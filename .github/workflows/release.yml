@@ -93,7 +93,9 @@ jobs:
           fi
 
       # Every Rune crate pins one full rev (AGENTS.md), and the tag names its first digits. A
-      # branch or tag pin, or a short rev, would let the build drift from what the tag says.
+      # branch or tag pin, a short rev, another URL for the same repository (ssh, say) or a
+      # [patch] or [replace] would let the build drift from what the tag says. A Rune source is
+      # one whose URL, without scheme, user, `.git` or a trailing `/`, is the repository's.
       - name: Check the Rune rev
         id: rune
         env:
@@ -103,15 +105,31 @@ jobs:
           rev=$(python3 - <<'PY'
           import glob, os, re, sys, tomllib
           git = os.environ["RUNE_GIT"]
-          sources = re.findall(r'^source = "git\+' + re.escape(git) + r'([^"]*)"$', open("Cargo.lock").read(), re.M)
-          if not sources:
-              sys.exit("::error::Cargo.lock has no Rune package")
+
+          def repo(url):
+              url = re.sub(r"^git\+", "", url.split("?")[0].split("#")[0]).lower()
+              url = re.sub(r"^[a-z][a-z0-9+.-]*://", "", url)
+              url = re.sub(r"^[^@/]+@", "", url)
+              url = re.sub(r"^([^/:]+):\d+/", r"\1/", url)  # host:port/path
+              url = re.sub(r"^([^/:]+):", r"\1/", url)  # scp-style git@host:path
+              url = re.sub(r"/+$", "", url)
+              return re.sub(r"\.git$", "", url)
+
+          rune_repo = repo(git)
+          spelled = r"^" + re.escape(git) + r"(?:\.git)?/?"
+          pinned = re.compile(spelled + r"(\?.*)$")  # Cargo.lock: the URL and its query
+          plain = re.compile(spelled + r"$")  # a manifest's git = "…"
           revs = set()
-          for rest in sources:
-              m = re.fullmatch(r"\?rev=([0-9a-f]{40})#([0-9a-f]{40})", rest)
-              if not m or m.group(1) != m.group(2):
-                  sys.exit(f"::error::Cargo.lock pins Rune as '{rest}', not ?rev=<40 hex>#<the same>")
-              revs.add(m.group(1))
+          for url in re.findall(r'^source = "git\+([^"]*)"$', open("Cargo.lock").read(), re.M):
+              if repo(url) != rune_repo:
+                  continue
+              m = pinned.match(url)
+              q = m and re.fullmatch(r"\?rev=([0-9a-f]{40})#([0-9a-f]{40})", m.group(1))
+              if not q or q.group(1) != q.group(2):
+                  sys.exit(f"::error::Cargo.lock pins Rune as '{url}', not {git}?rev=<40 hex>#<the same>")
+              revs.add(q.group(1))
+          if not revs:
+              sys.exit("::error::Cargo.lock has no Rune package")
           if len(revs) != 1:
               sys.exit(f"::error::Cargo.lock pins Rune at more than one rev: {sorted(revs)}")
           rev = revs.pop()
@@ -124,10 +142,17 @@ jobs:
 
           for path in ["Cargo.toml", *sorted(glob.glob("crates/*/Cargo.toml"))]:
               manifest = tomllib.load(open(path, "rb"))
+              for source in manifest.get("patch") or {}:
+                  if repo(source) == rune_repo:
+                      sys.exit(f"::error::{path} patches Rune ([patch.'{source}']); a release builds the pinned rev")
+              if manifest.get("replace"):
+                  sys.exit(f"::error::{path} has a [replace] section; a release builds what Cargo.lock pins")
               found = list(deps(manifest)) + list(deps(manifest.get("workspace") or {}))
               for name, spec in found:
-                  if not isinstance(spec, dict) or spec.get("git") != git:
+                  if not isinstance(spec, dict) or "git" not in spec or repo(spec["git"]) != rune_repo:
                       continue
+                  if not plain.match(spec["git"]):
+                      sys.exit(f"::error::{path}: {name} takes Rune from '{spec['git']}'; use {git}")
                   pin = {k: spec[k] for k in ("rev", "branch", "tag") if k in spec}
                   if list(pin) != ["rev"] or pin["rev"] != rev:
                       sys.exit(f"::error::{path}: {name} pins Rune by {pin or 'nothing'}; it needs rev = \"{rev}\"")
@@ -140,19 +165,25 @@ jobs:
           fi
           echo "rev=$rev" >> "$GITHUB_OUTPUT"
 
-      # mise.toml's Rust follows Rune's rust-toolchain.toml at the pinned rev (AGENTS.md).
+      # mise.toml's Rust follows Rune's rust-toolchain.toml at the pinned rev (AGENTS.md). Cargo
+      # may keep more than one Rune database (another URL spelling, say): use the one with the rev.
       - name: Check the Rust toolchain against Rune's
         env:
           REV: ${{ steps.rune.outputs.rev }}
         run: |
           set -euo pipefail
           cargo fetch --locked
-          db=$(find "${CARGO_HOME:-$HOME/.cargo}/git/db" -maxdepth 1 -name 'rune-*' -type d | head -n 1)
-          if [ -z "$db" ]; then
-            echo "::error::cargo fetch left no Rune checkout in its git database"
+          found=
+          for db in "${CARGO_HOME:-$HOME/.cargo}"/git/db/rune-*/; do
+            if [ -d "$db" ] && git -C "$db" show "$REV:rust-toolchain.toml" > "$RUNNER_TEMP/rune-toolchain.toml" 2>/dev/null; then
+              found=$db
+              break
+            fi
+          done
+          if [ -z "$found" ]; then
+            echo "::error::no Rune checkout in cargo's git database has $REV"
             exit 1
           fi
-          git -C "$db" show "$REV:rust-toolchain.toml" > "$RUNNER_TEMP/rune-toolchain.toml"
           python3 - "$RUNNER_TEMP/rune-toolchain.toml" <<'PY'
           import sys, tomllib
           rune = tomllib.load(open(sys.argv[1], "rb"))["toolchain"]["channel"]

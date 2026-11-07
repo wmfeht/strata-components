@@ -26,9 +26,6 @@ rune-kit = { version = "0.0.1", git = "https://github.com/anomalyco/rune", rev =
 strata-platform = { version = "0.0.1", path = "crates/strata-platform" }
 strata-kit = { version = "0.0.1", path = "crates/strata-kit" }
 strata-components = { version = "0.0.1", path = "crates/strata-components" }
-# Test-only and never published (strata-platform's dev-dependency). cargo-deny's `wildcards`
-# ban needs the version; publishing strata-platform must drop this dev-dependency first.
-strata-test-peer = { version = "0.0.1", path = "crates/strata-platform/tests/support/strata-test-peer" }
 
 # strata-platform glib-bridge (P9)
 futures-channel = "0.3"
@@ -37,8 +34,14 @@ glib = { version = "0.22", default-features = false }
 
 # PNG goldens: decodes rendered scenes for the tolerance check (gallery dev-dependency only).
 png = "0.18"
-serde = "1"
 serde_json = "1"
+
+# strata-platform test harness (W3): the session tests' peer and its client. strata-test-peer is
+# test-only and never published; cargo-deny's `wildcards` ban needs its version, so publishing
+# strata-platform needs this dev-dependency dropped or deny.toml's `allow-wildcard-paths` (owner
+# approval; docs/testing.md).
+serde = "1"
+strata-test-peer = { version = "0.0.1", path = "crates/strata-platform/tests/support/strata-test-peer" }
 wayland-client = "0.31"
 wayland-protocols = "0.32"
 wayland-protocols-misc = "0.3"

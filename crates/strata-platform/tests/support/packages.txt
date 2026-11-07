@@ -14,3 +14,6 @@ dbus-daemon
 dbus-bin
 mesa-vulkan-drivers
 libvulkan1
+
+# P9: `--all-features` builds glib-bridge, which links GLib and GIO.
+libglib2.0-dev

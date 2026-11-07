@@ -80,16 +80,18 @@ done
 [tasks.test-platform]
 description = "Run strata-platform's compositor tests, each in a private headless sway session"
 usage = '''
-arg "[filter]" help="A test filter (w3::, p2::); empty: all" default=""
+arg "[args]..." help="libtest arguments: a filter (w3::, p2::), --test-threads=1, --nocapture" var=#true
 '''
 run = '''
 set -eu
+# The harness refuses a session display that is the desktop's, so tell it what they were.
+export STRATA_OUTER_DISPLAY="${DISPLAY:-}" STRATA_OUTER_WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-}"
+export STRATA_OUTER_XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-}"
 unset DISPLAY WAYLAND_SOCKET HYPRLAND_INSTANCE_SIGNATURE SWAYSOCK I3SOCK DBUS_SESSION_BUS_ADDRESS
 export WAYLAND_DISPLAY=strata-test-no-wayland
 cargo build -p strata-test-peer -p strata-platform --bins --examples --all-features --locked
-set -- cargo test -p strata-platform --all-targets --all-features --locked -- --ignored
-if [ -n "${usage_filter:-}" ]; then set -- "$@" "$usage_filter"; fi
-"$@"
+eval "set -- ${usage_args:-}"
+cargo test -p strata-platform --all-targets --all-features --locked -- --ignored "$@"
 '''
 
 [tasks.deny]

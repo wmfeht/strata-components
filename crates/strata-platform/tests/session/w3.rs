@@ -6,11 +6,16 @@
 
 use strata_test_peer::protocol::{Action, Event, Offer, Payload, Selection, Via, fnv1a64, pattern};
 
+use std::collections::BTreeMap;
+use std::io::Write;
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use crate::support::{Display, Options, Proc, Session, Shell, Window, example, report, timeout};
+use crate::support::{
+    Display, Options, Proc, Session, Shell, Window, alive, example, processes_of, report, timeout,
+};
 
 const TEXT: &str = "héllo from the peer ✓";
 const UTF8: &str = "text/plain;charset=utf-8";
@@ -263,6 +268,9 @@ fn the_session_bus_is_private() {
             "org.freedesktop.DBus.ListActivatableNames",
         ]);
         let mut send = s.spawn("dbus-send", cmd);
+        send.wait_line(0, "dbus-send's reply", |l| {
+            l.trim_start().starts_with("array [")
+        });
         assert!(send.wait_exit().success(), "dbus-send failed");
         let names: Vec<String> = send
             .lines()
@@ -290,38 +298,27 @@ fn teardown_leaves_no_processes_or_files() {
     let s = Session::start();
     let (app, _, _) = harness_window(&s, Display::X11, "w3 teardown");
     let peer = s.peer(Display::Wayland);
-    let (xwayland, display) = s.xwayland().expect("Xwayland runs for the X11 window");
-    let mut pids = s.pids();
-    pids.push(xwayland);
+    let xwayland = s.xwayland().expect("Xwayland runs for the X11 window");
     let dir = s.runtime_dir().to_owned();
     drop(peer);
     drop(app);
     drop(s);
-    let left = leftovers(&pids, &dir, Some(display));
+    let left = leftovers(&dir, Some(xwayland));
     assert!(left.is_empty(), "left behind: {left:?}");
 }
 
-/// Whether `pid` runs (a zombie doesn't).
-fn alive(pid: u32) -> bool {
-    std::fs::read_to_string(format!("/proc/{pid}/stat"))
-        .ok()
-        .and_then(|stat| {
-            stat.rsplit_once(") ")
-                .map(|(_, rest)| !rest.starts_with('Z'))
-        })
-        .unwrap_or(false)
-}
-
-/// What a session left behind: live processes among `pids`, its directory, and Xwayland's
-/// lock file and socket for `display`.
-fn leftovers(pids: &[u32], dir: &Path, display: Option<u32>) -> Vec<String> {
-    let mut left: Vec<String> = pids
-        .iter()
-        .filter(|p| alive(**p))
+/// What a session left behind: processes started with its directory, Xwayland, the directory
+/// itself, and Xwayland's lock file and socket.
+fn leftovers(dir: &Path, xwayland: Option<(u32, u32)>) -> Vec<String> {
+    let mut left: Vec<String> = processes_of(dir)
+        .into_iter()
         .map(|p| format!("process {p}"))
         .collect();
     let mut paths = vec![dir.to_owned()];
-    if let Some(n) = display {
+    if let Some((pid, n)) = xwayland {
+        if alive(pid) {
+            left.push(format!("Xwayland {pid}"));
+        }
         paths.push(PathBuf::from(format!("/tmp/.X{n}-lock")));
         paths.push(PathBuf::from(format!("/tmp/.X11-unix/X{n}")));
     }
@@ -334,9 +331,41 @@ fn leftovers(pids: &[u32], dir: &Path, display: Option<u32>) -> Vec<String> {
     left
 }
 
-/// The child of `a_killed_test_leaves_no_processes_or_files`: with `STRATA_SESSION_REPORT`
-/// set, it starts a session, opens an X11 window (so Xwayland runs), reports, and waits to be
-/// killed. Without it, it does nothing.
+/// The X lock files in /tmp, with what they say: the pid of the server that holds the display.
+fn x_locks() -> BTreeMap<PathBuf, String> {
+    let Ok(entries) = std::fs::read_dir("/tmp") else {
+        return BTreeMap::new();
+    };
+    entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with(".X") && n.ends_with("-lock"))
+        })
+        .map(|p| {
+            let owner = std::fs::read_to_string(&p).unwrap_or_default();
+            (p, owner.trim().to_owned())
+        })
+        .collect()
+}
+
+/// Locks that weren't in `before` and name a process that is gone: what a killed session
+/// leaked. Locks that were there already (another X server's, a stray empty one) don't count,
+/// nor do the live sessions of tests running alongside.
+fn leaked_locks(before: &BTreeMap<PathBuf, String>) -> Vec<String> {
+    x_locks()
+        .into_iter()
+        .filter(|(path, owner)| before.get(path) != Some(owner))
+        .filter(|(_, owner)| owner.parse::<u32>().is_ok_and(|pid| !alive(pid)))
+        .map(|(path, owner)| format!("{} (pid {owner})", path.display()))
+        .collect()
+}
+
+/// The child of the SIGKILL and SIGINT tests: with `STRATA_SESSION_REPORT` set, it starts a
+/// session, opens an X11 window (so Xwayland runs), reports, and waits to be stopped. Without
+/// it, it does nothing.
 #[test]
 #[ignore = "needs a private session: mise run test-platform"]
 fn sigkill_child() {
@@ -352,67 +381,124 @@ fn sigkill_child() {
     std::thread::sleep(timeout() * 6);
 }
 
-/// SIGKILLs a test binary while sway starts, and again once its session is up with an X11
-/// window: the watchdog must leave no process, directory, lock file or socket behind.
+/// How a child test binary is stopped.
+#[derive(Clone, Copy, Debug)]
+enum Stop {
+    Kill,
+    /// A signal to its whole process group, as Ctrl-C sends SIGINT.
+    Group(&'static str),
+}
+
+/// Runs `w3::sigkill_child` in a test binary of its own, in a process group of its own, stops it
+/// `delay_ms` after it reports `point`, and checks the watchdog leaves nothing behind: no
+/// process started with the session's directory, no directory, no new lock file naming a dead
+/// server. With `decoy`, a process outside the session, whose pid sits in the session's `pids`
+/// file as a reused number would, must survive.
+fn stop_child(point: &str, delay_ms: u64, stop: Stop, decoy: bool) {
+    let what = format!("{stop:?} at {point:?} +{delay_ms} ms");
+    let reports = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("session");
+    std::fs::create_dir_all(&reports).expect("report directory");
+    let report = reports.join("child.report");
+    let _ = std::fs::remove_file(&report);
+    let locks = x_locks();
+    let mut child = Command::new(std::env::current_exe().expect("test binary"))
+        .args(["--exact", "w3::sigkill_child", "--ignored", "--nocapture"])
+        .env("STRATA_SESSION_REPORT", &report)
+        .process_group(0)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("the child test binary");
+    let read = || std::fs::read_to_string(&report).unwrap_or_default();
+    let deadline = Instant::now() + timeout();
+    while !read().lines().any(|l| l == point) {
+        assert!(
+            Instant::now() < deadline,
+            "{what}: the child never reported it: {}",
+            read()
+        );
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    std::thread::sleep(Duration::from_millis(delay_ms));
+    let text = read();
+    let dir = PathBuf::from(
+        text.lines()
+            .find_map(|l| l.strip_prefix("dir "))
+            .expect("the session directory"),
+    );
+    let mut decoy = decoy.then(|| {
+        let decoy = Command::new("sleep")
+            .arg("300")
+            .env_clear()
+            .env("XDG_RUNTIME_DIR", "/run/user/not-this-session")
+            .spawn()
+            .expect("a decoy process");
+        let mut pids = std::fs::File::options()
+            .append(true)
+            .open(dir.join("pids"))
+            .expect("the session's pids file");
+        writeln!(pids, "{}", decoy.id()).expect("planting the decoy's pid");
+        decoy
+    });
+    match stop {
+        Stop::Kill => child.kill().expect("SIGKILL"),
+        Stop::Group(signal) => {
+            let sent = Command::new("kill")
+                .arg(format!("-{signal}"))
+                .arg("--")
+                .arg(format!("-{}", child.id()))
+                .status()
+                .expect("kill");
+            assert!(sent.success(), "{what}: kill failed");
+        }
+    }
+    child.wait().expect("reaping the child");
+
+    let xwayland = read().lines().find_map(|l| {
+        let mut parts = l.strip_prefix("xwayland ")?.split(' ');
+        Some((parts.next()?.parse().ok()?, parts.next()?.parse().ok()?))
+    });
+    let deadline = Instant::now() + timeout();
+    loop {
+        let mut left = leftovers(&dir, xwayland);
+        left.extend(leaked_locks(&locks));
+        if left.is_empty() {
+            break;
+        }
+        assert!(Instant::now() < deadline, "{what}: left behind: {left:?}");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    if let Some(decoy) = decoy.as_mut() {
+        let survived = alive(decoy.id());
+        let _ = decoy.kill();
+        let _ = decoy.wait();
+        assert!(
+            survived,
+            "{what}: the watchdog killed a process outside the session"
+        );
+    }
+}
+
+/// SIGKILLs a test binary while sway starts (at four points in its first 120 ms, where it has
+/// made Xwayland's lock and socket but not yet said which display they are), and once its
+/// session is up with an X11 window, with a decoy pid in its `pids` file.
 #[test]
 #[ignore = "needs a private session: mise run test-platform"]
 fn a_killed_test_leaves_no_processes_or_files() {
-    for point in ["sway-starting", "window"] {
-        let reports = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("session");
-        std::fs::create_dir_all(&reports).expect("report directory");
-        let report = reports.join(format!("sigkill-{point}.report"));
-        let _ = std::fs::remove_file(&report);
-        let mut child = Command::new(std::env::current_exe().expect("test binary"))
-            .args(["--exact", "w3::sigkill_child", "--ignored", "--nocapture"])
-            .env("STRATA_SESSION_REPORT", &report)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("the child test binary");
-        let read = || std::fs::read_to_string(&report).unwrap_or_default();
-        let deadline = Instant::now() + timeout();
-        while !read().lines().any(|l| l == point) {
-            assert!(
-                Instant::now() < deadline,
-                "the child never reported {point:?}: {}",
-                read()
-            );
-            std::thread::sleep(std::time::Duration::from_millis(5));
-        }
-        child.kill().expect("SIGKILL");
-        child.wait().expect("reaping the child");
-
-        let text = read();
-        let field = |key: &'static str| {
-            text.lines()
-                .filter_map(move |l| l.strip_prefix(key)?.strip_prefix(' '))
-        };
-        let dir = PathBuf::from(field("dir").next().expect("the session directory"));
-        let mut pids: Vec<u32> = field("pid")
-            .chain(field("watchdog"))
-            .filter_map(|p| p.parse().ok())
-            .collect();
-        let mut display = None;
-        if let Some(x) = field("xwayland").next() {
-            let mut parts = x.split(' ').filter_map(|v| v.parse::<u32>().ok());
-            pids.extend(parts.next());
-            display = parts.next();
-        }
-        assert!(pids.len() >= 2, "the child reported no processes: {text}");
-        let deadline = Instant::now() + timeout();
-        loop {
-            let left = leftovers(&pids, &dir, display);
-            if left.is_empty() {
-                break;
-            }
-            assert!(
-                Instant::now() < deadline,
-                "killed at {point:?}, left behind: {left:?}"
-            );
-            std::thread::sleep(std::time::Duration::from_millis(50));
-        }
+    for delay in [0, 40, 80, 120] {
+        stop_child("sway-starting", delay, Stop::Kill, false);
     }
+    stop_child("window", 0, Stop::Kill, true);
+}
+
+/// Ctrl-C (SIGINT) and SIGTERM to a test binary's whole process group: the session's processes
+/// go with it, and the watchdog, in a group of its own that ignores both, cleans up.
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn an_interrupted_test_leaves_no_processes_or_files() {
+    stop_child("window", 0, Stop::Group("INT"), false);
+    stop_child("window", 0, Stop::Group("TERM"), false);
 }
 
 // ---- drag and drop, and export ----
@@ -461,6 +547,15 @@ fn drag_between_peers(display: Display, proxy: bool) {
     assert_eq!(mimes.len(), 3, "{mimes:?}");
     assert_eq!(proxied, proxy, "the drag's messages came the wrong way");
     b.wait_event("the drag moving", |e| matches!(e, Event::DropMotion { .. }));
+    // Release only once the source knows the target takes it, with Copy.
+    a.wait_event("the target accepting Copy", |e| {
+        matches!(
+            e,
+            Event::DragAction {
+                action: Some(Action::Copy)
+            }
+        )
+    });
     input.button(false);
     let dropped = b.wait_event("the drop", |e| matches!(e, Event::Dropped { .. }));
     let Event::Dropped { mime, action, data } = dropped else {

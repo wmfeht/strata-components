@@ -2,9 +2,11 @@
 //!
 //! [`Session::start`] brings up, under a private `XDG_RUNTIME_DIR`:
 //!
-//! 1. a watchdog, first: if the test process dies without tearing down (SIGKILL, a timeout),
-//!    it kills every process the session started (their pids are in `<dir>/pids`), removes a
-//!    dead Xwayland's lock and socket, unmounts what is mounted in the directory and removes it;
+//! 1. a watchdog, first, in a process group of its own that ignores Ctrl-C: if the test process
+//!    dies without tearing down (SIGKILL, SIGINT, a timeout), it kills the session's processes
+//!    (those started with `XDG_RUNTIME_DIR` set to the session's directory, and no other),
+//!    removes the Xwayland lock and socket a killed sway leaves, unmounts what is mounted in the
+//!    directory and removes it;
 //! 2. a session bus ([`Bus`]): a `dbus-daemon` with only the session's service directory;
 //! 3. a nested headless sway, with Xwayland (`sway.rs` lists the traps it works around);
 //! 4. an input peer ([`Session::input`]): a virtual pointer and keyboard, without which a
@@ -28,6 +30,7 @@ use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
 use std::io::Write;
 use std::os::unix::fs::DirBuilderExt;
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
@@ -436,34 +439,48 @@ impl Session {
         }
     }
 
-    /// Moves the input peer's pointer to `at` until `peer` reports an enter or a motion that
-    /// came after the move.
+    /// Moves the input peer's pointer to `at` until `reached` holds, checking for 200 ms after
+    /// each move, and moving again a point off if it doesn't.
     ///
     /// For a moment after sway re-tiles, a motion can reach no surface (likely sway's saved
-    /// snapshots of windows it is resizing), and a press then goes nowhere. So: move, sync with
-    /// the peer, and look for its pointer events since the move; if none, move again a point
-    /// off. An enter from before the move doesn't count.
-    pub fn point_at(&self, peer: &Peer, at: (f64, f64)) {
+    /// snapshots of windows it is resizing), and a press then goes nowhere. `reached` says how
+    /// the test knows the pointer got there: a peer's event ([`Session::point_at`]), an app's
+    /// log line.
+    pub fn point_until(&self, at: (f64, f64), reached: impl Fn() -> bool) {
         let deadline = Instant::now() + timeout();
         let mut nudge = 0.0;
         loop {
-            let mark = peer.line_count();
-            // Replies once sway has the motion; the peer's sync then means it has read
-            // whatever sway sent it for it. Xwayland passes motion on later, so X11 peers get
-            // a moment more.
+            // Replies once sway has the motion.
             self.input().pointer_move((at.0 + nudge, at.1 + nudge));
-            peer.sync();
-            if peer.pointer_since(mark, Duration::from_millis(200)) {
-                return;
+            let settle = Instant::now() + Duration::from_millis(200);
+            loop {
+                if reached() {
+                    return;
+                }
+                if Instant::now() >= settle {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(10));
             }
             assert!(
                 Instant::now() < deadline,
-                "{}: the pointer at {at:?} never reached peer {}",
-                self.name,
-                peer.pid()
+                "{}: the pointer at {at:?} never got there",
+                self.name
             );
             nudge = 1.0 - nudge;
         }
+    }
+
+    /// Moves the pointer to `at` until `peer` reports an enter or a motion that came after the
+    /// first move: an enter from before it doesn't count. Each check syncs with the peer first,
+    /// so it has read whatever sway sent it (Xwayland passes motion on later, so X11 peers may
+    /// take another check).
+    pub fn point_at(&self, peer: &Peer, at: (f64, f64)) {
+        let mark = peer.line_count();
+        self.point_until(at, || {
+            peer.sync();
+            peer.pointer_since(mark, Duration::ZERO)
+        });
     }
 
     /// Gives `window` keyboard focus and waits until sway reports it.
@@ -476,15 +493,6 @@ impl Session {
     /// The private runtime directory (`XDG_RUNTIME_DIR`).
     pub fn runtime_dir(&self) -> &Path {
         &self.dir
-    }
-
-    /// The pids the session recorded for the watchdog: the bus, sway and every spawned process.
-    pub fn pids(&self) -> Vec<u32> {
-        std::fs::read_to_string(self.dir.join("pids"))
-            .unwrap_or_default()
-            .split_whitespace()
-            .filter_map(|p| p.parse().ok())
-            .collect()
     }
 
     /// Xwayland's pid and display number, once an X client has started it. wlroots forks
@@ -503,7 +511,7 @@ impl Session {
     }
 }
 
-/// Adds `pid` to the session's `pids` file for the watchdog.
+/// Adds `pid` to the session's `pids` file, for diagnostics and the SIGKILL test's report.
 fn record(dir: &Path, pid: u32) {
     if let Ok(mut f) = std::fs::File::options()
         .create(true)
@@ -516,47 +524,126 @@ fn record(dir: &Path, pid: u32) {
 }
 
 /// The watchdog's script: wait for the test process to go, then clean up after it. `$1` is the
-/// test's pid, `$2` the session directory.
+/// test's pid, `$2` its start time (field 22 of `/proc/<pid>/stat`), `$3` the session
+/// directory.
+///
+/// It acts only on the session's processes: those whose environment has `XDG_RUNTIME_DIR=$3`
+/// (the desktop's is `/run/user/<uid>`), found by scanning `/proc`, never by a pid number that
+/// may have been reused. D-Bus-activated services count too. A killed sway leaves Xwayland's
+/// lock file and socket behind; the display comes from the sockets the session's processes
+/// hold, and a lock goes only if it names one of them.
 const WATCHDOG: &str = r#"
-t=$1; d=$2
-while kill -0 "$t" 2>/dev/null; do sleep 0.2; done
+trap '' INT TERM HUP
+t=$1; since=$2; d=$3
+alive() {
+  s=$(cat "/proc/$t/stat" 2>/dev/null) || return 1
+  set -- ${s##*") "}
+  [ "$1" != Z ] && [ "${20}" = "$since" ]
+}
+while alive; do sleep 0.2; done
 [ -d "$d" ] || exit 0
-pids=$(cat "$d/pids" 2>/dev/null)
-[ -z "$pids" ] || kill -KILL $pids 2>/dev/null
-n=$(sed 's/^://' "$d/display" 2>/dev/null)
-if [ -n "$n" ]; then
-  # Xwayland goes when sway does; make sure, then remove what a killed sway left behind.
-  pkill -KILL -f "^Xwayland :$n( |$)" 2>/dev/null
-  owner=$(tr -d ' \n' < "/tmp/.X$n-lock" 2>/dev/null)
-  for p in $pids; do
-    [ "$p" = "$owner" ] && rm -f "/tmp/.X$n-lock" "/tmp/.X11-unix/X$n"
+ours() {
+  for e in /proc/[0-9]*/environ; do
+    tr '\0' '\n' < "$e" 2>/dev/null | grep -qxF "XDG_RUNTIME_DIR=$d" || continue
+    p=${e#/proc/}; echo "${p%/environ}"
+  done
+}
+pids=$(ours)
+inodes=$(for p in $pids; do for f in /proc/$p/fd/*; do readlink "$f"; done; done 2>/dev/null |
+  sed -n 's/^socket:\[\([0-9]*\)\]$/\1/p' | sort -u)
+if [ -n "$inodes" ]; then
+  displays=$(printf '%s\n' "$inodes" | awk 'NR == FNR { own[$1] = 1; next }
+    FNR > 1 && ($7 in own) && $8 ~ /^@?\/tmp\/\.X11-unix\/X[0-9]+$/ { sub(/.*X/, "", $8); print $8 }' \
+    - /proc/net/unix | sort -u)
+  for n in $displays; do
+    owner=$(tr -d ' \n' < "/tmp/.X$n-lock" 2>/dev/null)
+    [ -n "$owner" ] || continue
+    for p in $pids; do
+      [ "$p" = "$owner" ] && rm -f "/tmp/.X$n-lock" "/tmp/.X11-unix/X$n"
+    done
   done
 fi
-sleep 0.2
-awk -v d="$d/" 'index($5 "/", d) == 1 { print $5 }' /proc/self/mountinfo |
-  while read -r m; do
+for round in 1 2 3 4 5; do
+  [ -n "$pids" ] || break
+  kill -KILL $pids 2>/dev/null
+  sleep 0.2
+  pids=$(ours)
+done
+awk -v d="$d/" '{ m = $5; gsub(/\\040/, " ", m); gsub(/\\011/, "\t", m); gsub(/\\134/, "\\", m) }
+  index(m "/", d) == 1 { print m }' /proc/self/mountinfo |
+  while IFS= read -r m; do
     fusermount3 -u -z "$m" 2>/dev/null || fusermount -u -z "$m" 2>/dev/null || umount -l "$m" 2>/dev/null
   done
-rm -rf "$d"
+rm -rf --one-file-system "$d"
 "#;
 
-/// Starts the watchdog for `dir` (see the module docs). It runs until the test process is gone,
-/// or until the session kills it after tearing down.
+/// Starts the watchdog for `dir` (see [`WATCHDOG`]), in a process group of its own so a Ctrl-C
+/// meant for the tests doesn't reach it. It runs until the test process is gone, or until the
+/// session kills it after tearing down.
 fn watchdog(dir: &Path) -> Child {
     Command::new("sh")
         .arg("-c")
         .arg(WATCHDOG)
         .arg("watchdog")
         .arg(std::process::id().to_string())
+        .arg(start_time("self").expect("this process's start time"))
         .arg(dir)
         .env_clear()
         .env("PATH", std::env::var_os("PATH").unwrap_or_default())
         .current_dir("/")
+        .process_group(0)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
         .expect("starting the session watchdog")
+}
+
+/// Field 22 of `/proc/<pid>/stat`: when the process started, which tells it from a later
+/// process that reuses its pid.
+fn start_time(pid: &str) -> Option<String> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let (_, rest) = stat.rsplit_once(") ")?;
+    rest.split(' ').nth(19).map(str::to_owned)
+}
+
+/// Whether `pid` runs (a zombie doesn't).
+pub fn alive(pid: u32) -> bool {
+    std::fs::read_to_string(format!("/proc/{pid}/stat"))
+        .ok()
+        .and_then(|stat| {
+            stat.rsplit_once(") ")
+                .map(|(_, rest)| !rest.starts_with('Z'))
+        })
+        .unwrap_or(false)
+}
+
+/// The live processes started with `XDG_RUNTIME_DIR` set to `dir`: a session's own, D-Bus
+/// activated services and Xwayland (which wlroots forks twice) included.
+pub fn processes_of(dir: &Path) -> Vec<u32> {
+    let want = format!("XDG_RUNTIME_DIR={}", dir.display());
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|e| e.file_name().to_str()?.parse::<u32>().ok())
+        .filter(|pid| {
+            std::fs::read(format!("/proc/{pid}/environ"))
+                .is_ok_and(|env| env.split(|b| *b == 0).any(|v| v == want.as_bytes()))
+        })
+        .filter(|pid| alive(*pid))
+        .collect()
+}
+
+/// A mount point from `/proc/self/mountinfo`, with its octal escapes (`\040` for a space)
+/// undone.
+fn unescape_mount(point: &str) -> String {
+    point
+        .replace("\\040", " ")
+        .replace("\\011", "\t")
+        .replace("\\012", "\n")
+        .replace("\\134", "\\")
 }
 
 /// What every process of a session gets: a private home and runtime directory, the session
@@ -595,12 +682,31 @@ impl Drop for Session {
             sway.stop();
         }
         self.bus.take();
+        // Nobody waits for what wlroots forked (Xwayland) or the bus activated: wait for every
+        // process started with the session's directory to go, then kill what is left.
+        let deadline = Instant::now() + timeout();
+        let mut left = processes_of(&self.dir);
+        while !left.is_empty() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+            left = processes_of(&self.dir);
+        }
+        if !left.is_empty() {
+            eprintln!("{}: killing what outlived the session: {left:?}", self.name);
+            let _ = Command::new("kill")
+                .arg("-KILL")
+                .args(left.iter().map(u32::to_string))
+                .status();
+            while !processes_of(&self.dir).is_empty() && Instant::now() < deadline + timeout() {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        }
         // A FUSE mount a GIO service left would keep the runtime directory from going.
         if let Ok(mounts) = std::fs::read_to_string("/proc/self/mountinfo") {
             for point in mounts.lines().filter_map(|l| l.split(' ').nth(4)) {
-                if Path::new(point).starts_with(&self.dir) {
+                let point = unescape_mount(point);
+                if Path::new(&point).starts_with(&self.dir) {
                     let _ = Command::new("fusermount3")
-                        .args(["-u", "-z", point])
+                        .args(["-u", "-z", &point])
                         .status();
                 }
             }

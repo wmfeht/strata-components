@@ -89,9 +89,10 @@ impl Proc {
             .unwrap_or_default()
     }
 
-    /// Waits for the first stdout line, from line `from` on, that `f` maps to a value. Panics
-    /// with the process's output once the session timeout passes or stdout closes first.
-    pub(super) fn wait_for<T>(
+    /// Waits for the first stdout line, from line `from` on, that `f` maps to a value, and
+    /// gives its index too. Panics with the process's output once the session timeout passes or
+    /// stdout closes first.
+    pub fn wait_for<T>(
         &self,
         from: usize,
         what: &str,
@@ -146,6 +147,16 @@ impl Proc {
         self.wait_for(from, what, |line| {
             serde_json::from_str::<Value>(line).ok().filter(|v| pred(v))
         })
+    }
+
+    /// The first stdout line from line `from` on that passes `pred`, JSON or not, with its index.
+    pub fn wait_line(
+        &self,
+        from: usize,
+        what: &str,
+        pred: impl Fn(&str) -> bool,
+    ) -> (usize, String) {
+        self.wait_for(from, what, |line| pred(line).then(|| line.to_owned()))
     }
 
     /// How many stdout lines have arrived: a point to wait from.

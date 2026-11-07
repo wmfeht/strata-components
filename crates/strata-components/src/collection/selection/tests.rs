@@ -5,6 +5,9 @@
 use super::*;
 use crate::contract::{EntryKind, ListEntry, ListSource};
 
+mod perf;
+mod property;
+
 fn entry(raw: u64) -> ListEntry {
     ListEntry::new(EntryId::new(raw), format!("e{raw}"), EntryKind::File, "")
 }

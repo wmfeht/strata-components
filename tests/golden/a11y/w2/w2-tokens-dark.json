@@ -633,28 +633,6 @@
               ],
               "key": "w2-shape-and-motion",
               "role": "group"
-            },
-            {
-              "children": [
-                {
-                  "name": "slots",
-                  "role": "label"
-                },
-                {
-                  "name": "list.row.height 26",
-                  "role": "label"
-                },
-                {
-                  "name": "sidebar.row.height 24",
-                  "role": "label"
-                },
-                {
-                  "name": "tabs.tab.height 36",
-                  "role": "label"
-                }
-              ],
-              "key": "w2-slots",
-              "role": "group"
             }
           ],
           "key": "w2-tokens",

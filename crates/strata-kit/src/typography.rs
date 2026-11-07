@@ -77,7 +77,7 @@ pub fn step_text_size(size: u16, delta: i32) -> u16 {
 fn base() -> &'static (Type, Ramp, IconSizes) {
     static BASE: OnceLock<(Type, Ramp, IconSizes)> = OnceLock::new();
     BASE.get_or_init(|| {
-        // `Look::from_kit`, never `Look::fallback`: the fallback may apply `LookParams`,
+        // `Look::from_kit`, never `Look::fallback`: the fallback applies `LookParams`,
         // which calls back in here, and re-entering a `OnceLock`'s initializer deadlocks.
         let look = Look::from_kit(Kit::neutral(false));
         (look.kit.ty, look.ty, look.icon_size)

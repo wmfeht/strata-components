@@ -328,6 +328,7 @@ The task builds the peer and strata-platform's examples, then runs the `#[ignore
 | `STRATA_SWAY_DEBUG=1` | sway's debug log in `sway.log` |
 | `STRATA_TEST_PEER` | The peer binary, instead of `target/<profile>/strata-test-peer` |
 | `STRATA_SESSION_REPORT` | A file a session appends its directory and pids to (W3's kill tests) |
+| `STRATA_SESSION_NAME` | The session's log directory name, instead of the test's (a test binary run as a child) |
 
 CI runs them in `.github/workflows/platform.yml` on Ubuntu 24.04 (sway 1.9), with the packages
 in `crates/strata-platform/tests/support/packages.txt`. A work package that needs another

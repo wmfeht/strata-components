@@ -381,6 +381,16 @@ fn sigkill_child() {
     std::thread::sleep(timeout() * 6);
 }
 
+/// A child test binary, killed if the test fails before it stops it.
+struct ChildGuard(std::process::Child);
+
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
 /// How a child test binary is stopped.
 #[derive(Clone, Copy, Debug)]
 enum Stop {
@@ -396,20 +406,33 @@ enum Stop {
 /// file as a reused number would, must survive.
 fn stop_child(point: &str, delay_ms: u64, stop: Stop, decoy: bool) {
     let what = format!("{stop:?} at {point:?} +{delay_ms} ms");
+    // Both kill tests run children at once: each child gets its own report and log names.
+    let tag = format!(
+        "{}-{}-{delay_ms}",
+        point,
+        match stop {
+            Stop::Kill => "kill",
+            Stop::Group(signal) => signal,
+        }
+    )
+    .to_lowercase();
     let reports = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("session");
     std::fs::create_dir_all(&reports).expect("report directory");
-    let report = reports.join("child.report");
+    let report = reports.join(format!("child-{tag}.report"));
     let _ = std::fs::remove_file(&report);
     let locks = x_locks();
-    let mut child = Command::new(std::env::current_exe().expect("test binary"))
-        .args(["--exact", "w3::sigkill_child", "--ignored", "--nocapture"])
-        .env("STRATA_SESSION_REPORT", &report)
-        .process_group(0)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("the child test binary");
+    let mut child = ChildGuard(
+        Command::new(std::env::current_exe().expect("test binary"))
+            .args(["--exact", "w3::sigkill_child", "--ignored", "--nocapture"])
+            .env("STRATA_SESSION_REPORT", &report)
+            .env("STRATA_SESSION_NAME", format!("w3-child-{tag}"))
+            .process_group(0)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("the child test binary"),
+    );
     let read = || std::fs::read_to_string(&report).unwrap_or_default();
     let deadline = Instant::now() + timeout();
     while !read().lines().any(|l| l == point) {
@@ -442,18 +465,18 @@ fn stop_child(point: &str, delay_ms: u64, stop: Stop, decoy: bool) {
         decoy
     });
     match stop {
-        Stop::Kill => child.kill().expect("SIGKILL"),
+        Stop::Kill => child.0.kill().expect("SIGKILL"),
         Stop::Group(signal) => {
             let sent = Command::new("kill")
                 .arg(format!("-{signal}"))
                 .arg("--")
-                .arg(format!("-{}", child.id()))
+                .arg(format!("-{}", child.0.id()))
                 .status()
                 .expect("kill");
             assert!(sent.success(), "{what}: kill failed");
         }
     }
-    child.wait().expect("reaping the child");
+    child.0.wait().expect("reaping the child");
 
     let xwayland = read().lines().find_map(|l| {
         let mut parts = l.strip_prefix("xwayland ")?.split(' ');

@@ -185,8 +185,16 @@ impl Session {
         static N: AtomicU32 = AtomicU32::new(0);
         static NAMES: Mutex<Option<HashMap<String, u32>>> = Mutex::new(None);
         let n = N.fetch_add(1, Ordering::Relaxed);
-        let base = match std::thread::current().name() {
-            Some(t) if t != "main" => t.replace("::", "-"),
+        // `STRATA_SESSION_NAME` names the logs of a test run in a binary of its own (W3's kill
+        // tests run several at once); otherwise the test's name does.
+        let base = match (
+            std::env::var("STRATA_SESSION_NAME")
+                .ok()
+                .filter(|v| !v.is_empty()),
+            std::thread::current().name(),
+        ) {
+            (Some(name), _) => name,
+            (None, Some(t)) if t != "main" => t.replace("::", "-"),
             _ => format!("session-{n}"),
         };
         // A second session in the same test gets a log directory of its own.

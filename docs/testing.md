@@ -49,17 +49,34 @@ The app's hooks (`strata_gallery::spec`) route to the open page, in a window and
   seconds: virtual in tests and headless runs. Use it to deliver fake async results
   (completions, highlighted lines, thumbnails, progress), and return true when state changed.
 - **Waker.** `Gallery::waker` wakes the app loop from another thread so the page's `poll` runs.
-  A fake worker on a real thread calls it after it hands over a result. In tests it is a no-op.
+  In tests it is a no-op.
 
-Golden scenes must render the same every run. The in-process mount (`strata_gallery::runtime`)
-runs the page's `poll` on every frame while it settles, so results that `poll` derives from
-the clock or from state the scene set up are in the golden. A result that arrives from a real
-thread is not: a golden scene pre-fills that state, and a script waits for it on the virtual
-clock only when `poll` produces it.
+Drive fake async from `poll` on the virtual clock: a fake worker is a queue of results, each
+due at a clock time, that `poll` hands over once the clock reaches it. Goldens and scripts then
+see the same results every run. A real thread (with `Gallery::waker`) is for windowed demos
+only; its results land at times no golden or script can rely on.
 
-Test a page's keys by mounting its scene with `strata_gallery::runtime`, sending keys with
-`Runtime::key` and reading the state, or with a script. `tests/goldens/keys.rs` shows the
-routing itself: a page hook that takes Escape keeps the page open.
+Golden scenes are captured at 1 s on the virtual clock (`AT` in `tests/goldens/support.rs`),
+late enough for entrance motion to come to rest. Both goldens run the same frames: the PNG
+check passes `--snap --at 1`, and the in-process mount (`strata_gallery::runtime`) runs a
+first frame at 0 s, then one every 1/60 s up to 1 s, as `--snap` does. So the page's `poll` runs
+61 times at the same clock times for both, and
+`png::the_png_render_ends_on_the_mounts_clock` checks the two clocks agree. A golden scene
+either pre-fills its state or schedules results that come due before 1 s.
+
+Test a page's behavior in process in `crates/strata-gallery/tests/<id>.rs`, with the tests
+inside `mod <id> { … }`, so `mise run test <id>::` runs them with the page's goldens. Mount a
+scene with `strata_gallery::runtime`, send keys with `Runtime::key` or pointer input, step
+`Runtime::frame`, and read the state; or write a script. `tests/goldens/keys.rs` shows the
+key routing itself: a page hook that takes Escape keeps the page open.
+
+### The Look
+
+W2 replaces `Gallery::kit` with the Look contract. Its PR is the one sanctioned edit to
+strata-gallery's `src/lib.rs`: it adds a `look: Look` field with the accessor components take
+(`fn(&Gallery) -> &Look`), and makes `Gallery::open` rebuild it for `dark`. From then on, K1, K2
+and K4 change `g.look` (a theme, density, text size or override) only from their own
+`scenes/<id>.rs`.
 
 Open the gallery with `mise run gallery`. A row on the index opens its page, and Escape
 returns to the index. `mise run gallery -- --scene c1-ten-rows-dark` opens one scene, and
@@ -213,6 +230,27 @@ alone, so no shim leans on another's dependencies. `mise run check` and CI run i
       eprintln!("run with --features csd");
   }
   ```
+
+## Dependencies
+
+Every crate's `[dependencies]` has a comment-separated block per work package that adds
+third-party crates, plus a shared block:
+
+| Crate | Blocks |
+| --- | --- |
+| strata-platform | one per feature (P0–P9) |
+| strata-kit | K1, K2, K3, K4; `[build-dependencies]`: K3 |
+| strata-components | C10a, C11, C12, C13, C14b, C25 |
+| strata-gallery (dev) | the X1, X2 and X3 demos |
+
+- Add a crate to `[workspace.dependencies]` (one line, in alphabetical order; check its licence
+  against `deny.toml`), then `<name>.workspace = true` in your block.
+- In strata-kit, strata-components and the gallery, a crate declared in any block is usable
+  from every module: use it as it is, and don't declare it again.
+- C10a adds `syntect` and `two-face` to `[workspace.dependencies]` and to its strata-components
+  block. K1 needs syntect's `Theme` type and reuses the workspace entry: `syntect.workspace =
+  true` in its own strata-kit block, with the features it needs. C10b and C11 use C10a's
+  declaration as it is.
 
 ## Shared lists and merge conflicts
 

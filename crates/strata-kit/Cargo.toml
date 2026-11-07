@@ -7,9 +7,27 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+# Each work package adds its third-party dependencies in its own block below. Keep the blank
+# lines: git conflicts when two branches edit neighbouring lines. A crate appears once: one
+# already declared in any block is usable from every module, so use it as it is. The shared
+# block takes a crate two work packages would add at once (docs/testing.md).
 [dependencies]
 rune.workspace = true
 rune-kit.workspace = true
+
+# Shared by two or more work packages.
+
+# K1 theme mapping (syntect's Theme type, theme files)
+
+# K2 shape, density and type
+
+# K3 icon catalogs
+
+# K4 user overrides (the overrides.toml parser)
+
+[build-dependencies]
+
+# K3 icon catalogs: build.rs, which generates the catalogs from the SVG sources
 
 [lints]
 workspace = true

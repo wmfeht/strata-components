@@ -130,6 +130,13 @@ Name scripts after the behavior group they check (`stem-selection.json`, `commit
 
 Confirm a filtered run matched at least one test.
 
+Give each worktree its own target directory; don't point several at one `CARGO_TARGET_DIR`.
+Cargo can then reuse another worktree's build of a workspace crate, because its dep-info names
+that worktree's files, and the tests run stale code. To save a full build, copy a target
+directory with `cp -a --reflink=auto`, then run
+`cargo clean -p strata-gallery -p strata-components -p strata-kit -p strata-platform` in the new
+worktree.
+
 `RUNE_BLESS=1` turns blessing on, as in Rune. `STRATA_BLESS` narrows it to a page id, a scene
 name or `<id>/<script>`. While blessing, the harness skips every other item: it neither compares
 nor writes it. `mise run bless <filter>` sets both and passes the cargo filter `<id>::`. After

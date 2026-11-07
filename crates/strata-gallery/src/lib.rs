@@ -6,6 +6,7 @@
 
 use rune::{AppSpec, Cx, El, Env, Key, KeyEvent, Runtime, Tx, Waker, col};
 use rune_kit::Kit;
+use strata_kit::look::Look;
 
 pub mod scenes;
 
@@ -27,11 +28,14 @@ pub type KeyHook = fn(&mut Gallery, &KeyEvent, &mut Tx) -> bool;
 /// True when state changed.
 pub type PollHook = fn(&mut Gallery, f64, &mut Tx) -> bool;
 
-/// The gallery's state: the open page, light or dark, the app's waker, and one demo state per
-/// page.
+/// The gallery's state: the open page, light or dark, the look pages draw with, the app's
+/// waker, and one demo state per page.
 #[derive(Default)]
 pub struct Gallery {
     pub dark: bool,
+    /// The look every page draws with. [`Gallery::open`] rebuilds it as the fallback for
+    /// `dark`; a look page (K1, K2, K4) then changes it from its own `scenes/<id>.rs`.
+    pub look: Look,
     /// The open page's id, or `None` for the index.
     pub page: Option<&'static str>,
     /// Wakes the app loop from another thread, so the open page's `poll` runs: a fake worker
@@ -77,15 +81,22 @@ pub struct Gallery {
 }
 
 impl Gallery {
-    /// Opens the page `page` in light or dark. Every scene except the index's calls this.
+    /// Opens the page `page` in light or dark, on the fallback look. Every scene except the
+    /// index's calls this.
     pub fn open(&mut self, page: &'static str, dark: bool) {
         self.page = Some(page);
         self.dark = dark;
+        self.look = Look::fallback(dark);
     }
 
-    /// The kit pages draw with.
-    pub fn kit(&self) -> Kit {
-        strata_kit::fallback(self.dark)
+    /// The look pages draw with: the accessor components take, `fn(&Gallery) -> &Look`.
+    pub fn look(&self) -> &Look {
+        &self.look
+    }
+
+    /// The look's kit.
+    pub fn kit(&self) -> &Kit {
+        &self.look.kit
     }
 }
 

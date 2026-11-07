@@ -6,17 +6,18 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | --- | --- | --- | --- |
 | W0 | merged | 3 review rounds; png dev-dep approved; PNG goldens blessed on NVIDIA (lavapipe/CI pending) | d4bcd36 |
 | W1 | merged | 1 review round + fixes; Rune binder cannot read URIs before drop (needs Rune or P1) | 6fda6da |
+| W1b | merged | contract doc change for C1a: EntryId lives for the process, never reused; rename may change it | 3bd5284 |
 | W2 | merged | 1 review round + fixes; row.sidebar/row.palette estimates for K2 to confirm; token-name review by K1/K2/C1e owners pending; PNG goldens on NVIDIA | 341e8cb |
 | W3 | planning |  |  |
 | S1 | merged | P3: X11 shim conditional on mutter/KWin hand test; Wayland resize/menu blocked on Rune (R1-R3, R7); Hyprland/GNOME/KDE/lavapipe hand test pending | c5794e1 |
 | S2 | merged | 3 review rounds; P0 feasible w/o Rune patch on libwayland>=1.23; Ubuntu 24.04 GNOME: DnD unsupported; R1-R5 drafted; Hyprland/GNOME/KDE/Dolphin hand test pending | 702338f |
 | S3 | merged | sway Wayland/X11 measured; Hyprland/GNOME/KDE/Firefox hand test pending (QEMU Tier B not run); 3 owner decisions | f5682e4 |
 | S4 | coding | fancy-regex vs onig; fixtures under tests/fixtures/code | |
-| S5 | ready | | |
+| S5 | coding | strata-platform name TAKEN on crates.io (unrelated) -> owner; 17 Rune issue drafts (U1-U17); release.yml dry-run local only | |
 | C10a | waiting | | |
 | C14a | ready | | |
-| C15 | planning | | |
-| C1a | planning | | |
+| C15 | coding | built on Rune modal/blur/motion primitives (not rune-kit Dialog); initial focus via tab_index workaround | |
+| C1a | coding | plan restarted after W1b; selection as id set + index overlay (100k in <1 ms) | |
 | C20a | ready | | |
 | C20b | ready | | |
 | C20c | ready | | |

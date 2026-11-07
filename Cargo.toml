@@ -1,0 +1,49 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/strata-platform",
+    "crates/strata-kit",
+    "crates/strata-components",
+    "crates/strata-gallery",
+]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.99.1"
+license = "MIT"
+
+[workspace.dependencies]
+# Rune is pre-release and not on crates.io. Every Rune crate pins the same `dev` rev; move
+# them together, on purpose (docs/plan.md §0).
+# Rune's defaults minus the macOS-only `metal-backend` and `ogg-audio` (MPL-2.0 decoders).
+rune = { version = "0.0.1", git = "https://github.com/anomalyco/rune", rev = "78d22ed8eef60d76ac3f322ffc5883f3fcbc57f5", default-features = false, features = ["accessibility", "dbus", "embedded-fonts", "svg"] }
+rune-kit = { version = "0.0.1", git = "https://github.com/anomalyco/rune", rev = "78d22ed8eef60d76ac3f322ffc5883f3fcbc57f5" }
+
+strata-platform = { version = "0.0.1", path = "crates/strata-platform" }
+strata-kit = { version = "0.0.1", path = "crates/strata-kit" }
+strata-components = { version = "0.0.1", path = "crates/strata-components" }
+
+serde_json = "1"
+
+[profile.dev.package."*"]
+debug = false
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "deny"
+unused_must_use = "deny"
+unused_unsafe = "deny"
+
+[workspace.lints.clippy]
+allow_attributes = "deny"
+allow_attributes_without_reason = "deny"
+await_holding_lock = "deny"
+await_holding_refcell_ref = "deny"
+dbg_macro = "deny"
+missing_safety_doc = "deny"
+multiple_unsafe_ops_per_block = "deny"
+todo = "warn"
+undocumented_unsafe_blocks = "deny"
+unimplemented = "warn"
+unwrap_used = "warn"

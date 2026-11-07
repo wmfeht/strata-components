@@ -1,0 +1,48 @@
+min_version = "2026.9.0"
+
+[tools]
+# Rune's own toolchain (rust-toolchain.toml at the pinned rev); move it with the Rune rev.
+rust = { version = "1.99.1", components = ["clippy", "rustfmt", "rust-analyzer"] }
+"aqua:EmbarkStudios/cargo-deny" = "0.20.2"
+"aqua:crate-ci/typos" = "1.50.1"
+
+[env]
+CARGO_TERM_COLOR = "always"
+
+[tasks.fmt]
+description = "Check Rust formatting"
+run = "cargo fmt --all --check"
+
+[tasks.compile]
+description = "Type-check all targets"
+run = "cargo check --workspace --all-targets --all-features --locked"
+
+[tasks.clippy]
+description = "Lint with Clippy"
+run = "cargo clippy --workspace --all-targets --all-features --locked -- -D warnings"
+
+[tasks.test]
+description = "Run the tests headless, never on the desktop display"
+raw_args = true
+run = "env -u DISPLAY -u WAYLAND_DISPLAY cargo test --workspace --all-targets --all-features --locked"
+
+[tasks.bless]
+description = "Rewrite the goldens from the current output; review the diff"
+run = "env -u DISPLAY -u WAYLAND_DISPLAY RUNE_BLESS=1 cargo test --workspace --all-targets --all-features --locked"
+
+[tasks.deny]
+description = "Check advisories, licenses, bans, and sources"
+run = "cargo deny check"
+
+[tasks.typos]
+description = "Check spelling"
+run = "typos"
+
+[tasks.check]
+description = "Local pre-push quality checks"
+depends = ["fmt", "compile", "clippy", "test", "deny", "typos"]
+
+[tasks.gallery]
+description = "Open the component gallery"
+raw_args = true
+run = "cargo run -p strata-gallery --"

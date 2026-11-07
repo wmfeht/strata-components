@@ -1,0 +1,15 @@
+[package]
+name = "strata-kit"
+description = "Strata's look on rune-kit: theme mapping, icon catalogs, density and text size"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+rune.workspace = true
+rune-kit.workspace = true
+
+[lints]
+workspace = true

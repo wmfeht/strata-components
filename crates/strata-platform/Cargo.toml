@@ -1,0 +1,15 @@
+[package]
+name = "strata-platform"
+description = "Linux platform shims for Rune apps: the Wayland and X11 pieces Rune does not ship yet"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+# Depends on `rune` only: never rune-kit, strata-kit or Strata (docs/plan.md §3).
+# Each shim lands behind its own cargo feature, together with its module.
+[dependencies]
+rune.workspace = true
+
+[lints]
+workspace = true

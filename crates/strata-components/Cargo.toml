@@ -1,0 +1,16 @@
+[package]
+name = "strata-components"
+description = "File-manager components for Rune: entry collections, views, chrome and previews"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+rune.workspace = true
+rune-kit.workspace = true
+strata-kit.workspace = true
+
+[lints]
+workspace = true

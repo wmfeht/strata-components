@@ -1,0 +1,11 @@
+[files]
+extend-exclude = [
+  "Cargo.lock",
+  "target/**",
+  "tests/golden/**/*.png",
+]
+
+[default.extend-words]
+Omarchy = "Omarchy"
+Hyprland = "Hyprland"
+Strata = "Strata"

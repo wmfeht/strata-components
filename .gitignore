@@ -1,0 +1,10 @@
+/target
+
+# Transient mise lockfiles; keep the committed mise.lock.
+/.mise.lock.*
+
+*.swp
+*.swo
+.idea/
+.vscode/
+.DS_Store

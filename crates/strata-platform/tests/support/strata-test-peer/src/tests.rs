@@ -74,6 +74,8 @@ fn a_chord_lists_its_modifiers_first() {
         ["Control_L", "Shift_L", "a"]
     );
     assert_eq!(chord_keys("Return").unwrap(), ["Return"]);
+    assert_eq!(chord_keys("shift").unwrap(), ["Shift_L"]);
+    assert_eq!(chord_keys("ctrl+alt").unwrap(), ["Control_L", "Alt_L"]);
     assert!(chord_keys("hyper+a").is_err());
     assert!(chord_keys("ctrl+").is_err());
 }

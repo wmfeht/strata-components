@@ -17,7 +17,13 @@ pub struct Bus {
 
 impl Bus {
     /// Starts the daemon with `env` (activated services inherit it) and waits for its address.
-    pub(super) fn start(dir: &Path, logs: &Path, env: &[(String, String)]) -> Bus {
+    /// `spawned` hears its pid at once, so the watchdog knows it from the start.
+    pub(super) fn start(
+        dir: &Path,
+        logs: &Path,
+        env: &[(String, String)],
+        spawned: impl FnOnce(u32),
+    ) -> Bus {
         let services = dir.join("dbus-services");
         std::fs::create_dir_all(&services).expect("bus service directory");
         let config = dir.join("bus.conf");
@@ -56,6 +62,7 @@ impl Bus {
             .stderr(stderr)
             .spawn()
             .unwrap_or_else(|e| panic!("starting dbus-daemon (is it installed?): {e}"));
+        spawned(child.id());
         let stdout = child.stdout.take().expect("piped stdout");
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
@@ -86,10 +93,6 @@ impl Bus {
     /// activatable (dbus-daemon watches the directory).
     pub fn service_dir(&self) -> &Path {
         &self.services
-    }
-
-    pub(super) fn pid(&self) -> u32 {
-        self.child.id()
     }
 }
 

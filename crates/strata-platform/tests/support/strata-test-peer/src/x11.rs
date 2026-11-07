@@ -2,19 +2,22 @@
 //! reads commands; both feed one channel that the main thread works through, so all state
 //! lives on one thread.
 //!
-//! Selections are `CLIPBOARD` and `PRIMARY`, with `TARGETS` and INCR both ways. Drag and drop is
-//! XDND version 5: the source runs on the implicit grab of the press on its own window.
+//! Selections are `CLIPBOARD` and `PRIMARY`, with `TARGETS`, `TIMESTAMP` and INCR both ways.
+//! Ownership and conversions carry real server timestamps (ICCCM), from a zero-length property
+//! append. Drag and drop is XDND version 5: the source runs on the implicit grab of the press on
+//! its own window, honours a target's `XdndProxy`, and speaks the lower of the two versions.
 //!
 //! `map` replies once the window is in the root's `_NET_CLIENT_LIST`, which wlroots updates
 //! when the compositor maps the window's `wl_surface`. Up to wlroots 0.20.2, a window whose
 //! first buffer reaches the compositor before its pairing with the X window (they travel on
 //! different sockets) is never mapped in sway; wlroots fixed it after 0.20.2 ("no
 //! synchronization between the two" in `xwayland_surface_associate`). A window that isn't
-//! listed within [`MAP_RETRY`] is unmapped and mapped again, which pairs a new surface.
+//! listed within [`MAP_RETRY`] (times `STRATA_TEST_TIMEOUT_SCALE`) is unmapped and mapped
+//! again, which pairs a new surface, until the test's own timeout gives up.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
-use std::sync::mpsc::{RecvTimeoutError, channel};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::time::{Duration, Instant};
 
 use strata_test_peer::protocol::{
@@ -36,9 +39,10 @@ use crate::{out, read_stdin};
 x11rb::atom_manager! {
     Atoms: AtomsCookie {
         CLIPBOARD, PRIMARY, TARGETS, TIMESTAMP, MULTIPLE, INCR, UTF8_STRING,
-        _NET_WM_NAME, _NET_WM_PID, _NET_CLIENT_LIST,
-        XdndAware, XdndTypeList, XdndSelection, XdndEnter, XdndPosition, XdndStatus,
-        XdndLeave, XdndDrop, XdndFinished, XdndActionCopy, XdndActionMove, XdndActionAsk,
+        _NET_WM_NAME, _NET_WM_PID, _NET_CLIENT_LIST, STRATA_PEER_TIME,
+        XdndAware, XdndProxy, XdndTypeList, XdndSelection, XdndEnter, XdndPosition,
+        XdndStatus, XdndLeave, XdndDrop, XdndFinished, XdndActionCopy, XdndActionMove,
+        XdndActionAsk,
     }
 }
 
@@ -48,11 +52,23 @@ const INCR_CHUNK: usize = 64 * 1024;
 
 const XDND_VERSION: u32 = 5;
 
-/// How long a mapped window may stay out of `_NET_CLIENT_LIST` before the peer maps it again.
+/// How long a mapped window may stay out of `_NET_CLIENT_LIST` before the peer maps it again,
+/// before `STRATA_TEST_TIMEOUT_SCALE`.
 const MAP_RETRY: Duration = Duration::from_millis(500);
 
-/// How many times the peer maps its window before `map` fails.
-const MAP_ATTEMPTS: u32 = 10;
+/// How long an INCR transfer may stall before it is dropped, before the scale: the harness's
+/// own wait.
+const INCR_STALL: Duration = Duration::from_secs(10);
+
+/// `STRATA_TEST_TIMEOUT_SCALE`, which the session passes on: slow machines wait longer.
+fn scaled(d: Duration) -> Duration {
+    let scale = std::env::var("STRATA_TEST_TIMEOUT_SCALE")
+        .ok()
+        .and_then(|s| s.parse::<f64>().ok())
+        .filter(|s| *s > 0.0)
+        .unwrap_or(1.0);
+    d.mul_f64(scale)
+}
 
 fn err<E: std::fmt::Display>(e: E) -> String {
     format!("x11: {e}")
@@ -61,6 +77,8 @@ fn err<E: std::fmt::Display>(e: E) -> String {
 enum Input {
     Command(Request),
     X(XEvent),
+    /// An event on the drop proxy's connection.
+    Proxy(XEvent),
     Lost(String),
 }
 
@@ -75,12 +93,31 @@ enum Conversion {
     },
 }
 
+/// A selection the peer owns: its offers and the server time it took it.
+struct Owned {
+    offers: Vec<Offer>,
+    time: u32,
+}
+
+struct IncrIn {
+    why: Conversion,
+    data: Vec<u8>,
+    last: Instant,
+}
+
 struct IncrOut {
     requestor: Window,
     property: Atom,
     target: Atom,
     data: Vec<u8>,
     offset: usize,
+    last: Instant,
+}
+
+struct DropPolicy {
+    mimes: Vec<String>,
+    actions: Vec<Action>,
+    preferred: Action,
 }
 
 struct DropIn {
@@ -89,11 +126,26 @@ struct DropIn {
     action: Option<Action>,
 }
 
+/// A drop target under the drag: the window, where its messages go (it or its `XdndProxy`),
+/// and the XDND version both sides speak.
+#[derive(Clone, Copy, PartialEq)]
+struct Target {
+    window: Window,
+    dest: Window,
+    version: u32,
+}
+
 struct DragOut {
     mimes: Vec<String>,
     action: Action,
-    target: Option<Window>,
+    target: Option<Target>,
     accepted: bool,
+}
+
+/// The drop proxy: a window on a second connection, so messages sent to it arrive apart from
+/// messages sent to the peer's own window.
+struct Proxy {
+    _conn: Arc<RustConnection>,
 }
 
 struct X {
@@ -101,20 +153,26 @@ struct X {
     atoms: Atoms,
     root: Window,
     win: Window,
-    /// The offers for each selection the peer owns (`CLIPBOARD`, `PRIMARY`, `XdndSelection`).
-    owned: HashMap<Atom, Vec<Offer>>,
+    rx: Receiver<Input>,
+    tx: Sender<Input>,
+    /// Inputs read while waiting for a server timestamp, handled next.
+    backlog: VecDeque<Input>,
+    /// The selections the peer owns (`CLIPBOARD`, `PRIMARY`, `XdndSelection`).
+    owned: HashMap<Atom, Owned>,
     /// Conversions in flight, by the property they land in, with the selection and target.
     pending: HashMap<Atom, (Atom, Atom, Conversion)>,
-    incr_in: HashMap<Atom, (Conversion, Vec<u8>)>,
+    incr_in: HashMap<Atom, IncrIn>,
     incr_out: Vec<IncrOut>,
     next_property: u32,
     map_reply: Option<u64>,
-    /// While `map` waits: when to map again, and how many times it has mapped.
-    map_retry: Option<(Instant, u32)>,
-    pressed: bool,
-    drop_policy: Option<(Vec<String>, Action)>,
+    /// While `map` waits: when to map again.
+    map_retry: Option<Instant>,
+    /// The time of the press that is still held, if any.
+    press_time: Option<u32>,
+    drop_policy: Option<DropPolicy>,
     drop: Option<DropIn>,
     drag: Option<DragOut>,
+    proxy: Option<Proxy>,
 }
 
 pub fn run() -> Result<(), String> {
@@ -185,22 +243,7 @@ pub fn run() -> Result<(), String> {
         },
         || {},
     );
-    let events = conn.clone();
-    std::thread::spawn(move || {
-        loop {
-            match events.wait_for_event() {
-                Ok(e) => {
-                    if tx.send(Input::X(e)).is_err() {
-                        break;
-                    }
-                }
-                Err(e) => {
-                    let _ = tx.send(Input::Lost(e.to_string()));
-                    break;
-                }
-            }
-        }
-    });
+    forward_events(conn.clone(), tx.clone(), Input::X);
 
     out::event(Event::Ready {
         backend: Backend::X11,
@@ -213,6 +256,9 @@ pub fn run() -> Result<(), String> {
         atoms,
         root,
         win,
+        rx,
+        tx,
+        backlog: VecDeque::new(),
         owned: HashMap::new(),
         pending: HashMap::new(),
         incr_in: HashMap::new(),
@@ -220,19 +266,17 @@ pub fn run() -> Result<(), String> {
         next_property: 0,
         map_reply: None,
         map_retry: None,
-        pressed: false,
+        press_time: None,
         drop_policy: None,
         drop: None,
         drag: None,
+        proxy: None,
     };
     loop {
-        let wait = x.map_retry.map_or(Duration::from_secs(3600), |(at, _)| {
-            at.saturating_duration_since(Instant::now())
-        });
-        let input = match rx.recv_timeout(wait) {
+        let input = match x.next_input() {
             Ok(input) => input,
             Err(RecvTimeoutError::Timeout) => {
-                x.map_again();
+                x.tick();
                 let _ = x.conn.flush();
                 continue;
             }
@@ -244,15 +288,96 @@ pub fn run() -> Result<(), String> {
                     break;
                 }
             }
-            Input::X(e) => x.event(e),
+            Input::X(e) => x.event(e, false),
+            Input::Proxy(e) => x.event(e, true),
             Input::Lost(e) => return Err(format!("x11 connection lost: {e}")),
         }
+        x.tick();
         let _ = x.conn.flush();
     }
     Ok(())
 }
 
+/// Sends every event of `conn` to the main loop, wrapped by `wrap`, from a thread of its own.
+fn forward_events(conn: Arc<RustConnection>, tx: Sender<Input>, wrap: fn(XEvent) -> Input) {
+    std::thread::spawn(move || {
+        loop {
+            match conn.wait_for_event() {
+                Ok(e) => {
+                    if tx.send(wrap(e)).is_err() {
+                        break;
+                    }
+                }
+                Err(e) => {
+                    let _ = tx.send(Input::Lost(e.to_string()));
+                    break;
+                }
+            }
+        }
+    });
+}
+
 impl X {
+    /// The next input: the backlog first, then the channel, waking for the next deadline.
+    fn next_input(&mut self) -> Result<Input, RecvTimeoutError> {
+        if let Some(input) = self.backlog.pop_front() {
+            return Ok(input);
+        }
+        let mut wait = Duration::from_secs(1);
+        if let Some(at) = self.map_retry {
+            wait = wait.min(at.saturating_duration_since(Instant::now()));
+        }
+        self.rx.recv_timeout(wait)
+    }
+
+    /// Deadlines: map the window again, drop stalled INCR transfers.
+    fn tick(&mut self) {
+        if self.map_retry.is_some_and(|at| Instant::now() >= at) {
+            self.map_again();
+        }
+        let stall = scaled(INCR_STALL);
+        self.incr_out.retain(|o| o.last.elapsed() < stall);
+        let stalled: Vec<Atom> = self
+            .incr_in
+            .iter()
+            .filter(|(_, i)| i.last.elapsed() >= stall)
+            .map(|(a, _)| *a)
+            .collect();
+        for atom in stalled {
+            if let Some(i) = self.incr_in.remove(&atom) {
+                self.finish(i.why, Err("the INCR transfer stalled".into()));
+            }
+        }
+    }
+
+    /// A server timestamp: append nothing to a property of the peer's window and read the time
+    /// of the change. Inputs that arrive meanwhile wait in the backlog.
+    fn server_time(&mut self) -> Result<u32, String> {
+        self.conn
+            .change_property8(
+                PropMode::APPEND,
+                self.win,
+                self.atoms.STRATA_PEER_TIME,
+                AtomEnum::STRING,
+                &[],
+            )
+            .map_err(err)?;
+        self.conn.flush().map_err(err)?;
+        let deadline = Instant::now() + scaled(INCR_STALL);
+        loop {
+            let left = deadline.saturating_duration_since(Instant::now());
+            match self.rx.recv_timeout(left) {
+                Ok(Input::X(XEvent::PropertyNotify(p)))
+                    if p.window == self.win && p.atom == self.atoms.STRATA_PEER_TIME =>
+                {
+                    return Ok(p.time);
+                }
+                Ok(other) => self.backlog.push_back(other),
+                Err(_) => return Err("x11: no server timestamp".into()),
+            }
+        }
+    }
+
     fn command(&mut self, req: Request) -> bool {
         let id = req.id;
         let result = match req.command {
@@ -301,11 +426,20 @@ impl X {
                 self.convert(self.selection_atom(selection), target, Conversion::Read(id))
             }),
             Command::DragStart { offers, actions } => self.drag_start(id, offers, actions),
-            Command::DropAccept { mimes, action } => {
-                self.drop_policy = (!mimes.is_empty()).then_some((mimes, action));
+            Command::DropAccept {
+                mimes,
+                actions,
+                preferred,
+            } => {
+                self.drop_policy = (!mimes.is_empty()).then_some(DropPolicy {
+                    mimes,
+                    actions,
+                    preferred,
+                });
                 out::ok(id);
                 Ok(())
             }
+            Command::DropProxy => self.drop_proxy().map(|()| out::ok(id)),
             Command::Export => {
                 out::value(
                     id,
@@ -346,6 +480,17 @@ impl X {
             .and_then(|c| c.reply().ok())
             .map(|r| String::from_utf8_lossy(&r.name).into_owned())
             .unwrap_or_default()
+    }
+
+    /// The first 32-bit value of a window property, if it has one.
+    fn property32(&self, window: Window, property: Atom, ty: AtomEnum) -> Option<u32> {
+        self.conn
+            .get_property(false, window, property, ty, 0, 1)
+            .ok()?
+            .reply()
+            .ok()?
+            .value32()?
+            .next()
     }
 
     fn selection_atom(&self, selection: Selection) -> Atom {
@@ -421,7 +566,7 @@ impl X {
         .map_err(err)?;
         c.map_window(self.win).map_err(err)?;
         self.map_reply = Some(id);
-        self.map_retry = Some((Instant::now() + MAP_RETRY, 1));
+        self.map_retry = Some(Instant::now() + scaled(MAP_RETRY));
         Ok(())
     }
 
@@ -460,25 +605,33 @@ impl X {
     /// The window is still not listed: unmap it and map it again (see the module docs).
     fn map_again(&mut self) {
         self.check_mapped();
-        let Some((_, attempts)) = self.map_retry else {
-            return;
-        };
-        if attempts >= MAP_ATTEMPTS {
-            self.map_retry = None;
-            if let Some(id) = self.map_reply.take() {
-                out::reply(
-                    id,
-                    Err(format!(
-                        "the window manager never listed the window ({attempts} maps)"
-                    )),
-                );
-            }
+        if self.map_retry.is_none() {
             return;
         }
         eprintln!("strata-test-peer: window not mapped by the compositor; mapping it again");
         let _ = self.conn.unmap_window(self.win);
         let _ = self.conn.map_window(self.win);
-        self.map_retry = Some((Instant::now() + MAP_RETRY, attempts + 1));
+        self.map_retry = Some(Instant::now() + scaled(MAP_RETRY));
+    }
+
+    /// Takes `selection` with `offers` at `time`, and checks the server agrees.
+    fn own(&mut self, selection: Atom, offers: Vec<Offer>, time: u32) -> Result<(), String> {
+        self.owned.insert(selection, Owned { offers, time });
+        self.conn
+            .set_selection_owner(self.win, selection, time)
+            .map_err(err)?;
+        let owner = self
+            .conn
+            .get_selection_owner(selection)
+            .map_err(err)?
+            .reply()
+            .map_err(err)?
+            .owner;
+        if owner != self.win {
+            self.owned.remove(&selection);
+            return Err("the X server did not give the peer the selection".into());
+        }
+        Ok(())
     }
 
     fn selection_set(
@@ -489,29 +642,16 @@ impl X {
         offers: Vec<Offer>,
     ) -> Result<(), String> {
         Self::x11_only(via)?;
-        let atom = self.selection_atom(selection);
-        self.owned.insert(atom, offers);
-        self.conn
-            .set_selection_owner(self.win, atom, x11rb::CURRENT_TIME)
-            .map_err(err)?;
-        let owner = self
-            .conn
-            .get_selection_owner(atom)
-            .map_err(err)?
-            .reply()
-            .map_err(err)?
-            .owner;
-        if owner != self.win {
-            self.owned.remove(&atom);
-            return Err("the X server did not give the peer the selection".into());
-        }
+        let time = self.server_time()?;
+        self.own(self.selection_atom(selection), offers, time)?;
         out::ok(id);
         Ok(())
     }
 
-    /// Asks the selection's owner for `target`, into a property of the peer's own.
+    /// Asks the selection's owner for `target` now, into a property of the peer's own.
     fn convert(&mut self, selection: Atom, target: Atom, why: Conversion) -> Result<(), String> {
-        self.convert_at(selection, target, why, x11rb::CURRENT_TIME)
+        let time = self.server_time()?;
+        self.convert_at(selection, target, why, time)
     }
 
     fn convert_at(
@@ -530,15 +670,58 @@ impl X {
         Ok(())
     }
 
+    /// Points the window's `XdndProxy` at a window on a second connection.
+    fn drop_proxy(&mut self) -> Result<(), String> {
+        let (conn, _) = x11rb::connect(None).map_err(err)?;
+        let conn = Arc::new(conn);
+        let proxy = conn.generate_id().map_err(err)?;
+        conn.create_window(
+            0,
+            proxy,
+            self.root,
+            -10,
+            -10,
+            1,
+            1,
+            0,
+            WindowClass::INPUT_ONLY,
+            x11rb::COPY_FROM_PARENT,
+            &CreateWindowAux::new().override_redirect(1),
+        )
+        .map_err(err)?;
+        // The spec: the proxy's own XdndProxy names itself, so a source can trust it.
+        conn.change_property32(
+            PropMode::REPLACE,
+            proxy,
+            self.atoms.XdndProxy,
+            AtomEnum::WINDOW,
+            &[proxy],
+        )
+        .map_err(err)?;
+        conn.flush().map_err(err)?;
+        self.conn
+            .change_property32(
+                PropMode::REPLACE,
+                self.win,
+                self.atoms.XdndProxy,
+                AtomEnum::WINDOW,
+                &[proxy],
+            )
+            .map_err(err)?;
+        forward_events(conn.clone(), self.tx.clone(), Input::Proxy);
+        self.proxy = Some(Proxy { _conn: conn });
+        Ok(())
+    }
+
     fn drag_start(
         &mut self,
         id: u64,
         offers: Vec<Offer>,
         actions: Vec<Action>,
     ) -> Result<(), String> {
-        if !self.pressed {
+        let Some(time) = self.press_time else {
             return Err("a drag needs a press on the peer's window that is still held".into());
-        }
+        };
         let mimes: Vec<String> = offers.iter().map(|o| o.mime.clone()).collect();
         let types = mimes
             .iter()
@@ -553,10 +736,8 @@ impl X {
                 &types,
             )
             .map_err(err)?;
-        self.owned.insert(self.atoms.XdndSelection, offers);
-        self.conn
-            .set_selection_owner(self.win, self.atoms.XdndSelection, x11rb::CURRENT_TIME)
-            .map_err(err)?;
+        // The drag's selection carries the time of the press that started it.
+        self.own(self.atoms.XdndSelection, offers, time)?;
         self.drag = Some(DragOut {
             mimes,
             action: actions.first().copied().unwrap_or(Action::Copy),
@@ -567,15 +748,24 @@ impl X {
         Ok(())
     }
 
+    /// A client message to `dest` about `window` (they differ when `dest` is a proxy).
+    fn message_to(&self, dest: Window, window: Window, ty: Atom, data: [u32; 5]) {
+        let event = ClientMessageEvent::new(32, window, ty, data);
+        let _ = self
+            .conn
+            .send_event(false, dest, EventMask::NO_EVENT, event);
+    }
+
     fn message(&self, to: Window, ty: Atom, data: [u32; 5]) {
-        let event = ClientMessageEvent::new(32, to, ty, data);
-        let _ = self.conn.send_event(false, to, EventMask::NO_EVENT, event);
+        self.message_to(to, to, ty, data);
     }
 
     // ---- events ----
 
-    fn event(&mut self, e: XEvent) {
+    fn event(&mut self, e: XEvent, proxied: bool) {
         match e {
+            XEvent::ClientMessage(m) => self.client_message(&m, proxied),
+            _ if proxied => {}
             XEvent::MapNotify(m) if m.window == self.win => self.check_mapped(),
             XEvent::FocusIn(f) if f.event == self.win && f.mode == NotifyMode::NORMAL => {
                 out::event(Event::Focus { focused: true });
@@ -591,18 +781,24 @@ impl X {
             }
             XEvent::LeaveNotify(e) if e.event == self.win => out::event(Event::PointerLeave),
             XEvent::ButtonPress(b) if b.event == self.win => {
-                self.pressed = true;
+                self.press_time = Some(b.time);
                 out::event(Event::PointerButton { pressed: true });
             }
             XEvent::ButtonRelease(b) if b.event == self.win => {
-                self.pressed = false;
+                self.press_time = None;
                 if self.drag.is_some() {
-                    self.drag_release();
+                    self.drag_release(b.time);
                 }
                 out::event(Event::PointerButton { pressed: false });
             }
-            XEvent::MotionNotify(m) if self.drag.is_some() => {
-                self.drag_motion(m.root_x, m.root_y);
+            XEvent::MotionNotify(m) if m.event == self.win => {
+                out::event(Event::PointerMotion {
+                    x: f64::from(m.event_x),
+                    y: f64::from(m.event_y),
+                });
+                if self.drag.is_some() {
+                    self.drag_motion(m.root_x, m.root_y, m.time);
+                }
             }
             XEvent::SelectionRequest(r) => self.serve(r),
             XEvent::SelectionClear(c) => {
@@ -630,7 +826,6 @@ impl X {
                 }
             }
             XEvent::PropertyNotify(p) => self.property(p.window, p.atom, p.state),
-            XEvent::ClientMessage(m) => self.client_message(&m),
             _ => {}
         }
     }
@@ -661,13 +856,18 @@ impl X {
     }
 
     fn answer(&mut self, r: &SelectionRequestEvent, property: Atom) -> Result<bool, String> {
-        let Some(offers) = self.owned.get(&r.selection) else {
+        let Some(owned) = self.owned.get(&r.selection) else {
             return Ok(false);
         };
+        // ICCCM: refuse a request from before the peer took the selection.
+        if r.time != x11rb::CURRENT_TIME && r.time < owned.time {
+            return Ok(false);
+        }
+        let (offers, owned_at) = (owned.offers.clone(), owned.time);
         let a = &self.atoms;
         if r.target == a.TARGETS {
             let mut list = vec![a.TARGETS, a.TIMESTAMP];
-            for o in offers.clone() {
+            for o in &offers {
                 list.push(self.atom(&o.mime)?);
             }
             self.conn
@@ -688,7 +888,7 @@ impl X {
                     r.requestor,
                     property,
                     AtomEnum::INTEGER,
-                    &[x11rb::CURRENT_TIME],
+                    &[owned_at],
                 )
                 .map_err(err)?;
             return Ok(true);
@@ -736,6 +936,7 @@ impl X {
             target: r.target,
             data,
             offset: 0,
+            last: Instant::now(),
         });
         Ok(true)
     }
@@ -752,6 +953,7 @@ impl X {
             let end = (o.offset + INCR_CHUNK).min(o.data.len());
             let chunk = o.data[o.offset..end].to_vec();
             o.offset = end;
+            o.last = Instant::now();
             let _ = self.conn.change_property8(
                 PropMode::REPLACE,
                 o.requestor,
@@ -775,11 +977,12 @@ impl X {
                 return;
             };
             if reply.value.is_empty() {
-                if let Some((why, data)) = self.incr_in.remove(&atom) {
-                    self.finish(why, Ok(data));
+                if let Some(i) = self.incr_in.remove(&atom) {
+                    self.finish(i.why, Ok(i.data));
                 }
-            } else if let Some((_, data)) = self.incr_in.get_mut(&atom) {
-                data.extend_from_slice(&reply.value);
+            } else if let Some(i) = self.incr_in.get_mut(&atom) {
+                i.data.extend_from_slice(&reply.value);
+                i.last = Instant::now();
             }
         }
     }
@@ -815,7 +1018,14 @@ impl X {
             Err(e) => return self.finish(why, Err(e)),
         };
         if reply.type_ == self.atoms.INCR {
-            self.incr_in.insert(n.property, (why, Vec::new()));
+            self.incr_in.insert(
+                n.property,
+                IncrIn {
+                    why,
+                    data: Vec::new(),
+                    last: Instant::now(),
+                },
+            );
             return;
         }
         if matches!(why, Conversion::Targets(_)) {
@@ -884,12 +1094,12 @@ impl X {
 
     // ---- XDND ----
 
-    fn client_message(&mut self, m: &ClientMessageEvent) {
+    fn client_message(&mut self, m: &ClientMessageEvent, proxied: bool) {
         let a = &self.atoms;
         let l = m.data.as_data32();
         let ty = m.type_;
         if ty == a.XdndEnter {
-            self.drop_enter(l);
+            self.drop_enter(l, proxied);
         } else if ty == a.XdndPosition {
             self.drop_position(l);
         } else if ty == a.XdndLeave {
@@ -899,7 +1109,10 @@ impl X {
             self.drop_drop(l);
         } else if ty == a.XdndStatus {
             let action = self.action_of(l[4]);
-            if let Some(d) = self.drag.as_mut() {
+            // Only the target under the drag now: a late status from the last one is stale.
+            if let Some(d) = self.drag.as_mut()
+                && d.target.is_some_and(|t| t.window == l[0])
+            {
                 d.accepted = l[1] & 1 != 0;
                 let action = action.filter(|_| d.accepted);
                 out::event(Event::DragAction { action });
@@ -912,7 +1125,7 @@ impl X {
         }
     }
 
-    fn drop_enter(&mut self, l: [u32; 5]) {
+    fn drop_enter(&mut self, l: [u32; 5], proxied: bool) {
         let source = l[0];
         let mut types: Vec<Atom> = l[2..5].iter().copied().filter(|t| *t != 0).collect();
         if l[1] & 1 != 0
@@ -932,23 +1145,29 @@ impl X {
             types = list.value32().map(Iterator::collect).unwrap_or_default();
         }
         let mimes: Vec<String> = types.into_iter().map(|t| self.atom_name(t)).collect();
-        let (mime, action) = match &self.drop_policy {
-            Some((want, action)) => (
-                want.iter().find(|m| mimes.contains(m)).cloned(),
-                Some(*action),
-            ),
-            None => (None, None),
-        };
+        let mime = self
+            .drop_policy
+            .as_ref()
+            .and_then(|p| p.mimes.iter().find(|m| mimes.contains(m)).cloned());
         self.drop = Some(DropIn {
             source,
-            action: action.filter(|_| mime.is_some()),
             mime,
+            action: None,
         });
-        out::event(Event::DropEnter { mimes });
+        out::event(Event::DropEnter { mimes, proxied });
     }
 
     fn drop_position(&mut self, l: [u32; 5]) {
-        let Some(d) = &self.drop else { return };
+        // The source proposes an action (XDND 2 and later); take it if the policy allows it,
+        // else the policy's preferred one.
+        let proposed = self.action_of(l[4]);
+        let chosen = self.drop_policy.as_ref().map(|p| match proposed {
+            Some(a) if a == p.preferred || p.actions.contains(&a) => a,
+            _ => p.preferred,
+        });
+        let Some(d) = self.drop.as_mut() else { return };
+        d.action = chosen.filter(|_| d.mime.is_some());
+        let (source, accept, action) = (d.source, d.mime.is_some(), d.action);
         let (rx, ry) = ((l[2] >> 16) as i16, (l[2] & 0xffff) as i16);
         let local = self
             .conn
@@ -956,11 +1175,10 @@ impl X {
             .ok()
             .and_then(|c| c.reply().ok())
             .map_or((0, 0), |r| (r.dst_x, r.dst_y));
-        let accept = d.mime.is_some();
-        let action = d.action.map_or(x11rb::NONE, |a| self.action_atom(a));
+        let action = action.map_or(x11rb::NONE, |a| self.action_atom(a));
         // XdndStatus: bit 0 accepts, bit 1 asks for a position on every motion.
         self.message(
-            d.source,
+            source,
             self.atoms.XdndStatus,
             [self.win, u32::from(accept) | 2, 0, 0, action],
         );
@@ -990,8 +1208,9 @@ impl X {
         }
     }
 
-    /// The XdndAware top-level window under a root point, other than the peer's own.
-    fn aware_at(&self, x: i16, y: i16) -> Option<Window> {
+    /// The XdndAware top-level window under a root point, other than the peer's own, with where
+    /// its messages go: its `XdndProxy` when the proxy names itself, else the window.
+    fn target_at(&self, x: i16, y: i16) -> Option<Target> {
         let mut w = self.root;
         for _ in 0..8 {
             let r = self
@@ -1004,34 +1223,42 @@ impl X {
                 return None;
             }
             w = r.child;
-            let aware = self
-                .conn
-                .get_property(false, w, self.atoms.XdndAware, AtomEnum::ATOM, 0, 1)
-                .ok()?
-                .reply()
-                .ok()?;
-            if aware.value_len > 0 {
-                return Some(w);
+            if let Some(version) = self.property32(w, self.atoms.XdndAware, AtomEnum::ATOM) {
+                let proxy = self
+                    .property32(w, self.atoms.XdndProxy, AtomEnum::WINDOW)
+                    .filter(|p| {
+                        self.property32(*p, self.atoms.XdndProxy, AtomEnum::WINDOW) == Some(*p)
+                    });
+                return Some(Target {
+                    window: w,
+                    dest: proxy.unwrap_or(w),
+                    version: version.min(XDND_VERSION),
+                });
             }
         }
         None
     }
 
-    fn drag_motion(&mut self, x: i16, y: i16) {
-        let target = self.aware_at(x, y);
+    fn drag_motion(&mut self, x: i16, y: i16, time: u32) {
+        let target = self.target_at(x, y);
         let Some(d) = self.drag.as_ref() else { return };
         let (old, mimes, action) = (d.target, d.mimes.clone(), d.action);
-        if old != target {
+        if old.map(|t| t.window) != target.map(|t| t.window) {
             if let Some(old) = old {
-                self.message(old, self.atoms.XdndLeave, [self.win, 0, 0, 0, 0]);
+                self.message_to(
+                    old.dest,
+                    old.window,
+                    self.atoms.XdndLeave,
+                    [self.win, 0, 0, 0, 0],
+                );
             }
             if let Some(t) = target {
                 let more = u32::from(mimes.len() > 3);
-                let mut l = [self.win, (XDND_VERSION << 24) | more, 0, 0, 0];
+                let mut l = [self.win, (t.version << 24) | more, 0, 0, 0];
                 for (i, m) in mimes.iter().take(3).enumerate() {
                     l[2 + i] = self.atom(m).unwrap_or(x11rb::NONE);
                 }
-                self.message(t, self.atoms.XdndEnter, l);
+                self.message_to(t.dest, t.window, self.atoms.XdndEnter, l);
             }
             if let Some(d) = self.drag.as_mut() {
                 d.target = target;
@@ -1040,34 +1267,35 @@ impl X {
         }
         if let Some(t) = target {
             let position = ((x as u16 as u32) << 16) | (y as u16 as u32);
-            self.message(
-                t,
+            self.message_to(
+                t.dest,
+                t.window,
                 self.atoms.XdndPosition,
-                [
-                    self.win,
-                    0,
-                    position,
-                    x11rb::CURRENT_TIME,
-                    self.action_atom(action),
-                ],
+                [self.win, 0, position, time, self.action_atom(action)],
             );
         }
     }
 
-    fn drag_release(&mut self) {
+    fn drag_release(&mut self, time: u32) {
         let Some(d) = self.drag.as_ref() else { return };
         match d.target {
             Some(t) if d.accepted => {
-                self.message(
-                    t,
+                self.message_to(
+                    t.dest,
+                    t.window,
                     self.atoms.XdndDrop,
-                    [self.win, 0, x11rb::CURRENT_TIME, 0, 0],
+                    [self.win, 0, time, 0, 0],
                 );
                 out::event(Event::DragDropped);
             }
             target => {
                 if let Some(t) = target {
-                    self.message(t, self.atoms.XdndLeave, [self.win, 0, 0, 0, 0]);
+                    self.message_to(
+                        t.dest,
+                        t.window,
+                        self.atoms.XdndLeave,
+                        [self.win, 0, 0, 0, 0],
+                    );
                 }
                 self.drag = None;
                 self.owned.remove(&self.atoms.XdndSelection);

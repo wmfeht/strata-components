@@ -33,7 +33,9 @@ pub enum Command {
         extent: [u32; 2],
     },
     /// A plain toplevel (an `xdg_toplevel`, or an X window) with app id and class
-    /// `strata-test-peer`. Replies with [`Mapped`] once it has its first buffer or is mapped.
+    /// `strata-test-peer`. Replies with [`Mapped`]: on Wayland once it has committed its first
+    /// buffer; on X11 once the window manager lists it in `_NET_CLIENT_LIST`, which wlroots
+    /// does when the compositor maps it.
     Map {
         title: String,
         width: u32,
@@ -90,11 +92,15 @@ pub enum Command {
         actions: Vec<Action>,
     },
     /// How the peer's window answers drops from now on: the first of `mimes` the drag offers,
-    /// with `action`. No `mimes` refuses every drop.
+    /// with any of `actions`, `preferred` first. No `mimes` refuses every drop.
     DropAccept {
         mimes: Vec<String>,
-        action: Action,
+        actions: Vec<Action>,
+        preferred: Action,
     },
+    /// X11 only: point the window's `XdndProxy` at a window on a second connection, so drag
+    /// messages must go to the proxy ([`Event::DropEnter`] says which way they came).
+    DropProxy,
     /// Exports the peer's window for another client to parent to ([`Exported`]).
     Export,
     /// Replies once everything sent before it has reached the server and come back.
@@ -271,6 +277,11 @@ pub enum Event {
         x: f64,
         y: f64,
     },
+    /// The pointer moved in the peer's window, at window-local points.
+    PointerMotion {
+        x: f64,
+        y: f64,
+    },
     /// The pointer left the peer's window.
     PointerLeave,
     /// A button went down or up on the peer's window.
@@ -309,9 +320,12 @@ pub enum Event {
     },
     /// Drag source: the drag ended without a drop.
     DragCancelled,
-    /// Drop target: a drag entered the peer's window.
+    /// Drop target: a drag entered the peer's window. `proxied`: on X11, its messages came
+    /// through the window's `XdndProxy`.
     DropEnter {
         mimes: Vec<String>,
+        #[serde(default)]
+        proxied: bool,
     },
     /// Drop target: the drag moved, in window-local points.
     DropMotion {
@@ -358,9 +372,16 @@ pub fn fnv1a64(data: &[u8]) -> String {
 }
 
 /// The keysym names of a chord, modifiers first: `ctrl+shift+a` gives `Control_L`, `Shift_L`
-/// and `a`. The last part is any keysym name (`Return`, `F5`, `a`); the others are `ctrl`,
-/// `shift`, `alt` or `super`.
+/// and `a`. The last part is any keysym name (`Return`, `F5`, `a`) or a modifier alone
+/// (`shift`, to hold it); the others are `ctrl`, `shift`, `alt` or `super`.
 pub fn chord_keys(chord: &str) -> Result<Vec<String>, String> {
+    let modifier = |m: &str| match m.to_ascii_lowercase().as_str() {
+        "ctrl" | "control" => Some("Control_L"),
+        "shift" => Some("Shift_L"),
+        "alt" => Some("Alt_L"),
+        "super" | "logo" => Some("Super_L"),
+        _ => None,
+    };
     let parts: Vec<&str> = chord.split('+').map(str::trim).collect();
     let Some((key, mods)) = parts.split_last() else {
         return Err(format!("empty chord {chord:?}"));
@@ -370,15 +391,9 @@ pub fn chord_keys(chord: &str) -> Result<Vec<String>, String> {
     }
     let mut keys = Vec::with_capacity(parts.len());
     for m in mods {
-        let name = match m.to_ascii_lowercase().as_str() {
-            "ctrl" | "control" => "Control_L",
-            "shift" => "Shift_L",
-            "alt" => "Alt_L",
-            "super" | "logo" => "Super_L",
-            other => return Err(format!("chord {chord:?}: unknown modifier {other:?}")),
-        };
+        let name = modifier(m).ok_or_else(|| format!("chord {chord:?}: unknown modifier {m:?}"))?;
         keys.push(name.to_owned());
     }
-    keys.push((*key).to_owned());
+    keys.push(modifier(key).map_or_else(|| (*key).to_owned(), str::to_owned));
     Ok(keys)
 }

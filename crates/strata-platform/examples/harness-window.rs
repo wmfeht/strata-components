@@ -5,7 +5,8 @@
 //! - `{"ev":"ready","handle":"wayland"}` (or `xlib`, `xcb`) once the window exists;
 //! - `{"ev":"frame"}` after its first frame is drawn;
 //! - `{"ev":"layout","w":640.0,"h":400.0}` each time its size in points changes;
-//! - `{"ev":"focus","focused":true}`, `{"ev":"press","n":1}` and `{"ev":"key","key":"Enter",…}`;
+//! - `{"ev":"focus","focused":true}`, `{"ev":"press","n":1}`, `{"ev":"secondary-press"}` and
+//!   `{"ev":"key","key":"Enter",…}`;
 //! - `{"ev":"exit-error","error":"…"}` if the app can't run.
 //!
 //! `--title TITLE` sets the window title (default `harness-window`). Its app id is
@@ -18,7 +19,7 @@ use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use rune::raw_window_handle::RawWindowHandle;
-use rune::{App, AppSpec, Cx, El, KeyEvent, Tx, WindowHandle, col, text};
+use rune::{App, AppSpec, Cx, El, KeyEvent, PointerPress, Tx, WindowHandle, col, text};
 use serde_json::{Value, json};
 
 #[derive(Default)]
@@ -48,6 +49,9 @@ fn view(s: &State, _: &mut Cx<State>) -> El {
         .on_press(|s: &mut State| {
             s.presses += 1;
             log("press", json!({ "n": s.presses }));
+        })
+        .on_secondary_press(|_: &mut State, _: PointerPress, _: &mut Tx| {
+            log("secondary-press", json!({}));
         })
         .on_layout(|_: &mut State, r: [f32; 4]| {
             log("layout", json!({ "w": r[2], "h": r[3] }));

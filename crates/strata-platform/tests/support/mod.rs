@@ -2,11 +2,13 @@
 //!
 //! [`Session::start`] brings up, under a private `XDG_RUNTIME_DIR`:
 //!
-//! 1. a session bus ([`Bus`]): a `dbus-daemon` with only the session's service directory;
-//! 2. a nested headless sway, with Xwayland (`sway.rs` lists the traps it works around);
-//! 3. an input peer ([`Session::input`]): a virtual pointer and keyboard, without which a
-//!    headless seat gives no client pointer events or keyboard focus;
-//! 4. a watchdog that stops sway and the bus if the test process dies without tearing down.
+//! 1. a watchdog, first: if the test process dies without tearing down (SIGKILL, a timeout),
+//!    it kills every process the session started (their pids are in `<dir>/pids`), removes a
+//!    dead Xwayland's lock and socket, unmounts what is mounted in the directory and removes it;
+//! 2. a session bus ([`Bus`]): a `dbus-daemon` with only the session's service directory;
+//! 3. a nested headless sway, with Xwayland (`sway.rs` lists the traps it works around);
+//! 4. an input peer ([`Session::input`]): a virtual pointer and keyboard, without which a
+//!    headless seat gives no client pointer events or keyboard focus.
 //!
 //! Processes start through [`Session::command`], with an environment built from nothing
 //! ([`Session::env`]), so none can reach the desktop's display, bus or runtime directory.
@@ -22,12 +24,15 @@ mod peer;
 mod process;
 mod sway;
 
+use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
+use std::io::Write;
 use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub use bus::Bus;
 pub use peer::Peer;
@@ -109,18 +114,62 @@ fn tail(path: &Path, n: usize) -> String {
     format!("--- {} ---\n{}", path.display(), lines[start..].join("\n"))
 }
 
+/// Appends a line to the file `STRATA_SESSION_REPORT` names, if any: how a test that runs
+/// another test binary (W3's SIGKILL checks) learns the session's directory and processes.
+pub fn report(line: &str) {
+    let Some(path) = std::env::var_os("STRATA_SESSION_REPORT") else {
+        return;
+    };
+    if let Ok(mut f) = std::fs::File::options()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
+        let _ = writeln!(f, "{line}");
+    }
+}
+
+/// The desktop's display, as the shell had it: `mise run test-platform` saves it in
+/// `STRATA_OUTER_*` before clearing it.
+struct Outer {
+    display: Option<String>,
+    /// The desktop's Wayland socket.
+    wayland: Option<PathBuf>,
+}
+
+impl Outer {
+    fn get() -> Outer {
+        let var = |saved: &str, live: &str| {
+            std::env::var(saved)
+                .ok()
+                .or_else(|| std::env::var(live).ok())
+                .filter(|v| !v.is_empty())
+        };
+        let runtime = var("STRATA_OUTER_XDG_RUNTIME_DIR", "XDG_RUNTIME_DIR");
+        let wayland = var("STRATA_OUTER_WAYLAND_DISPLAY", "WAYLAND_DISPLAY").map(|w| {
+            let w = PathBuf::from(w);
+            match (&runtime, w.is_absolute()) {
+                (Some(dir), false) => Path::new(dir).join(w),
+                _ => w,
+            }
+        });
+        Outer {
+            display: var("STRATA_OUTER_DISPLAY", "DISPLAY"),
+            wayland,
+        }
+    }
+}
+
 pub struct Session {
     name: String,
     dir: PathBuf,
     logs: PathBuf,
     icd: Option<OsString>,
-    /// The desktop's `DISPLAY`, which the session's must never be.
-    outer_display: Option<String>,
-    // Dropped in this order: the input peer, sway (its clients go with it), the bus.
+    outer: Outer,
     input: Option<Peer>,
     sway: Option<sway::Sway>,
-    bus: Bus,
-    watchdog: Option<Child>,
+    bus: Option<Bus>,
+    watchdog: Child,
 }
 
 impl Session {
@@ -131,10 +180,24 @@ impl Session {
 
     pub fn with(opts: Options) -> Session {
         static N: AtomicU32 = AtomicU32::new(0);
+        static NAMES: Mutex<Option<HashMap<String, u32>>> = Mutex::new(None);
         let n = N.fetch_add(1, Ordering::Relaxed);
-        let name = match std::thread::current().name() {
+        let base = match std::thread::current().name() {
             Some(t) if t != "main" => t.replace("::", "-"),
             _ => format!("session-{n}"),
+        };
+        // A second session in the same test gets a log directory of its own.
+        let name = {
+            let mut names = NAMES.lock().expect("session names");
+            let count = names
+                .get_or_insert_with(HashMap::new)
+                .entry(base.clone())
+                .or_default();
+            *count += 1;
+            match *count {
+                1 => base,
+                k => format!("{base}-{k}"),
+            }
         };
         let logs = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
             .join("session")
@@ -148,6 +211,9 @@ impl Session {
             .mode(0o700)
             .create(&dir)
             .unwrap_or_else(|e| panic!("creating {}: {e}", dir.display()));
+        report(&format!("dir {}", dir.display()));
+        let watchdog = watchdog(&dir);
+        report(&format!("watchdog {}", watchdog.id()));
         for sub in [
             "home",
             "home/.config",
@@ -157,27 +223,32 @@ impl Session {
         ] {
             std::fs::create_dir_all(dir.join(sub)).expect("session home");
         }
-        let icd = gpu::icd();
+        let bus = Bus::start(&dir, &logs, &base_env(&dir, None), |pid| record(&dir, pid));
         let mut session = Session {
             name,
-            outer_display: std::env::var("DISPLAY").ok().filter(|d| !d.is_empty()),
-            bus: Bus::start(&dir, &logs, &base_env(&dir, None)),
+            outer: Outer::get(),
+            icd: gpu::icd(),
+            bus: Some(bus),
             dir,
             logs,
-            icd,
             input: None,
             sway: None,
-            watchdog: None,
+            watchdog,
         };
         if opts.compositor {
             let renderer = gpu::renderer(session.icd.as_deref());
-            let env = base_env(&session.dir, Some(session.bus.address()));
+            let env = base_env(&session.dir, Some(session.bus().address()));
+            let dir = session.dir.clone();
             session.sway = Some(sway::Sway::start(
                 &session.dir,
                 &session.logs,
                 &opts,
                 &renderer,
                 &env,
+                |pid| {
+                    record(&dir, pid);
+                    report("sway-starting");
+                },
             ));
             std::fs::write(
                 session.logs.join("session.txt"),
@@ -189,7 +260,6 @@ impl Session {
             )
             .expect("session notes");
         }
-        session.watchdog = Some(session.watchdog());
         if opts.compositor && opts.input {
             let input = Peer::spawn(&session, Display::Wayland, "input");
             let (w, h) = opts.output;
@@ -197,27 +267,8 @@ impl Session {
             input.devices([logical(w), logical(h)]);
             session.input = Some(input);
         }
+        report("ready");
         session
-    }
-
-    /// Stops sway and the bus once this process is gone, in case it dies without dropping
-    /// the session (SIGKILL, a test timeout). sway's clients and Xwayland go with sway.
-    fn watchdog(&self) -> Child {
-        let mut pids = vec![self.bus.pid().to_string()];
-        pids.extend(self.sway.as_ref().map(|s| s.pid().to_string()));
-        Command::new("sh")
-            .arg("-c")
-            .arg(r#"p=$1; shift; while kill -0 "$p" 2>/dev/null; do sleep 0.5; done; kill "$@" 2>/dev/null"#)
-            .arg("watchdog")
-            .arg(std::process::id().to_string())
-            .args(pids)
-            .env_clear()
-            .env("PATH", std::env::var_os("PATH").unwrap_or_default())
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("starting the session watchdog")
     }
 
     fn sway(&self) -> &sway::Sway {
@@ -226,16 +277,23 @@ impl Session {
             .expect("this session has no compositor (Options::compositor)")
     }
 
-    /// The environment of a process in this session, built from nothing.
+    /// The environment of a process in this session, built from nothing. It passes on
+    /// `STRATA_TEST_TIMEOUT_SCALE` and `LD_LIBRARY_PATH` where set; ICD paths in
+    /// `STRATA_VK_ICD` should be absolute.
     pub fn env(&self, display: Display) -> Vec<(OsString, OsString)> {
-        let mut env: Vec<(OsString, OsString)> = base_env(&self.dir, Some(self.bus.address()))
+        let mut env: Vec<(OsString, OsString)> = base_env(&self.dir, Some(self.bus().address()))
             .into_iter()
             .map(|(k, v)| (k.into(), v.into()))
             .collect();
         let mut set = |k: &str, v: &OsStr| env.push((k.into(), v.to_owned()));
         match display {
             Display::Wayland => {
-                set("WAYLAND_DISPLAY", self.sway().wayland_display().as_ref());
+                let name = self.sway().wayland_display();
+                assert!(
+                    self.outer.wayland.as_deref() != Some(self.dir.join(name).as_path()),
+                    "the session's Wayland socket {name} is the desktop's"
+                );
+                set("WAYLAND_DISPLAY", name.as_ref());
                 set("XDG_SESSION_TYPE", "wayland".as_ref());
             }
             Display::X11 => {
@@ -244,7 +302,7 @@ impl Session {
                     .x_display_name()
                     .expect("this session has no Xwayland (Options::xwayland)");
                 assert!(
-                    self.outer_display.as_deref() != Some(x),
+                    self.outer.display.as_deref() != Some(x),
                     "the session's DISPLAY {x} is the desktop's"
                 );
                 set("DISPLAY", x.as_ref());
@@ -258,6 +316,11 @@ impl Session {
         if let Some(icd) = &self.icd {
             set("VK_ICD_FILENAMES", icd);
             set("VK_DRIVER_FILES", icd);
+        }
+        for pass in ["STRATA_TEST_TIMEOUT_SCALE", "LD_LIBRARY_PATH"] {
+            if let Some(v) = std::env::var_os(pass) {
+                set(pass, &v);
+            }
         }
         set("RUNE_GPU_LOG", "1".as_ref());
         set("RUST_BACKTRACE", "1".as_ref());
@@ -275,15 +338,18 @@ impl Session {
     }
 
     /// Starts `cmd` (from [`Session::command`]), logging as `<name>.stdout.log` and
-    /// `<name>.stderr.log` in the session's log directory.
+    /// `<name>.stderr.log` in the session's log directory (`<name>-2` and so on for a name
+    /// already taken).
     pub fn spawn(&self, name: &str, cmd: Command) -> Proc {
-        let mut name = name.to_owned();
+        let mut unique = name.to_owned();
         let mut n = 1;
-        while self.logs.join(format!("{name}.stdout.log")).exists() {
+        while self.logs.join(format!("{unique}.stdout.log")).exists() {
             n += 1;
-            name = format!("{name}-{n}");
+            unique = format!("{name}-{n}");
         }
-        Proc::spawn(&name, cmd, &self.logs)
+        let proc = Proc::spawn(&unique, cmd, &self.logs);
+        record(&self.dir, proc.pid());
+        proc
     }
 
     /// A new peer process on `display`.
@@ -304,12 +370,17 @@ impl Session {
     }
 
     pub fn bus(&self) -> &Bus {
-        &self.bus
+        self.bus.as_ref().expect("the session bus")
     }
 
     /// Runs sway commands (`[con_id=4] focus`) and panics unless all succeed.
     pub fn sway_command(&self, cmd: &str) {
         self.sway().command(cmd);
+    }
+
+    /// sway's whole tree, as `swaymsg -t get_tree` gives it.
+    pub fn tree(&self) -> serde_json::Value {
+        self.sway().tree()
     }
 
     /// Waits for a toplevel of process `pid` with a size.
@@ -319,15 +390,16 @@ impl Session {
         })
     }
 
-    fn wait_window_where(&self, what: &str, pred: impl Fn(&Window) -> bool) -> Window {
-        let deadline = std::time::Instant::now() + timeout();
+    /// Waits for a toplevel that passes `pred`; `what` names it in the failure.
+    pub fn wait_window_where(&self, what: &str, pred: impl Fn(&Window) -> bool) -> Window {
+        let deadline = Instant::now() + timeout();
         loop {
-            let windows = sway::windows(&self.sway().tree());
+            let windows = sway::windows(&self.tree());
             if let Some(w) = windows.iter().find(|w| pred(w)) {
                 return w.clone();
             }
             assert!(
-                std::time::Instant::now() < deadline,
+                Instant::now() < deadline,
                 "{}: no {what} in sway's tree, which has {windows:#?}",
                 self.name
             );
@@ -339,9 +411,9 @@ impl Session {
     /// by side. The clients may not have drawn at their new size yet: sync each one before
     /// sending input.
     pub fn wait_windows(&self, pids: &[u32]) -> Vec<Window> {
-        let deadline = std::time::Instant::now() + timeout();
+        let deadline = Instant::now() + timeout();
         loop {
-            let all = sway::windows(&self.sway().tree());
+            let all = sway::windows(&self.tree());
             let found: Vec<Window> = pids
                 .iter()
                 .filter_map(|p| all.iter().find(|w| w.pid == *p).cloned())
@@ -356,7 +428,7 @@ impl Session {
                 return found;
             }
             assert!(
-                std::time::Instant::now() < deadline,
+                Instant::now() < deadline,
                 "{}: no windows of pids {pids:?} side by side in sway's tree, which has {all:#?}",
                 self.name
             );
@@ -364,28 +436,28 @@ impl Session {
         }
     }
 
-    /// Moves the input peer's pointer to `at` until `peer` reports the pointer in its window.
+    /// Moves the input peer's pointer to `at` until `peer` reports an enter or a motion that
+    /// came after the move.
     ///
-    /// While sway resizes windows it shows saved snapshots of them, which take no pointer
-    /// focus, so a motion then can reach no client, and a press after it goes nowhere. A sync
-    /// with each client doesn't prove sway has applied the resize. So move, and move again a
-    /// point off, until the peer has the pointer.
+    /// For a moment after sway re-tiles, a motion can reach no surface (likely sway's saved
+    /// snapshots of windows it is resizing), and a press then goes nowhere. So: move, sync with
+    /// the peer, and look for its pointer events since the move; if none, move again a point
+    /// off. An enter from before the move doesn't count.
     pub fn point_at(&self, peer: &Peer, at: (f64, f64)) {
-        let deadline = std::time::Instant::now() + timeout();
+        let deadline = Instant::now() + timeout();
         let mut nudge = 0.0;
         loop {
+            let mark = peer.line_count();
+            // Replies once sway has the motion; the peer's sync then means it has read
+            // whatever sway sent it for it. Xwayland passes motion on later, so X11 peers get
+            // a moment more.
             self.input().pointer_move((at.0 + nudge, at.1 + nudge));
-            // An enter from before this motion may still be the peer's last word: let the
-            // motion's own enter or leave arrive first.
-            std::thread::sleep(Duration::from_millis(50));
-            for _ in 0..10 {
-                if peer.pointer_inside() {
-                    return;
-                }
-                std::thread::sleep(Duration::from_millis(10));
+            peer.sync();
+            if peer.pointer_since(mark, Duration::from_millis(200)) {
+                return;
             }
             assert!(
-                std::time::Instant::now() < deadline,
+                Instant::now() < deadline,
                 "{}: the pointer at {at:?} never reached peer {}",
                 self.name,
                 peer.pid()
@@ -406,12 +478,85 @@ impl Session {
         &self.dir
     }
 
-    /// sway's and the bus's process ids.
+    /// The pids the session recorded for the watchdog: the bus, sway and every spawned process.
     pub fn pids(&self) -> Vec<u32> {
-        let mut pids = vec![self.bus.pid()];
-        pids.extend(self.sway.as_ref().map(sway::Sway::pid));
-        pids
+        std::fs::read_to_string(self.dir.join("pids"))
+            .unwrap_or_default()
+            .split_whitespace()
+            .filter_map(|p| p.parse().ok())
+            .collect()
     }
+
+    /// Xwayland's pid and display number, once an X client has started it. wlroots forks
+    /// Xwayland twice, so it isn't sway's child: find it by its command line, `Xwayland :N`.
+    pub fn xwayland(&self) -> Option<(u32, u32)> {
+        let name = self.sway.as_ref()?.x_display_name()?;
+        let display = name.trim_start_matches(':').parse().ok()?;
+        let pid = std::fs::read_dir("/proc").ok()?.flatten().find_map(|e| {
+            let pid: u32 = e.file_name().to_str()?.parse().ok()?;
+            let cmdline = std::fs::read(e.path().join("cmdline")).ok()?;
+            let mut args = cmdline.split(|b| *b == 0);
+            let program = args.next()?;
+            (program.ends_with(b"Xwayland") && args.next()? == name.as_bytes()).then_some(pid)
+        })?;
+        Some((pid, display))
+    }
+}
+
+/// Adds `pid` to the session's `pids` file for the watchdog.
+fn record(dir: &Path, pid: u32) {
+    if let Ok(mut f) = std::fs::File::options()
+        .create(true)
+        .append(true)
+        .open(dir.join("pids"))
+    {
+        let _ = writeln!(f, "{pid}");
+    }
+    report(&format!("pid {pid}"));
+}
+
+/// The watchdog's script: wait for the test process to go, then clean up after it. `$1` is the
+/// test's pid, `$2` the session directory.
+const WATCHDOG: &str = r#"
+t=$1; d=$2
+while kill -0 "$t" 2>/dev/null; do sleep 0.2; done
+[ -d "$d" ] || exit 0
+pids=$(cat "$d/pids" 2>/dev/null)
+[ -z "$pids" ] || kill -KILL $pids 2>/dev/null
+n=$(sed 's/^://' "$d/display" 2>/dev/null)
+if [ -n "$n" ]; then
+  # Xwayland goes when sway does; make sure, then remove what a killed sway left behind.
+  pkill -KILL -f "^Xwayland :$n( |$)" 2>/dev/null
+  owner=$(tr -d ' \n' < "/tmp/.X$n-lock" 2>/dev/null)
+  for p in $pids; do
+    [ "$p" = "$owner" ] && rm -f "/tmp/.X$n-lock" "/tmp/.X11-unix/X$n"
+  done
+fi
+sleep 0.2
+awk -v d="$d/" 'index($5 "/", d) == 1 { print $5 }' /proc/self/mountinfo |
+  while read -r m; do
+    fusermount3 -u -z "$m" 2>/dev/null || fusermount -u -z "$m" 2>/dev/null || umount -l "$m" 2>/dev/null
+  done
+rm -rf "$d"
+"#;
+
+/// Starts the watchdog for `dir` (see the module docs). It runs until the test process is gone,
+/// or until the session kills it after tearing down.
+fn watchdog(dir: &Path) -> Child {
+    Command::new("sh")
+        .arg("-c")
+        .arg(WATCHDOG)
+        .arg("watchdog")
+        .arg(std::process::id().to_string())
+        .arg(dir)
+        .env_clear()
+        .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+        .current_dir("/")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("starting the session watchdog")
 }
 
 /// What every process of a session gets: a private home and runtime directory, the session
@@ -444,16 +589,13 @@ fn base_env(dir: &Path, bus: Option<&str>) -> Vec<(String, String)> {
 
 impl Drop for Session {
     fn drop(&mut self) {
+        // The input peer, then sway (its clients and Xwayland go with it), then the bus.
         self.input.take();
         if let Some(mut sway) = self.sway.take() {
             sway.stop();
         }
-        if let Some(mut w) = self.watchdog.take() {
-            let _ = w.kill();
-            let _ = w.wait();
-        }
-        // The bus goes when the struct does; a FUSE mount a GIO service left would keep the
-        // runtime directory from going.
+        self.bus.take();
+        // A FUSE mount a GIO service left would keep the runtime directory from going.
         if let Ok(mounts) = std::fs::read_to_string("/proc/self/mountinfo") {
             for point in mounts.lines().filter_map(|l| l.split(' ').nth(4)) {
                 if Path::new(point).starts_with(&self.dir) {
@@ -464,11 +606,11 @@ impl Drop for Session {
             }
         }
         let _ = std::fs::remove_dir_all(&self.dir);
+        let _ = self.watchdog.kill();
+        let _ = self.watchdog.wait();
         if std::thread::panicking() {
             eprintln!("{}: session logs in {}", self.name, self.logs.display());
-            if let Some(sway) = self.logs.join("sway.log").to_str() {
-                eprintln!("{}", tail(Path::new(sway), 20));
-            }
+            eprintln!("{}", tail(&self.logs.join("sway.log"), 20));
         }
     }
 }

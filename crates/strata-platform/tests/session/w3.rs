@@ -1,12 +1,16 @@
 //! W3's own checks of the harness: a Rune window under headless sway and Xwayland, virtual
-//! input reaching it, the peer's clipboard, drag and drop and export on both backends, the
-//! private bus, and teardown.
+//! input reaching it, the peer's clipboard, drag and drop (with an `XdndProxy` too) and export
+//! on both backends, the private bus, and teardown, orderly and after a SIGKILL.
 //!
 //! Work package: W3, `docs/work/phase-0-groundwork/W3-compositor-harness.md`.
 
 use strata_test_peer::protocol::{Action, Event, Offer, Payload, Selection, Via, fnv1a64, pattern};
 
-use crate::support::{Display, Options, Proc, Session, Shell, Window, example};
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::time::Instant;
+
+use crate::support::{Display, Options, Proc, Session, Shell, Window, example, report, timeout};
 
 const TEXT: &str = "héllo from the peer ✓";
 const UTF8: &str = "text/plain;charset=utf-8";
@@ -51,6 +55,7 @@ fn rune_window_opens_under_sway() {
     assert_eq!(window.shell, Shell::XdgShell);
     assert_eq!(window.app_id.as_deref(), Some("strata-harness-window"));
     assert_eq!(window.title, "w3 wayland");
+    assert!(!window.floating, "sway tiles a new window");
     no_errors(&app);
 }
 
@@ -75,12 +80,26 @@ fn input_reaches(display: Display) {
     let (app, window, _) = harness_window(&s, display, "w3 input");
     s.focus(&window);
     app.wait_json("focus", |v| v["ev"] == "focus" && v["focused"] == true);
-    s.input().click_at(window.at(0.5, 0.5));
-    app.wait_json("a press", |v| v["ev"] == "press" && v["n"] == 1);
-    s.input().key("Return");
-    app.wait_json("Return", |v| v["ev"] == "key" && v["key"] == "Enter");
-    s.input().key("ctrl+a");
-    app.wait_json("Ctrl+A", |v| v["ev"] == "key" && v["ctrl"] == true);
+    let input = s.input();
+    // Each step waits for its own line, after the last step's.
+    input.click_at(window.at(0.5, 0.5));
+    let (at, _) = app.wait_json_from(0, "a press", |v| v["ev"] == "press" && v["n"] == 1);
+    input.right_click_at(window.at(0.5, 0.5));
+    let (at, _) = app.wait_json_from(at + 1, "a secondary press", |v| {
+        v["ev"] == "secondary-press"
+    });
+    input.key("Return");
+    let (at, _) = app.wait_json_from(at + 1, "Return", |v| {
+        v["ev"] == "key" && v["key"] == "Enter"
+    });
+    input.key("ctrl+a");
+    let (at, _) = app.wait_json_from(at + 1, "Ctrl+A", |v| v["ev"] == "key" && v["ctrl"] == true);
+    input.key_down("shift");
+    input.key("b");
+    input.key_up("shift");
+    app.wait_json_from(at + 1, "B with Shift held", |v| {
+        v["ev"] == "key" && v["shift"] == true && v["key"] == "Text(\"B\")"
+    });
 }
 
 #[test]
@@ -271,24 +290,136 @@ fn teardown_leaves_no_processes_or_files() {
     let s = Session::start();
     let (app, _, _) = harness_window(&s, Display::X11, "w3 teardown");
     let peer = s.peer(Display::Wayland);
+    let (xwayland, display) = s.xwayland().expect("Xwayland runs for the X11 window");
     let mut pids = s.pids();
-    pids.extend([app.pid(), peer.pid(), s.input().pid()]);
+    pids.push(xwayland);
     let dir = s.runtime_dir().to_owned();
     drop(peer);
     drop(app);
     drop(s);
-    let alive: Vec<u32> = pids
-        .into_iter()
-        .filter(|p| std::path::Path::new(&format!("/proc/{p}")).exists())
+    let left = leftovers(&pids, &dir, Some(display));
+    assert!(left.is_empty(), "left behind: {left:?}");
+}
+
+/// Whether `pid` runs (a zombie doesn't).
+fn alive(pid: u32) -> bool {
+    std::fs::read_to_string(format!("/proc/{pid}/stat"))
+        .ok()
+        .and_then(|stat| {
+            stat.rsplit_once(") ")
+                .map(|(_, rest)| !rest.starts_with('Z'))
+        })
+        .unwrap_or(false)
+}
+
+/// What a session left behind: live processes among `pids`, its directory, and Xwayland's
+/// lock file and socket for `display`.
+fn leftovers(pids: &[u32], dir: &Path, display: Option<u32>) -> Vec<String> {
+    let mut left: Vec<String> = pids
+        .iter()
+        .filter(|p| alive(**p))
+        .map(|p| format!("process {p}"))
         .collect();
-    assert!(alive.is_empty(), "still running: {alive:?}");
-    assert!(!dir.exists(), "{} is left", dir.display());
+    let mut paths = vec![dir.to_owned()];
+    if let Some(n) = display {
+        paths.push(PathBuf::from(format!("/tmp/.X{n}-lock")));
+        paths.push(PathBuf::from(format!("/tmp/.X11-unix/X{n}")));
+    }
+    left.extend(
+        paths
+            .into_iter()
+            .filter(|p| p.exists())
+            .map(|p| p.display().to_string()),
+    );
+    left
+}
+
+/// The child of `a_killed_test_leaves_no_processes_or_files`: with `STRATA_SESSION_REPORT`
+/// set, it starts a session, opens an X11 window (so Xwayland runs), reports, and waits to be
+/// killed. Without it, it does nothing.
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn sigkill_child() {
+    if std::env::var_os("STRATA_SESSION_REPORT").is_none() {
+        return;
+    }
+    let s = Session::start();
+    let (_app, _, _) = harness_window(&s, Display::X11, "w3 sigkill");
+    if let Some((pid, display)) = s.xwayland() {
+        report(&format!("xwayland {pid} {display}"));
+    }
+    report("window");
+    std::thread::sleep(timeout() * 6);
+}
+
+/// SIGKILLs a test binary while sway starts, and again once its session is up with an X11
+/// window: the watchdog must leave no process, directory, lock file or socket behind.
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn a_killed_test_leaves_no_processes_or_files() {
+    for point in ["sway-starting", "window"] {
+        let reports = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("session");
+        std::fs::create_dir_all(&reports).expect("report directory");
+        let report = reports.join(format!("sigkill-{point}.report"));
+        let _ = std::fs::remove_file(&report);
+        let mut child = Command::new(std::env::current_exe().expect("test binary"))
+            .args(["--exact", "w3::sigkill_child", "--ignored", "--nocapture"])
+            .env("STRATA_SESSION_REPORT", &report)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("the child test binary");
+        let read = || std::fs::read_to_string(&report).unwrap_or_default();
+        let deadline = Instant::now() + timeout();
+        while !read().lines().any(|l| l == point) {
+            assert!(
+                Instant::now() < deadline,
+                "the child never reported {point:?}: {}",
+                read()
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        child.kill().expect("SIGKILL");
+        child.wait().expect("reaping the child");
+
+        let text = read();
+        let field = |key: &'static str| {
+            text.lines()
+                .filter_map(move |l| l.strip_prefix(key)?.strip_prefix(' '))
+        };
+        let dir = PathBuf::from(field("dir").next().expect("the session directory"));
+        let mut pids: Vec<u32> = field("pid")
+            .chain(field("watchdog"))
+            .filter_map(|p| p.parse().ok())
+            .collect();
+        let mut display = None;
+        if let Some(x) = field("xwayland").next() {
+            let mut parts = x.split(' ').filter_map(|v| v.parse::<u32>().ok());
+            pids.extend(parts.next());
+            display = parts.next();
+        }
+        assert!(pids.len() >= 2, "the child reported no processes: {text}");
+        let deadline = Instant::now() + timeout();
+        loop {
+            let left = leftovers(&pids, &dir, display);
+            if left.is_empty() {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "killed at {point:?}, left behind: {left:?}"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
 }
 
 // ---- drag and drop, and export ----
 
-/// The input peer drags from peer `a`'s window to peer `b`'s; `b` reads the drop.
-fn drag_between_peers(display: Display) {
+/// The input peer drags from peer `a`'s window to peer `b`'s; `b` reads the drop. With
+/// `proxy` (X11), `b`'s drag messages go through its `XdndProxy`.
+fn drag_between_peers(display: Display, proxy: bool) {
     let s = Session::start();
     let a = s.peer(display);
     let b = s.peer(display);
@@ -299,7 +430,14 @@ fn drag_between_peers(display: Display) {
     let [from, to] = <[_; 2]>::try_from(s.wait_windows(&[a.pid(), b.pid()])).expect("two windows");
     a.sync();
     b.sync();
-    b.accept_drops(&["text/plain", UTF8], Action::Copy);
+    b.accept_drops(
+        &["text/plain", UTF8],
+        &[Action::Copy, Action::Move],
+        Action::Copy,
+    );
+    if proxy {
+        b.drop_proxy();
+    }
 
     let input = s.input();
     s.point_at(&a, from.at(0.5, 0.5));
@@ -317,10 +455,11 @@ fn drag_between_peers(display: Display) {
     let entered = b.wait_event("the drag entering", |e| {
         matches!(e, Event::DropEnter { .. })
     });
-    let Event::DropEnter { mimes } = entered else {
+    let Event::DropEnter { mimes, proxied } = entered else {
         unreachable!()
     };
     assert_eq!(mimes.len(), 3, "{mimes:?}");
+    assert_eq!(proxied, proxy, "the drag's messages came the wrong way");
     b.wait_event("the drag moving", |e| matches!(e, Event::DropMotion { .. }));
     input.button(false);
     let dropped = b.wait_event("the drop", |e| matches!(e, Event::Dropped { .. }));
@@ -343,13 +482,19 @@ fn drag_between_peers(display: Display) {
 #[test]
 #[ignore = "needs a private session: mise run test-platform"]
 fn peer_drags_to_peer_on_wayland() {
-    drag_between_peers(Display::Wayland);
+    drag_between_peers(Display::Wayland, false);
 }
 
 #[test]
 #[ignore = "needs a private session: mise run test-platform"]
 fn peer_drags_to_peer_on_x11() {
-    drag_between_peers(Display::X11);
+    drag_between_peers(Display::X11, false);
+}
+
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn peer_drags_to_peer_through_an_xdnd_proxy() {
+    drag_between_peers(Display::X11, true);
 }
 
 #[test]

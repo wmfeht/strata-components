@@ -167,6 +167,14 @@ impl DataControl {
     }
 }
 
+/// How the peer's window answers drops (`drop-accept`).
+#[derive(Clone)]
+pub struct DropPolicy {
+    pub mimes: Vec<String>,
+    pub actions: Vec<Action>,
+    pub preferred: Action,
+}
+
 /// The drag over the peer's window, as a drop target.
 pub struct Drop {
     offer: WlDataOffer,
@@ -351,16 +359,24 @@ impl Dispatch<WlDataDevice, ()> for St {
                 let policy = st.drop_policy.clone();
                 let mime = policy
                     .as_ref()
-                    .and_then(|(want, _)| want.iter().find(|m| mimes.contains(m)).cloned());
+                    .and_then(|p| p.mimes.iter().find(|m| mimes.contains(m)).cloned());
                 offer.accept(serial, mime.clone());
                 if offer.version() >= 3 {
-                    let action = match (&mime, &policy) {
-                        (Some(_), Some((_, a))) => flags(*a),
-                        _ => DndAction::empty(),
+                    let (actions, preferred) = match (&mime, &policy) {
+                        (Some(_), Some(p)) => (
+                            p.actions
+                                .iter()
+                                .fold(flags(p.preferred), |all, a| all | flags(*a)),
+                            flags(p.preferred),
+                        ),
+                        _ => (DndAction::empty(), DndAction::empty()),
                     };
-                    offer.set_actions(action, action);
+                    offer.set_actions(actions, preferred);
                 }
-                out::event(Event::DropEnter { mimes });
+                out::event(Event::DropEnter {
+                    mimes,
+                    proxied: false,
+                });
                 st.drop = Some(Drop {
                     offer,
                     mime,

@@ -155,7 +155,7 @@ pub struct St {
     current: HashMap<(Via, Selection), OfferRef>,
     generation: HashMap<(Via, Selection), u64>,
     pending_sets: Vec<PendingSet>,
-    drop_policy: Option<(Vec<String>, strata_test_peer::protocol::Action)>,
+    drop_policy: Option<data::DropPolicy>,
     drop: Option<Drop>,
     buffers: u64,
 }
@@ -263,11 +263,20 @@ impl St {
                 mime,
             } => self.selection_read(id, selection, via, mime),
             Command::DragStart { offers, actions } => self.drag_start(id, offers, actions),
-            Command::DropAccept { mimes, action } => {
-                self.drop_policy = (!mimes.is_empty()).then_some((mimes, action));
+            Command::DropAccept {
+                mimes,
+                actions,
+                preferred,
+            } => {
+                self.drop_policy = (!mimes.is_empty()).then_some(data::DropPolicy {
+                    mimes,
+                    actions,
+                    preferred,
+                });
                 out::ok(id);
                 Ok(())
             }
+            Command::DropProxy => Err("XdndProxy is X11's; a Wayland peer has none".into()),
             Command::Export => self.export(id),
         };
         if let Err(e) = result {
@@ -386,10 +395,25 @@ impl Dispatch<WlRegistry, GlobalListContents> for St {
 delegate_noop!(St: ignore WlCompositor);
 delegate_noop!(St: ignore WlShm);
 delegate_noop!(St: ignore WlShmPool);
-delegate_noop!(St: ignore WlBuffer);
 delegate_noop!(St: ignore WlSurface);
 delegate_noop!(St: ignore WlDataDeviceManager);
 delegate_noop!(St: ignore ZxdgExporterV2);
+
+/// Each draw makes a buffer; the compositor releases it once a newer one replaces it.
+impl Dispatch<WlBuffer, ()> for St {
+    fn event(
+        _: &mut Self,
+        buffer: &WlBuffer,
+        event: <WlBuffer as Proxy>::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let wayland_client::protocol::wl_buffer::Event::Release = event {
+            buffer.destroy();
+        }
+    }
+}
 
 impl Dispatch<WlCallback, Callback> for St {
     fn event(
@@ -446,6 +470,14 @@ impl Dispatch<WlPointer, ()> for St {
                 surface_y,
                 ..
             } => out::event(Event::PointerEnter {
+                x: surface_x,
+                y: surface_y,
+            }),
+            wl_pointer::Event::Motion {
+                surface_x,
+                surface_y,
+                ..
+            } => out::event(Event::PointerMotion {
                 x: surface_x,
                 y: surface_y,
             }),

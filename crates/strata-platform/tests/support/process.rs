@@ -47,8 +47,14 @@ impl Proc {
             .unwrap_or_else(|e| panic!("creating {}: {e}", stdout_log.display()));
         std::thread::spawn(move || {
             let (lines, ready) = &*reader;
-            for line in BufReader::new(stdout).lines() {
-                let Ok(line) = line else { break };
+            let mut stdout = BufReader::new(stdout);
+            let mut buf = Vec::new();
+            // Bytes, not `lines()`: a line that isn't UTF-8 must not end the reading.
+            while stdout.read_until(b'\n', &mut buf).is_ok_and(|n| n > 0) {
+                let line = String::from_utf8_lossy(&buf)
+                    .trim_end_matches(['\n', '\r'])
+                    .to_owned();
+                buf.clear();
                 let _ = writeln!(log, "{line}");
                 if let Ok(mut l) = lines.lock() {
                     l.lines.push(line);
@@ -126,13 +132,29 @@ impl Proc {
 
     /// The first stdout line that is JSON and passes `pred`.
     pub fn wait_json(&self, what: &str, pred: impl Fn(&Value) -> bool) -> Value {
-        self.wait_for(0, what, |line| {
-            serde_json::from_str::<Value>(line).ok().filter(|v| pred(v))
-        })
-        .1
+        self.wait_json_from(0, what, pred).1
     }
 
-    pub(super) fn send_line(&self, line: &str) {
+    /// The first JSON stdout line passing `pred` at index `from` or later, with its index:
+    /// pass `index + 1` (or [`Proc::line_count`] taken before an action) to wait for the next.
+    pub fn wait_json_from(
+        &self,
+        from: usize,
+        what: &str,
+        pred: impl Fn(&Value) -> bool,
+    ) -> (usize, Value) {
+        self.wait_for(from, what, |line| {
+            serde_json::from_str::<Value>(line).ok().filter(|v| pred(v))
+        })
+    }
+
+    /// How many stdout lines have arrived: a point to wait from.
+    pub fn line_count(&self) -> usize {
+        self.out.0.lock().map_or(0, |l| l.lines.len())
+    }
+
+    /// Writes one line to the process's stdin.
+    pub fn send_line(&self, line: &str) {
         let mut stdin = self.stdin.lock().expect("stdin lock");
         let ok = stdin
             .as_mut()

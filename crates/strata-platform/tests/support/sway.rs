@@ -29,12 +29,15 @@ pub struct Sway {
 }
 
 impl Sway {
+    /// Starts sway and waits for its sockets (and Xwayland's display). `spawned` hears sway's
+    /// pid at once, so the watchdog knows it from the start.
     pub(super) fn start(
         dir: &Path,
         logs: &Path,
         opts: &Options,
         renderer: &str,
         env: &[(String, String)],
+        spawned: impl FnOnce(u32),
     ) -> Sway {
         let config = dir.join("sway.conf");
         let (w, h) = opts.output;
@@ -77,6 +80,7 @@ impl Sway {
             .stderr(err)
             .spawn()
             .unwrap_or_else(|e| panic!("starting sway through setpriv: {e}"));
+        spawned(child.id());
 
         let deadline = Instant::now() + timeout();
         let (wayland, socket) = loop {
@@ -133,10 +137,6 @@ impl Sway {
 
     pub(super) fn x_display_name(&self) -> Option<&str> {
         self.display.as_deref()
-    }
-
-    pub(super) fn pid(&self) -> u32 {
-        self.child.id()
     }
 
     /// Runs sway commands and panics unless every one succeeds.
@@ -231,7 +231,8 @@ pub struct Rect {
 /// A toplevel as sway's tree reports it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Window {
-    pub(super) id: i64,
+    /// sway's container id: `[con_id=…]` in commands.
+    pub id: i64,
     pub pid: u32,
     pub shell: Shell,
     /// The Wayland app id, or the X11 class.
@@ -240,6 +241,8 @@ pub struct Window {
     /// The client's own area (no border), in layout points.
     pub content: Rect,
     pub focused: bool,
+    /// Floating rather than tiled.
+    pub floating: bool,
 }
 
 impl Rect {
@@ -302,5 +305,6 @@ fn window(n: &Value) -> Option<Window> {
             height: num(&wr["height"]),
         },
         focused: n["focused"] == true,
+        floating: n["type"] == "floating_con",
     })
 }

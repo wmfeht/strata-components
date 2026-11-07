@@ -3,6 +3,7 @@
 
 use std::cell::Cell;
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -109,18 +110,37 @@ impl Peer {
         event
     }
 
-    /// Whether the pointer is in the peer's window, by its last enter or leave event.
-    pub fn pointer_inside(&self) -> bool {
-        self.proc
-            .lines()
-            .iter()
-            .rev()
-            .find_map(|line| match parse(line) {
-                Some(Message::Event(Event::PointerEnter { .. })) => Some(true),
-                Some(Message::Event(Event::PointerLeave)) => Some(false),
-                _ => None,
-            })
-            .unwrap_or(false)
+    /// How many lines the peer has written: a point to look for events after.
+    pub fn line_count(&self) -> usize {
+        self.proc.line_count()
+    }
+
+    /// Whether, from line `mark` on, the peer's last pointer event is an enter or a motion,
+    /// waiting up to `wait` for one: the pointer reached its window after `mark`.
+    pub fn pointer_since(&self, mark: usize, wait: Duration) -> bool {
+        let deadline = Instant::now() + wait;
+        loop {
+            let last =
+                self.proc
+                    .lines()
+                    .iter()
+                    .skip(mark)
+                    .rev()
+                    .find_map(|line| match parse(line) {
+                        Some(Message::Event(
+                            Event::PointerEnter { .. } | Event::PointerMotion { .. },
+                        )) => Some(true),
+                        Some(Message::Event(Event::PointerLeave)) => Some(false),
+                        _ => None,
+                    });
+            if last == Some(true) {
+                return true;
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
     }
 
     // ---- windows ----
@@ -153,11 +173,13 @@ impl Peer {
         self.request(Command::PointerMove { x, y });
     }
 
+    /// The left button, down or up.
     pub fn button(&self, pressed: bool) {
-        self.request(Command::PointerButton {
-            button: Button::Left,
-            pressed,
-        });
+        self.button_of(Button::Left, pressed);
+    }
+
+    pub fn button_of(&self, button: Button, pressed: bool) {
+        self.request(Command::PointerButton { button, pressed });
     }
 
     /// Moves to `to` in 20 steps, 10 ms apart: a drag that moves rather than jumps.
@@ -176,11 +198,34 @@ impl Peer {
         self.button(false);
     }
 
+    /// A right click at a layout point.
+    pub fn right_click_at(&self, at: (f64, f64)) {
+        self.pointer_move(at);
+        self.button_of(Button::Right, true);
+        self.button_of(Button::Right, false);
+    }
+
     /// A chord: `Return`, `ctrl+c`.
     pub fn key(&self, chord: &str) {
         self.request(Command::Key {
             key: chord.to_owned(),
             pressed: None,
+        });
+    }
+
+    /// Presses a chord's keys and holds them: `shift`, `ctrl+alt`.
+    pub fn key_down(&self, chord: &str) {
+        self.request(Command::Key {
+            key: chord.to_owned(),
+            pressed: Some(true),
+        });
+    }
+
+    /// Releases a chord's keys.
+    pub fn key_up(&self, chord: &str) {
+        self.request(Command::Key {
+            key: chord.to_owned(),
+            pressed: Some(false),
         });
     }
 
@@ -217,12 +262,19 @@ impl Peer {
         });
     }
 
-    /// Accept drops of the first of `mimes` offered, with `action`; none refuses them.
-    pub fn accept_drops(&self, mimes: &[&str], action: Action) {
+    /// Accept drops of the first of `mimes` offered, with any of `actions`, `preferred` first;
+    /// no `mimes` refuses them.
+    pub fn accept_drops(&self, mimes: &[&str], actions: &[Action], preferred: Action) {
         self.request(Command::DropAccept {
             mimes: mimes.iter().map(|m| (*m).to_owned()).collect(),
-            action,
+            actions: actions.to_vec(),
+            preferred,
         });
+    }
+
+    /// X11: drag messages for the peer's window go to a proxy window from now on.
+    pub fn drop_proxy(&self) {
+        self.request(Command::DropProxy);
     }
 
     /// Replies once everything the peer sent before has reached the server and come back.

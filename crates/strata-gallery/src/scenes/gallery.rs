@@ -4,7 +4,7 @@
 //! The index lists only what W0 declares (each page's work package and name), never a page's
 //! scenes, so its goldens don't change when a work package adds scenes.
 
-use rune::{Cx, El, col, row, text};
+use rune::{Cx, El, KeyEvent, Tx, col, row, text};
 
 use super::PAGES;
 use crate::{Gallery, Scene};
@@ -52,4 +52,12 @@ pub fn view(g: &Gallery, _cx: &mut Cx<Gallery>) -> El {
                 .gap(24.0)
                 .children(columns),
         )
+}
+
+pub fn on_key(_g: &mut Gallery, _key: &KeyEvent, _tx: &mut Tx) -> bool {
+    false
+}
+
+pub fn poll(_g: &mut Gallery, _t: f64, _tx: &mut Tx) -> bool {
+    false
 }

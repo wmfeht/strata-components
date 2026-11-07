@@ -2,11 +2,12 @@
 //! look work package that shows something.
 //!
 //! W0 declares every page here once. A work package edits only its own `scenes/<id>.rs`,
-//! which provides `Demo` (its field in [`Gallery`]), `SCENES`, `REVIEW` and `view`.
+//! which provides `Demo` (its field in [`Gallery`]), `SCENES`, `REVIEW`, `view`, and the
+//! `on_key` and `poll` hooks the app runs while the page is open.
 
 use rune::{El, text};
 
-use crate::{Gallery, Scene, View};
+use crate::{Gallery, KeyHook, PollHook, Scene, View};
 
 pub mod c1;
 pub mod c10;
@@ -61,6 +62,10 @@ pub struct Page {
     /// Review scenes: reachable with `--scene`, kept out of the goldens.
     pub review: &'static [Scene],
     pub view: View,
+    /// Keys no focused element took, while the page is open. True consumes the key.
+    pub on_key: KeyHook,
+    /// Runs every frame while the page is open. True when state changed.
+    pub poll: PollHook,
 }
 
 macro_rules! page {
@@ -73,6 +78,8 @@ macro_rules! page {
             scenes: $id::SCENES,
             review: $id::REVIEW,
             view: $id::view,
+            on_key: $id::on_key,
+            poll: $id::poll,
         }
     };
 }
@@ -86,6 +93,8 @@ pub const INDEX: Page = Page {
     scenes: gallery::SCENES,
     review: gallery::REVIEW,
     view: gallery::view,
+    on_key: gallery::on_key,
+    poll: gallery::poll,
 };
 
 /// Every page but the index, in the order the index lists them.

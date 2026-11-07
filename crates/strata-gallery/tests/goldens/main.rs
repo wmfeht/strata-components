@@ -3,6 +3,7 @@
 //! its goldens. See `docs/testing.md`.
 
 mod a11y;
+mod keys;
 mod png;
 mod registry;
 mod scripts;

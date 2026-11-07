@@ -4,7 +4,7 @@
 //! something). Each page lives in `scenes/<id>.rs` with its scenes, its demo state and its
 //! view; `docs/testing.md` describes the layout and the goldens built from it.
 
-use rune::{Cx, El, col};
+use rune::{AppSpec, Cx, El, Env, Key, KeyEvent, Runtime, Tx, Waker, col};
 use rune_kit::Kit;
 
 pub mod scenes;
@@ -19,12 +19,24 @@ pub type Scene = (&'static str, fn(&mut Gallery));
 /// A page's view.
 pub type View = fn(&Gallery, &mut Cx<Gallery>) -> El;
 
-/// The gallery's state: the open page, light or dark, and one demo state per page.
+/// A page's key hook, `AppSpec::on_key`'s shape: keys no focused element took. True consumes
+/// the key.
+pub type KeyHook = fn(&mut Gallery, &KeyEvent, &mut Tx) -> bool;
+
+/// A page's poll hook, `AppSpec::poll`'s shape: runs every frame with the clock in seconds.
+/// True when state changed.
+pub type PollHook = fn(&mut Gallery, f64, &mut Tx) -> bool;
+
+/// The gallery's state: the open page, light or dark, the app's waker, and one demo state per
+/// page.
 #[derive(Default)]
 pub struct Gallery {
     pub dark: bool,
     /// The open page's id, or `None` for the index.
     pub page: Option<&'static str>,
+    /// Wakes the app loop from another thread, so the open page's `poll` runs: a fake worker
+    /// calls it after it hands over a result. Set by [`setup`]; a no-op in tests.
+    pub waker: Option<Waker>,
     pub w1: scenes::w1::Demo,
     pub w2: scenes::w2::Demo,
     pub k1: scenes::k1::Demo,
@@ -86,4 +98,54 @@ pub fn view(g: &Gallery, cx: &mut Cx<Gallery>) -> El {
         .h_full()
         .fill(g.kit().c.bg_base)
         .child((page.view)(g, cx))
+}
+
+/// The app: every scene, and the hooks that route keys and polls to the open page. The binary
+/// runs it, so `--snap` and `--script` runs go through the same hooks as a window.
+pub fn spec(scenes: &'static [Scene]) -> AppSpec<Gallery> {
+    AppSpec {
+        scenes,
+        setup: Some(setup),
+        poll: Some(poll),
+        on_key: Some(on_key),
+        ..AppSpec::new("Strata components", SIZE, Gallery::default, view)
+    }
+}
+
+/// A headless runtime on `g`, wired as [`spec`] wires the app: the open page's `poll` runs on
+/// every `frame`, keys go through [`on_key`], and the waker is a no-op.
+pub fn runtime(g: Gallery, env: Env) -> Runtime<Gallery> {
+    let mut rt = Runtime::new(g, view, SIZE, env);
+    rt.poll = Some(poll);
+    rt.on_key = Some(on_key);
+    setup(&mut rt.state, std::sync::Arc::new(|| {}));
+    rt
+}
+
+/// Keeps the app's waker for pages that deliver results from another thread.
+pub fn setup(g: &mut Gallery, waker: Waker) {
+    g.waker = Some(waker);
+}
+
+/// Runs the open page's poll.
+pub fn poll(g: &mut Gallery, t: f64, tx: &mut Tx) -> bool {
+    (scenes::open_page(g).poll)(g, t, tx)
+}
+
+/// Gives the key to the open page first; a key it leaves goes to [`route_key`]'s fallback.
+pub fn on_key(g: &mut Gallery, key: &KeyEvent, tx: &mut Tx) -> bool {
+    route_key(scenes::open_page(g).on_key, g, key, tx)
+}
+
+/// `page_key` takes the key first. If it leaves Escape and a page is open, Escape goes back
+/// to the index. Public so tests can route through a page hook of their own.
+pub fn route_key(page_key: KeyHook, g: &mut Gallery, key: &KeyEvent, tx: &mut Tx) -> bool {
+    if page_key(g, key, tx) {
+        return true;
+    }
+    if key.key == Key::Escape && g.page.is_some() {
+        g.page = None;
+        return true;
+    }
+    false
 }

@@ -25,7 +25,12 @@ pub mod lucide;
 mod tests;
 
 /// A catalog behind the semantic names.
+///
+/// Rows look icons up while they draw, by name for every entry, so both lookups must be
+/// sublinear in the catalog's size: an index, a generated `match` or a binary search over a
+/// sorted list, never a scan of `all`.
 #[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
 pub struct IconSet {
     /// The catalog's id, as settings name it (`lucide`, `catppuccin`).
     pub name: &'static str,
@@ -60,10 +65,6 @@ pub const PLACEHOLDER: IconSet = IconSet {
 
 fn placeholder(name: IconName) -> &'static Icon {
     &PLACEHOLDERS[name as usize]
-}
-
-fn placeholder_named(key: &str) -> Option<&'static Icon> {
-    PLACEHOLDERS.iter().find(|i| i.name == key)
 }
 
 /// One of rune-kit's glyphs, under a placeholder name.
@@ -113,6 +114,13 @@ macro_rules! icon_names {
         static PLACEHOLDERS: [Icon; IconName::ALL.len()] = [
             $(Icon { name: $id, view: $art.0, body: $art.1 },)*
         ];
+
+        fn placeholder_named(key: &str) -> Option<&'static Icon> {
+            match key {
+                $($id => Some(&PLACEHOLDERS[IconName::$variant as usize]),)*
+                _ => None,
+            }
+        }
     };
 }
 
@@ -134,6 +142,8 @@ icon_names! {
     Symlink = "symlink" => line!(r#"<path d="M4 12.5V9.5a3 3 0 0 1 3-3h5.5"/><path d="M10 4l2.5 2.5L10 9"/>"#),
     /// Locked: no permission, an encrypted volume (C8, C26).
     Lock = "lock" => kit!(LOCK),
+    /// An archive: zip, tar and the like (C14b archive preview).
+    Archive = "archive" => line!(r#"<rect x="2.5" y="3" width="11" height="3" rx="0.5"/><path d="M3.5 6v7h9V6M6.5 8.5h3"/>"#),
     /// Unlock an encrypted volume (C8).
     Unlock = "unlock" => line!(r#"<rect x="3.5" y="7.5" width="9" height="6" rx="1"/><path d="M5.5 7.5V5a2.5 2.5 0 0 1 4.8-1"/>"#),
 
@@ -222,6 +232,14 @@ icon_names! {
     Cut = "cut" => line!(r#"<circle cx="4.5" cy="11.5" r="2"/><circle cx="11.5" cy="11.5" r="2"/><path d="M6 10L12 2.5M10 10L4 2.5"/>"#),
     /// Paste (C21).
     Paste = "paste" => line!(r#"<rect x="3.5" y="3" width="9" height="11" rx="1"/><path d="M6 3V2h4v1"/><path d="M8 6v5M6 9l2 2 2-2"/>"#),
+    /// A new folder (C21).
+    FolderPlus = "folder_plus" => line!(r#"<path d="M2.5 12.5v-9h4l1.5 1.5h5.5v7.5z"/><path d="M8 7v4M6 9h4"/>"#),
+    /// Extract an archive here (C21, C14b).
+    Extract = "extract" => line!(r#"<rect x="2.5" y="3" width="11" height="3" rx="0.5"/><path d="M3.5 6v7h9V6"/><path d="M8 7.5v4M6.3 9.8L8 11.5l1.7-1.7"/>"#),
+    /// Open a terminal here (C21).
+    Terminal = "terminal" => line!(r#"<rect x="2" y="3" width="12" height="10" rx="1"/><path d="M4.5 6.5L6.5 8l-2 1.5M8 10.5h3.5"/>"#),
+    /// Properties (C21, C15).
+    Properties = "properties" => line!(r#"<path d="M3 4.5h10M3 8h10M3 11.5h10"/><circle cx="5.5" cy="4.5" r="1.2" fill="currentColor" stroke="none"/><circle cx="10.5" cy="8" r="1.2" fill="currentColor" stroke="none"/><circle cx="7" cy="11.5" r="1.2" fill="currentColor" stroke="none"/>"#),
     /// Rename (C5, C21).
     Rename = "rename" => line!(r#"<path d="M10.5 3l2.5 2.5-7 7H3.5V10z"/>"#),
     /// Open in another application (C9).
@@ -232,6 +250,8 @@ icon_names! {
     Source = "source" => line!(r#"<path d="M5.5 4.5L2 8l3.5 3.5M10.5 4.5L14 8l-3.5 3.5"/>"#),
     /// Show a document rendered (C9).
     Rendered = "rendered" => kit!(EYE),
+    /// Hidden files shown or not, a hidden entry (C21).
+    EyeOff = "eye_off" => kit!(EYE_OFF),
 
     // Views.
     /// The List view (C4).
@@ -278,6 +298,8 @@ icon_names! {
     Volume = "volume" => line!(r#"<path d="M2.5 6v4H5l3.5 3V3L5 6z"/><path d="M10.5 6a3 3 0 0 1 0 4M12 4.5a5 5 0 0 1 0 7"/>"#),
     /// Muted.
     VolumeMute = "volume_mute" => line!(r#"<path d="M2.5 6v4H5l3.5 3V3L5 6z"/><path d="M10.5 6.5l3 3M13.5 6.5l-3 3"/>"#),
+    /// Repeat or loop playback.
+    Repeat = "repeat" => line!(r#"<path d="M3 7.5V6.5a2 2 0 0 1 2-2h8M11 2.5l2 2-2 2"/><path d="M13 8.5v1a2 2 0 0 1-2 2H3M5 13.5l-2-2 2-2"/>"#),
     /// Full screen.
     Fullscreen = "fullscreen" => line!(r#"<path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/>"#),
 
@@ -286,6 +308,8 @@ icon_names! {
     ZoomIn = "zoom_in" => line!(r#"<circle cx="7" cy="7" r="4.5"/><path d="M13.5 13.5l-3.3-3.3M5 7h4M7 5v4"/>"#),
     /// Zoom out.
     ZoomOut = "zoom_out" => line!(r#"<circle cx="7" cy="7" r="4.5"/><path d="M13.5 13.5l-3.3-3.3M5 7h4"/>"#),
+    /// Rotate an image a quarter turn (C14a).
+    Rotate = "rotate" => line!(r#"<path d="M3 8a5 5 0 1 0 1.5-3.6"/><path d="M3 2.5V5h2.5"/>"#),
     /// Fit to the window.
     Fit = "fit" => line!(r#"<rect x="5" y="5" width="6" height="6" rx="0.5"/><path d="M2.5 5V2.5H5M11 2.5h2.5V5M13.5 11v2.5H11M5 13.5H2.5V11"/>"#),
 }

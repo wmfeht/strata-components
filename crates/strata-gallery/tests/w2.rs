@@ -23,10 +23,10 @@ mod w2 {
     #[test]
     fn opening_a_page_rebuilds_the_look_for_its_appearance() {
         let mut g = Gallery::default();
-        tokens::set(&mut g.look, "rows.list", Value::Length(99.0)).expect("set");
+        tokens::set(&mut g.look, "row.list", Value::Length(99.0)).expect("set");
         g.open("w2", true);
         assert!(g.look().kit.dark);
-        assert_eq!(tokens::get(g.look(), "rows.list"), Ok(Value::Length(26.0)));
+        assert_eq!(tokens::get(g.look(), "row.list"), Ok(Value::Length(26.0)));
         g.open("w2", false);
         assert!(!g.look().kit.dark);
     }
@@ -45,16 +45,16 @@ mod w2 {
         let tokens_scene = scene("w2-tokens-light");
         let mut fallback = Gallery::default();
         tokens_scene(&mut fallback);
-        assert!(texts(fallback).contains("rows.list 26"));
+        assert!(texts(fallback).contains("row.list 26"));
 
         let mut changed = Gallery::default();
         tokens_scene(&mut changed);
-        tokens::set(&mut changed.look, "rows.list", Value::Length(30.0)).expect("set");
+        tokens::set(&mut changed.look, "row.list", Value::Length(30.0)).expect("set");
         let tree = texts(changed);
         assert!(
-            tree.contains("rows.list 30"),
+            tree.contains("row.list 30"),
             "the sheet shows the changed token"
         );
-        assert!(!tree.contains("rows.list 26"));
+        assert!(!tree.contains("row.list 26"));
     }
 }

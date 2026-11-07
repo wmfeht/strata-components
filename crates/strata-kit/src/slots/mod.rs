@@ -14,7 +14,8 @@
 //! 2. One reader per token, `fn(&Look) -> T`, which the component calls. It returns the set
 //!    value, or else the inherited one.
 //! 3. `TOKENS`, the slot's entries in the registry ([`crate::tokens`]): one line per token,
-//!    naming it `<slot>.<part>.<property>` (`list.row.height`).
+//!    naming it `<slot>.<part>.<property>` (`list.row.height`): exactly three segments, the
+//!    slot's id first.
 //!
 //! ```ignore
 //! #[derive(Clone, Debug, Default)]
@@ -22,9 +23,9 @@
 //!     pub row_height: Option<f32>,
 //! }
 //!
-//! /// A ListTable row's height: `list.row.height`, else `rows.list`.
+//! /// A ListTable row's height: `list.row.height`, else `row.list`.
 //! pub fn row_height(look: &Look) -> f32 {
-//!     look.slots.list.row_height.unwrap_or(look.rows.list)
+//!     look.slots.list.row_height.unwrap_or(look.row.list)
 //! }
 //!
 //! pub const TOKENS: &[Token] = &[Token::length("list.row.height", row_height, |l, v| {
@@ -34,7 +35,7 @@
 //!
 //! K4's `[list.row]` table then sets `list.row.height`, and the component reads it through
 //! `row_height`. A slot token nothing set follows its source, so a user override of
-//! `rows.list` moves the list rows too.
+//! `row.list` moves the list rows too.
 //!
 //! Renaming or removing a slot token breaks users' override files: record it in the changelog
 //! (plan K4).
@@ -42,7 +43,7 @@
 //! # A new slot file
 //!
 //! Its own small PR edits this file in three places: the `mod` line, the [`Slots`] field and
-//! the [`TOKENS`] entry.
+//! the [`TOKENS`] entry with the slot's id.
 
 use crate::tokens::Token;
 
@@ -71,5 +72,11 @@ pub struct Slots {
     pub tabs: tabs::Tabs,
 }
 
-/// Every slot's registry entries, which `tokens::all` lists after the core tokens.
-pub const TOKENS: &[&[Token]] = &[icons::TOKENS, list::TOKENS, sidebar::TOKENS, tabs::TOKENS];
+/// Every slot's id and registry entries, which `tokens::all` lists after the core tokens. A
+/// slot token's name is `<id>.<part>.<property>`.
+pub const TOKENS: &[(&str, &[Token])] = &[
+    ("icons", icons::TOKENS),
+    ("list", list::TOKENS),
+    ("sidebar", sidebar::TOKENS),
+    ("tabs", tabs::TOKENS),
+];

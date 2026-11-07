@@ -383,6 +383,10 @@
                 {
                   "name": "parameter",
                   "role": "label"
+                },
+                {
+                  "name": "preprocessor",
+                  "role": "label"
                 }
               ],
               "key": "w2-syntax",
@@ -416,6 +420,24 @@
                 }
               ],
               "key": "w2-radius",
+              "role": "group"
+            },
+            {
+              "children": [
+                {
+                  "name": "ladders",
+                  "role": "label"
+                },
+                {
+                  "name": "tiles 32 36 40 44 48 56 64 72 80 96 112 128 144 160 192 224 256 (default 64)",
+                  "role": "label"
+                },
+                {
+                  "name": "thumbnails 128 256",
+                  "role": "label"
+                }
+              ],
+              "key": "w2-ladders",
               "role": "group"
             },
             {
@@ -545,19 +567,19 @@
                   "role": "label"
                 },
                 {
-                  "name": "rows.list 26",
+                  "name": "row.list 26",
                   "role": "label"
                 },
                 {
-                  "name": "rows.columns 26",
+                  "name": "row.columns 26",
                   "role": "label"
                 },
                 {
-                  "name": "rows.sidebar 28",
+                  "name": "row.sidebar 28",
                   "role": "label"
                 },
                 {
-                  "name": "rows.palette 32",
+                  "name": "row.palette 32",
                   "role": "label"
                 },
                 {
@@ -587,11 +609,51 @@
                   "role": "label"
                 },
                 {
-                  "name": "on true, radius 14, intensity 1",
+                  "name": "on true, radius 14, opacity 0.24",
                   "role": "label"
                 }
               ],
               "key": "w2-glow",
+              "role": "group"
+            },
+            {
+              "children": [
+                {
+                  "name": "shape and motion",
+                  "role": "label"
+                },
+                {
+                  "name": "roundness 1",
+                  "role": "label"
+                },
+                {
+                  "name": "animations true",
+                  "role": "label"
+                }
+              ],
+              "key": "w2-shape-and-motion",
+              "role": "group"
+            },
+            {
+              "children": [
+                {
+                  "name": "slots",
+                  "role": "label"
+                },
+                {
+                  "name": "list.row.height 26",
+                  "role": "label"
+                },
+                {
+                  "name": "sidebar.row.height 28",
+                  "role": "label"
+                },
+                {
+                  "name": "tabs.tab.height 40",
+                  "role": "label"
+                }
+              ],
+              "key": "w2-slots",
               "role": "group"
             }
           ],

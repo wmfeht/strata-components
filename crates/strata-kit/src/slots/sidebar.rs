@@ -16,9 +16,9 @@ pub struct Sidebar {
     pub row_height: Option<f32>,
 }
 
-/// A sidebar row's height: `sidebar.row.height`, else `rows.sidebar`.
+/// A sidebar row's height: `sidebar.row.height`, else `row.sidebar`.
 pub fn row_height(look: &Look) -> f32 {
-    look.slots.sidebar.row_height.unwrap_or(look.rows.sidebar)
+    look.slots.sidebar.row_height.unwrap_or(look.row.sidebar)
 }
 
 pub const TOKENS: &[Token] = &[Token::length("sidebar.row.height", row_height, |l, v| {

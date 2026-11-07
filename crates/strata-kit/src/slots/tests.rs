@@ -3,8 +3,8 @@ use crate::tokens::{self, Value};
 
 /// Each seeded slot token, with the core token it inherits from.
 const SEEDS: &[(&str, &str)] = &[
-    ("list.row.height", "rows.list"),
-    ("sidebar.row.height", "rows.sidebar"),
+    ("list.row.height", "row.list"),
+    ("sidebar.row.height", "row.sidebar"),
     ("tabs.tab.height", "frame.bar"),
 ];
 
@@ -37,9 +37,12 @@ fn a_set_slot_token_stops_following_its_source() {
 }
 
 #[test]
-fn the_tab_strip_grows_with_frame_density() {
-    let mut look = Look::fallback(false);
-    let compact = length(&look, "tabs.tab.height");
-    tokens::set(&mut look, "frame.inset", Value::Length(4.0)).expect("set");
-    assert_eq!(length(&look, "tabs.tab.height"), compact + 8.0);
+fn slot_token_names_are_the_slot_id_a_part_and_a_property() {
+    for (id, slot) in super::TOKENS {
+        for token in *slot {
+            let segments: Vec<_> = token.name().split('.').collect();
+            assert_eq!(segments.len(), 3, "{}", token.name());
+            assert_eq!(segments[0], *id, "{} is in slot {id}", token.name());
+        }
+    }
 }

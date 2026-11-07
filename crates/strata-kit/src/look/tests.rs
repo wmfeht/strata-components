@@ -31,6 +31,8 @@ fn a_ladder_must_increase_and_hold_its_default() {
     assert!(Ladder::new(vec![64.0, 32.0], 32.0).is_none());
     assert!(Ladder::new(vec![32.0, 64.0], 48.0).is_none());
     assert!(Ladder::new(vec![32.0, f32::NAN], 32.0).is_none());
+    assert!(Ladder::new(vec![0.0, 32.0], 32.0).is_none());
+    assert!(Ladder::new(vec![-8.0, 32.0], 32.0).is_none());
 }
 
 #[test]
@@ -45,14 +47,70 @@ fn a_tile_takes_the_smallest_thumbnail_class_that_covers_it() {
 }
 
 #[test]
-fn an_unknown_icon_key_has_no_icon() {
+fn an_icon_key_finds_the_catalog_icon_of_that_name() {
     let look = Look::fallback(false);
+    let folder = look.icon(IconName::Folder);
+    let found = look.icon_named(folder.name).expect("in the catalog");
+    assert!(std::ptr::eq(found, folder));
     assert!(look.icon_named("no-such-icon").is_none());
-    assert!(std::ptr::eq(
-        look.icon_named(IconName::Folder.id())
-            .expect("in the catalog"),
-        look.icon(IconName::Folder)
-    ));
+}
+
+fn hash(x: &impl std::hash::Hash) -> u64 {
+    use std::hash::BuildHasher;
+    std::hash::BuildHasherDefault::<std::hash::DefaultHasher>::default().hash_one(x)
+}
+
+/// A change to one token struct.
+type Change = fn(&mut Look);
+
+/// A memo keyed on the token structs reruns when a token changes, and only then.
+#[test]
+fn token_structs_hash_as_memo_versions() {
+    let a = Look::fallback(false);
+    let key = |l: &Look| {
+        hash(&(
+            (
+                l.space,
+                l.frame,
+                l.content,
+                l.row,
+                l.icon_size,
+                l.glow,
+                l.ty,
+            ),
+            (&l.tiles, &l.thumbnails, l.syntax_extra),
+        ))
+    };
+    assert_eq!(key(&a), key(&Look::fallback(false)));
+
+    let changes: [(&str, Change); 10] = [
+        ("space", |l| l.space.xs += 1.0),
+        ("frame", |l| l.frame.inset += 1.0),
+        ("content", |l| l.content.pad += 1.0),
+        ("row", |l| l.row.list += 1.0),
+        ("icon_size", |l| l.icon_size.md += 1.0),
+        ("glow", |l| l.glow.opacity /= 2.0),
+        ("ty", |l| l.ty.title.size += 1.0),
+        ("tiles", |l| {
+            l.tiles = Ladder::new(vec![32.0, 64.0], 64.0).expect("valid")
+        }),
+        ("thumbnails", |l| {
+            l.thumbnails = ThumbnailSteps::new(vec![256.0]).expect("valid")
+        }),
+        ("syntax_extra", |l| {
+            l.syntax_extra.preprocessor = l.kit.c.danger.fg
+        }),
+    ];
+    for (name, change) in changes {
+        let mut b = a.clone();
+        change(&mut b);
+        assert_ne!(key(&a), key(&b), "a changed {name} hashes differently");
+    }
+
+    let (mut zero, mut negative) = (a.space, a.space);
+    zero.xxs = 0.0;
+    negative.xxs = -0.0;
+    assert_eq!(hash(&zero), hash(&negative), "-0.0 hashes as 0.0");
 }
 
 #[test]

@@ -18,14 +18,15 @@
 //! | `space.{xxs,xs,sm,md,lg,xl,xxl}` | length | `look.space` |
 //! | `frame.{inset,bar,control}` | length | `look.frame` |
 //! | `content.pad` | length | `look.content` |
-//! | `rows.{list,columns,sidebar,palette}` | length | `look.rows` |
+//! | `row.{list,columns,sidebar,palette}` | length | `look.row` |
 //! | `icon_size.{sm,md,lg}` | length | `look.icon_size` |
 //! | `glow.on` | flag | `look.glow.on` |
 //! | `glow.color` | colour | `look.glow.color` |
 //! | `glow.radius` | length | `look.glow.radius` |
-//! | `glow.intensity` | number, 0–4 | `look.glow.intensity` |
+//! | `glow.opacity` | number, 0–1 | `look.glow.opacity` |
 //! | `syntax.<kind>` | colour | `look.syntax`, one per `rune_kit::syntax::Syntax` kind |
-//! | `<slot>.<part>.<property>` | any | a component slot ([`crate::slots`]), such as `list.row.height` |
+//! | `syntax.preprocessor` | colour | `look.syntax_extra.preprocessor` |
+//! | `<slot>.<part>.<property>` | any | a component slot ([`crate::slots`]), such as `list.row.height`: exactly three segments, the slot's id first |
 //!
 //! Lengths are in points: finite and not negative.
 //!
@@ -43,9 +44,9 @@ use std::fmt;
 
 use rune::Color;
 use rune_kit::syntax::Syntax;
-use rune_kit::{Palette, Radius, StateColors, Type};
+use rune_kit::{Kit, Palette, Radius, StateColors, Type};
 
-use crate::look::{Content, Frame, IconSizes, Look, Ramp, Rows, Space};
+use crate::look::{Content, Frame, IconSizes, Look, Ramp, RowHeights, Space, SyntaxExtra};
 use crate::slots;
 
 #[cfg(test)]
@@ -283,7 +284,7 @@ impl fmt::Debug for Token {
 pub fn all() -> impl Iterator<Item = &'static Token> {
     CORE.iter()
         .flat_map(|group| group.iter())
-        .chain(slots::TOKENS.iter().flat_map(|slot| slot.iter()))
+        .chain(slots::TOKENS.iter().flat_map(|(_, tokens)| tokens.iter()))
 }
 
 /// The token named `name`.
@@ -305,9 +306,31 @@ pub fn set(look: &mut Look, name: &str, value: Value) -> Result<(), TokenError> 
         .set(look, value)
 }
 
-const CORE: &[&[Token]] = &[
-    COLORS, STATES, RADII, TYPE, SPACE, FRAME, CONTENT, ROWS, ICON_SIZE, GLOW, SYNTAX,
+/// Every core token, by group. A slot's tokens are in `slots::TOKENS`.
+pub(crate) const CORE: &[&[Token]] = &[
+    COLORS, STATES, RADII, TYPE, SPACE, FRAME, CONTENT, ROW, ICON_SIZE, GLOW, SYNTAX,
 ];
+
+/// Names every `Kit` field, so a Rune bump that adds one fails to build until it is either
+/// registered or listed here as not a token:
+///
+/// - `c`, `ty` and `radius` are tokens: `color.*`, `type.*` and `radius.*`;
+/// - `dark` is the appearance, which the theme picks, not a value to override;
+/// - `elevation` (shadow lists), `glyph` (icons) and `motion` (springs) have no token kind
+///   yet; adding one is an addition;
+/// - `blend_over`, `ring` and `invalid_text` are how the theme is painted, not tokens.
+const _: fn(Kit) = |Kit {
+                        dark: _,
+                        c: _,
+                        elevation: _,
+                        glyph: _,
+                        ty: _,
+                        radius: _,
+                        motion: _,
+                        blend_over: _,
+                        ring: _,
+                        invalid_text: _,
+                    }| {};
 
 /// `color.<field>` for each `kit.c` colour. The pattern names every `Palette` field, so a
 /// Rune bump that adds one fails to build until it is registered here.
@@ -427,59 +450,50 @@ macro_rules! lengths {
 
 const RADII: &[Token] = lengths!(Radius, "radius", kit.radius => xs, sm, md, lg, xl);
 
-/// `type.<style>.{size,line_height,weight,tracking}` for each style.
+/// `type.<style>.{size,line_height,weight,tracking}` for each style of `kit.ty`, then of
+/// `look.ty`. The patterns name every field of both, so this one list is the whole ramp.
 macro_rules! type_styles {
-    ($(($($path:ident).+, $style:ident)),* $(,)?) => {
-        &[$(
+    (kit.ty: [$($kit:ident),* $(,)?], ty: [$($ramp:ident),* $(,)?] $(,)?) => {{
+        const _: fn(Type) = |Type { $($kit: _,)* }| {};
+        const _: fn(Ramp) = |Ramp { $($ramp: _,)* }| {};
+        &[
+            $(type_styles!(@style kit.ty, $kit),)*
+            $(type_styles!(@style ty, $ramp),)*
+        ]
+    }};
+    (@style $($path:ident).+, $style:ident) => {
+        [
             Token::length(concat!("type.", stringify!($style), ".size"), |l| l.$($path).+.$style.size, |l, v| l.$($path).+.$style.size = v),
             Token::length(concat!("type.", stringify!($style), ".line_height"), |l| l.$($path).+.$style.line_height, |l, v| l.$($path).+.$style.line_height = v),
             Token::number(concat!("type.", stringify!($style), ".weight"), 1.0, 1000.0, |l| l.$($path).+.$style.weight, |l, v| l.$($path).+.$style.weight = v),
             Token::number(concat!("type.", stringify!($style), ".tracking"), -10.0, 10.0, |l| l.$($path).+.$style.tracking, |l, v| l.$($path).+.$style.tracking = v),
-        )*]
+        ]
     };
 }
 
-const TYPE: &[Token] = {
-    const _: fn(Type) = |Type {
-                             ui: _,
-                             ui_medium: _,
-                             ui_compact: _,
-                             small: _,
-                             small_medium: _,
-                             body: _,
-                             body_medium: _,
-                             text_small: _,
-                             text_small_medium: _,
-                             text_xsmall: _,
-                             text_xsmall_medium: _,
-                             mono: _,
-                         }| {};
-    const _: fn(Ramp) = |Ramp {
-                             title: _,
-                             heading: _,
-                         }| {};
-    type_styles!(
-        (kit.ty, ui),
-        (kit.ty, ui_medium),
-        (kit.ty, ui_compact),
-        (kit.ty, small),
-        (kit.ty, small_medium),
-        (kit.ty, body),
-        (kit.ty, body_medium),
-        (kit.ty, text_small),
-        (kit.ty, text_small_medium),
-        (kit.ty, text_xsmall),
-        (kit.ty, text_xsmall_medium),
-        (kit.ty, mono),
-        (ty, title),
-        (ty, heading),
-    )
-};
+const TYPE_STYLES: &[[Token; 4]] = type_styles!(
+    kit.ty: [
+        ui,
+        ui_medium,
+        ui_compact,
+        small,
+        small_medium,
+        body,
+        body_medium,
+        text_small,
+        text_small_medium,
+        text_xsmall,
+        text_xsmall_medium,
+        mono,
+    ],
+    ty: [title, heading],
+);
+const TYPE: &[Token] = TYPE_STYLES.as_flattened();
 
 const SPACE: &[Token] = lengths!(Space, "space", space => xxs, xs, sm, md, lg, xl, xxl);
 const FRAME: &[Token] = lengths!(Frame, "frame", frame => inset, bar, control);
 const CONTENT: &[Token] = lengths!(Content, "content", content => pad);
-const ROWS: &[Token] = lengths!(Rows, "rows", rows => list, columns, sidebar, palette);
+const ROW: &[Token] = lengths!(RowHeights, "row", row => list, columns, sidebar, palette);
 const ICON_SIZE: &[Token] = lengths!(IconSizes, "icon_size", icon_size => sm, md, lg);
 
 const GLOW: &[Token] = &[
@@ -487,23 +501,28 @@ const GLOW: &[Token] = &[
     Token::color("glow.color", |l| l.glow.color, |l, v| l.glow.color = v),
     Token::length("glow.radius", |l| l.glow.radius, |l, v| l.glow.radius = v),
     Token::number(
-        "glow.intensity",
+        "glow.opacity",
         0.0,
-        4.0,
-        |l| l.glow.intensity,
-        |l, v| l.glow.intensity = v,
+        1.0,
+        |l| l.glow.opacity,
+        |l, v| l.glow.opacity = v,
     ),
 ];
 
-/// `syntax.<kind>` for each kind rune-kit colours.
+/// `syntax.<kind>` for each kind rune-kit colours, then for each of `look.syntax_extra`.
 macro_rules! syntax {
-    ($($kind:ident => $name:literal),* $(,)?) => {{
+    ($($kind:ident => $name:literal),* $(,)?; extra: $($extra:ident),* $(,)?) => {{
         // `Syntax` is non-exhaustive, so a kind a Rune bump adds can't fail this build:
         // check this list against `rune_kit::syntax::Syntax` on every bump.
+        const _: fn(SyntaxExtra) = |SyntaxExtra { $($extra: _,)* }| {};
         &[$(Token::color(
             concat!("syntax.", $name),
             |l| l.syntax.color(Syntax::$kind),
             |l, v| l.syntax = l.syntax.with(Syntax::$kind, v),
+        ),)* $(Token::color(
+            concat!("syntax.", stringify!($extra)),
+            |l| l.syntax_extra.$extra,
+            |l, v| l.syntax_extra.$extra = v,
         ),)*]
     }};
 }
@@ -519,5 +538,6 @@ const SYNTAX: &[Token] = syntax!(
     Punctuation => "punctuation",
     Inserted => "inserted",
     Deleted => "deleted",
-    Parameter => "parameter",
+    Parameter => "parameter";
+    extra: preprocessor,
 );

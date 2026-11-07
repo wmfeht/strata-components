@@ -8,11 +8,15 @@
 //! [`Look::fallback`] is the look before any Strata theme exists. The real one is built in
 //! this order, each step changing the previous step's `Look` in place:
 //!
-//! 1. the theme (K1, `theme/`): `kit`, `syntax` and `glow`;
+//! 1. the theme (K1, `theme/`): [`Look::from_kit`] on the theme's kit, then `syntax`,
+//!    `syntax_extra` and `glow`;
 //! 2. the user's shape, density and type settings (K2, `shape.rs`, `density.rs`,
 //!    `typography.rs`): `kit.radius` and `roundness`, `kit.ty` and `ty`, `space`, `frame`,
-//!    `content`, `rows`, `icon_size`, `tiles` and `font`;
-//! 3. the user's overrides (K4, `overrides/`), by name through [`crate::tokens`].
+//!    `content`, `row`, `icon_size`, `tiles` and `font`;
+//! 3. the user's overrides (K4, `overrides/`), by name through [`crate::tokens`];
+//! 4. last, the syntect theme for C10a (K1), built from `syntax` and `syntax_extra` as they
+//!    stand after the overrides, so an override of a `syntax.*` token reaches highlighted
+//!    code. Nothing changes the syntax colours after this step without rebuilding it.
 //!
 //! The fallback values are Strata's own defaults at its default 13 px text size, so a
 //! component built against them looks right when K1–K4 land. Only the goldens move.
@@ -20,11 +24,16 @@
 //! # Rules for components
 //!
 //! - Take the look as `&Look` in a builder, as rune-kit's builders take `&Kit`, and hand
-//!   `&look.kit` to the rune-kit parts you use. Where a handler or a memo needs it later, take
-//!   an accessor, `fn(&S) -> &Look`.
+//!   `&look.kit` to the rune-kit parts you use. Where a handler needs it later, take an
+//!   accessor, `fn(&S) -> &Look`.
+//! - Read fields, and a slot's own reader for a slot token (`slots::list::row_height`). Never
+//!   call `tokens::get` while drawing: the registry is for override files, by name.
 //! - Colours come from `kit.c` (or a slot token). Sizes and gaps come from `space`, `frame`,
-//!   `rows` and `icon_size`. Radii come from `kit.radius` or [`Look::round`]. Never write a
+//!   `row` and `icon_size`. Radii come from `kit.radius` or [`Look::round`]. Never write a
 //!   literal colour, and never a literal size where a token says it.
+//! - Don't clone a `Look` into a row closure or a memo. Copy the `Copy` token structs a row
+//!   reads (`look.row`, `look.space`, `look.kit.c`, …); each is `Hash`, so it can be part of
+//!   a `memo` version.
 //! - Icons come from [`Look::icon`] by [`IconName`], or [`Look::icon_named`] for a catalog
 //!   name (an entry's icon key). Tint them with Kit's icon roles; a multi-colour catalog's
 //!   bodies name their own colours, and Rune draws those instead, so a component never needs
@@ -34,9 +43,11 @@
 //!   `Cx::reduced_motion` on every commit, so Rune's own motion follows.
 //! - A component-specific token (a list row's height, say) is a slot: see [`crate::slots`].
 
+use std::hash::{Hash, Hasher};
+
 use rune::{Color, Icon, TextStyle};
 use rune_kit::Kit;
-use rune_kit::syntax::SyntaxTheme;
+use rune_kit::syntax::{Syntax, SyntaxTheme};
 
 use crate::icons::{self, IconName, IconSet};
 use crate::slots::Slots;
@@ -56,7 +67,8 @@ pub fn fallback(dark: bool) -> Kit {
 ///
 /// Fields are public so the look's builders (K1, K2, K4) change them in place and components
 /// read them. The struct is `non_exhaustive`: a new token is a new field, which breaks no
-/// reader. Build one with [`Look::fallback`], never with a struct literal.
+/// reader. Build one with [`Look::fallback`] or [`Look::from_kit`], never with a struct
+/// literal.
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub struct Look {
@@ -73,7 +85,7 @@ pub struct Look {
     /// Spacing inside the file views.
     pub content: Content,
     /// Row height per view.
-    pub rows: Rows,
+    pub row: RowHeights,
     /// Icon sizes.
     pub icon_size: IconSizes,
     /// The tile sizes IconsGrid steps through (C3): Ctrl+Shift+wheel and the size shortcuts.
@@ -85,8 +97,12 @@ pub struct Look {
     pub roundness: f32,
     /// The element glow (Strata's "element glow" setting and its theme colour).
     pub glow: Glow,
-    /// Syntax colours for source previews and code blocks (C10a, C11), per token kind.
+    /// Syntax colours for source previews and code blocks (C10a, C11), per rune-kit token
+    /// kind. rune-kit's own highlighting reads this directly.
     pub syntax: SyntaxTheme,
+    /// Syntax colours for kinds rune-kit's [`SyntaxTheme`] doesn't have. Only the syntect
+    /// theme reads these.
+    pub syntax_extra: SyntaxExtra,
     /// The icon catalog behind [`IconName`].
     pub icons: IconSet,
     /// The interface and code fonts. `None` keeps the app's own (`AppSpec::families`). The
@@ -102,9 +118,15 @@ impl Look {
     /// Strata's look before a theme is loaded: rune-kit's neutral kit, with Strata's default
     /// shape, density and text size.
     pub fn fallback(dark: bool) -> Look {
-        let kit = Kit::neutral(dark);
+        Look::from_kit(Kit::neutral(dark))
+    }
+
+    /// `kit` with Strata's default extensions, the ones that follow a kit (the glow and
+    /// syntax colours, the type ramp) derived from it. K1 starts each theme's look here.
+    pub fn from_kit(kit: Kit) -> Look {
+        let syntax = SyntaxTheme::from_kit(&kit);
         Look {
-            ty: Ramp::fallback(&kit),
+            ty: Ramp::from_kit(&kit),
             space: Space {
                 xxs: 2.0,
                 xs: 4.0,
@@ -120,7 +142,7 @@ impl Look {
                 control: 24.0,
             },
             content: Content { pad: 4.0 },
-            rows: Rows {
+            row: RowHeights {
                 list: 26.0,
                 columns: 26.0,
                 sidebar: 28.0,
@@ -140,9 +162,12 @@ impl Look {
                 on: true,
                 color: kit.c.text_accent,
                 radius: 14.0,
-                intensity: 1.0,
+                opacity: 0.24,
             },
-            syntax: SyntaxTheme::from_kit(&kit),
+            syntax_extra: SyntaxExtra {
+                preprocessor: syntax.color(Syntax::Function),
+            },
+            syntax,
             icons: icons::lucide::SET,
             font: None,
             animations: true,
@@ -176,8 +201,32 @@ impl Default for Look {
     }
 }
 
+/// An `f32`'s bits for hashing, `-0.0` as `0.0` and every NaN alike, as rune-kit hashes
+/// `Radius` and `Color`.
+fn bits(x: f32) -> u32 {
+    if x == 0.0 {
+        0
+    } else if x.is_nan() {
+        f32::NAN.to_bits()
+    } else {
+        x.to_bits()
+    }
+}
+
+/// `Hash` over the listed `f32` fields' [`bits`].
+macro_rules! hash_lengths {
+    ($ty:ident { $($field:ident),* $(,)? }) => {
+        impl Hash for $ty {
+            fn hash<H: Hasher>(&self, state: &mut H) {
+                let $ty { $($field),* } = self;
+                $(bits(*$field).hash(state);)*
+            }
+        }
+    };
+}
+
 /// The type styles Strata adds to Kit's ramp (`kit.ty`).
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Hash)]
 #[non_exhaustive]
 pub struct Ramp {
     /// Dialog and panel titles.
@@ -187,7 +236,7 @@ pub struct Ramp {
 }
 
 impl Ramp {
-    fn fallback(kit: &Kit) -> Ramp {
+    fn from_kit(kit: &Kit) -> Ramp {
         Ramp {
             title: TextStyle {
                 size: 15.0,
@@ -213,6 +262,16 @@ pub struct Space {
     pub xxl: f32,
 }
 
+hash_lengths!(Space {
+    xxs,
+    xs,
+    sm,
+    md,
+    lg,
+    xl,
+    xxl
+});
+
 /// The window's bars, which Frame density grows together so they stay aligned.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
@@ -227,6 +286,12 @@ pub struct Frame {
     pub control: f32,
 }
 
+hash_lengths!(Frame {
+    inset,
+    bar,
+    control
+});
+
 /// Spacing inside the file views, which Content density sets.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
@@ -236,12 +301,14 @@ pub struct Content {
     pub pad: f32,
 }
 
+hash_lengths!(Content { pad });
+
 /// Row heights per view, in points, at the current density and text size. K2 folds in
 /// whichever density grows each view: Content density for the file views, Frame density for
 /// the sidebar.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
-pub struct Rows {
+pub struct RowHeights {
     /// ListTable rows (C4).
     pub list: f32,
     /// ColumnsView rows (C2).
@@ -251,6 +318,13 @@ pub struct Rows {
     /// Result rows in the search palette and folder peek (C17, C22).
     pub palette: f32,
 }
+
+hash_lengths!(RowHeights {
+    list,
+    columns,
+    sidebar,
+    palette
+});
 
 /// Icon sizes in points.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -264,22 +338,55 @@ pub struct IconSizes {
     pub lg: f32,
 }
 
+hash_lengths!(IconSizes { sm, md, lg });
+
 /// The element glow, as plain data. Where it is drawn, the component converts it to
 /// rune-fx's glow parameters.
+///
+/// `radius` and `opacity` describe the standard glow, the one a focused or selected element
+/// of ordinary size (a row, a button, a tab) gets: Strata's 14 px at 0.24 opacity. A larger
+/// site (a dialog, a drop target over a whole view) scales `radius` from it in proportion
+/// to its size and keeps `opacity`, so every glow follows an override of these two.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
 pub struct Glow {
     /// Strata's "element glow" setting.
     pub on: bool,
+    /// The glow's colour, at full opacity.
     pub color: Color,
-    /// The glow's reach, in points.
+    /// The standard glow's reach, in points.
     pub radius: f32,
-    /// 1.0 is full strength.
-    pub intensity: f32,
+    /// The standard glow's opacity at its brightest, from 0 to 1.
+    pub opacity: f32,
+}
+
+impl Hash for Glow {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        let Glow {
+            on,
+            color,
+            radius,
+            opacity,
+        } = self;
+        on.hash(state);
+        color.hash(state);
+        bits(*radius).hash(state);
+        bits(*opacity).hash(state);
+    }
+}
+
+/// Syntax colours for the kinds Strata's themes colour and rune-kit's [`SyntaxTheme`] has
+/// no kind for. Only the syntect theme (K1, C10a) reads these.
+#[derive(Clone, Copy, Debug, PartialEq, Hash)]
+#[non_exhaustive]
+pub struct SyntaxExtra {
+    /// Preprocessor directives and attributes (`#include`, `#[derive]`): Strata's
+    /// `syntax_preprocessor`. Defaults to the function colour.
+    pub preprocessor: Color,
 }
 
 /// The interface and code font families, as `AppSpec::families` takes them.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub struct Families {
     pub ui: String,
@@ -302,13 +409,23 @@ pub struct Ladder {
     default: f32,
 }
 
+impl Hash for Ladder {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.steps.len().hash(state);
+        for &s in &self.steps {
+            bits(s).hash(state);
+        }
+        bits(self.default).hash(state);
+    }
+}
+
 impl Ladder {
-    /// A ladder over `steps`, or `None` unless they are finite and strictly increasing,
-    /// with at least one step, and `default` is one of them.
+    /// A ladder over `steps`, or `None` unless they are finite, positive and strictly
+    /// increasing, with at least one step, and `default` is one of them.
     pub fn new(steps: Vec<f32>, default: f32) -> Option<Ladder> {
         let increasing = steps.windows(2).all(|w| w[0] < w[1]);
-        let finite = steps.iter().all(|s| s.is_finite());
-        (increasing && finite && steps.contains(&default)).then_some(Ladder { steps, default })
+        let valid = steps.iter().all(|s| s.is_finite() && *s > 0.0);
+        (increasing && valid && steps.contains(&default)).then_some(Ladder { steps, default })
     }
 
     /// Strata's tile sizes: finer where one step is a larger share of the size.
@@ -358,6 +475,15 @@ impl Ladder {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ThumbnailSteps {
     sizes: Vec<f32>,
+}
+
+impl Hash for ThumbnailSteps {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.sizes.len().hash(state);
+        for &s in &self.sizes {
+            bits(s).hash(state);
+        }
+    }
 }
 
 impl ThumbnailSteps {

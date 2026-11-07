@@ -43,6 +43,10 @@
                   "role": "label"
                 },
                 {
+                  "name": "archive",
+                  "role": "label"
+                },
+                {
                   "name": "unlock",
                   "role": "label"
                 },
@@ -199,6 +203,22 @@
                   "role": "label"
                 },
                 {
+                  "name": "folder_plus",
+                  "role": "label"
+                },
+                {
+                  "name": "extract",
+                  "role": "label"
+                },
+                {
+                  "name": "terminal",
+                  "role": "label"
+                },
+                {
+                  "name": "properties",
+                  "role": "label"
+                },
+                {
                   "name": "rename",
                   "role": "label"
                 },
@@ -216,6 +236,10 @@
                 },
                 {
                   "name": "rendered",
+                  "role": "label"
+                },
+                {
+                  "name": "eye_off",
                   "role": "label"
                 },
                 {
@@ -299,6 +323,10 @@
                   "role": "label"
                 },
                 {
+                  "name": "repeat",
+                  "role": "label"
+                },
+                {
                   "name": "fullscreen",
                   "role": "label"
                 },
@@ -308,6 +336,10 @@
                 },
                 {
                   "name": "zoom_out",
+                  "role": "label"
+                },
+                {
+                  "name": "rotate",
                   "role": "label"
                 },
                 {
@@ -357,6 +389,10 @@
                   "role": "label"
                 },
                 {
+                  "name": "archive",
+                  "role": "label"
+                },
+                {
                   "name": "unlock",
                   "role": "label"
                 },
@@ -513,6 +549,22 @@
                   "role": "label"
                 },
                 {
+                  "name": "folder_plus",
+                  "role": "label"
+                },
+                {
+                  "name": "extract",
+                  "role": "label"
+                },
+                {
+                  "name": "terminal",
+                  "role": "label"
+                },
+                {
+                  "name": "properties",
+                  "role": "label"
+                },
+                {
                   "name": "rename",
                   "role": "label"
                 },
@@ -530,6 +582,10 @@
                 },
                 {
                   "name": "rendered",
+                  "role": "label"
+                },
+                {
+                  "name": "eye_off",
                   "role": "label"
                 },
                 {
@@ -613,6 +669,10 @@
                   "role": "label"
                 },
                 {
+                  "name": "repeat",
+                  "role": "label"
+                },
+                {
                   "name": "fullscreen",
                   "role": "label"
                 },
@@ -622,6 +682,10 @@
                 },
                 {
                   "name": "zoom_out",
+                  "role": "label"
+                },
+                {
+                  "name": "rotate",
                   "role": "label"
                 },
                 {

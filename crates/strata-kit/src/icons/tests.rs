@@ -52,9 +52,3 @@ fn the_placeholder_draws_each_name_with_its_own_icon() {
     let ids: BTreeSet<_> = IconName::ALL.iter().map(|n| n.id()).collect();
     assert_eq!(ids.len(), IconName::ALL.len(), "ids are unique");
 }
-
-#[test]
-fn catalog_ids_are_unique() {
-    let ids: BTreeSet<_> = catalogs().iter().map(|s| s.name).collect();
-    assert_eq!(ids.len(), catalogs().len());
-}

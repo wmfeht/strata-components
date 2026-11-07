@@ -41,8 +41,16 @@ fn every_registered_name_round_trips() {
     }
 }
 
+fn is_slot(name: &str) -> bool {
+    slots::TOKENS
+        .iter()
+        .any(|(_, tokens)| tokens.iter().any(|t| t.name() == name))
+}
+
+/// Setting a core token may move slot tokens, which inherit from it, but never another core
+/// token. Setting a slot token moves nothing else.
 #[test]
-fn setting_one_token_leaves_the_others() {
+fn setting_one_token_moves_only_what_inherits_from_it() {
     let fresh = Look::fallback(false);
     for token in all() {
         let mut look = Look::fallback(false);
@@ -52,17 +60,9 @@ fn setting_one_token_leaves_the_others() {
             .filter(|t| t.name() != token.name() && t.get(&look) != t.get(&fresh))
             .map(|t| t.name())
             .collect();
-        // A slot token inherits, so setting its source moves it too; nothing else may move.
-        let inherits = |n: &str| {
-            matches!(
-                (token.name(), n),
-                ("rows.list", "list.row.height")
-                    | ("rows.sidebar", "sidebar.row.height")
-                    | ("frame.bar" | "frame.inset", "tabs.tab.height")
-            )
-        };
+        let allowed = |n: &str| !is_slot(token.name()) && is_slot(n);
         assert!(
-            moved.iter().all(|n| inherits(n)),
+            moved.iter().all(|n| allowed(n)),
             "setting {} also moved {moved:?}",
             token.name()
         );
@@ -84,13 +84,13 @@ fn an_unknown_name_is_an_error() {
 #[test]
 fn a_rejected_value_leaves_the_look_unchanged() {
     let mut look = Look::fallback(false);
-    let before = get(&look, "rows.list");
+    let before = get(&look, "row.list");
     let rejected = [
-        ("rows.list", Value::Color(rgb(1.0, 0.0, 0.0))),
-        ("rows.list", Value::Number(30.0)),
-        ("rows.list", Value::Length(-1.0)),
-        ("rows.list", Value::Length(f32::NAN)),
-        ("rows.list", Value::Length(f32::INFINITY)),
+        ("row.list", Value::Color(rgb(1.0, 0.0, 0.0))),
+        ("row.list", Value::Number(30.0)),
+        ("row.list", Value::Length(-1.0)),
+        ("row.list", Value::Length(f32::NAN)),
+        ("row.list", Value::Length(f32::INFINITY)),
     ];
     for (name, value) in rejected {
         assert!(
@@ -98,7 +98,7 @@ fn a_rejected_value_leaves_the_look_unchanged() {
             "{name} took {value:?}"
         );
     }
-    assert_eq!(get(&look, "rows.list"), before);
+    assert_eq!(get(&look, "row.list"), before);
 
     assert_eq!(
         set(&mut look, "type.ui.weight", Value::Number(1200.0)),

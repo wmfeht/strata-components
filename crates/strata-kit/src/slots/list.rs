@@ -16,9 +16,9 @@ pub struct List {
     pub row_height: Option<f32>,
 }
 
-/// A ListTable row's height: `list.row.height`, else `rows.list`.
+/// A ListTable row's height: `list.row.height`, else `row.list`.
 pub fn row_height(look: &Look) -> f32 {
-    look.slots.list.row_height.unwrap_or(look.rows.list)
+    look.slots.list.row_height.unwrap_or(look.row.list)
 }
 
 pub const TOKENS: &[Token] = &[Token::length("list.row.height", row_height, |l, v| {

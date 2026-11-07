@@ -8,6 +8,7 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | W1 | merged | 1 review round + fixes; Rune binder cannot read URIs before drop (needs Rune or P1) | 6fda6da |
 | W1b | merged | contract doc change for C1a: EntryId lives for the process, never reused; rename may change it | 3bd5284 |
 | W1c | merged | contract additions for C1e: collection slot; geometry docs no longer rely on on_drag | 0b52156 |
+| W2b | coding | Look::fallback = Strata defaults via K2 (bar 36, row.sidebar 24, row.palette 53, 60 % roundness); re-blesses affected goldens | |
 | G1 | coding | owner request: gallery index as buttons with implemented / not-built markers | |
 | W2 | merged | 1 review round + fixes; row.sidebar/row.palette estimates for K2 to confirm; token-name review by K1/K2/C1e owners pending; PNG goldens on NVIDIA | 341e8cb |
 | W3 | planning |  |  |
@@ -34,7 +35,7 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | C8 | coding | own list on SidebarRow+Reorder (rune-kit Sidebar opens on arrow, no rail); keyboard pin reorder left out (no bullet) | |
 | C9 | review 2 | own split + DrawerState (not SplitView); HostedPreview trait for C10–C14; focus via focus_return stubs | |
 | K1 | ready | | |
-| K2 | review 1 (final fixes) | real Strata values (upstream/main 35ee677ab); W2 fallback fix follows as W2b; font list arrives as data | |
+| K2 | merged | 1 review round + fixes; Strata values at upstream/main 35ee677ab; font list arrives as data (Rune #114/U16); Switch/Button sizes are rune-kit gaps | db41ea7 |
 | K3 | ready | | |
 | K4 | ready | | |
 | P0 | waiting | | |

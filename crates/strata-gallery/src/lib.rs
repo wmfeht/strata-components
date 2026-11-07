@@ -41,6 +41,9 @@ pub struct Gallery {
     /// Wakes the app loop from another thread, so the open page's `poll` runs: a fake worker
     /// calls it after it hands over a result. Set by [`setup`]; a no-op in tests.
     pub waker: Option<Waker>,
+    /// The index's state. `index.markers` (default true) marks each page built or not built;
+    /// the index's golden scenes turn it off, so their goldens don't change as pages land.
+    pub index: scenes::gallery::Demo,
     pub w1: scenes::w1::Demo,
     pub w2: scenes::w2::Demo,
     pub k1: scenes::k1::Demo,

@@ -49,6 +49,21 @@ fn page_docs_exist() {
     }
 }
 
+/// A page that still shows its placeholder never counts as built on the index.
+#[test]
+fn placeholder_pages_are_not_implemented() {
+    for p in scenes::PAGES {
+        let mut g = Gallery::default();
+        g.open(p.id, false);
+        let mut rt = strata_gallery::runtime(g, rune::Env::new(false, 1.0));
+        rt.frame(0.0);
+        let tree = rt.accessibility_json().to_string();
+        if tree.contains(&format!("\"{}-placeholder\"", p.id)) {
+            assert!(!p.implemented(), "{} shows its placeholder", p.id);
+        }
+    }
+}
+
 fn every_scene() -> impl Iterator<Item = (&'static Page, &'static str, fn(&mut Gallery))> {
     scenes::all().flat_map(|p| {
         p.scenes

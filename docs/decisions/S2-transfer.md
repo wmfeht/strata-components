@@ -14,15 +14,15 @@
 | # | Question | Answer | Where it ran |
 | --- | --- | --- | --- |
 | Q1 | Reach winit's `wl_display` and a seat without patching Rune? | **Yes, on libwayland ≥ 1.23.** `wl_proxy_get_display` on the surface from `WindowHandle::with_raw_handle`, then `Backend::from_foreign_display`. No on 1.22 (Ubuntu 24.04) without a private-ABI read. | sway |
-| Q2 | A second event queue, and who dispatches it? | **Yes, and we must dispatch it.** A watcher thread that only polls the fd (driver A) races: without an every-turn hook, events wait for an unrelated wake (p99 123–279 ms). A reader thread that takes part in libwayland's read protocol, with dispatch on the UI thread (driver C), gave p99 0.92 ms at 200 changes × 30 ms and 1.13 ms at 500 × 5 ms, one run each. | sway |
+| Q2 | A second event queue, and who dispatches it? | **Yes, and we must dispatch it.** A watcher thread that only polls the fd (driver A) races: without an every-turn hook, events wait for an unrelated wake (p99 123–279 ms at 200 changes × 30 ms, 37 ms at 500 × 5 ms). A reader thread that takes part in libwayland's read protocol, with dispatch on the UI thread (driver C), gave p99 0.92 ms at 200 changes × 30 ms and 1.13 ms at 500 × 5 ms, one run each. | sway |
 | Q3 | Start a `wl_data_device` drag from a press Rune saw; does Rune's capture stay sane? | **The drag works; the capture doesn't.** winit gets a pointer leave and never the release. Rune stays `pressing()` through the whole drag. Afterwards it is cleaned up only by accident (sway bounces keyboard focus at the drop). Without that, `on_drag` keeps getting moves with no button held until the next press. | sway |
-| Q4 | Drops with any MIME type and a position per motion, in Rune's coordinates? | **Yes.** Six types were offered and read intact, 8 MiB included. There was one motion event per pointer motion. Surface coordinates equal Rune window points at scales 1, 1.5 and 2: zero hit-test mismatches. Nautilus ↔ Rune works in both directions. | sway, Nautilus in sway |
+| Q4 | Drops with any MIME type and a position per motion, in Rune's coordinates? | **Yes.** Six types were offered and read intact, 8 MiB included. There was one motion event per pointer motion. Surface coordinates equal Rune window points at scales 1, 1.5 and 2: zero hit-test mismatches. Nautilus ↔ Rune works in both directions (by hand, no log). | sway, Nautilus in sway |
 | Q5 | Data-control on Hyprland, sway, GNOME, KDE; fallback cost? | **Sway and Hyprland have both protocols, KWin has ext only, mutter has neither.** Without data-control, P2 hears the clipboard only while focused, and a write needs a fresh input serial. | sway; others from docs, hand test pending |
 | Q6 | X11: share winit's connection, or a second one? | **A second `x11rb` connection.** Rune exposes no X connection, and winit owns XDND for its window. `XdndProxy` on Rune's window plus a grab-less source (XI2 raw events) work both ways. | Xvfb, Xwayland |
 | Q7 | Drag icon from an element snapshot, headless? | **Yes**, through public API (`Runtime::new`, `render::Gpu::headless`, `Renderer`, `Offscreen`). It is pixel-identical to `--snap --crop`. Cold 150–255 ms, warm 7 ms. It renders a separate `Runtime`, not the live frame. | headless, sway |
 
-**P0 has an approach with no Rune patch** (below). Ubuntu 24.04's libwayland 1.22 is the
-exception: there it has no route to winit's display for drag and drop. Rune needs to expose five
+**P0 has an approach with no Rune patch** (below), apart from libwayland 1.22 (Ubuntu
+24.04): there it has no route to winit's display for drag and drop. Rune needs to expose five
 things (R1–R5) for the shims to be deleted later. One of them (R5, ending a pointer capture)
 is the only one P1 can't work around cleanly.
 
@@ -87,7 +87,7 @@ Each row is one run (`logs/q2-<driver>-<time>`). "Ticker" means a 10 ms `AppHand
 thread was on to measure UI lag; it dominates idle CPU. The 500 × 5 ms runs idled 3 s, the
 others 10 s.
 
-| Run | Load | Ticker | p50 / p99 / max (ms) | Idle wakes | Idle CPU (ms) | Stop (ms) |
+| Run | Load | Ticker | `ext_data_control` latency p50 / p99 / max (ms) | Idle wakes | Idle CPU (ms) | Stop (ms) |
 | --- | --- | --- | --- | --- | --- | --- |
 | a-144048 | 200 × 30 ms | on | 0.38 / **123.3** / 154.2 | 9 in 10 s | 90.2 | 0.19 |
 | a-144200 | 200 × 30 ms | off | 0.51 / **278.6** / 309.4 | 12 in 10 s | 19.0 | 0.07 |
@@ -306,28 +306,40 @@ No Rune patch. Everything goes behind P0's internal `transfer` module; P1, P2 an
    (else `zwlr` v2), `wl_compositor` and `wl_shm` for icons, and `zxdg_importer_v2` for P4. Bind
    `wl_pointer` and `wl_keyboard` only from `capabilities`. The pointer and keyboard are for
    serials and modifiers, never for input: Rune keeps that.
-3. **Surfaces.** On every `on_window`, rebind the surface: `ObjectId::from_ptr` +
-   `WlSurface::from_id`, as `platform/activation.rs` does. Wayland recreates the window on each
-   show.
-   - `ObjectId::from_ptr` on a foreign proxy has no liveness tracking. Clear the surface when
-     its window closes or hides (`App::on_close`, and before any hide P0 can see). Never use a
-     surface from an earlier `on_window`: it may point at a destroyed proxy.
-   - Keep a map from surface to window, filled by `on_window` (one entry per Rune window when
-     an app opens several). Route `wl_data_device.enter` and `wl_pointer.enter` by surface.
-   - Reject surfaces not in the map. On compositors without server-side decorations, winit's
-     adwaita frame draws on subsurfaces of its own (sctk-adwaita), and a drag over the frame
-     enters those. By source; not seen on sway, which decorates server-side.
+3. **Surfaces: keep the `WindowHandle`, never the surface.** `with_raw_handle` says not to
+   retain the pointer beyond the callback (`window/handle.rs:131`). A hide doesn't run
+   `on_close` (Rune README, line 882), and a Wayland hide destroys the surface (Q1: 101
+   `on_window` calls for 100 hides). A stored surface would dangle, and a reused address would
+   misroute events.
+   - Keep a clone of each window's `WindowHandle` from `on_window`. It is `Clone` and "refreshed
+     across App close/reopen".
+   - Resolve the surface at each use, on the UI thread, through `with_raw_handle`: the origin for
+     `start_drag`, the surface for an icon or for P4. Build the `ObjectId::from_ptr` +
+     `WlSurface::from_id` proxy inside that use only, as `platform/activation.rs` does for its
+     own lifetime. `with_raw_handle` returns `Err` while the window is closed.
+   - Route `wl_data_device.enter` and `wl_pointer.enter` during `dispatch_pending` (which runs on
+     the UI thread under driver C). Compare the event's surface pointer with each kept handle's
+     current surface, and keep no map.
+   - Drop events whose surface matches no handle. On compositors without server-side
+     decorations, winit's adwaita frame draws on subsurfaces of its own (sctk-adwaita), and a
+     drag over the frame enters those. By source; not seen on sway, which decorates server-side.
+   - Run here (`logs/teardown2/handle.jsonl`): the handle kept from the first `on_window` gave
+     `Ok(surface 0x…f0330)`, then `Err("window is closed")` while hidden, then the new surface
+     (`0x…62d330`) after `show`. That probe called `with_raw_handle` from a non-UI thread, so it
+     shows the refresh, not the threading. The prototype itself still rebinds a stored surface
+     per `on_window`; the no-map routing is designed, not run.
 4. **Driver C.** One reader thread per display that takes part in libwayland's read protocol.
    After each read that returned events, it wakes the UI with a caller-supplied waker:
    `AppHandle::update_if`, returning whether anything changed. The UI side calls
    `dispatch_pending`, so protocol handlers and hit tests run on the UI thread. A stop pipe ends
-   the thread in under 1 ms. Three invariants, because winit's `read_events` waits for C's read
-   while C holds a read intent:
+   the thread in under 1 ms. Invariants, because winit's `read_events` waits for C's read while
+   C holds a read intent:
    - C never waits on the UI thread while it holds a read intent. It reads or `cancel_read`s
      first, and only then wakes the UI and waits for the turn.
-   - The stop wake (the pipe) makes C `cancel_read` before it exits; it never leaves an intent
-     behind.
-   - After the stop flag is set, C makes no libwayland call at all.
+   - After the stop flag (or the stop pipe), C's only libwayland call is `cancel_read` on an
+     intent it already holds. It makes no new `prepare_read`. The prototype does this (`wl.rs`
+     600–602 on `spike/s2-prototype`: the stop check drops the guard and breaks).
+   - The stop must complete while winit's display is alive (step 6).
 
    C's turn wait has a timeout (100 ms in the prototype). Once the loop has ended no turn comes,
    which is why the late stop in the teardown runs below took 100 ms in 4 of 5 runs.
@@ -337,35 +349,69 @@ No Rune patch. Everything goes behind P0's internal `transfer` module; P1, P2 an
    - every pipe `O_CLOEXEC`;
    - close our write end right after `receive` (and the flush), or the read never sees EOF;
    - a read timeout, so a source that never writes doesn't pin a worker;
-   - ignore `SIGPIPE` and treat `EPIPE` on a source write as "the reader left".
-6. **Teardown.** Objects bound on winit's display must be gone before winit closes it.
-   - On the UI thread, in `App::on_close` for the last window and on the app's quit path
-     (before `AppHandle::quit` or `Tx::quit`), first stop and join the reader thread.
-   - Then destroy sources, offers, devices, pointer, keyboard and seat, and drop the `Backend`.
-     wayland-backend's `ConnectionState::drop` (`sys/client_impl/mod.rs:1129–1152`) calls
-     `wl_proxy_destroy` on every proxy it still knows, then `wl_event_queue_destroy`.
-   - Never leave them to a `static`, `thread_local` or other destructor that runs after `run`
-     returns. If no hook ran, leak them with `mem::forget`.
-   - Measured here (`logs/teardown/`), 5 runs each under sway, driver C:
-     - dropped on the UI thread before quitting: 5 of 5 exit 0;
-     - stopped and leaked before quitting: 5 of 5 exit 0;
-     - reader left running, stopped and dropped after `run` returned: **5 of 5 SIGSEGV**. The
-       core shows `wl_proxy_destroy` ← `ConnectionState::drop` ← the `Backend` drop.
-   - This matches S3's E1.7 (`docs/decisions/S3-foreign-parent.md`). The earlier claim that an
-     un-stopped reader was harmless was wrong: the prototype held the binding in a `static`, so
-     its destructor never ran.
+   - a size cap on offer reads, so a source can't exhaust memory;
+   - treat `EPIPE` on a source write as "the reader left". Rust already ignores `SIGPIPE`, and
+     a library mustn't change the signal disposition.
+6. **Teardown.** The reader must be stopped and joined, and every object bound on winit's
+   display destroyed or leaked, before winit closes the display.
+   - **When:** only when the event loop is ending, since step 2 binds once per display and the
+     display outlives windows. That is the app's quit path (before `AppHandle::quit` or
+     `Tx::quit`), an `on_close` that calls `tx.quit()`, or `on_close` in an app without
+     `keep_running`. Not the last window's `on_close` in general: under `keep_running()` or
+     `windowless()` the loop and the display live on.
+   - `App::on_close` is `fn(&mut S, &mut Tx)`, so the transfer handle must be reachable from
+     `S` or be process-wide. That is the P0 "transfer handle's home" decision below. Teardown
+     from `on_close` is designed, not run.
+   - **Order, on the UI thread:** stop and join the reader (unconditionally, before `run`
+     returns). Then destroy sources, offers, devices, pointer, keyboard and seat, and drop the
+     `Backend`. wayland-backend's `ConnectionState::drop` (`sys/client_impl/mod.rs:1129–1152`)
+     calls `wl_proxy_destroy` on every proxy it still knows, then `wl_event_queue_destroy`.
+   - **Never** let the objects drop in a `thread_local` destructor or any value dropped after
+     `run` returns. A plain `static` that is never dropped is a leak, which is fine for the
+     proxies. Leaking (`mem::forget`) is the fallback for the objects, but not for the reader:
+     a reader still running when the display closes is a use-after-free even if every object
+     is leaked. It polls a closed (possibly reused) fd and calls `cancel_read` on a freed
+     display.
+   - **Exits with no hook:** a winit connection error, or `AppHandle::quit` called from code
+     that skipped P0's teardown. There P0 has no safe path until R4's lifetime hook; P0 should
+     document that it must be called first. Unverified.
+   - **Measured** (`logs/teardown2/`, exit codes in `exit-codes.txt`; first pass in
+     `logs/teardown/`), 5 runs each under sway, driver C:
+
+     | Variant | Reader | Objects | Exit |
+     | --- | --- | --- | --- |
+     | early | stopped on the UI thread before quit | dropped on the UI thread before quit | 5 × 0 |
+     | leak | stopped before quit | leaked | 5 × 0 |
+     | late drop only | stopped before quit | dropped after `run` returned | **5 × 139 (SIGSEGV)** |
+     | late stop only | left running; stopped after `run` returned | leaked | 5 × 0 |
+     | late both | left running; stopped after `run` returned | dropped after `run` returned | **5 × 139** |
+
+     The cores show `wl_proxy_destroy` ← `ConnectionState::drop` ← the `Backend` drop. So the
+     crash comes from the late drop. The late stop didn't crash, but it isn't safe: in one run
+     the stop took 0.05 ms, so `cancel_read` really ran on the freed display; in the others the
+     reader was stuck in its 100 ms turn wait and exited at the stop check. No crash is not
+     evidence of safety for a use-after-free. Exit codes are from the shell (`$?`, 139 =
+     SIGSEGV). In the first pass they were printed but not saved; the second pass saved them.
+   - This matches S3's E1.7 (`docs/decisions/S3-foreign-parent.md`). The first version of this
+     record called an un-stopped reader harmless. That was wrong: the prototype held the
+     binding in a `static`, so its destructor never ran.
    - R4's lifetime hook would remove this rule.
 
 **X11.** A second x11rb connection and window:
 - selections with `TARGETS`, INCR and XFixes owner tracking;
 - an XDND target behind `XdndProxy` set on Rune's window;
 - a grab-less XDND source on XI2 raw events;
-- an event thread (`X::run` in the prototype) that blocks in `wait_for_event` and wakes the UI
-  with `AppHandle::update_if`, returning whether any event arrived (the same reason as A's
-  `update_if` rule);
+- our own window carries `XdndProxy` pointing at itself, as the XDND spec requires of a proxy
+  window (`x11.rs:117`), plus `XdndAware` 5;
+- an event thread (`X::run` in the prototype) that wakes the UI with `AppHandle::update_if`,
+  returning whether any event arrived (the same reason as A's `update_if` rule);
 - `XdndProxy` set again on every `on_window`, since a recreated window starts without it;
-- at teardown, `XdndProxy` deleted from Rune's window before our window and connection go.
-  Otherwise sources keep sending to a window that no longer exists. Unverified.
+- a stop path. The prototype's thread blocks in `wait_for_event` and has none. Either set a stop
+  flag and send a `ClientMessage` to our own window to wake it, or poll the connection's fd
+  together with a stop pipe and drain with `poll_for_event`. Designed, not run.
+- teardown in this order: stop and join the event thread, delete `XdndProxy` from Rune's
+  window, then destroy our window and drop the connection. Otherwise sources keep sending to a
+  window that no longer exists. Designed, not run.
 
 **Starting point.** The prototype's `probe` (`wl.rs` drivers B and C, `x11.rs`, `display.rs`,
 `snapshot.rs`), the peer and the harness scripts are on the local branch `spike/s2-prototype`
@@ -426,7 +472,11 @@ Recommended changes. None of these files was edited here.
       `invalid_action_mask`, `invalid_action`;
     - `wl_data_source`: `invalid_action_mask`, `invalid_source` (`set_actions` on a selection
       source, or a drag source used for the selection);
-    - `wl_data_device`: `role` (an icon surface that already has another role);
+    - `wl_data_device`: `role` (an icon surface that already has another role) and
+      `used_source` (a source passed to `start_drag` or `set_selection` twice);
+    - `wl_shm` / `wl_shm_pool`: `invalid_format`, `invalid_stride`, `invalid_fd` (drag icons);
+    - `wl_surface`: `invalid_scale`, and `invalid_size`: a buffer whose size isn't divisible by
+      the buffer scale. That is the scale-2 icon trap for P1.
     - data-control: `invalid_offer` (`offer` after `set_selection`) and `used_source` (a
       source reused).
 
@@ -465,8 +515,9 @@ Recommended changes. None of these files was edited here.
     state with `srgb_blend` on.
   - **In-process fast path:**
     - Offer a private MIME type carrying a per-drag token, such as
-      `application/x-strata-drag;token=<pid>-<counter>`, and match it at `enter` against the
-      drag this process started. Seeing the drag on our own data device isn't enough: another
+      `application/x-inprocess-drag;token=<pid>-<counter>`, and match it at `enter` against
+      the drag this process started. The type is generic or supplied by the caller, with no
+      Strata name (strata-platform's rule). Seeing the drag on our own data device isn't enough: another
       process's drag arrives there too.
     - X11: compare `XdndEnter`'s source window with our own window as well.
     - On a match, carry the typed payload instead of serialized URIs. Unverified: not built.
@@ -504,7 +555,8 @@ Recommended changes. None of these files was edited here.
 
 - **P0:**
   - where the transfer handle lives: reached through an app-state accessor, as components take
-    state, or a process-wide value per display;
+    state, or a process-wide value per display. Teardown depends on it: `App::on_close` gets only
+    `&mut S` and `&mut Tx` (step 6);
   - how P1, P2 and P4 subscribe to its events, given one reader and one waker per display;
   - the CI GPU route (lavapipe with pixman, untested here; see W3).
 - **P1:** scale-2 drag icons (`set_buffer_scale`), the X11 drag-icon window, touch-started
@@ -513,12 +565,22 @@ Recommended changes. None of these files was edited here.
 
 ## Open questions for the owner
 
-1. **libwayland < 1.23 (Ubuntu 24.04 LTS ships 1.22).** S3 asked the same for P4. The options:
-   - a. no Wayland drag and drop there, and P2 on its own data-control connection;
-   - b. hold until R4;
-   - c. read the private `wl_proxy` layout (it matched on 1.26).
+1. **libwayland < 1.23 (Ubuntu 24.04 LTS ships 1.22).** S3 asked the same for P4. Ubuntu
+   24.04's default session is GNOME on Wayland, and mutter has no data-control at all (Q5). So
+   on a default 24.04 desktop P0 has neither winit's display (for drag and drop and the
+   `wl_data_device` clipboard) nor data-control on a connection of its own. The options:
+   - a. Report Unsupported for Wayland drag and drop there. For the clipboard, use data-control
+     on P2's own connection where the compositor has it (sway, Hyprland, KWin). Otherwise use
+     the X11 route through Xwayland: X11 selections on a second connection, which mutter bridges
+     to Wayland clients, as arboard falls back to (designed, not run). Report Unsupported where
+     neither exists.
+   - b. Hold P1 and P2 until R4.
+   - c. Read the private `wl_proxy` layout (it matched on 1.26).
 
-   Recommendation: **a**. c is a private ABI.
+   Recommendation: **a**. It keeps copy and paste of files working on default 24.04 through
+   Xwayland, and loses only drag and drop there, for one LTS that 26.04 replaces. c is a private
+   ABI and should not ship. Whether mutter's Xwayland bridge carries `x-special/gnome-copied-files`
+   and `text/uri-list` faithfully is a hand test.
 2. **Copy or move by modifier** can't follow Ctrl and Shift on sway as a drop target, and
    probably not on Hyprland. Accept the compositor's action there, or ask Hyprland? Hand tests
    on GNOME and KDE decide the rest.
@@ -534,9 +596,11 @@ Recommended changes. None of these files was edited here.
 - A Scale-2 drag icon, the X11 drag icon window, X11 modifier actions, X11 `MULTIPLE`, a
   primary-selection round trip, and touch-started drags: not built.
 - libwayland 1.22 was simulated by skipping the symbol, not run on a 1.22 system.
-- Designed but not run: the fast-path token (P1), deleting `XdndProxy` at teardown, Escape to
-  cancel an X11 drag, the surface map's rejection of CSD subsurfaces, fd timeouts and `EPIPE`
-  handling.
+- Designed but not run: the fast-path token (P1), the X11 event thread's stop path and
+  deleting `XdndProxy` at teardown, Escape to cancel an X11 drag, multi-window routing by
+  comparing each kept `WindowHandle`'s current surface (and dropping CSD subsurfaces), teardown
+  from `on_close`, fd timeouts, the read size cap and `EPIPE` handling, and P2's Xwayland route
+  on mutter.
 
 ## Appendix: Rune issue drafts for S5
 
@@ -546,6 +610,8 @@ Common setup: each program is `src/main.rs` of a binary crate whose only depende
 `rune = { git = "https://github.com/anomalyco/rune", rev = "78d22ed8eef60d76ac3f322ffc5883f3fcbc57f5", default-features = false, features = ["accessibility", "dbus", "embedded-fonts", "svg"] }`.
 Where a compositor is needed, a headless sway (`WLR_BACKENDS=headless`) with a
 `zwlr_virtual_pointer_v1` client to press and move is enough; no real session is involved.
+The runs here used the prototype's peer. `wlrctl pointer move <dx> <dy>` and `wlrctl pointer
+click` speak the same protocol and should do (untested here).
 
 ### R1 Linux: `drag_out` is ignored
 
@@ -560,7 +626,11 @@ Expected: as on macOS, a system drag with the item's data starts at the threshol
 is a snapshot of the element, and `on_drag_start` and `on_drag_end` run.
 
 Actual:
-- Headless (`--script drag.json --trace t.json`): `drag-out #0/tile`, then `on_drag_start` and
+- Headless (`--script drag.json --trace t.json`), with this `drag.json`:
+  ```json
+  {"events": [{"t": 0.1, "type": "move", "x": 70, "y": 45}, {"t": 0.15, "type": "down", "x": 70, "y": 45}, {"t": 0.2, "type": "move", "x": 90, "y": 45}, {"t": 0.3, "type": "move", "x": 200, "y": 80}, {"t": 0.4, "type": "up", "x": 200, "y": 80}]}
+  ```
+  The trace records `drag-out #0/tile`, then the program prints `on_drag_start` and
   `on_drag_end Cancelled`.
 - Windowed under sway: only `on_drag Down`, 20 × `on_drag Move`, `on_drag Up`. No system drag,
   no `on_drag_start` or `on_drag_end`.
@@ -678,7 +748,9 @@ Actual:
 - X11: `Ok("Xlib(XlibWindowHandle { window: …, visual_id: … })")`, nothing else. Shims open a
   second connection, which can't release winit's pointer grab.
 
-Ask: `WindowHandle::with_raw_display_handle(|d| ..)`.
+Ask: the three items above. The canonical text of the display-handle ask is S1's
+[R7](S1-linux-window.md#r7-public-access-to-the-native-display-connection); this draft adds the
+lifetime hook and the optional every-turn hook to it.
 
 ```rust
 use rune::{App, AppSpec, Cx, El, col};

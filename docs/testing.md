@@ -82,9 +82,19 @@ W2's token sheet goldens (`w2-tokens-*`) show the core tokens only. Slot tokens 
 the `w2-slots-light` and `w2-slots-dark` review scenes, which have no goldens, so adding a slot
 token never moves a golden outside the component's own page.
 
-Open the gallery with `mise run gallery`. A row on the index opens its page, and Escape
-returns to the index. `mise run gallery -- --scene c1-ten-rows-dark` opens one scene, and
-`-- --list-scenes` lists them all.
+Open the gallery with `mise run gallery`. A button on the index opens its page (click, Space
+or Return), and Escape returns to the index. `mise run gallery -- --scene c1-ten-rows-dark`
+opens one scene, and `-- --list-scenes` lists them all.
+
+### The index's markers
+
+The index groups the pages by their registry `lane` and marks each one built or not built.
+`Page::implemented` decides it: a page is built once it has golden scenes. The marker is a dot
+on the button plus its accessible description, and a count and legend sit above the lanes. The
+app and a `--snap` without `--scene` show them, but the golden scenes `gallery-index-light` and
+`-dark` turn them off (`Gallery::index.markers`). So landing a page's first scenes never
+changes the index goldens, and parallel branches don't conflict on them. Review the markers with
+`--scene gallery-index-status-light` or `-dark`.
 
 ## Goldens
 

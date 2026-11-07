@@ -55,6 +55,8 @@ pub struct Page {
     /// The work package that owns the page, as its docs name it (`C1e`).
     pub wp: &'static str,
     pub name: &'static str,
+    /// The index group the page is listed under.
+    pub lane: Lane,
     /// The work package doc, relative to the repository root.
     pub doc: Option<&'static str>,
     /// Golden scenes: each has an accessibility and a PNG golden.
@@ -68,12 +70,57 @@ pub struct Page {
     pub poll: PollHook,
 }
 
+impl Page {
+    /// Whether the page's work package has built it: true once it has golden scenes. The
+    /// index's markers and count come from this alone, so nothing else needs updating when a
+    /// work package lands.
+    pub fn implemented(&self) -> bool {
+        !self.scenes.is_empty()
+    }
+}
+
+/// The groups the index lists pages under: the work plan's lanes
+/// (`docs/work/README.md`), with phase 0's contracts as their own group.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Lane {
+    Groundwork,
+    Look,
+    Collection,
+    Chrome,
+    Preview,
+    Controls,
+}
+
+impl Lane {
+    /// Every lane, in the order the index shows them.
+    pub const ALL: [Lane; 6] = [
+        Lane::Groundwork,
+        Lane::Look,
+        Lane::Collection,
+        Lane::Chrome,
+        Lane::Preview,
+        Lane::Controls,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Lane::Groundwork => "Groundwork",
+            Lane::Look => "Look",
+            Lane::Collection => "Collection",
+            Lane::Chrome => "Chrome",
+            Lane::Preview => "Preview",
+            Lane::Controls => "Controls",
+        }
+    }
+}
+
 macro_rules! page {
-    ($id:ident, $wp:literal, $name:literal, $doc:literal) => {
+    ($id:ident, $lane:ident, $wp:literal, $name:literal, $doc:literal) => {
         Page {
             id: stringify!($id),
             wp: $wp,
             name: $name,
+            lane: Lane::$lane,
             doc: Some(concat!("docs/work/", $doc)),
             scenes: $id::SCENES,
             review: $id::REVIEW,
@@ -89,6 +136,7 @@ pub const INDEX: Page = Page {
     id: "gallery",
     wp: "W0",
     name: "Index",
+    lane: Lane::Groundwork,
     doc: None,
     scenes: gallery::SCENES,
     review: gallery::REVIEW,
@@ -101,192 +149,259 @@ pub const INDEX: Page = Page {
 pub const PAGES: &[Page] = &[
     page!(
         w1,
+        Groundwork,
         "W1",
         "Component contracts",
         "phase-0-groundwork/W1-component-contracts.md"
     ),
     page!(
         w2,
+        Groundwork,
         "W2",
         "Look contract",
         "phase-0-groundwork/W2-look-contract.md"
     ),
     page!(
         k1,
+        Look,
         "K1",
         "Theme mapping",
         "phase-1-leaves/K1-theme-mapping.md"
     ),
     page!(
         k2,
+        Look,
         "K2",
         "Shape, density and type",
         "phase-1-leaves/K2-shape-density-type.md"
     ),
     page!(
         k3,
+        Look,
         "K3",
         "Icon catalogs",
         "phase-1-leaves/K3-icon-catalogs.md"
     ),
     page!(
         k4,
+        Look,
         "K4",
         "User overrides",
         "phase-1-leaves/K4-user-overrides.md"
     ),
     page!(
         c1,
+        Collection,
         "C1e",
         "Collection element",
         "phase-2-composites/C1e-collection-element.md"
     ),
-    page!(c2, "C2", "ColumnsView", "phase-3-views/C2-columns-view.md"),
-    page!(c3, "C3", "IconsGrid", "phase-3-views/C3-icons-grid.md"),
-    page!(c4, "C4", "ListTable", "phase-3-views/C4-list-table.md"),
+    page!(
+        c2,
+        Collection,
+        "C2",
+        "ColumnsView",
+        "phase-3-views/C2-columns-view.md"
+    ),
+    page!(
+        c3,
+        Collection,
+        "C3",
+        "IconsGrid",
+        "phase-3-views/C3-icons-grid.md"
+    ),
+    page!(
+        c4,
+        Collection,
+        "C4",
+        "ListTable",
+        "phase-3-views/C4-list-table.md"
+    ),
     page!(
         c5,
+        Collection,
         "C5",
         "InlineRenameEditor",
         "phase-1-leaves/C5-inline-rename.md"
     ),
-    page!(c6, "C6", "LocationBar", "phase-1-leaves/C6-location-bar.md"),
-    page!(c7, "C7", "BrowserTabs", "phase-1-leaves/C7-browser-tabs.md"),
+    page!(
+        c6,
+        Chrome,
+        "C6",
+        "LocationBar",
+        "phase-1-leaves/C6-location-bar.md"
+    ),
+    page!(
+        c7,
+        Chrome,
+        "C7",
+        "BrowserTabs",
+        "phase-1-leaves/C7-browser-tabs.md"
+    ),
     page!(
         c8,
+        Chrome,
         "C8",
         "PlacesSidebar",
         "phase-1-leaves/C8-places-sidebar.md"
     ),
     page!(
         c9,
+        Preview,
         "C9",
         "PreviewDrawer",
         "phase-1-leaves/C9-preview-drawer.md"
     ),
     page!(
         c10,
+        Preview,
         "C10b",
         "CodeView",
         "phase-2-composites/C10b-code-view.md"
     ),
     page!(
         c10a,
+        Preview,
         "C10a",
         "Highlighter",
         "phase-1-leaves/C10a-highlighter.md"
     ),
     page!(
         c11,
+        Preview,
         "C11",
         "DocumentView",
         "phase-2-composites/C11-document-view.md"
     ),
-    page!(c12, "C12", "PdfView", "phase-2-composites/C12-pdf-view.md"),
+    page!(
+        c12,
+        Preview,
+        "C12",
+        "PdfView",
+        "phase-2-composites/C12-pdf-view.md"
+    ),
     page!(
         c13,
+        Preview,
         "C13",
         "MediaPlayer",
         "phase-2-composites/C13-media-player.md"
     ),
     page!(
         c14a,
+        Preview,
         "C14a",
         "Pixels viewport",
         "phase-1-leaves/C14a-pixels-viewport.md"
     ),
     page!(
         c14b,
+        Preview,
         "C14b",
         "Viewers and archive preview",
         "phase-3-views/C14b-viewers.md"
     ),
     page!(
         c15,
+        Chrome,
         "C15",
         "StrataDialog",
         "phase-1-leaves/C15-strata-dialog.md"
     ),
     page!(
         c16,
+        Chrome,
         "C16",
         "ProgressDock",
         "phase-2-composites/C16-progress-dock.md"
     ),
     page!(
         c17,
+        Chrome,
         "C17",
         "SearchPalette",
         "phase-2-composites/C17-search-palette.md"
     ),
     page!(
         c18,
+        Chrome,
         "C18",
         "FilterBar and FooterPrompt",
         "phase-2-composites/C18-filter-bar-footer-prompt.md"
     ),
     page!(
         c19,
+        Chrome,
         "C19",
         "Footer and ShortcutReference",
         "phase-2-composites/C19-footer-shortcut-reference.md"
     ),
     page!(
         c20a,
+        Controls,
         "C20a",
         "Slider and NumberField",
         "phase-1-leaves/C20a-slider-number-field.md"
     ),
     page!(
         c20b,
+        Controls,
         "C20b",
         "ColorPicker",
         "phase-1-leaves/C20b-color-picker.md"
     ),
     page!(
         c20c,
+        Controls,
         "C20c",
         "Tabbed form and settings search",
         "phase-1-leaves/C20c-tabbed-form-settings-search.md"
     ),
     page!(
         c20d,
+        Controls,
         "C20d",
         "IconPicker",
         "phase-4-integration/C20d-icon-picker.md"
     ),
     page!(
         c21,
+        Chrome,
         "C21",
         "Context menus",
         "phase-1-leaves/C21-context-menus.md"
     ),
     page!(
         c22,
+        Chrome,
         "C22",
         "Folder peek",
         "phase-1-leaves/C22-folder-peek.md"
     ),
     page!(
         c23,
+        Chrome,
         "C23",
         "Motion effects",
         "phase-1-leaves/C23-motion-effects.md"
     ),
     page!(
         c24,
+        Collection,
         "C24",
         "Scroll extras",
         "phase-1-leaves/C24-scroll-extras.md"
     ),
     page!(
         c25,
+        Collection,
         "C25",
         "ThumbnailStore",
         "phase-1-leaves/C25-thumbnail-store.md"
     ),
     page!(
         c26,
+        Chrome,
         "C26",
         "MountPrompts",
         "phase-2-composites/C26-mount-prompts.md"

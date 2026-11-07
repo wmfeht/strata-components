@@ -4,10 +4,18 @@
 //!
 //! Selections are `CLIPBOARD` and `PRIMARY`, with `TARGETS` and INCR both ways. Drag and drop is
 //! XDND version 5: the source runs on the implicit grab of the press on its own window.
+//!
+//! `map` replies once the window is in the root's `_NET_CLIENT_LIST`, which wlroots updates
+//! when the compositor maps the window's `wl_surface`. Up to wlroots 0.20.2, a window whose
+//! first buffer reaches the compositor before its pairing with the X window (they travel on
+//! different sockets) is never mapped in sway; wlroots fixed it after 0.20.2 ("no
+//! synchronization between the two" in `xwayland_surface_associate`). A window that isn't
+//! listed within [`MAP_RETRY`] is unmapped and mapped again, which pairs a new surface.
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::mpsc::channel;
+use std::sync::mpsc::{RecvTimeoutError, channel};
+use std::time::{Duration, Instant};
 
 use strata_test_peer::protocol::{
     Action, Backend, Command, Event, Exported, Mapped, Offer, Request, Selection, Targets, Via,
@@ -28,7 +36,7 @@ use crate::{out, read_stdin};
 x11rb::atom_manager! {
     Atoms: AtomsCookie {
         CLIPBOARD, PRIMARY, TARGETS, TIMESTAMP, MULTIPLE, INCR, UTF8_STRING,
-        _NET_WM_NAME, _NET_WM_PID,
+        _NET_WM_NAME, _NET_WM_PID, _NET_CLIENT_LIST,
         XdndAware, XdndTypeList, XdndSelection, XdndEnter, XdndPosition, XdndStatus,
         XdndLeave, XdndDrop, XdndFinished, XdndActionCopy, XdndActionMove, XdndActionAsk,
     }
@@ -39,6 +47,12 @@ x11rb::atom_manager! {
 const INCR_CHUNK: usize = 64 * 1024;
 
 const XDND_VERSION: u32 = 5;
+
+/// How long a mapped window may stay out of `_NET_CLIENT_LIST` before the peer maps it again.
+const MAP_RETRY: Duration = Duration::from_millis(500);
+
+/// How many times the peer maps its window before `map` fails.
+const MAP_ATTEMPTS: u32 = 10;
 
 fn err<E: std::fmt::Display>(e: E) -> String {
     format!("x11: {e}")
@@ -95,6 +109,8 @@ struct X {
     incr_out: Vec<IncrOut>,
     next_property: u32,
     map_reply: Option<u64>,
+    /// While `map` waits: when to map again, and how many times it has mapped.
+    map_retry: Option<(Instant, u32)>,
     pressed: bool,
     drop_policy: Option<(Vec<String>, Action)>,
     drop: Option<DropIn>,
@@ -151,6 +167,12 @@ pub fn run() -> Result<(), String> {
         conn.xfixes_select_selection_input(win, selection, owner_changes)
             .map_err(err)?;
     }
+    // The window manager lists mapped windows in the root's _NET_CLIENT_LIST.
+    conn.change_window_attributes(
+        root,
+        &ChangeWindowAttributesAux::new().event_mask(EventMask::PROPERTY_CHANGE),
+    )
+    .map_err(err)?;
     conn.flush().map_err(err)?;
 
     let (tx, rx) = channel();
@@ -195,12 +217,25 @@ pub fn run() -> Result<(), String> {
         incr_out: Vec::new(),
         next_property: 0,
         map_reply: None,
+        map_retry: None,
         pressed: false,
         drop_policy: None,
         drop: None,
         drag: None,
     };
-    for input in rx {
+    loop {
+        let wait = x.map_retry.map_or(Duration::from_secs(3600), |(at, _)| {
+            at.saturating_duration_since(Instant::now())
+        });
+        let input = match rx.recv_timeout(wait) {
+            Ok(input) => input,
+            Err(RecvTimeoutError::Timeout) => {
+                x.map_again();
+                let _ = x.conn.flush();
+                continue;
+            }
+            Err(RecvTimeoutError::Disconnected) => break,
+        };
         match input {
             Input::Command(req) => {
                 if !x.command(req) {
@@ -384,7 +419,64 @@ impl X {
         .map_err(err)?;
         c.map_window(self.win).map_err(err)?;
         self.map_reply = Some(id);
+        self.map_retry = Some((Instant::now() + MAP_RETRY, 1));
         Ok(())
+    }
+
+    /// Whether the window manager lists the peer's window as mapped.
+    fn listed(&self) -> bool {
+        self.conn
+            .get_property(
+                false,
+                self.root,
+                self.atoms._NET_CLIENT_LIST,
+                AtomEnum::WINDOW,
+                0,
+                4096,
+            )
+            .ok()
+            .and_then(|c| c.reply().ok())
+            .and_then(|r| r.value32().map(|mut v| v.any(|w| w == self.win)))
+            .unwrap_or(false)
+    }
+
+    /// Replies to `map` once the window is listed.
+    fn check_mapped(&mut self) {
+        if self.map_reply.is_some() && self.listed() {
+            self.map_retry = None;
+            if let Some(id) = self.map_reply.take() {
+                out::value(
+                    id,
+                    Mapped {
+                        xid: Some(self.win),
+                    },
+                );
+            }
+        }
+    }
+
+    /// The window is still not listed: unmap it and map it again (see the module docs).
+    fn map_again(&mut self) {
+        self.check_mapped();
+        let Some((_, attempts)) = self.map_retry else {
+            return;
+        };
+        if attempts >= MAP_ATTEMPTS {
+            self.map_retry = None;
+            if let Some(id) = self.map_reply.take() {
+                out::reply(
+                    id,
+                    Err(format!(
+                        "the window manager never listed the window ({attempts} maps)"
+                    )),
+                );
+            }
+            return;
+        }
+        eprintln!("strata-test-peer: window not mapped by the compositor; mapping it again");
+        let _ = self.conn.unmap_window(self.win);
+        let _ = self.conn.map_window(self.win);
+        self.map_retry = Some((Instant::now() + MAP_RETRY, attempts + 1));
     }
 
     fn selection_set(
@@ -482,16 +574,7 @@ impl X {
 
     fn event(&mut self, e: XEvent) {
         match e {
-            XEvent::MapNotify(m) if m.window == self.win => {
-                if let Some(id) = self.map_reply.take() {
-                    out::value(
-                        id,
-                        Mapped {
-                            xid: Some(self.win),
-                        },
-                    );
-                }
-            }
+            XEvent::MapNotify(m) if m.window == self.win => self.check_mapped(),
             XEvent::FocusIn(f) if f.event == self.win && f.mode == NotifyMode::NORMAL => {
                 out::event(Event::Focus { focused: true });
             }
@@ -532,6 +615,11 @@ impl X {
                 }
             }
             XEvent::SelectionNotify(n) => self.converted(n),
+            XEvent::PropertyNotify(p) if p.window == self.root => {
+                if p.atom == self.atoms._NET_CLIENT_LIST {
+                    self.check_mapped();
+                }
+            }
             XEvent::PropertyNotify(p) => self.property(p.window, p.atom, p.state),
             XEvent::ClientMessage(m) => self.client_message(&m),
             _ => {}

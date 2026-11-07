@@ -20,7 +20,7 @@ struct Lines {
 
 pub struct Proc {
     name: String,
-    child: Child,
+    child: Mutex<Child>,
     stdin: Mutex<Option<ChildStdin>>,
     out: Arc<(Mutex<Lines>, Condvar)>,
     stdout_log: PathBuf,
@@ -62,7 +62,7 @@ impl Proc {
         });
         Proc {
             name: name.to_owned(),
-            child,
+            child: Mutex::new(child),
             stdin: Mutex::new(stdin),
             out,
             stdout_log,
@@ -71,7 +71,7 @@ impl Proc {
     }
 
     pub fn pid(&self) -> u32 {
-        self.child.id()
+        self.child.lock().map_or(0, |c| c.id())
     }
 
     /// Every stdout line so far.
@@ -110,7 +110,12 @@ impl Proc {
                     "timed out"
                 };
                 drop(l);
-                panic!("{}: waiting for {what}: {why}\n{}", self.name, self.tails());
+                panic!(
+                    "{}: waiting for {what}: {why} ({})\n{}",
+                    self.name,
+                    self.status(),
+                    self.tails()
+                );
             }
             l = ready
                 .wait_timeout(l, deadline - now)
@@ -136,11 +141,28 @@ impl Proc {
         assert!(ok, "{}: its stdin is closed\n{}", self.name, self.tails());
     }
 
+    /// Whether the process still runs, or how it exited, for failure messages.
+    fn status(&self) -> String {
+        let Ok(mut child) = self.child.lock() else {
+            return "status unknown".into();
+        };
+        // A process whose output just closed may take a moment to exit.
+        for _ in 0..50 {
+            match child.try_wait() {
+                Ok(Some(status)) => return format!("exited: {status}"),
+                Ok(None) => std::thread::sleep(std::time::Duration::from_millis(10)),
+                Err(e) => return format!("status unknown: {e}"),
+            }
+        }
+        "still running".into()
+    }
+
     /// Waits for the process to exit, within the session timeout.
     pub fn wait_exit(&mut self) -> ExitStatus {
         let deadline = Instant::now() + timeout();
         loop {
-            match self.child.try_wait() {
+            let status = self.child.lock().expect("child lock").try_wait();
+            match status {
                 Ok(Some(status)) => return status,
                 Ok(None) if Instant::now() < deadline => {
                     std::thread::sleep(std::time::Duration::from_millis(20));
@@ -170,7 +192,9 @@ impl Drop for Proc {
         if let Ok(mut stdin) = self.stdin.lock() {
             stdin.take();
         }
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        if let Ok(child) = self.child.get_mut() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
     }
 }

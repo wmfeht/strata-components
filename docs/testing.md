@@ -355,9 +355,15 @@ devices. Tests drive it with typed calls (`set_selection`, `read`, `drag_start`,
 - **Wait for the layout before input.** On X11 a window maps at its own size and sway tiles it
   after. Input sent before the app lays out again can land outside its old size. The
   harness's example logs `layout`; W3's tests wait until it matches sway's size.
-- **Map X11 windows one at a time.** Wait for each in sway's tree before mapping the next. Two
-  X windows mapped within a few milliseconds can leave one never mapped in sway (seen with sway
-  1.12 and wlroots 0.20; one X window, or two 300 ms apart, never failed).
+- **An X11 window can stay unmapped in sway.** wlroots up to 0.20.2 (Ubuntu 24.04 has 0.17)
+  maps an Xwayland window only on a buffer commit that arrives after it has paired the window
+  with its `wl_surface`. The commit and the pairing travel on different sockets, so a fast
+  first commit leaves the window unmapped for good. wlroots fixed this after 0.20.2. The X11
+  peer's `map` waits until the window manager lists the window in `_NET_CLIENT_LIST`, and maps
+  it again if it isn't listed within 500 ms. About one window in five needed that when two
+  peers mapped at once. An app's own X11 window can't be retried this way: if
+  `wait_window` times out on an X11 app, this is the likely cause (W3's example window never
+  hit it in over 60 opens).
 - **Sync clients after a relayout.** A new window re-tiles the others. `wait_windows` waits for
   sway's tree, and a peer's `sync()` makes sure it has drawn at its new size.
 - **Focus needs the keyboard.** `wl_data_device.set_selection` needs keyboard focus on the

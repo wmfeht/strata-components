@@ -336,8 +336,8 @@ impl Session {
     }
 
     /// Waits until each of `pids` has a toplevel and no two overlap: sway has tiled them side
-    /// by side. Map X11 windows one at a time (docs/testing.md). The clients may not have
-    /// drawn at their new size yet: sync each one before sending input.
+    /// by side. The clients may not have drawn at their new size yet: sync each one before
+    /// sending input.
     pub fn wait_windows(&self, pids: &[u32]) -> Vec<Window> {
         let deadline = std::time::Instant::now() + timeout();
         loop {

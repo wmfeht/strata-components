@@ -292,11 +292,9 @@ fn drag_between_peers(display: Display) {
     let s = Session::start();
     let a = s.peer(display);
     let b = s.peer(display);
-    // One at a time: two X windows mapped within milliseconds can leave one unmapped in sway
-    // (docs/testing.md). sway then tiles them side by side; the syncs make sure both have
-    // drawn at their tiled size before the pointer moves.
+    // sway tiles them side by side; the syncs make sure both have drawn at their tiled size
+    // before the pointer moves.
     a.map("w3 drag source");
-    s.wait_window(a.pid());
     b.map("w3 drop target");
     let [from, to] = <[_; 2]>::try_from(s.wait_windows(&[a.pid(), b.pid()])).expect("two windows");
     a.sync();

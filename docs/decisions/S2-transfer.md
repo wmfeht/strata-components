@@ -317,9 +317,17 @@ No Rune patch. Everything goes behind P0's internal `transfer` module; P1, P2 an
      `start_drag`, the surface for an icon or for P4. Build the `ObjectId::from_ptr` +
      `WlSurface::from_id` proxy inside that use only, as `platform/activation.rs` does for its
      own lifetime. `with_raw_handle` returns `Err` while the window is closed.
+   - It must be the UI thread. `with_raw_handle` upgrades its weak reference to winit's
+     `Window` for the call. Off the UI thread that temporary `Arc` can be the last one, and
+     that thread would then drop winit's `Window`.
    - Route `wl_data_device.enter` and `wl_pointer.enter` during `dispatch_pending` (which runs on
      the UI thread under driver C). Compare the event's surface pointer with each kept handle's
      current surface, and keep no map.
+   - Events are parsed on C's thread during the read (`sys/client_impl/mod.rs:952–1016`) and
+     delivered later by `dispatch_pending` on the UI thread, so a foreign surface's pointer may
+     be stale by then. Compare only `surface.id().as_ptr()`. Never send a request on the event's
+     `WlSurface`, and never build a proxy from it. A misroute from a stale or reused address is
+     harmless, because a `leave` follows.
    - Drop events whose surface matches no handle. On compositors without server-side
      decorations, winit's adwaita frame draws on subsurfaces of its own (sctk-adwaita), and a
      drag over the frame enters those. By source; not seen on sway, which decorates server-side.
@@ -332,17 +340,27 @@ No Rune patch. Everything goes behind P0's internal `transfer` module; P1, P2 an
    After each read that returned events, it wakes the UI with a caller-supplied waker:
    `AppHandle::update_if`, returning whether anything changed. The UI side calls
    `dispatch_pending`, so protocol handlers and hit tests run on the UI thread. A stop pipe ends
-   the thread in under 1 ms. Invariants, because winit's `read_events` waits for C's read while
-   C holds a read intent:
+   a reader that is in `poll` in under 1 ms. A reader waiting for a UI turn is another matter
+   (the fourth invariant). Invariants, because winit's `read_events` waits for C's read while C
+   holds a read intent:
    - C never waits on the UI thread while it holds a read intent. It reads or `cancel_read`s
      first, and only then wakes the UI and waits for the turn.
    - After the stop flag (or the stop pipe), C's only libwayland call is `cancel_read` on an
-     intent it already holds. It makes no new `prepare_read`. The prototype does this (`wl.rs`
-     600–602 on `spike/s2-prototype`: the stop check drops the guard and breaks).
+     intent it already holds. It checks the flag before each `prepare_read`, and an intent that
+     races the flag is cancelled at the next `poll`, which the stop pipe wakes. The prototype
+     does this (`wl.rs` 600–602 on `spike/s2-prototype`: the stop check drops the guard and
+     breaks).
    - The stop must complete while winit's display is alive (step 6).
+   - Stop also notifies the turn condvar, and the turn wait returns once the stop flag is set.
+     The UI thread never joins on a wait that only a UI turn can end. The prototype breaks this:
+     `Stop::stop` (`wl.rs` 492–502) only closes the pipe, and `wait_turn` (`wl.rs` 442–445)
+     waits on the condvar with a 100 ms timeout. A join from the UI thread while C waits for a
+     turn therefore blocks for up to 100 ms, and would deadlock without the timeout, since the
+     joining thread is the one that would give the turn.
 
-   C's turn wait has a timeout (100 ms in the prototype). Once the loop has ended no turn comes,
-   which is why the late stop in the teardown runs below took 100 ms in 4 of 5 runs.
+   C's turn wait has a timeout (100 ms in the prototype). After `run` returns no turn comes. In
+   the teardown runs below, the late stop took about 100 ms in 4 of 5 `late-stop-only` runs
+   (0.05 ms in the fifth), and in 2 of 5 `late-both` runs (0.16–0.39 ms in the other three).
 5. **Data off the UI thread.** Offers are read through a pipe on a worker thread, and the result
    comes back through the waker. Sources write each type lazily, on a worker, from bytes cached
    per source. fd hygiene:
@@ -355,15 +373,20 @@ No Rune patch. Everything goes behind P0's internal `transfer` module; P1, P2 an
 6. **Teardown.** The reader must be stopped and joined, and every object bound on winit's
    display destroyed or leaked, before winit closes the display.
    - **When:** only when the event loop is ending, since step 2 binds once per display and the
-     display outlives windows. That is the app's quit path (before `AppHandle::quit` or
-     `Tx::quit`), an `on_close` that calls `tx.quit()`, or `on_close` in an app without
-     `keep_running`. Not the last window's `on_close` in general: under `keep_running()` or
-     `windowless()` the loop and the display live on.
+     display outlives windows. There are two cases:
+     - The quit path: P0 tears down itself, before `Tx::quit` or `AppHandle::quit`. After a
+       quit, no further `on_close` runs: Rune skips the remaining hosts' hooks when the loop is
+       already exiting (`window.rs:200–207`).
+     - The last main window's `on_close` in an app without `keep_running`: closing it ends the
+       app (`window.rs:200–207`).
+
+     Not the last window's `on_close` in general: under `keep_running()` or `windowless()` the
+     loop and the display live on.
    - `App::on_close` is `fn(&mut S, &mut Tx)`, so the transfer handle must be reachable from
      `S` or be process-wide. That is the P0 "transfer handle's home" decision below. Teardown
      from `on_close` is designed, not run.
-   - **Order, on the UI thread:** stop and join the reader (unconditionally, before `run`
-     returns). Then destroy sources, offers, devices, pointer, keyboard and seat, and drop the
+   - **Order, on the UI thread:** set the stop flag, wake both the poll (pipe) and the turn wait
+     (condvar), then join the reader, unconditionally and before `run` returns. Then destroy sources, offers, devices, pointer, keyboard and seat, and drop the
      `Backend`. wayland-backend's `ConnectionState::drop` (`sys/client_impl/mod.rs:1129–1152`)
      calls `wl_proxy_destroy` on every proxy it still knows, then `wl_event_queue_destroy`.
    - **Never** let the objects drop in a `thread_local` destructor or any value dropped after
@@ -386,10 +409,13 @@ No Rune patch. Everything goes behind P0's internal `transfer` module; P1, P2 an
      | late stop only | left running; stopped after `run` returned | leaked | 5 × 0 |
      | late both | left running; stopped after `run` returned | dropped after `run` returned | **5 × 139** |
 
-     The cores show `wl_proxy_destroy` ← `ConnectionState::drop` ← the `Backend` drop. So the
-     crash comes from the late drop. The late stop didn't crash, but it isn't safe: in one run
-     the stop took 0.05 ms, so `cancel_read` really ran on the freed display; in the others the
-     reader was stuck in its 100 ms turn wait and exited at the stop check. No crash is not
+     The cores show `wl_proxy_destroy` ← `ConnectionState::drop` ← the `Backend` drop
+     (`coredumpctl info` for `late-both` runs 3 and 4, PIDs 3826812 and 3826856, saved as
+     `logs/teardown2/coredump-3826812.txt` and `coredump-3826856.txt`). So the crash comes from
+     the late drop. The late stop didn't crash, but it isn't safe: in one
+     `late-stop-only` run the stop took 0.05 ms, so `cancel_read` really ran on the freed
+     display; in the other four the reader was stuck in its 100 ms turn wait and exited at the
+     stop check. No crash is not
      evidence of safety for a use-after-free. Exit codes are from the shell (`$?`, 139 =
      SIGSEGV). In the first pass they were printed but not saved; the second pass saved them.
    - This matches S3's E1.7 (`docs/decisions/S3-foreign-parent.md`). The first version of this

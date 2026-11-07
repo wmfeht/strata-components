@@ -123,6 +123,17 @@ fn index_at_inverts_rect_of() {
         "the right edge is out"
     );
     assert_eq!(g.index_at(Point::new(-1.0, 5.0)), None);
+    assert_eq!(
+        g.index_at(Point::new(f32::NAN, 5.0)),
+        None,
+        "a NaN x hits nothing"
+    );
+    assert_eq!(
+        g.index_at(Point::new(5.0, f32::NAN)),
+        None,
+        "nor does a NaN y"
+    );
+    assert!(g.range_in(Rect::new(0.0, f32::NAN, 10.0, 10.0)).is_empty());
 }
 
 #[test]

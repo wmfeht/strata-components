@@ -289,14 +289,15 @@ impl UniformRows {
         (f64::from(y) - f64::from(self.top)) / f64::from(self.row_height)
     }
 
-    /// A fractional row number clamped to `0..=len` and truncated to a whole row.
+    /// A fractional row number clamped to `0..=len` and truncated to a whole row. NaN (from a
+    /// NaN coordinate) clamps to 0.
     fn clamp_row(&self, row: f64) -> usize {
-        if row <= 0.0 {
+        if row.is_nan() || row <= 0.0 {
             0
         } else if row >= self.len as f64 {
             self.len
         } else {
-            // In range: 0 < row < len, so the cast neither wraps nor saturates.
+            // 0 < row < len here, so the cast only drops the fraction.
             row as usize
         }
     }
@@ -309,7 +310,9 @@ impl CollectionGeometry for UniformRows {
     }
 
     fn index_at(&self, point: Point) -> Option<usize> {
-        if !self.drawable() || point.x < 0.0 || point.x >= self.width {
+        // Written so that a NaN x, which fails every comparison, is outside too.
+        let across = point.x >= 0.0 && point.x < self.width;
+        if !self.drawable() || !across {
             return None;
         }
         let row = self.row_at(point.y);

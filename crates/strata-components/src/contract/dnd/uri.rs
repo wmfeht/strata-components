@@ -41,9 +41,11 @@ pub fn parse_uri_list(list: &[u8]) -> Vec<String> {
         .collect()
 }
 
-/// The local path a `file:` URI names, or `None` for another scheme, a remote host or a bad
-/// percent escape. Takes `file:///p`, `file://localhost/p`, `file:/p` and the relative
-/// `file:p` that [`file_uri`] writes.
+/// The local path a `file:` URI names, or `None` for another scheme, a remote host, a bad
+/// percent escape (anything but `%` and two hex digits) or an escaped NUL (`%00`), which no
+/// path holds. Takes `file:///p`, `file://localhost/p`, `file:/p` and the relative `file:p`
+/// that [`file_uri`] writes. A query or fragment (`?…`, `#…`) is no part of the path and is
+/// left out; a `?` or `#` in a name arrives escaped.
 ///
 /// Used by: [`DropData::file_paths`](super::DropData::file_paths), the
 /// [`Dnd::rune`](super::Dnd::rune) binder, X2.
@@ -53,6 +55,7 @@ pub fn uri_to_path(uri: &str) -> Option<PathBuf> {
         return None;
     }
     let rest = &uri[5..];
+    let rest = rest.split(['?', '#']).next().unwrap_or_default();
     let path = match rest.strip_prefix("//") {
         Some(authority) => {
             let slash = authority.find('/')?;
@@ -76,8 +79,13 @@ fn percent_decode(s: &str) -> Option<Vec<u8>> {
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%' {
-            let hex = s.get(i + 1..i + 3)?;
-            out.push(u8::from_str_radix(hex, 16).ok()?);
+            let hi = hex_digit(*bytes.get(i + 1)?)?;
+            let lo = hex_digit(*bytes.get(i + 2)?)?;
+            let byte = (hi << 4) | lo;
+            if byte == 0 {
+                return None;
+            }
+            out.push(byte);
             i += 3;
         } else {
             out.push(bytes[i]);
@@ -85,6 +93,16 @@ fn percent_decode(s: &str) -> Option<Vec<u8>> {
         }
     }
     Some(out)
+}
+
+/// The value of one ASCII hex digit.
+fn hex_digit(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    }
 }
 
 #[cfg(unix)]

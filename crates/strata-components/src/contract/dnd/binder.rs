@@ -1,6 +1,7 @@
 //! [`Dnd`]: how a component attaches its drop zones and drag sources to elements, as the host
 //! chooses.
 
+use std::cell::Cell;
 use std::rc::Rc;
 
 use rune::{DragItem, DragOperation, El};
@@ -8,7 +9,7 @@ use rune::{DragItem, DragOperation, El};
 use super::{
     DragPayload, DragSource, DropActions, DropData, DropHover, DropOffer, DropZone, Dropped,
 };
-use super::{URI_LIST, uri_to_path};
+use super::{URI_LIST, file_uri, uri_list_only, uri_to_path};
 
 type DropBind<S> = Rc<dyn Fn(El, DropZone<S>) -> El>;
 type DragBind<S> = Rc<dyn Fn(El, DragSource<S>) -> El>;
@@ -53,8 +54,14 @@ impl<S: 'static> Dnd<S> {
     ///
     /// A file drop offers `text/uri-list`, comes from another process, and allows copy and
     /// move: Rune doesn't say what the source allows. The zone gets the files as one uri-list
-    /// item, with `tx.mods()` and `tx.drop_point()`. Rune negotiates no action, so
-    /// [`DropZone::action`] is never asked.
+    /// item, with `tx.mods()` and `tx.drop_point()`.
+    ///
+    /// - Rune's hover handlers hear no paths, so offers carry [`DropOffer::uris`] only on the
+    ///   drop.
+    /// - Rune reports no drag starts, so a drag gets a new [`DropOffer::serial`] each time it
+    ///   reaches a zone. Its drop shares the serial of the hover before it.
+    /// - Rune routes drags with no state, so [`DropZone::action`] is asked only at the drop. A
+    ///   refusal there goes to the zone's `on_reject`, or nowhere.
     pub fn rune() -> Self {
         Self::custom(rune_drop_zone, rune_drag_source)
     }
@@ -86,25 +93,67 @@ impl<S: 'static> Dnd<S> {
     }
 }
 
-/// What a Rune file drag offers.
-fn file_offer() -> DropOffer {
-    DropOffer::new(
-        vec![URI_LIST.to_owned()],
-        DropActions::COPY | DropActions::MOVE,
-    )
+thread_local! {
+    /// The serial of the Rune file drag last heard, and whether it is still live (no drop yet).
+    /// Shared by every zone the Rune binder wires on this thread, which is the UI thread.
+    static RUNE_DRAG: Cell<(u64, bool)> = const { Cell::new((0, false)) };
+}
+
+/// Rune reports no drag starts, so a drag's serial is taken from what zones hear. A zone
+/// reached (`on_drop_hover(true)`, or its rejected twin) starts a new serial: one drag moving
+/// across zones gets several, but two drags never share one. A leave keeps it, so the drop that
+/// follows a hover shares the hover's serial.
+fn hover_serial(over: bool) -> u64 {
+    RUNE_DRAG.with(|d| {
+        let (serial, _) = d.get();
+        if over {
+            d.set((serial + 1, true));
+            serial + 1
+        } else {
+            serial
+        }
+    })
+}
+
+/// The serial of a drop: the live drag's, else a new one (a drop no hover came before, which
+/// only headless runs send). The drag ends with it.
+fn drop_serial() -> u64 {
+    RUNE_DRAG.with(|d| {
+        let (serial, live) = d.get();
+        let serial = if live { serial } else { serial + 1 };
+        d.set((serial, false));
+        serial
+    })
+}
+
+/// What a Rune file drag offers: files, as copy or move, since Rune doesn't say what the
+/// source allows.
+fn file_offer(serial: u64) -> DropOffer {
+    DropOffer::new(uri_list_only(), DropActions::COPY | DropActions::MOVE).serial(serial)
 }
 
 fn rune_drop_zone<S: 'static>(el: El, zone: DropZone<S>) -> El {
-    let offer = file_offer();
-    if zone.accepts(&offer) {
+    // Rune's drags all offer `text/uri-list` and come from another process, so reading it is
+    // the whole acceptance test, with no offer to build per element.
+    if zone.reads(URI_LIST) {
         let z = zone.clone();
         let mut el = el.on_drop_files(move |s: &mut S, files, tx| {
-            let dropped = Dropped::new(file_offer(), DropData::files(files), tx.mods())
-                .point(tx.drop_point());
+            let uris = files.iter().map(|p| file_uri(p)).collect();
+            let offer = file_offer(drop_serial()).uris(uris);
+            if z.choose(s, &offer, tx.mods()).is_none() {
+                // Refused by its `action`: Rune has already routed the drop here, so it can't
+                // pass it on. Only `on_reject` hears it.
+                z.reject(s, offer, tx);
+                return;
+            }
+            let dropped =
+                Dropped::new(offer, DropData::files(files), tx.mods()).point(tx.drop_point());
             z.deliver(s, dropped, tx);
         });
+        // Wired even for a zone that doesn't listen, so every drag reaching a zone gets a serial.
         let z = zone.clone();
         el = el.on_drop_hover(move |s: &mut S, over, tx| {
+            let offer = file_offer(hover_serial(over));
             z.hover(
                 s,
                 if over {
@@ -112,6 +161,7 @@ fn rune_drop_zone<S: 'static>(el: El, zone: DropZone<S>) -> El {
                 } else {
                     DropHover::Left
                 },
+                &offer,
                 tx,
             );
         });
@@ -124,17 +174,18 @@ fn rune_drop_zone<S: 'static>(el: El, zone: DropZone<S>) -> El {
         let z = zone.clone();
         el.on_drop_files(|_: &mut S, _, _| {})
             .accepts_files(|_| false)
-            .on_drop_rejected(move |s: &mut S, _, tx| z.reject(s, file_offer(), tx))
+            .on_drop_rejected(move |s: &mut S, files, tx| {
+                let uris = files.iter().map(|p| file_uri(p)).collect();
+                z.reject(s, file_offer(drop_serial()).uris(uris), tx);
+            })
             .on_drop_rejected_hover(move |s: &mut S, over, tx| {
-                zone.hover(
-                    s,
-                    if over {
-                        DropHover::Rejecting
-                    } else {
-                        DropHover::Left
-                    },
-                    tx,
-                );
+                let offer = file_offer(hover_serial(over));
+                let hover = if over {
+                    DropHover::Rejecting
+                } else {
+                    DropHover::Left
+                };
+                zone.hover(s, hover, &offer, tx);
             })
     } else {
         el

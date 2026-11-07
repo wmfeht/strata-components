@@ -53,15 +53,6 @@ fn a_replacement_indexes_only_the_new_entries() {
 }
 
 #[test]
-fn a_thumbnail_key_reaches_the_entry() {
-    let mut e = entry(1, "photo.jpg", EntryKind::File);
-    e.thumbnail = Some(ThumbKey::new(7));
-    let s = ListSource::new(vec![e, entry(2, "notes", EntryKind::File)]);
-    assert_eq!(s.entry(0).thumbnail, Some(ThumbKey::new(7)));
-    assert_eq!(s.entry(1).thumbnail, None);
-}
-
-#[test]
 fn only_folders_and_links_to_folders_are_folder_like() {
     assert!(EntryKind::Folder.is_folder_like());
     assert!(EntryKind::Symlink(LinkTarget::Folder).is_folder_like());

@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use rune::{Cx, DragOperation, El, Env, Runtime, el, row};
+use rune::{Cx, DragOperation, El, Env, Runtime, col, el, row};
 
 use super::binder::drag_item;
 use super::*;
@@ -24,12 +24,7 @@ fn choose(
     volume: VolumeRelation,
     cross_device: CrossDevice,
 ) -> Option<DropAction> {
-    choose_action(ActionInput {
-        mods: m,
-        offered,
-        volume,
-        cross_device,
-    })
+    choose_action(ActionInput::new(m, offered, volume, cross_device))
 }
 
 const PLAIN: (bool, bool) = (false, false);
@@ -49,6 +44,7 @@ fn a_plain_drop_on_the_same_volume_moves() {
         let got = choose(with(PLAIN), BOTH, VolumeRelation::Same, cross);
         assert_eq!(got, Some(DropAction::Move), "{cross:?}");
     }
+    // "When the dragging application does not offer move, the drop copies."
     let copy_only = choose(with(PLAIN), COPY, VolumeRelation::Same, CrossDevice::Ask);
     assert_eq!(
         copy_only,
@@ -123,7 +119,7 @@ fn a_plain_drop_onto_another_device_follows_the_setting() {
     }
 }
 
-// "When the dragging application does not offer move, the drop copies."
+// Strata's `drop_commit` forbids a drop offering neither copy nor move; no bullet names it.
 #[test]
 fn a_drop_offering_neither_copy_nor_move_is_forbidden() {
     for m in [PLAIN, CTRL, SHIFT] {
@@ -229,11 +225,26 @@ fn only_local_file_uris_name_paths() {
         "file://server/share/a",
         "file:///bad%zzescape",
         "file:///cut%2",
+        "file:///sign%+1",
+        "file:///nul%00byte",
         "file://",
+        "file:?query",
         "fil",
     ] {
         assert_eq!(uri_to_path(uri), None, "{uri}");
     }
+}
+
+#[test]
+fn a_query_or_fragment_is_no_part_of_the_path() {
+    let path = |uri| uri_to_path(uri).expect("a local file");
+    assert_eq!(path("file:///a/b.txt?x=1"), PathBuf::from("/a/b.txt"));
+    assert_eq!(path("file:///a/b.txt#top"), PathBuf::from("/a/b.txt"));
+    assert_eq!(
+        path("file:///a/%3F%23.txt"),
+        PathBuf::from("/a/?#.txt"),
+        "escaped, they're the name"
+    );
 }
 
 #[test]
@@ -254,21 +265,29 @@ fn a_payload_becomes_a_rune_drag_item() {
     assert!(drag_item(&DragPayload::new(vec![EntryId::new(1)], Vec::new())).is_none());
 }
 
-/// A pane background (`outer`) around four 100-point cells: a folder row that follows moves
-/// (`row`), a zone that takes only PNG and says so (`refuse`), one that takes only PNG and
-/// passes other drags on (`pass`), and one attached through [`Dnd::none`] (`none`).
+/// A pane background (`outer`, 400 by 300) around two rows of 100-point cells. The first: a
+/// folder row that follows moves (`row`), a zone that takes only PNG and says so (`refuse`),
+/// one that takes only PNG and passes other drags on (`pass`), and one attached through
+/// [`Dnd::none`] (`none`). The second: zones whose `action` refuses every drag, one with an
+/// `on_reject` (`veto`) and one without (`quiet-veto`). Below them, bare background.
 #[derive(Default)]
 struct Pane {
     log: Vec<String>,
     dropped: Vec<Dropped>,
+    /// Every offer a hover or drop carried: the zone, the serial, and whether its URIs were read.
+    offers: Vec<(&'static str, u64, bool)>,
 }
 
 fn logging(key: &'static str) -> DropZone<Pane> {
     DropZone::new(move |s: &mut Pane, d: Dropped, _| {
         s.log.push(format!("{key} drop"));
+        s.offers.push((key, d.offer.serial, d.offer.uris.is_some()));
         s.dropped.push(d);
     })
-    .on_hover(move |s: &mut Pane, h, _| s.log.push(format!("{key} {h:?}")))
+    .on_hover(move |s: &mut Pane, h, offer: &DropOffer, _| {
+        s.log.push(format!("{key} {h:?}"));
+        s.offers.push((key, offer.serial, offer.uris.is_some()));
+    })
 }
 
 fn view(_: &Pane, _: &mut Cx<Pane>) -> El {
@@ -282,18 +301,28 @@ fn view(_: &Pane, _: &mut Cx<Pane>) -> El {
             .mime_types(&["image/png"])
             .on_reject(|s: &mut Pane, offer, _| {
                 s.log
-                    .push(format!("refuse rejected {:?}", offer.mime_types))
+                    .push(format!("refuse rejected {:?}", offer.mime_types));
             });
     let pass = logging("pass").mime_types(&["image/png"]);
+    let veto = logging("veto")
+        .action(|_, _, _| None)
+        .on_reject(|s: &mut Pane, offer, _| {
+            s.log.push(format!("veto rejected {:?}", offer.uris));
+        });
+    let quiet_veto = logging("quiet-veto").action(|_, _, _| None);
     let cells = row()
         .child(dnd.drop_zone(cell("row"), follow))
         .child(dnd.drop_zone(cell("refuse"), refuse))
         .child(dnd.drop_zone(cell("pass"), pass))
         .child(Dnd::none().drop_zone(cell("none"), logging("none")));
-    dnd.drop_zone(
-        el().key("outer").size(400.0, 300.0).child(cells),
-        logging("outer"),
-    )
+    let vetoes = row()
+        .child(dnd.drop_zone(cell("veto"), veto))
+        .child(dnd.drop_zone(cell("quiet-veto"), quiet_veto));
+    let pane = el()
+        .key("outer")
+        .size(400.0, 300.0)
+        .child(col().child(cells).child(vetoes));
+    dnd.drop_zone(pane, logging("outer"))
 }
 
 fn pane() -> Runtime<Pane> {
@@ -348,7 +377,16 @@ fn the_rune_binder_hovers_the_innermost_zone_and_delivers_a_uri_list() {
         dropped.data.file_paths(),
         files(&["/home/me/a b.txt", "rel.png"])
     );
-    assert_eq!(dropped.offer, DropOffer::new(vec![URI_LIST.into()], BOTH));
+    let offer = &dropped.offer;
+    assert_eq!(
+        (offer.mime_types.as_ref(), offer.actions, offer.local),
+        ([URI_LIST.into()].as_slice(), BOTH, false)
+    );
+    assert_eq!(
+        offer.uris.as_deref(),
+        Some(dropped.data.uris().as_slice()),
+        "the drop's offer names its URIs"
+    );
     assert!(dropped.data.local.is_none());
     let point = dropped.point.expect("a headless drop has a point");
     assert_eq!((point.x, point.y), (50.0, 250.0));
@@ -406,5 +444,87 @@ fn the_none_binder_attaches_nothing() {
     assert_eq!(
         rt.state.log,
         ["outer Accepting", "outer Left", "outer drop"]
+    );
+}
+
+#[test]
+fn a_zone_whose_action_refuses_never_gets_the_drop() {
+    let mut rt = pane();
+    let mut f = 0;
+    drop_at(&mut rt, &mut f, &["/a.txt"], (50.0, 150.0));
+    assert_eq!(
+        rt.state.log,
+        [
+            "veto Accepting",
+            "veto Left",
+            r#"veto rejected Some(["file:///a.txt"])"#
+        ],
+        "Rune routes with no state, so the zone accepts until the drop, then refuses it"
+    );
+    rt.state.log.clear();
+    drop_at(&mut rt, &mut f, &["/a.txt"], (150.0, 150.0));
+    assert_eq!(
+        rt.state.log,
+        ["quiet-veto Accepting", "quiet-veto Left"],
+        "and with no on_reject nothing hears it"
+    );
+    assert!(rt.state.dropped.is_empty());
+}
+
+#[test]
+fn a_new_drag_gets_a_new_serial_and_its_drop_shares_the_hovers() {
+    let mut rt = pane();
+    let mut f = 0;
+    drop_at(&mut rt, &mut f, &["/a"], (50.0, 50.0));
+    drop_at(&mut rt, &mut f, &["/b"], (50.0, 50.0));
+    let o = rt.state.offers.clone();
+    // Each drag on the row: Accepting, Left, then the drop.
+    let [a_in, a_out, a_drop, b_in, b_out, b_drop] = o.as_slice() else {
+        panic!("two hovers and drops on the row: {o:?}");
+    };
+    assert!(o.iter().all(|(k, ..)| *k == "row"), "{o:?}");
+    assert_eq!(
+        (a_out.1, a_drop.1),
+        (a_in.1, a_in.1),
+        "one drag, one serial"
+    );
+    assert_eq!((b_out.1, b_drop.1), (b_in.1, b_in.1));
+    assert_ne!(a_in.1, b_in.1, "the second drag has its own");
+    assert_eq!(
+        [a_in.2, a_out.2, a_drop.2],
+        [false, false, true],
+        "Rune hears the paths only at the drop"
+    );
+
+    rt.drop_files(files(&["/c"]), Some((50.0, 50.0)));
+    step(&mut rt, &mut f);
+    let c = rt.state.offers.last().expect("the drop was heard");
+    assert!(
+        c.1 != a_in.1 && c.1 != b_in.1,
+        "a drop no hover came before gets a new serial"
+    );
+}
+
+#[test]
+fn a_drag_moving_to_another_zone_never_reuses_an_earlier_drags_serial() {
+    let mut rt = pane();
+    let mut f = 0;
+    drop_at(&mut rt, &mut f, &["/a"], (50.0, 50.0));
+    let first = rt.state.offers[0].1;
+    rt.drag_files(files(&["/b"]), Some((50.0, 50.0)));
+    step(&mut rt, &mut f);
+    rt.drag_files_to(Some((50.0, 250.0)));
+    step(&mut rt, &mut f);
+    let outer: Vec<u64> = rt
+        .state
+        .offers
+        .iter()
+        .filter(|(k, ..)| *k == "outer")
+        .map(|o| o.1)
+        .collect();
+    assert!(
+        !outer.is_empty() && !outer.contains(&first),
+        "{:?}",
+        rt.state.offers
     );
 }

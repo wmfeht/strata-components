@@ -53,7 +53,7 @@ pub enum EntryKind {
 
 impl EntryKind {
     /// Whether the entry behaves as a folder: a folder, or a link to one. Folder-like entries
-    /// open as folders, take drops, and fall back to the Folder icon.
+    /// open as folders, are drop candidates, and fall back to the Folder icon.
     pub const fn is_folder_like(self) -> bool {
         matches!(self, Self::Folder | Self::Symlink(LinkTarget::Folder))
     }
@@ -172,7 +172,7 @@ pub trait EntrySource {
 /// Used by: the tests and gallery pages of C1a, C1c, C1d, C1e, C2, C3, C4, C14b and C22.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ListEntry {
-    /// The entry's id, unique in its source.
+    /// The entry's id, unique across every source shown at once (see [`EntryId`]).
     pub id: EntryId,
     /// The name the row shows.
     pub name: String,

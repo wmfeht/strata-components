@@ -53,8 +53,8 @@
 //! ```
 //!
 //! An app that has an `AppHandle` instead of the setup waker passes
-//! `Arc::new(move || handle.wake())`. There is no `AppHandle::update` path: answers always land
-//! in state and are read in `poll`, which a headless `Runtime` runs the same way.
+//! `Arc::new(move || handle.wake())`. The bridge doesn't use `AppHandle::update`: answers always
+//! land in state and are read in `poll`, which a headless `Runtime` runs the same way.
 //!
 //! # Which side touches what
 //!
@@ -66,10 +66,21 @@
 //!   [`Inbox`], [`Requests`], [`Request`], [`Emitter`] and [`Asker`] are `Send` (for `Send`
 //!   payloads); [`Keep`] is not, and lives only on the GLib thread.
 //! - **Spawn GLib-side futures with [`spawn_local`]**, not `glib::spawn_future_local`. The bridge
-//!   tracks them, so shutdown drops them on the GLib thread; an untracked future still pending at
-//!   shutdown is dropped wherever the context's last reference goes.
+//!   tracks them: shutdown drops them first, and [`LocalTask::abort`] drops one early. An
+//!   untracked future still pending at shutdown is dropped when the context is finalized, which
+//!   the bridge does on the GLib thread as it exits.
+//! - **Timers and idles on the bridge's context.** Use `glib::timeout_future`, or a source
+//!   attached to `MainContext::ref_thread_default()`. Never `glib::timeout_add_local` or
+//!   `idle_add_local`: they attach to the global default context, which the bridge doesn't run,
+//!   so they never fire.
 //! - **Async calls only.** A blocking GIO call stalls every task on the bridge, and shutdown waits
 //!   for it only up to its bound before it leaves the thread running.
+//! - **Keep the context on the bridge.** `MainContext` is `Send`, but don't move a clone of the
+//!   bridge's context (or a GLib source or object attached to it) off the GLib thread. If such a
+//!   reference were the last one, the context would be finalized on another thread, and an
+//!   untracked future still pending would then panic inside a C callback and **abort the
+//!   process**. That is the one abort path left; the bridge's own references all drop on the GLib
+//!   thread.
 //! - **Singletons bind to the first caller.** `gio::VolumeMonitor::get()` emits its signals in the
 //!   thread-default context of the thread that first calls it, so make that first call on the
 //!   bridge.
@@ -80,13 +91,14 @@
 //! `Runtime` drops) stops the loop. On the GLib thread it then drops every tracked future and
 //! every [`Keep`] (disconnecting its handlers), runs what is still queued, and exits; the drop
 //! waits for that, up to one second. Tasks still pending report [`TaskState::Stopped`], and work
-//! sent through a [`Glib`] handle afterwards stops at once.
+//! sent through a [`Glib`] handle afterwards stops at once. Last, the thread drops its context
+//! and loop, finalizing what is still attached there.
 //!
 //! # What Strata moves onto it
 //!
 //! - Volumes, drives and mounts (`adapters/volume`, `gio::VolumeMonitor`).
 //! - Mount operations: password, question and process prompts (`gio::MountOperation`, through
-//!   [`Glib::requests`]; the prompts themselves are C26).
+//!   [`Glib::requests`]; the app's prompts answer them).
 //! - Folder monitors (`adapters/local_files/monitors.rs`, `gio::FileMonitor`).
 //! - Open With and launching (`gio::AppInfo`, `gio::AppLaunchContext`).
 //! - GVfs and remote locations (`adapters/gio_location`), the trash (`trash://`) and camera
@@ -104,7 +116,7 @@ mod task;
 mod thread;
 
 pub use channel::{Emitter, Inbox};
-pub use registry::spawn_local;
+pub use registry::{LocalTask, spawn_local};
 pub use request::{Asker, Request, Requests};
 pub use signal::{Attachment, Keep, Signal};
 pub use task::{Task, TaskState};

@@ -51,10 +51,11 @@ impl<M> Queue<M> {
 }
 
 impl<M> Emitter<M> {
-    /// Queues `message` and wakes the app. Returns false, dropping `message`, once the [`Inbox`]
-    /// is gone.
+    /// Queues `message`, and wakes the app if the queue was empty: a queue with messages in it
+    /// already woke the app, and its next drain takes this one too. Returns false, dropping
+    /// `message`, once the [`Inbox`] is gone.
     pub fn emit(&self, message: M) -> bool {
-        {
+        let was_empty = {
             // Checked under the lock the inbox closes with, so nothing is queued after it closes
             // and lingers there (a queued `Request` would keep its asker waiting).
             let mut state = self.queue.lock();
@@ -62,9 +63,16 @@ impl<M> Emitter<M> {
                 return false;
             }
             state.items.push_back(message);
+            state.items.len() == 1
+        };
+        if was_empty {
+            (self.waker)();
         }
-        (self.waker)();
         true
+    }
+
+    pub(super) fn waker(&self) -> Waker {
+        self.waker.clone()
     }
 
     /// Whether the [`Inbox`] is gone.

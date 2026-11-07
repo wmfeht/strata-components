@@ -9,6 +9,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::future::Future;
+use std::marker::PhantomData;
 
 use super::signal::Keep;
 
@@ -44,7 +45,8 @@ pub(super) fn open() {
     });
 }
 
-fn is_open() -> bool {
+/// Whether this is a bridge thread that still takes work: false once shutdown began.
+pub(super) fn is_open() -> bool {
     REGISTRY
         .try_with(|r| r.borrow().as_ref().is_some_and(|r| r.open))
         .unwrap_or(false)
@@ -138,7 +140,7 @@ pub(super) fn teardown() {
 /// # Panics
 ///
 /// When called on any thread but a bridge thread ([`THREAD_NAME`](super::THREAD_NAME)).
-pub fn spawn_local(future: impl Future<Output = ()> + 'static) {
+pub fn spawn_local(future: impl Future<Output = ()> + 'static) -> LocalTask {
     let key = REGISTRY.with_borrow_mut(|r| {
         let r = r
             .as_mut()
@@ -147,4 +149,22 @@ pub fn spawn_local(future: impl Future<Output = ()> + 'static) {
         Key::Local(r.next_local)
     });
     spawn_tracked(key, future);
+    LocalTask {
+        key,
+        _glib_thread: PhantomData,
+    }
+}
+
+/// A [`spawn_local`] future, on the GLib thread. Dropping the handle leaves the future running.
+pub struct LocalTask {
+    key: Key,
+    /// Not `Send`: the registry it aborts through is the GLib thread's.
+    _glib_thread: PhantomData<*const ()>,
+}
+
+impl LocalTask {
+    /// Drops the future now, if it is still running.
+    pub fn abort(self) {
+        abort(self.key);
+    }
 }

@@ -78,8 +78,8 @@ impl Attachment {
         let released = Arc::new(AtomicBool::new(false));
         let gone = released.clone();
         glib.run(move || {
-            // Released before it was made: never make it.
-            if !gone.load(Ordering::Acquire) {
+            // Released before it was made, or drained after teardown: never make it.
+            if !gone.load(Ordering::Acquire) && registry::is_open() {
                 registry::hold(id, make());
             }
         });

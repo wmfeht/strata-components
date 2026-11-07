@@ -3,6 +3,7 @@
 use std::future::Future;
 
 use futures_channel::oneshot;
+use rune::Waker;
 
 use super::channel::{Emitter, Inbox};
 
@@ -34,11 +35,41 @@ impl<Q, A> Asker<Q, A> {
     /// Queues `question` for the app and resolves to its answer, or to `None` when the request
     /// is dropped unanswered or the [`Requests`] is gone. Await it in a future on the GLib thread
     /// (see [`spawn_local`](super::spawn_local)); it never blocks the loop.
+    ///
+    /// Dropping the future before it resolves withdraws the request: the app is woken, and
+    /// [`Request::is_withdrawn`] turns true, so a prompt can close.
     pub fn ask(&self, question: Q) -> impl Future<Output = Option<A>> + use<Q, A> {
         let (reply, answer) = oneshot::channel();
         // Refused by a closed inbox, the request drops here and the answer resolves to None.
-        self.emitter.emit(Request { question, reply });
-        async move { answer.await.ok() }
+        let queued = self.emitter.emit(Request { question, reply });
+        // Made out here, not in the async block, so it drops with a future never polled too.
+        let withdrawal = Withdrawal {
+            waker: queued.then(|| self.emitter.waker()),
+        };
+        async move {
+            let answer = answer.await.ok();
+            withdrawal.disarm();
+            answer
+        }
+    }
+}
+
+/// Wakes the app when an [`ask`](Asker::ask) future drops before it resolves.
+struct Withdrawal {
+    waker: Option<Waker>,
+}
+
+impl Withdrawal {
+    fn disarm(mut self) {
+        self.waker = None;
+    }
+}
+
+impl Drop for Withdrawal {
+    fn drop(&mut self) {
+        if let Some(waker) = self.waker.take() {
+            waker();
+        }
     }
 }
 
@@ -74,5 +105,11 @@ impl<Q, A> Request<Q, A> {
     /// Answers the asker. Returns false when it stopped waiting (its future was dropped).
     pub fn respond(self, answer: A) -> bool {
         self.reply.send(answer).is_ok()
+    }
+
+    /// Whether the asker stopped waiting: its [`ask`](Asker::ask) future was dropped, and an
+    /// answer would go nowhere. The app is woken when that happens.
+    pub fn is_withdrawn(&self) -> bool {
+        self.reply.is_canceled()
     }
 }

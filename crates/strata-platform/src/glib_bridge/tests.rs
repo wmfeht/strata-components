@@ -5,11 +5,11 @@
 //! `GIO_USE_VFS=local` is in its environment, and a test can't set that in-process without
 //! `unsafe`.
 
-use std::io::ErrorKind;
+use std::io::{ErrorKind, Read};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver};
@@ -42,6 +42,9 @@ const CHILD: &str = "STRATA_GLIB_BRIDGE_TEST_CHILD";
 /// How long a test waits for something the GLib thread sends.
 const DEADLINE: Duration = Duration::from_secs(5);
 
+/// How long the child copy of a test may run before it is killed.
+const CHILD_DEADLINE: Duration = Duration::from_secs(30);
+
 /// Runs `body` in a child copy of this test binary, where GIO stays local and every bus address
 /// points at a socket this process listens on. Fails if the child fails, ran no test, or
 /// connected to either bus.
@@ -50,7 +53,7 @@ fn isolated(name: &str, body: fn()) {
         body();
         return;
     }
-    let scratch = Scratch::new(name);
+    let scratch = Scratch::new();
     let session = scratch.path().join("session-bus");
     let system = scratch.path().join("system-bus");
     let buses = [("session", listen(&session)), ("system", listen(&system))];
@@ -62,7 +65,7 @@ fn isolated(name: &str, body: fn()) {
     let module = module_path!();
     let module = module.split_once("::").map_or(module, |(_, rest)| rest);
     let test = format!("{module}::{name}");
-    let out = Command::new(std::env::current_exe().expect("the test binary's path"))
+    let mut child = Command::new(std::env::current_exe().expect("the test binary's path"))
         .args([test.as_str(), "--exact", "--nocapture", "--test-threads=1"])
         .env(CHILD, "1")
         .env("GIO_USE_VFS", "local")
@@ -71,16 +74,36 @@ fn isolated(name: &str, body: fn()) {
         .env("DBUS_SYSTEM_BUS_ADDRESS", bus_address(&system))
         .env("XDG_RUNTIME_DIR", &runtime_dir)
         .env("TMPDIR", scratch.path())
-        .output()
-        .expect("run the child test");
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    let stderr = String::from_utf8_lossy(&out.stderr);
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("start the child test");
+    // Read on threads, so a full pipe can't stall the child while this one waits.
+    let stdout = read_all(child.stdout.take().expect("the child's stdout"));
+    let stderr = read_all(child.stderr.take().expect("the child's stderr"));
+    let deadline = Instant::now() + CHILD_DEADLINE;
+    let status = loop {
+        if let Some(status) = child.try_wait().expect("wait for the child test") {
+            break Some(status);
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            break None;
+        }
+        thread::sleep(Duration::from_millis(20));
+    };
+    let stdout = stdout.join().expect("read the child's stdout");
+    let stderr = stderr.join().expect("read the child's stderr");
+    let Some(status) = status else {
+        panic!("{test} ran past {CHILD_DEADLINE:?} in the child:\n{stdout}\n{stderr}");
+    };
     assert!(
-        out.status.success(),
-        "{test} failed in the child:\n{stdout}\n{stderr}"
+        status.success(),
+        "{test} failed in the child ({status}):\n{stdout}\n{stderr}"
     );
     assert!(
-        stdout.contains("1 passed"),
+        stdout.contains("test result: ok. 1 passed"),
         "the child ran no test named {test}:\n{stdout}"
     );
     for (bus, listener) in buses {
@@ -90,6 +113,14 @@ fn isolated(name: &str, body: fn()) {
             Err(e) => panic!("checking the {bus} bus: {e}"),
         }
     }
+}
+
+fn read_all(mut pipe: impl Read + Send + 'static) -> thread::JoinHandle<String> {
+    thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = pipe.read_to_end(&mut bytes);
+        String::from_utf8_lossy(&bytes).into_owned()
+    })
 }
 
 fn listen(path: &Path) -> UnixListener {
@@ -104,12 +135,15 @@ fn bus_address(path: &Path) -> String {
     format!("unix:path={}", path.display())
 }
 
-/// A directory removed on drop.
+/// A directory removed on drop. Its name is short, as the stand-in bus sockets inside it must
+/// fit a socket address (108 bytes).
 struct Scratch(PathBuf);
 
 impl Scratch {
-    fn new(name: &str) -> Self {
-        let path = std::env::temp_dir().join(format!("glib-bridge-{}-{name}", std::process::id()));
+    fn new() -> Self {
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let n = NEXT.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!("glib-bridge-{}-{n}", std::process::id()));
         let _ = fs::remove_dir_all(&path);
         fs::create_dir_all(&path).expect("make a scratch dir");
         Scratch(path)
@@ -218,7 +252,7 @@ fn poll_query(s: &mut Query, _: f64, _: &mut Tx) -> bool {
 #[test]
 fn a_file_query_lands_on_runes_loop() {
     isolated("a_file_query_lands_on_runes_loop", || {
-        let scratch = Scratch::new("query");
+        let scratch = Scratch::new();
         let path = scratch.path().join("note.txt");
         fs::write(&path, b"hello").expect("write the file");
         let (waker, wakes) = waker();
@@ -295,7 +329,7 @@ fn poll_watch(s: &mut Watch, _: f64, _: &mut Tx) -> bool {
 #[test]
 fn a_file_monitor_change_arrives() {
     isolated("a_file_monitor_change_arrives", || {
-        let scratch = Scratch::new("monitor");
+        let scratch = Scratch::new();
         let dir = scratch.path().join("watched");
         fs::create_dir(&dir).expect("make the folder");
         let (waker, wakes) = waker();
@@ -540,8 +574,7 @@ fn the_thread_exits_when_the_runtime_drops() {
 
         drop(rt);
 
-        // All done before the drop returned: it waits for the thread.
-        assert_eq!(bridge_threads(), 0, "the bridge thread exited");
+        // The drop joined the thread, so its drops are already done.
         for what in ["the pending future", "the Keep"] {
             let dropped_on = dropped
                 .try_recv()
@@ -552,7 +585,107 @@ fn the_thread_exits_when_the_runtime_drops() {
                 "{what} drops on the GLib thread"
             );
         }
+        // The kernel's thread list can lag the join a little, so that is polled.
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while bridge_threads() > 0 {
+            assert!(Instant::now() < deadline, "the bridge thread exited");
+            thread::sleep(Duration::from_millis(5));
+        }
         assert!(handle.is_stopped());
         assert_eq!(handle.spawn(|| async {}).state(), TaskState::Stopped);
+    });
+}
+
+#[test]
+fn an_untracked_future_pending_at_shutdown_drops_on_the_glib_thread() {
+    isolated(
+        "an_untracked_future_pending_at_shutdown_drops_on_the_glib_thread",
+        || {
+            let (waker, _wakes) = waker();
+            let bridge = GlibThread::start(waker).expect("the bridge starts");
+            let handle = bridge.handle();
+            let (started_tx, started) = mpsc::channel();
+            let (dropped_tx, dropped) = mpsc::channel();
+
+            let _attachment = handle.attach(move || {
+                // Against the module's rule (use spawn_local): the bridge doesn't track it.
+                glib::spawn_future_local(async move {
+                    let _report = DropReport(dropped_tx);
+                    let _ = started_tx.send(());
+                    glib::timeout_future(Duration::from_secs(3600)).await;
+                });
+                Keep::new()
+            });
+            started.recv_timeout(DEADLINE).expect("the future starts");
+            drop(bridge);
+
+            let dropped_on = dropped
+                .recv_timeout(DEADLINE)
+                .expect("the future is dropped");
+            assert_eq!(dropped_on.as_deref(), Some(THREAD_NAME));
+            drop(handle);
+        },
+    );
+}
+
+thread_local! {
+    /// The withdrawal test's ask, on the GLib thread.
+    static ASK: std::cell::RefCell<Option<LocalTask>> = const { std::cell::RefCell::new(None) };
+}
+
+struct Held {
+    _bridge: GlibThread,
+    _attachment: Attachment,
+    asks: Requests<String, String>,
+    held: Option<Request<String, String>>,
+    withdrawn: bool,
+}
+
+fn poll_held(s: &mut Held, _: f64, _: &mut Tx) -> bool {
+    if let Some(request) = s.asks.drain().next() {
+        s.held = Some(request);
+    }
+    let withdrawn = s.held.as_ref().is_some_and(Request::is_withdrawn);
+    let changed = withdrawn != s.withdrawn;
+    s.withdrawn = withdrawn;
+    changed
+}
+
+#[test]
+fn a_dropped_ask_withdraws_its_request() {
+    isolated("a_dropped_ask_withdraws_its_request", || {
+        let (waker, wakes) = waker();
+        let bridge = GlibThread::start(waker).expect("the bridge starts");
+        let handle = bridge.handle();
+        let (asker, asks) = handle.requests::<String, String>();
+        let attachment = handle.attach(move || {
+            let ask = spawn_local(async move {
+                let _ = asker.ask("Unlock the drive?".into()).await;
+            });
+            ASK.set(Some(ask));
+            Keep::new()
+        });
+        let state = Held {
+            _bridge: bridge,
+            _attachment: attachment,
+            asks,
+            held: None,
+            withdrawn: false,
+        };
+        let mut rt = runtime(state, poll_held);
+        frames_until(&mut rt, &wakes, "the request", |s| s.held.is_some());
+        assert!(!rt.state.withdrawn, "the asker is still waiting");
+
+        // The GLib side gives up on the question, as a cancelled mount does.
+        while wakes.try_recv().is_ok() {}
+        let _abort = handle.attach(|| {
+            ASK.take().expect("the ask is running").abort();
+            Keep::new()
+        });
+        wakes
+            .recv_timeout(DEADLINE)
+            .expect("the withdrawal wakes the app");
+        rt.frame(1.0 / 60.0);
+        assert!(rt.state.withdrawn, "poll sees the request withdrawn");
     });
 }

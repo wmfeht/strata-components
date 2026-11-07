@@ -1,9 +1,9 @@
 //! The bridge thread, its owner and its handle.
 
 use std::future::Future;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 use std::{fmt, io, thread};
 
@@ -29,7 +29,6 @@ const DRAIN_LIMIT: usize = 1000;
 /// shuts the thread down (see the [module docs](super#shutdown)).
 pub struct GlibThread {
     glib: Glib,
-    main_loop: glib::MainLoop,
     exited: mpsc::Receiver<()>,
     thread: Option<thread::JoinHandle<()>>,
 }
@@ -42,7 +41,11 @@ pub struct Glib {
 }
 
 struct Inner {
-    context: glib::MainContext,
+    /// The context and its loop, until the bridge thread takes them as it exits. Only that
+    /// thread drops them, so the context's last reference goes there: finalizing the context
+    /// finalizes its sources, and a local future's source panics (in a C callback, which aborts
+    /// the process) when it is finalized on another thread.
+    main: Mutex<Option<(glib::MainContext, glib::MainLoop)>>,
     waker: Waker,
     stopped: AtomicBool,
     next_id: AtomicU64,
@@ -80,30 +83,35 @@ impl GlibThread {
     pub fn start(waker: Waker) -> io::Result<GlibThread> {
         let context = glib::MainContext::new();
         let main_loop = glib::MainLoop::new(Some(&context), false);
+        let inner = Arc::new(Inner {
+            main: Mutex::new(Some((context.clone(), main_loop.clone()))),
+            waker,
+            stopped: AtomicBool::new(false),
+            next_id: AtomicU64::new(0),
+        });
         let (ready_tx, ready) = mpsc::channel();
         let (exit_tx, exited) = mpsc::channel();
         let thread = thread::Builder::new().name(THREAD_NAME.into()).spawn({
-            let context = context.clone();
-            let main_loop = main_loop.clone();
-            move || run(&context, &main_loop, ready_tx, exit_tx)
-        })?;
+            let inner = inner.clone();
+            move || run(inner, context, main_loop, ready_tx, exit_tx)
+        });
+        let thread = match thread {
+            Ok(thread) => thread,
+            Err(e) => {
+                // The closure, and its clones of the context, dropped with the failed spawn: no
+                // source is attached yet, so dropping the rest here is safe.
+                inner.take_main();
+                return Err(e);
+            }
+        };
         if ready.recv().is_err() {
             let _ = thread.join();
             return Err(io::Error::other(
                 "the GLib bridge thread could not own its main context",
             ));
         }
-        let inner = Inner {
-            context,
-            waker,
-            stopped: AtomicBool::new(false),
-            next_id: AtomicU64::new(0),
-        };
         Ok(GlibThread {
-            glib: Glib {
-                inner: Arc::new(inner),
-            },
-            main_loop,
+            glib: Glib { inner },
             exited,
             thread: Some(thread),
         })
@@ -121,8 +129,14 @@ impl GlibThread {
     }
 
     fn stop(&mut self, timeout: Duration) -> Result<(), ShutdownError> {
-        self.glib.inner.stopped.store(true, Ordering::Release);
-        self.main_loop.quit();
+        {
+            // Under the lock `Glib::run` spawns under, so nothing is queued after the stop.
+            let main = self.glib.inner.lock_main();
+            self.glib.inner.stopped.store(true, Ordering::Release);
+            if let Some((_, main_loop)) = &*main {
+                main_loop.quit();
+            }
+        }
         let Some(thread) = self.thread.take() else {
             return Ok(());
         };
@@ -148,8 +162,9 @@ impl Drop for GlibThread {
 /// The bridge thread's body. `exit` is never sent on: dropping it, on return or unwind, tells
 /// [`GlibThread::stop`] the thread is done.
 fn run(
-    context: &glib::MainContext,
-    main_loop: &glib::MainLoop,
+    inner: Arc<Inner>,
+    context: glib::MainContext,
+    main_loop: glib::MainLoop,
     ready: mpsc::Sender<()>,
     exit: mpsc::Sender<()>,
 ) {
@@ -172,7 +187,24 @@ fn run(
             }
         }
     });
+    // The last references, once the context is no longer this thread's default: finalizing it
+    // here drops what is still attached (an untracked local future, say) on this thread.
+    inner.take_main();
+    drop(main_loop);
+    drop(context);
+    drop(inner);
     drop(exit);
+}
+
+impl Inner {
+    fn lock_main(&self) -> MutexGuard<'_, Option<(glib::MainContext, glib::MainLoop)>> {
+        self.main.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn take_main(&self) {
+        let main = self.lock_main().take();
+        drop(main);
+    }
 }
 
 impl Glib {
@@ -196,7 +228,8 @@ impl Glib {
             return task;
         }
         self.run(move || {
-            if delivery.is_cancelled() {
+            // Cancelled, or drained after teardown: don't make what would only be dropped.
+            if delivery.is_cancelled() || !registry::is_open() {
                 return;
             }
             let future = make();
@@ -263,9 +296,9 @@ impl Glib {
     /// `MainContext::spawn`, not `invoke`: `invoke` runs the closure on the calling thread when
     /// no thread owns the context, which is the case after shutdown.
     pub(super) fn run(&self, f: impl FnOnce() + Send + 'static) {
-        if self.is_stopped() {
-            return;
+        let main = self.inner.lock_main();
+        if let (false, Some((context, _))) = (self.is_stopped(), &*main) {
+            drop(context.spawn(async move { f() }));
         }
-        drop(self.inner.context.spawn(async move { f() }));
     }
 }

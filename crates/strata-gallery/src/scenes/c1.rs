@@ -6,7 +6,10 @@
 //! The page is a stand-in file pane over four fake folders: Documents (10 entries), Photos
 //! (2,000), Archive (100,000) and Empty. Its header shows the folder, the preview (the
 //! cursor's entry, as `on_cursor` reports it) and the last thing the host heard. Page keys
-//! stand in for the host's commands, since the keyboard controller (C1c) isn't installed:
+//! stand in for the host's commands, since the keyboard controller (C1c) isn't installed. The
+//! header's intent label (`c1-intent`) shows the last intent the controllers sent; a
+//! `BeginRename` opens the rename slot, where Enter renames and Escape cancels.
+//!
 //!
 //! | Key | Does |
 //! | --- | --- |
@@ -28,7 +31,7 @@ use std::collections::HashMap;
 
 use rune::{Cx, El, Key, KeyEvent, TextEdit, Tx, col, row, text, text_input};
 use strata_components::collection::element::{
-    Collection, CollectionState, Controllers, DropOver, RowMarks, Slot,
+    Collection, CollectionState, Controllers, DropOver, Intent, RowMarks, Slot,
 };
 use strata_components::collection::selection::{
     AnchorRule, CursorGone, Extend, Listing, RestoreMemory, SyncRule,
@@ -144,8 +147,10 @@ pub struct Demo {
     pub clock: f64,
     /// The preview: the cursor's entry, as `on_cursor` reports it.
     pub preview: String,
-    /// The last drop or intent the host heard.
+    /// The last drop the host heard, or what happened on disk.
     pub last: String,
+    /// The last intent the controllers sent, as the page words it ("Clicked Notes.md").
+    pub intent: String,
     /// The entry whose rename editor is open, and its text.
     pub renaming: Option<EntryId>,
     pub rename_edit: TextEdit,
@@ -182,6 +187,7 @@ impl Default for Demo {
             preview: String::new(),
             last: String::new(),
             renaming: None,
+            intent: String::new(),
             rename_edit: TextEdit::new(""),
             marks: HashMap::new(),
             layout: 1,
@@ -349,6 +355,62 @@ impl Demo {
         self.refresh_preview();
     }
 
+    /// Hears an intent: records it for the status label, and opens the rename slot for
+    /// `BeginRename`. The intents are the controllers' (C1b's); the default click sends
+    /// `Clicked`.
+    fn heard(&mut self, intent: Intent) {
+        self.intent = match intent {
+            Intent::Clicked { id } => format!("Clicked {}", self.name_of(Some(id))),
+            Intent::Activate { id, .. } => format!("Opened {}", self.name_of(Some(id))),
+            Intent::OpenInNew { id, window } => {
+                let place = if window { "window" } else { "tab" };
+                format!("Opened {} in a new {place}", self.name_of(Some(id)))
+            }
+            Intent::BeginDrag { ids, .. } => format!("Dragging {} items", ids.len()),
+            Intent::BeginRename { id } => {
+                let name = self.name_of(Some(id));
+                self.renaming = Some(id);
+                self.rename_edit = TextEdit::new(name.clone());
+                self.rename_edit.focused = true;
+                format!("Renaming {name}")
+            }
+            Intent::ContextMenu { target, .. } => match target {
+                Some(id) => format!("Menu on {}", self.name_of(Some(id))),
+                None => "Menu on the background".to_owned(),
+            },
+            _ => "Other".to_owned(),
+        };
+    }
+
+    /// Enter in the rename field: the entry takes the new name and keeps its id, as this host
+    /// promises.
+    fn commit_rename(&mut self) {
+        let Some(id) = self.renaming.take() else {
+            return;
+        };
+        let name = self.rename_edit.text.clone();
+        let rename = |entries: &mut Vec<ListEntry>| {
+            if let Some(e) = entries.iter_mut().find(|e| e.id == id) {
+                e.name = name.clone();
+            }
+        };
+        if let Some(disk) = self.disk.get_mut(&self.folder) {
+            rename(disk);
+        }
+        let mut entries = self.listing.entries().to_vec();
+        rename(&mut entries);
+        self.listing.replace(entries);
+        self.version += 1;
+        self.intent = format!("Renamed to {name}");
+        self.refresh_preview();
+    }
+
+    /// Escape in the rename field: the name stays.
+    fn cancel_rename(&mut self) {
+        self.renaming = None;
+        self.intent = "Rename cancelled".to_owned();
+    }
+
     /// A slow load completing.
     fn finish_load(&mut self, tx: &mut Tx) {
         self.loading = None;
@@ -479,6 +541,7 @@ pub fn collection() -> Collection<Gallery> {
     )
     .clock(|g: &Gallery| g.c1.clock)
     .on_cursor(|g: &mut Gallery, _, _| g.c1.refresh_preview())
+    .on_intent(|g: &mut Gallery, intent, _| g.c1.heard(intent))
     .on_drop(|g: &mut Gallery, target, dropped, _| {
         let n = dropped.data.uris().len();
         let to = match target {
@@ -506,6 +569,14 @@ pub fn collection() -> Collection<Gallery> {
                         .key("c1-rename")
                         .label("Rename")
                         .on_edit(|g: &mut Gallery| &mut g.c1.rename_edit)
+                        .on_submit(|g: &mut Gallery, _| g.c1.commit_rename())
+                        .on_input_key(|g: &mut Gallery, key: &KeyEvent, _| {
+                            if key.key != Key::Escape {
+                                return false;
+                            }
+                            g.c1.cancel_rename();
+                            true
+                        })
                         .grow(1.0),
                 )
         }),
@@ -555,6 +626,12 @@ pub fn view(g: &Gallery, _cx: &mut Cx<Gallery>) -> El {
                 .color(kit.c.text_muted),
         )
         .child(
+            text(d.intent.clone())
+                .key("c1-intent")
+                .font(kit.ty.ui)
+                .color(kit.c.text_muted),
+        )
+        .child(
             text(d.last.clone())
                 .key("c1-last")
                 .font(kit.ty.ui)
@@ -575,6 +652,7 @@ pub fn on_key(g: &mut Gallery, key: &KeyEvent, tx: &mut Tx) -> bool {
     let d = &mut g.c1;
     let mods = key.mods;
     match &key.key {
+        Key::Escape if d.renaming.is_some() => d.cancel_rename(),
         Key::Function(5) => d.refresh(tx),
         Key::Delete if mods.ctrl || mods.cmd => d.delete_on_disk(),
         Key::Delete => d.delete_cursor(tx),

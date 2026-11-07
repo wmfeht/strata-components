@@ -353,9 +353,6 @@ fn item<S: 'static>(cfg: &Rc<Config<S>>, frame: &Frame, s: &S, rcx: &RowCx<'_>) 
     {
         outer = cfg.dnd.drop_zone(outer, row_zone(cfg, on_drop.clone(), id));
     }
-    if let Some(source) = &cfg.drag_source {
-        outer = cfg.dnd.drag_source(outer, source.clone());
-    }
     outer
 }
 

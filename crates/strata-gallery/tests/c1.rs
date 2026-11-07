@@ -12,6 +12,9 @@ mod support;
 
 mod c1 {
     use rune::{ElementInfo, Env, Key, KeyEvent, Mods, Runtime};
+    use strata_components::collection::element::{
+        Ctx, Effect, Flow, Intent, PointerController, PointerInput, PointerPhase,
+    };
     use strata_gallery::scenes::c1::{WARMED, WARMUP};
     use strata_gallery::{Gallery, scenes};
 
@@ -215,6 +218,62 @@ mod c1 {
                 assert_eq!(cursor, Some(10_005), "the restore applied once complete");
             }
         }
+    }
+
+    fn text_of(rt: &Runtime<Gallery>, key: &str) -> String {
+        element(rt, key).and_then(|e| e.text).unwrap_or_default()
+    }
+
+    /// The page shows the last intent: the default click finishes with `Clicked`.
+    #[test]
+    fn the_page_shows_the_last_intent() {
+        let mut rt = mount("c1-ten-rows-light");
+        tap(&mut rt, "row-7");
+        assert_eq!(text_of(&rt, "c1-intent"), "Clicked holiday.jpg");
+    }
+
+    /// A controller that asks to rename whatever is pressed, as C1b's slow second click will.
+    struct RenameOnPress;
+
+    impl PointerController for RenameOnPress {
+        fn pointer(&mut self, input: &PointerInput, cx: &mut Ctx<'_>) -> Flow {
+            if input.phase == PointerPhase::Down
+                && let Some(i) = input.hit.index
+            {
+                let id = cx.source.id_at(i);
+                cx.apply(|sel, src| sel.select_only(src, i));
+                cx.emit(Effect::Intent(Intent::BeginRename { id }));
+            }
+            Flow::Handled
+        }
+    }
+
+    /// `BeginRename` opens the rename slot on its row; Enter renames, Escape cancels.
+    #[test]
+    fn a_rename_intent_opens_the_rename_slot() {
+        let mut rt = mount("c1-ten-rows-light");
+        rt.update(|g, _| g.c1.coll.controllers.pointer = Some(Box::new(RenameOnPress)));
+        tap(&mut rt, "row-4");
+        assert_eq!(text_of(&rt, "c1-intent"), "Renaming Notes.md");
+        let field = element(&rt, "c1-rename").expect("the rename slot is open");
+        assert!(field.focused, "and has focus");
+        key(&mut rt, Key::End, Mods::default());
+        rt.key(KeyEvent {
+            key: Key::Text("x".into()),
+            mods: Mods::default(),
+        });
+        run(&mut rt, 0.1);
+        key(&mut rt, Key::Enter, Mods::default());
+        assert!(element(&rt, "c1-rename").is_none(), "Enter closes it");
+        assert_eq!(text_of(&rt, "c1-intent"), "Renamed to Notes.mdx");
+        let d = &rt.state.c1;
+        assert_eq!(d.listing.entries()[3].name, "Notes.mdx");
+
+        tap(&mut rt, "row-5");
+        assert!(element(&rt, "c1-rename").is_some());
+        key(&mut rt, Key::Escape, Mods::default());
+        assert!(element(&rt, "c1-rename").is_none(), "Escape closes it");
+        assert_eq!(rt.state.c1.listing.entries()[4].name, "budget.ods");
     }
 
     /// The scripted 100k scroll (`tests/scripts/c1/scroll-100k.json`) under

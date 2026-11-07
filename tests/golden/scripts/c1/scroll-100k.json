@@ -15,6 +15,11 @@
               "role": "label"
             },
             {
+              "key": "c1-intent",
+              "name": "Clicked entry-002453.dat",
+              "role": "label"
+            },
+            {
               "key": "c1-last",
               "name": "",
               "role": "label"

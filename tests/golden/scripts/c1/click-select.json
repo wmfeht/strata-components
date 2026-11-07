@@ -15,6 +15,11 @@
               "role": "label"
             },
             {
+              "key": "c1-intent",
+              "name": "Clicked holiday.jpg",
+              "role": "label"
+            },
+            {
               "key": "c1-last",
               "name": "",
               "role": "label"

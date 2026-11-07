@@ -5,7 +5,9 @@
 //! [`CollectionState`] the host keeps (its [`Selection`] among it). Rows host slots the host or
 //! the view fills ([`Slot`]): an icon or thumbnail (C25), a label or rename editor (C5),
 //! trailing cells (C4, [`ContentSlot`]), a drop highlight on folder rows and a drag source
-//! (W1's [`Dnd`] binder). Pointer, keyboard and marquee input goes through one seam
+//! (W1's [`Dnd`] binder). Drags out start from the pointer controller's
+//! [`Intent::BeginDrag`], not from rows (see Decisions). Pointer, keyboard and marquee input
+//! goes through one seam
 //! ([`seam`]) to the controllers C1b, C1c and C1d install; with none, a press selects.
 //!
 //! ```ignore
@@ -63,6 +65,13 @@
 //! - **Rows move at once.** Inserted and removed rows land without growth or exit motion
 //!   (`El::instant_changes`), so what is drawn always matches the index geometry presses and
 //!   the marquee hit-test against. Removal effects (C23's dissolve, a slide) are the host's.
+//! - **No drag source on rows.** Rune counts `El::drag_out` as a primary press handler
+//!   (`Handlers::has_primary`, `el/handler_set.rs` at the pinned rev), so a row with one becomes
+//!   the press target (`runtime/input/hit.rs`, `primary_target`) and the container's `on_drag`
+//!   never hears presses on it: no selection, no click intent, no drag threshold. So rows get
+//!   no `drag_out`, and the element takes no `DragSource`. A drag starts when the pointer
+//!   controller (C1b) emits [`Intent::BeginDrag`] past its threshold, with the window point;
+//!   the host binds that to the system drag (X2, through the platform shim).
 //! - **No cursor reveal on a pointer press.** A key or a tick that moves the cursor scrolls it
 //!   into view; a press moves it only onto what the viewport already shows.
 //!
@@ -94,13 +103,13 @@ pub use lines::{Lines, OnePerLine};
 pub use row::{ContentSlot, RowCx, RowMarks, RowState, Slot};
 pub use seam::{
     Activation, Controllers, Ctx, Effect, Flow, Hit, Intent, KeyController, KeyInput,
-    MarqueeController, PointerController, PointerInput, PointerPhase, Region,
+    MarqueeController, PointerController, PointerInput, PointerPhase, Region, default_pointer,
 };
 pub use state::{CollectionState, DropOver};
 
 #[cfg(doc)]
 use crate::collection::selection::Selection;
-use crate::contract::{Dnd, DragSource, DropHover, DropZone, Dropped, EntryId, EntrySource, Point};
+use crate::contract::{Dnd, DropHover, DropZone, Dropped, EntryId, EntrySource, Point};
 
 type GetFn<S> = fn(&S) -> (&dyn EntrySource, &CollectionState);
 type GetMutFn<S> = fn(&mut S) -> (&dyn EntrySource, &mut CollectionState);
@@ -129,7 +138,6 @@ pub(crate) struct Config<S> {
     dnd: Dnd<S>,
     read_only: bool,
     on_drop: Option<row::DropFn<S>>,
-    drag_source: Option<DragSource<S>>,
     icon: Option<Slot<S>>,
     label: Option<Slot<S>>,
     content: Option<ContentSlot<S>>,
@@ -184,7 +192,6 @@ impl<S: 'static> Collection<S> {
                 dnd: Dnd::rune(),
                 read_only: false,
                 on_drop: None,
-                drag_source: None,
                 icon: None,
                 label: None,
                 content: None,
@@ -243,7 +250,7 @@ impl<S: 'static> Collection<S> {
         self
     }
 
-    /// Read-only: no drops, no drag-out and no rename, as the archive preview needs (C14b).
+    /// Read-only: no drops and no rename, as the archive preview needs (C14b).
     pub fn read_only(mut self) -> Self {
         self.cfg.read_only = true;
         self
@@ -256,13 +263,6 @@ impl<S: 'static> Collection<S> {
         f: impl Fn(&mut S, Option<EntryId>, Dropped, &mut Tx) + 'static,
     ) -> Self {
         self.cfg.on_drop = Some(Rc::new(f));
-        self
-    }
-
-    /// Makes every row a drag source carrying what `source` gives (the host builds the payload
-    /// from the selection).
-    pub fn drag_source(mut self, source: DragSource<S>) -> Self {
-        self.cfg.drag_source = Some(source);
         self
     }
 

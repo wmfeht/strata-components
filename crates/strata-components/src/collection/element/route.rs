@@ -19,9 +19,10 @@ use crate::collection::selection::Changed;
 use crate::contract::{EntrySource, Point, Rect};
 
 /// Where an input came from, for what the element does after it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum Source {
-    Pointer,
+    /// A pointer input; for a move, its content point, which a marquee begun by it hears.
+    Pointer(Option<Point>),
     Key,
     Tick,
 }
@@ -75,7 +76,12 @@ fn after<S: 'static>(
                 revealed = true;
             }
             Effect::BeginMarquee { at, mods } => {
-                begin_marquee(cfg, s, tx, at, mods);
+                // A band begun by a move also takes that move, so it doesn't lag one behind.
+                let then = match from {
+                    Source::Pointer(moved_to) => moved_to,
+                    _ => None,
+                };
+                begin_marquee(cfg, s, tx, at, mods, then);
             }
             Effect::ScrollTo { y, glide } => {
                 let key = keys::viewport_path(&cfg.key);
@@ -95,7 +101,7 @@ fn after<S: 'static>(
         }
     }
     // A key that moves the cursor keeps it in view; a pointer moves it only to what it shows.
-    if moved && from != Source::Pointer && !revealed {
+    if moved && !matches!(from, Source::Pointer(_)) && !revealed {
         let (src, st) = (cfg.get_mut)(s);
         if let Some(index) = st.selection.cursor_index(src) {
             st.reveal(&cfg.key, src, index, tx);
@@ -119,14 +125,24 @@ fn after<S: 'static>(
     }
 }
 
-fn begin_marquee<S: 'static>(cfg: &Rc<Config<S>>, s: &mut S, tx: &mut Tx, at: Point, mods: Mods) {
+fn begin_marquee<S: 'static>(
+    cfg: &Rc<Config<S>>,
+    s: &mut S,
+    tx: &mut Tx,
+    at: Point,
+    mods: Mods,
+    then: Option<Point>,
+) {
     let has = (cfg.get)(s).1.controllers.marquee.is_some();
     if !has {
         return;
     }
-    dispatch(cfg, s, tx, Source::Pointer, |c, cx| {
+    dispatch(cfg, s, tx, Source::Pointer(None), |c, cx| {
         if let Some(m) = c.marquee.as_mut() {
             m.begin(at, mods, cx);
+            if let Some(p) = then {
+                m.moved(p, cx);
+            }
         }
         Flow::Handled
     });
@@ -158,8 +174,9 @@ fn hit<S: 'static>(cfg: &Rc<Config<S>>, s: &S, p: Point) -> Hit {
     }
 }
 
-/// The default row's content: its icon and the drawn width of its name, from the row's left
-/// inset, as Strata counts a label's rendered text (not the space it fills) as the entry.
+/// The default row's regions: its icon (and the gap after it) is content, the drawn width of
+/// its name is the name, as Strata counts a label's rendered text (not the space it fills) as
+/// the entry; the rest is gutter.
 fn default_region<S: 'static>(
     cfg: &Rc<Config<S>>,
     s: &S,
@@ -171,8 +188,10 @@ fn default_region<S: 'static>(
     let entry = src.entry(index);
     let (label_w, _) = rune::text::measure(entry.name, &[], look.kit.ty.ui_compact, None);
     let left = strata_kit::slots::collection::row_inset(look) + look.space.xs;
-    let right = left + look.icon_size.md + look.space.sm + label_w;
-    if local.x >= left && local.x < right {
+    let name = left + look.icon_size.md + look.space.sm;
+    if local.x >= name && local.x < name + label_w {
+        Region::Name
+    } else if local.x >= left && local.x < name {
         Region::Content
     } else {
         Region::Gutter
@@ -249,7 +268,8 @@ pub(super) fn on_secondary<S: 'static>(
 
 fn route_pointer<S: 'static>(cfg: &Rc<Config<S>>, s: &mut S, tx: &mut Tx, input: &PointerInput) {
     let input = *input;
-    dispatch(cfg, s, tx, Source::Pointer, move |c, cx| {
+    let moved_to = (input.phase == PointerPhase::Move).then_some(input.point);
+    dispatch(cfg, s, tx, Source::Pointer(moved_to), move |c, cx| {
         if let Some(m) = c.marquee.as_mut()
             && m.active()
         {
@@ -287,6 +307,9 @@ pub(super) fn on_key<S: 'static>(
         now: cfg.clock.map_or(0.0, |c| c(s)),
     };
     let flow = dispatch(cfg, s, tx, Source::Key, |c, cx| {
+        if let Some(p) = c.pointer.as_mut() {
+            p.key_seen(&input);
+        }
         if event.key == rune::Key::Escape
             && let Some(m) = c.marquee.as_mut()
             && m.cancel(cx)

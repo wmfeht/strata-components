@@ -42,11 +42,23 @@ pub enum PointerPhase {
 ///
 /// Used by: C1b, C1d, C3, C4.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Region {
-    /// On the entry itself: its icon, thumbnail or the drawn text of its name.
+    /// On the drawn text of the entry's name: where a slow second click renames.
+    Name,
+    /// On the rest of the entry itself: its icon or thumbnail. A slow click here doesn't
+    /// rename.
     Content,
     /// Blank row space, or no entry at all.
     Gutter,
+}
+
+impl Region {
+    /// Whether the point is on the entry (its name or the rest of its content), not in the
+    /// gutter.
+    pub fn on_entry(self) -> bool {
+        matches!(self, Region::Name | Region::Content)
+    }
 }
 
 /// What a pointer input is over.
@@ -92,6 +104,26 @@ pub struct PointerInput {
     pub now: f64,
 }
 
+impl PointerInput {
+    /// An input at content point `point` over `hit`, as a controller's unit test builds one:
+    /// no modifiers, no travel, a first click, at time 0, and `point` as the window point too.
+    /// Set the other fields after.
+    pub fn new(phase: PointerPhase, button: PointerButton, point: Point, hit: Hit) -> Self {
+        Self {
+            phase,
+            button,
+            point,
+            window: point,
+            travel: Point::default(),
+            hit,
+            mods: Mods::default(),
+            clicks: 1,
+            cancelled: false,
+            now: 0.0,
+        }
+    }
+}
+
 /// One key the focused collection heard.
 ///
 /// Fields may be added.
@@ -110,6 +142,20 @@ pub struct KeyInput<'a> {
     pub repeat: bool,
     /// The host's clock, in seconds.
     pub now: f64,
+}
+
+impl<'a> KeyInput<'a> {
+    /// `event` with no physical key or base, not repeating, at time 0, as a controller's unit
+    /// test builds one. Set the other fields after.
+    pub fn new(event: &'a KeyEvent) -> Self {
+        Self {
+            event,
+            physical: None,
+            base: None,
+            repeat: false,
+            now: 0.0,
+        }
+    }
 }
 
 /// Whether a controller took an input.
@@ -150,6 +196,13 @@ pub enum Intent {
         /// How.
         how: Activation,
     },
+    /// A plain single click on the entry finished (released where it was pressed, no
+    /// modifiers): what a single-click preview opens on. It may still turn out to be the first
+    /// half of a double click; telling them apart is the pointer controller's.
+    Clicked {
+        /// The entry.
+        id: EntryId,
+    },
     /// Open the entry in a new tab, or a new window (a middle click).
     OpenInNew {
         /// The entry.
@@ -157,10 +210,13 @@ pub enum Intent {
         /// A new window rather than a tab.
         window: bool,
     },
-    /// Start a drag of these entries: the host builds the `DragPayload`.
+    /// Start a drag of these entries: the host builds the `DragPayload` and starts the system
+    /// drag (X2). Rows have no drag source of their own (see the element's Decisions).
     BeginDrag {
         /// The dragged entries, in display order.
         ids: Vec<EntryId>,
+        /// Where the pointer is, in window points: where the drag image starts.
+        window: Point,
     },
     /// Start renaming the entry.
     BeginRename {
@@ -228,7 +284,10 @@ pub struct Ctx<'a> {
 }
 
 impl<'a> Ctx<'a> {
-    pub(super) fn new(
+    /// A context over `source` and `geometry`, changing `selection`. The element makes one per
+    /// input; a controller's unit tests make their own, with no Rune runtime, then read
+    /// [`Ctx::changed`] and [`Ctx::effects`].
+    pub fn new(
         source: &'a dyn EntrySource,
         geometry: &'a dyn CollectionGeometry,
         visible: Rect,
@@ -273,6 +332,11 @@ impl<'a> Ctx<'a> {
         self.changed
     }
 
+    /// The effects asked for so far, in order.
+    pub fn effects(&self) -> &[Effect] {
+        &self.effects
+    }
+
     pub(super) fn finish(self) -> (Changed, Vec<Effect>) {
         (self.changed, self.effects)
     }
@@ -288,6 +352,10 @@ pub trait PointerController {
     fn tick(&mut self, _cx: &mut Ctx<'_>) -> Flow {
         Flow::Pass
     }
+
+    /// Hears every key the collection hears, before the keyboard controller and whether or
+    /// not anything takes it: a pending slow-click rename is cancelled by a key.
+    fn key_seen(&mut self, _input: &KeyInput<'_>) {}
 }
 
 /// Keyboard navigation (C1c): keys while the collection has focus.
@@ -353,15 +421,40 @@ impl std::fmt::Debug for Controllers {
     }
 }
 
+/// How far (points) a release may land from its press and still finish a click: Rune's own
+/// click-pairing distance.
+const CLICK_SLOP: f32 = 4.0;
+
 /// The pointer behaviour with no pointer controller: a primary press selects only the entry
-/// under it, or clears the selection over empty space.
-pub(super) fn default_pointer(input: &PointerInput, cx: &mut Ctx<'_>) -> Flow {
-    if input.phase != PointerPhase::Down || input.button != PointerButton::Primary {
+/// under it, or clears the selection over empty space; a plain release on it finishes a click
+/// ([`Intent::Clicked`]).
+pub fn default_pointer(input: &PointerInput, cx: &mut Ctx<'_>) -> Flow {
+    if input.button != PointerButton::Primary {
         return Flow::Pass;
     }
-    match input.hit.index {
-        Some(i) => cx.apply(|sel, src| sel.select_only(src, i)),
-        None => cx.apply(|sel, _| sel.clear()),
-    };
-    Flow::Handled
+    match input.phase {
+        PointerPhase::Down => {
+            match input.hit.index {
+                Some(i) => cx.apply(|sel, src| sel.select_only(src, i)),
+                None => cx.apply(|sel, _| sel.clear()),
+            };
+            Flow::Handled
+        }
+        PointerPhase::Up => {
+            let plain = !(input.mods.shift || input.mods.ctrl || input.mods.cmd || input.mods.alt);
+            let still = input.travel.x.abs() <= CLICK_SLOP && input.travel.y.abs() <= CLICK_SLOP;
+            if let Some(i) = input.hit.index
+                && plain
+                && still
+                && !input.cancelled
+                && input.clicks == 1
+                && i < cx.source.len()
+            {
+                let id = cx.source.id_at(i);
+                cx.emit(Effect::Intent(Intent::Clicked { id }));
+            }
+            Flow::Handled
+        }
+        PointerPhase::Move => Flow::Pass,
+    }
 }

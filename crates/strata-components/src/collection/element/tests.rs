@@ -34,6 +34,7 @@ struct Host {
     cursors: Vec<Option<EntryId>>,
     selections: usize,
     intents: Vec<String>,
+    last_intent: Option<Intent>,
     /// Rows built (label slot calls).
     built: Rc<Cell<usize>>,
     per_line: usize,
@@ -50,6 +51,7 @@ impl Host {
             cursors: Vec::new(),
             selections: 0,
             intents: Vec::new(),
+            last_intent: None,
             built: Rc::new(Cell::new(0)),
             per_line: 1,
             app_keys: 0,
@@ -88,7 +90,10 @@ fn collection(s: &Host) -> Collection<Host> {
     }))
     .on_cursor(|s: &mut Host, id, _| s.cursors.push(id))
     .on_selection(|s: &mut Host, _| s.selections += 1)
-    .on_intent(|s: &mut Host, intent, _| s.intents.push(format!("{intent:?}")));
+    .on_intent(|s: &mut Host, intent, _| {
+        s.intents.push(format!("{intent:?}"));
+        s.last_intent = Some(intent);
+    });
     if s.per_line > 1 {
         c = c.lines(PerLine(s.per_line)).roles(Roles::GRID_CELLS);
     }
@@ -314,8 +319,8 @@ fn an_installed_pointer_controller_replaces_the_default_and_its_intents_reach_th
     assert_eq!(downs[1].hit.index, Some(4));
     assert_eq!(
         downs[1].hit.region,
-        Region::Content,
-        "a press on the name is on the entry"
+        Region::Name,
+        "a press on the name is on the name"
     );
     assert!(log.pointer.iter().any(|p| p.phase == PointerPhase::Up));
 }
@@ -659,4 +664,228 @@ fn part_keys_are_full_paths_under_the_collection() {
             .iter()
             .any(|e| e.path.ends_with("row-2") && e.role == "option")
     );
+}
+
+// The seam requests from C1b's plan (N1–N7).
+
+/// A pointer controller that records every input and key it hears, and does what `on_move`
+/// says on the first move of each gesture.
+struct Recorder {
+    log: Rc<RefCell<Log>>,
+    keys: Rc<Cell<usize>>,
+    on_move: fn(&PointerInput, &mut Ctx<'_>),
+    moved: bool,
+}
+
+impl PointerController for Recorder {
+    fn pointer(&mut self, input: &PointerInput, cx: &mut Ctx<'_>) -> Flow {
+        self.log.borrow_mut().pointer.push(*input);
+        match input.phase {
+            PointerPhase::Down => self.moved = false,
+            PointerPhase::Move if !self.moved => {
+                self.moved = true;
+                (self.on_move)(input, cx);
+            }
+            _ => {}
+        }
+        Flow::Handled
+    }
+
+    fn key_seen(&mut self, _input: &KeyInput<'_>) {
+        self.keys.set(self.keys.get() + 1);
+    }
+}
+
+fn recorder(
+    n: usize,
+    on_move: fn(&PointerInput, &mut Ctx<'_>),
+) -> (Runtime<Host>, Rc<RefCell<Log>>, Rc<Cell<usize>>) {
+    let log = Rc::new(RefCell::new(Log::default()));
+    let keys = Rc::new(Cell::new(0));
+    let mut host = Host::new(n);
+    host.coll.controllers.pointer = Some(Box::new(Recorder {
+        log: log.clone(),
+        keys: keys.clone(),
+        on_move,
+        moved: false,
+    }));
+    host.coll.controllers.keyboard = Some(Box::new(Keys));
+    host.coll.controllers.marquee = Some(Box::new(Band(log.clone(), false)));
+    (runtime(host), log, keys)
+}
+
+/// N1: the name, the rest of the content (the icon) and the gutter are told apart.
+#[test]
+fn a_press_on_the_icon_is_content_and_on_the_name_is_the_name() {
+    let (mut rt, log, _) = recorder(20, |_, _| {});
+    let [x, y, w, h] = element(&rt, "row-3").unwrap().visible;
+    let look = Look::fallback(false);
+    let icon_mid =
+        strata_kit::slots::collection::row_inset(&look) + look.space.xs + look.icon_size.md / 2.0;
+    for px in [x + icon_mid, x + 40.0, x + w - 30.0] {
+        click_at(&mut rt, px, y + h / 2.0);
+    }
+    let regions: Vec<_> = log
+        .borrow()
+        .pointer
+        .iter()
+        .filter(|p| p.phase == PointerPhase::Down)
+        .map(|p| p.hit.region)
+        .collect();
+    assert_eq!(regions, [Region::Content, Region::Name, Region::Gutter]);
+    assert!(Region::Content.on_entry() && Region::Name.on_entry() && !Region::Gutter.on_entry());
+}
+
+/// N2: the default pointer finishes a plain click with `Clicked`; a drag or a modified click
+/// doesn't.
+#[test]
+fn a_plain_click_finishes_with_a_clicked_intent_and_a_drag_does_not() {
+    let mut rt = runtime(Host::new(20));
+    click(&mut rt, "row-4");
+    assert!(matches!(rt.state.last_intent, Some(Intent::Clicked { id }) if id == EntryId::new(4)));
+
+    rt.state.last_intent = None;
+    let [x, y, w, h] = element(&rt, "row-6").unwrap().visible;
+    let (x, y) = (x + w / 2.0, y + h / 2.0);
+    rt.pointer_down(x, y);
+    rt.frame(1.0 / 60.0);
+    rt.pointer_move(x, y + 20.0);
+    rt.frame(1.0 / 60.0);
+    rt.pointer_up(x, y + 20.0);
+    rt.frame(1.0 / 60.0);
+    assert!(
+        rt.state.last_intent.is_none(),
+        "a press that travelled isn't a click"
+    );
+
+    rt.physical_input(rune::PhysicalInput::Modifiers(Mods {
+        shift: true,
+        ..Mods::default()
+    }));
+    click_at(&mut rt, x, y);
+    rt.physical_input(rune::PhysicalInput::Modifiers(Mods::default()));
+    assert!(
+        rt.state.last_intent.is_none(),
+        "a modified click isn't a plain click"
+    );
+}
+
+/// N3: the pointer controller hears every key, taken or not.
+#[test]
+fn the_pointer_controller_sees_every_key_the_collection_hears() {
+    let (mut rt, _, keys) = recorder(20, |_, _| {});
+    click(&mut rt, "row-2");
+    press(&mut rt, Key::End);
+    press(&mut rt, Key::Function(2));
+    assert_eq!(
+        keys.get(),
+        2,
+        "one key the keyboard controller took, one it passed"
+    );
+}
+
+/// N4: drop zones on folder rows don't take presses, so the controller still hears them.
+#[test]
+fn presses_on_rows_with_drop_zones_reach_the_controller() {
+    fn with_drops(s: &Host, _: &mut Cx<Host>) -> El {
+        col()
+            .size(W, H)
+            .child(collection(s).on_drop(|_: &mut Host, _, _, _| {}).build(s))
+    }
+    let mut rt = Runtime::new(Host::new(20), with_drops, (W, H), Env::new(false, 1.0));
+    rt.frame(0.0);
+    rt.frame(1.0 / 60.0);
+    // Entry 10 is a folder: its row carries a drop zone.
+    click(&mut rt, "row-10");
+    assert_eq!(rt.state.coll.selection.cursor(), Some(id(10)));
+}
+
+/// N5: a controller can be tested with a `Ctx` and no runtime.
+#[test]
+fn a_controller_runs_against_a_ctx_without_a_runtime() {
+    let src = FastSource::new(10);
+    let geometry = OnePerLine.geometry(10, 26.0, 300.0, 200.0);
+    let mut sel = crate::collection::selection::Selection::new();
+    let mut cx = Ctx::new(
+        &src,
+        &*geometry,
+        crate::contract::Rect::new(0.0, 0.0, 300.0, 200.0),
+        0.0,
+        &mut sel,
+    );
+    let hit = Hit {
+        index: Some(3),
+        region: Region::Name,
+    };
+    let down = PointerInput::new(
+        PointerPhase::Down,
+        rune::PointerButton::Primary,
+        Point::new(40.0, 90.0),
+        hit,
+    );
+    let up = PointerInput {
+        phase: PointerPhase::Up,
+        ..down
+    };
+    default_pointer(&down, &mut cx);
+    default_pointer(&up, &mut cx);
+    assert!(cx.changed().selection && cx.changed().cursor);
+    assert!(
+        matches!(cx.effects(), [Effect::Intent(Intent::Clicked { id })] if *id == EntryId::new(3))
+    );
+    let _ = KeyInput::new(&KeyEvent {
+        key: Key::Escape,
+        mods: Mods::default(),
+    });
+    drop(cx);
+    assert_eq!(sel.cursor(), Some(EntryId::new(3)));
+}
+
+/// N6: a band begun by a move takes that move too.
+#[test]
+fn a_marquee_begun_by_a_move_hears_that_move() {
+    let (mut rt, log, _) = recorder(40, |input, cx| {
+        cx.emit(Effect::BeginMarquee {
+            at: input.point,
+            mods: input.mods,
+        });
+    });
+    let [x, y, w, h] = element(&rt, "row-2").unwrap().visible;
+    let (x, y) = (x + w - 20.0, y + h / 2.0);
+    rt.pointer_down(x, y);
+    rt.frame(1.0 / 60.0);
+    rt.pointer_move(x, y + 40.0);
+    rt.frame(1.0 / 60.0);
+    rt.pointer_up(x, y + 40.0);
+    rt.frame(1.0 / 60.0);
+    assert_eq!(log.borrow().marquee, ["begin", "moved", "end"]);
+}
+
+/// N7: a drag intent carries the pointer's window point.
+#[test]
+fn a_drag_intent_carries_the_window_point() {
+    let (mut rt, _, _) = recorder(40, |input, cx| {
+        if let Some(i) = input.hit.index {
+            let ids = vec![cx.source.id_at(i)];
+            cx.emit(Effect::Intent(Intent::BeginDrag {
+                ids,
+                window: input.window,
+            }));
+        }
+    });
+    let [x, y, _, h] = element(&rt, "row-5").unwrap().visible;
+    let (x, y) = (x + 40.0, y + h / 2.0);
+    rt.pointer_down(x, y);
+    rt.frame(1.0 / 60.0);
+    rt.pointer_move(x + 12.0, y + 3.0);
+    rt.frame(1.0 / 60.0);
+    rt.pointer_up(x + 12.0, y + 3.0);
+    rt.frame(1.0 / 60.0);
+    match &rt.state.last_intent {
+        Some(Intent::BeginDrag { ids, window }) => {
+            assert_eq!(ids, &[EntryId::new(5)]);
+            assert_eq!(*window, Point::new(x + 12.0, y + 3.0));
+        }
+        other => panic!("no drag intent: {other:?}"),
+    }
 }

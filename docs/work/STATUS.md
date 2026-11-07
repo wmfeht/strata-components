@@ -32,8 +32,8 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | C5 | ready | | |
 | C6 | ready | | |
 | C7 | ready | | |
-| C8 | coded (waits on W2b rebase, then review 1) | own list on SidebarRow+Reorder (rune-kit Sidebar opens on arrow, no rail); keyboard pin reorder left out (no bullet) | |
-| C9 | review 2 (fixing 428 test) | own split + DrawerState (not SplitView); HostedPreview trait for C10–C14; focus via focus_return stubs | |
+| C8 | review 1 (fixing B1 parked reorder) | own list on SidebarRow+Reorder (rune-kit Sidebar opens on arrow, no rail); keyboard pin reorder left out (no bullet) | |
+| C9 | merged | 3 review rounds; own split + DrawerState; HostedPreview trait; focus via focus_return stubs (Rune Tx::focus draft); PNG goldens on NVIDIA | bad5d4c |
 | K1 | ready | | |
 | K2 | merged | 1 review round + fixes; Strata values at upstream/main 35ee677ab; font list arrives as data (Rune #114/U16); Switch/Button sizes are rune-kit gaps | db41ea7 |
 | K3 | ready | | |
@@ -53,7 +53,7 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | C17 | ready | | |
 | C18 | ready | | |
 | C19 | ready | | |
-| C1b | ready | | |
+| C1b | coding | plain state machine first; C1e adapter after C1e merges (seam requests N1–N8 sent to C1e) | |
 | C1c | ready | | |
 | C1d | ready | | |
 | C1e | coding | 0 view runs over 600 scroll frames at 100k (probe); focus-on-return bullets deferred (Rune focus API) | |

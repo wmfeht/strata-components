@@ -1,0 +1,163 @@
+//! The header: the previewed item (icon, name, details, badges), then the controls the hosted
+//! view supports, in Strata's order: the Rendered/Source switch, Find, the busy spinner, Open,
+//! Wrap and Close. There is never a Print button.
+
+use rune::{El, Tx, col, el, icon, row, text};
+use rune_kit::{ControlSize, IconButton, IconButtonVariant, Spinner, State};
+use strata_kit::icons::IconName;
+use strata_kit::look::Look;
+
+use super::{DocumentView, DrawerIntent, DrawerState, Parts, Shared, find};
+
+pub(super) fn header<S: 'static>(
+    shared: &Shared<S>,
+    st: &DrawerState,
+    parts: &Parts<'_, S>,
+    look: &Look,
+) -> El {
+    let k = &look.kit;
+    let caps = parts.caps;
+    let labels = &shared.labels;
+    let button = |name: IconName, label: &str| {
+        IconButton::new(look.icon(name))
+            .variant(IconButtonVariant::GhostMuted)
+            .control_size(ControlSize::Regular)
+            .label(label.to_owned())
+    };
+
+    let mut controls: Vec<El> = Vec::new();
+    if let Some(view) = caps.view {
+        let (name, label) = match view {
+            DocumentView::Rendered => (IconName::Source, &labels.view_source),
+            DocumentView::Source => (IconName::Rendered, &labels.view_rendered),
+        };
+        let sh = shared.clone();
+        controls.push(
+            button(name, label)
+                .on_press_tx(move |s: &mut S, tx: &mut Tx| {
+                    sh.emit(s, DrawerIntent::ShowView(view.other()), tx)
+                })
+                .build(k)
+                .key("preview-view-switch"),
+        );
+    }
+    if caps.searchable {
+        let sh = shared.clone();
+        controls.push(
+            button(IconName::Search, &labels.find)
+                .expanded(st.find.open)
+                .on_press_tx(move |s: &mut S, tx: &mut Tx| {
+                    if (sh.access)(s).find.open {
+                        find::close(&sh, s, tx);
+                    } else {
+                        (sh.access)(s).open_find();
+                    }
+                })
+                .build(k)
+                .key("preview-find"),
+        );
+    }
+    if let Some(busy) = &caps.busy {
+        controls.push(
+            el().key("preview-busy")
+                .role("progressbar")
+                .label(busy.clone())
+                .child(
+                    Spinner::new()
+                        .size(look.icon_size.md)
+                        .build(k)
+                        .a11y_hidden(),
+                ),
+        );
+    }
+    if parts.open_allowed {
+        let sh = shared.clone();
+        controls.push(
+            button(IconName::Open, &labels.open)
+                .on_press_tx(move |s: &mut S, tx: &mut Tx| sh.emit(s, DrawerIntent::Open, tx))
+                .build(k)
+                .key("preview-open"),
+        );
+    }
+    if let Some(on) = caps.wrap {
+        let sh = shared.clone();
+        let wrap = button(IconName::Wrap, &labels.wrap)
+            // On, it keeps the pressed fill, as the open Find button does.
+            .state(if on { State::Pressed } else { State::Rest })
+            .on_press_tx(move |s: &mut S, tx: &mut Tx| sh.emit(s, DrawerIntent::SetWrap(!on), tx));
+        controls.push(wrap.build(k).key("preview-wrap").checked(on));
+    }
+    let sh = shared.clone();
+    controls.push(
+        button(IconName::Close, &labels.close)
+            .help(labels.close.clone())
+            .on_press_tx(move |s: &mut S, tx: &mut Tx| {
+                find::end(&sh, s);
+                (sh.access)(s).close_with(sh.animations, tx);
+                sh.emit(s, DrawerIntent::Closed, tx);
+            })
+            .build(k)
+            .key("preview-close"),
+    );
+
+    let info = parts.header;
+    let mut heading = col().grow(1.0).min_w(0.0);
+    if !info.title.is_empty() {
+        heading = heading.child(
+            text(info.title.clone())
+                .key("preview-title")
+                .font(k.ty.ui_medium)
+                .color(k.c.text_base)
+                .max_lines(1),
+        );
+    }
+    if !info.details.is_empty() {
+        heading = heading.child(
+            text(info.details.join(" · "))
+                .key("preview-details")
+                .font(k.ty.small)
+                .color(k.c.text_muted)
+                .max_lines(1),
+        );
+    }
+    if !info.badges.is_empty() {
+        heading = heading.child(row().key("preview-badges").gap(look.space.xs).children(
+            info.badges.iter().enumerate().map(|(i, b)| {
+                text(b.clone())
+                    .key(format!("preview-badge-{i}"))
+                    .font(k.ty.small_medium)
+                    .color(k.c.text_muted)
+                    .px(look.space.xs)
+                    .radius(look.round(k.radius.sm))
+                    .fill(k.c.layer_02)
+            }),
+        ));
+    }
+    let mut handle = row()
+        .key("preview-handle")
+        .grow(1.0)
+        .min_w(0.0)
+        .gap(look.space.sm)
+        .items_center()
+        .children(info.icon.map(|i| {
+            icon(i, look.icon_size.md)
+                .color(k.c.icon_muted)
+                .a11y_hidden()
+        }))
+        .child(heading);
+    if let Some((dnd, source)) = parts.drag {
+        handle = dnd.drag_source(handle, source.clone());
+    }
+
+    row()
+        .key("preview-header")
+        .w_full()
+        .min_h(look.frame.bar + 2.0 * look.frame.inset)
+        .px(look.space.md)
+        .py(look.space.xs)
+        .gap(look.space.xs)
+        .items_center()
+        .border_sides([0.0, 0.0, 1.0, 0.0], k.c.border_muted)
+        .child(handle)
+        .children(controls)
+}

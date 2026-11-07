@@ -1,8 +1,9 @@
 use crate::look::Look;
 use crate::tokens::{self, Value};
 
-/// Each seeded slot token, with the core token it inherits from.
+/// Each slot token that inherits from a core token, with that token.
 const SEEDS: &[(&str, &str)] = &[
+    ("collection.row.radius", "radius.md"),
     ("list.row.height", "row.list"),
     ("sidebar.row.height", "row.sidebar"),
     ("tabs.tab.height", "frame.bar"),

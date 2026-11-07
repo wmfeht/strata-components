@@ -2,9 +2,14 @@
 //! and keyboard context-menu anchors work over rows that aren't mounted.
 //!
 //! Every value is in points, in content coordinates: the origin is the top-left of the scroll
-//! content, before scrolling. That is the space Rune's `on_drag` reports on the content stack
-//! of a scroll viewport. To anchor a popup, add the viewport's window origin and subtract its
-//! scroll offset ([`Rect::offset`]).
+//! content, before scrolling. A component computes a content point from a window point as
+//! window point − the viewport's window origin + the scroll offset. To anchor a popup, go the
+//! other way: add the viewport's window origin and subtract the scroll offset
+//! ([`Rect::offset`]).
+//!
+//! Don't take content coordinates from Rune's `on_drag` on the content stack. On a
+//! `.virtualize` stack it reports a y rebased to the mounted rows: a press at viewport y = 40
+//! with the list scrolled 28,800 pt reports y = 2034, not 28,840.
 
 use std::ops::Range;
 

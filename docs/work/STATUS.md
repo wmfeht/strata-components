@@ -5,12 +5,12 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | WP | State | Note | Merge commit |
 | --- | --- | --- | --- |
 | W0 | merged | 3 review rounds; png dev-dep approved; PNG goldens blessed on NVIDIA (lavapipe/CI pending) | d4bcd36 |
-| W1 | ready |  |  |
-| W2 | ready |  |  |
-| W3 | ready |  |  |
-| S1 | review 1 | P3: X11 shim feasible, Wayland resize/menu blocked on Rune; Hyprland/GNOME/KDE hand test pending | |
+| W1 | planning |  |  |
+| W2 | planning | | |
+| W3 | planning |  |  |
+| S1 | merged | P3: X11 shim conditional on mutter/KWin hand test; Wayland resize/menu blocked on Rune (R1-R3, R7); Hyprland/GNOME/KDE/lavapipe hand test pending | c5794e1 |
 | S2 | coding | sway needs `setpriv --no-new-privs` here (cap_sys_nice + RLIMIT_RTTIME=0) | |
-| S3 | coding | QEMU guest runs not approved: those cells hand test pending | |
+| S3 | review 1 | no blocker; sway measured; Hyprland/GNOME/KDE/Firefox hand test pending; 3 owner decisions | |
 | S4 | coding | fancy-regex vs onig; fixtures under tests/fixtures/code | |
 | S5 | waiting | | |
 | C10a | waiting | | |

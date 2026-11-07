@@ -217,8 +217,14 @@ pub fn check(id: &str) {
         match result {
             Err(e) => failures.push(format!("script {}: {e}", path.display())),
             Ok((m, tree)) => {
-                for miss in unmet(&tree, &m.expect) {
+                let misses = unmet(&tree, &m.expect);
+                let blessing = support::mode(id, &bless_name) == Mode::Bless;
+                for miss in &misses {
                     failures.push(format!("script {}: expect: {miss}", path.display()));
+                }
+                // Blessing never records an end state its own expectations reject.
+                if blessing && !misses.is_empty() {
+                    continue;
                 }
                 let actual = support::pretty(&tree);
                 support::text_golden("scripts", id, &stem, &bless_name, &actual, &mut failures);

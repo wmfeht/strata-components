@@ -10,6 +10,11 @@ license.workspace = true
 # its own feature's list and its own block under [dependencies]. Keep the blank line and the
 # comment between entries: git conflicts when two branches edit neighbouring lines.
 #
+# A dependency appears once in [dependencies]. If another shim's block already declares one you
+# need (zbus for both P5 and P8, say), move it to the shared block at the top, keep it
+# `optional = true`, and enable it with `dep:<name>` from each feature that uses it. Two blocks
+# declaring the same crate merge cleanly in git but make the manifest invalid.
+#
 # Examples gate their own body on their feature (`#[cfg(feature = "csd")] fn main()`, plus a
 # `#[cfg(not(..))] fn main()` that says which feature to enable), so they need no
 # `[[example]]` entry here and still build under `mise run compile-features`.
@@ -51,6 +56,8 @@ _transfer = []
 # optional dependencies go in its own block below, enabled with `dep:` from its feature.
 [dependencies]
 rune.workspace = true
+
+# Shared by two or more shims: optional, enabled with `dep:` from each feature that uses it.
 
 # dnd (P1)
 

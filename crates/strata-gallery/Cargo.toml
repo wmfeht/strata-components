@@ -17,5 +17,17 @@ strata-components.workspace = true
 png.workspace = true
 serde_json.workspace = true
 
+# The integration demos (examples/), one block each. Keep the blank lines: git conflicts when
+# two branches edit neighbouring lines. A crate two demos need, strata-platform with their
+# features included, moves to the shared block and appears only once.
+
+# Shared by two or more demos.
+
+# X1 shell demo: examples/shell.rs
+
+# X2 drag-and-drop demo: examples/dnd.rs
+
+# X3 clipboard demo: examples/clipboard.rs
+
 [lints]
 workspace = true

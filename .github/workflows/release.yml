@@ -23,7 +23,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-${{ inputs.tag || github.ref }}
+  group: release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 env:
@@ -60,9 +60,10 @@ jobs:
         run: |
           set -euo pipefail
           semver='(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?'
-          re="^${TAG_PREFIX}(${semver})\+rune\.([0-9a-f]{7,40})$"
+          re="^${TAG_PREFIX}(${semver})\+rune\.([0-9a-f]{7})$"
+          # A manual run's tag is free text: don't print it until it matches.
           if [[ ! "$TAG" =~ $re ]]; then
-            echo "::error::'$TAG' isn't ${TAG_PREFIX}<semver>+rune.<rev>, e.g. ${TAG_PREFIX}0.1.0+rune.78d22ed"
+            echo "::error::the tag isn't ${TAG_PREFIX}<semver>+rune.<7 hex digits>, e.g. ${TAG_PREFIX}0.1.0+rune.78d22ed"
             exit 1
           fi
           version="${BASH_REMATCH[1]}"
@@ -91,7 +92,8 @@ jobs:
             exit 1
           fi
 
-      # Every Rune crate pins one full rev (AGENTS.md), and the tag names its first digits.
+      # Every Rune crate pins one full rev (AGENTS.md), and the tag names its first digits. A
+      # branch or tag pin, or a short rev, would let the build drift from what the tag says.
       - name: Check the Rune rev
         id: rune
         env:
@@ -99,18 +101,36 @@ jobs:
         run: |
           set -euo pipefail
           rev=$(python3 - <<'PY'
-          import os, re, sys
-          git = re.escape(os.environ["RUNE_GIT"])
-          lock = open("Cargo.lock").read()
-          pins = set(re.findall(r'source = "git\+' + git + r'\?rev=([0-9a-f]+)#([0-9a-f]{40})"', lock))
-          revs = {exact for _, exact in pins}
-          if len(revs) != 1 or any(asked != exact for asked, exact in pins):
-              sys.exit(f"::error::Cargo.lock must pin every Rune crate to one full rev, found {sorted(pins)}")
+          import glob, os, re, sys, tomllib
+          git = os.environ["RUNE_GIT"]
+          sources = re.findall(r'^source = "git\+' + re.escape(git) + r'([^"]*)"$', open("Cargo.lock").read(), re.M)
+          if not sources:
+              sys.exit("::error::Cargo.lock has no Rune package")
+          revs = set()
+          for rest in sources:
+              m = re.fullmatch(r"\?rev=([0-9a-f]{40})#([0-9a-f]{40})", rest)
+              if not m or m.group(1) != m.group(2):
+                  sys.exit(f"::error::Cargo.lock pins Rune as '{rest}', not ?rev=<40 hex>#<the same>")
+              revs.add(m.group(1))
+          if len(revs) != 1:
+              sys.exit(f"::error::Cargo.lock pins Rune at more than one rev: {sorted(revs)}")
           rev = revs.pop()
-          manifest = open("Cargo.toml").read()
-          asked = set(re.findall(r'git = "' + git + r'", rev = "([0-9a-f]+)"', manifest))
-          if asked != {rev}:
-              sys.exit(f"::error::Cargo.toml's Rune revs {sorted(asked)} don't match Cargo.lock's {rev}")
+
+          def deps(table):
+              for key in ("dependencies", "dev-dependencies", "build-dependencies"):
+                  yield from (table.get(key) or {}).items()
+              for target in (table.get("target") or {}).values():
+                  yield from deps(target)
+
+          for path in ["Cargo.toml", *sorted(glob.glob("crates/*/Cargo.toml"))]:
+              manifest = tomllib.load(open(path, "rb"))
+              found = list(deps(manifest)) + list(deps(manifest.get("workspace") or {}))
+              for name, spec in found:
+                  if not isinstance(spec, dict) or spec.get("git") != git:
+                      continue
+                  pin = {k: spec[k] for k in ("rev", "branch", "tag") if k in spec}
+                  if list(pin) != ["rev"] or pin["rev"] != rev:
+                      sys.exit(f"::error::{path}: {name} pins Rune by {pin or 'nothing'}; it needs rev = \"{rev}\"")
           print(rev)
           PY
           )
@@ -216,11 +236,12 @@ jobs:
 
       # Rune links libwayland-client and libxkbcommon. mesa-vulkan-drivers is lavapipe, the
       # software Vulkan the PNG goldens and scripts render on (docs/testing.md).
+      # strata-platform's glib-bridge feature links GLib and GIO (glib-sys, gio-sys).
       - name: Install system libraries
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libwayland-dev libxkbcommon-dev mesa-vulkan-drivers
+            libglib2.0-dev libwayland-dev libxkbcommon-dev mesa-vulkan-drivers
 
       - name: Install the pinned toolchain
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7

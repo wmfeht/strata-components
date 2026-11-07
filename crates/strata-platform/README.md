@@ -51,7 +51,7 @@ digits of the Rune rev the release supports. Pin the tag, and pin Rune at that s
 ```toml
 [dependencies]
 rune = { git = "https://github.com/anomalyco/rune", rev = "78d22ed8eef60d76ac3f322ffc5883f3fcbc57f5" }
-strata-platform = { git = "https://github.com/wmfeht/strata-components", tag = "strata-platform-v0.1.0+rune.78d22ed", features = ["csd", "settings"] }
+strata-platform = { git = "https://github.com/wmfeht/strata-components", tag = "strata-platform-v0.1.0+rune.78d22ed", features = ["glib-bridge"] }
 ```
 
 The tag shown is an example; take a real one from [Supported Rune revs](#supported-rune-revs).

@@ -1,0 +1,16 @@
+# The Ubuntu packages .github/workflows/platform.yml installs for `mise run test-platform`.
+# One package per line; `#` starts a comment. A work package that needs more (a portal, python3-gi
+# for a fake service) adds its own block below. Keep the blank lines between blocks.
+
+# W3: Rune's build (Wayland, xkbcommon), the session (sway, Xwayland, a bus, dbus-send for the
+# bus test), lavapipe, and the X11 keyboard library a windowed Rune app loads.
+libwayland-dev
+libxkbcommon-dev
+libxkbcommon-x11-0
+xkb-data
+sway
+xwayland
+dbus-daemon
+dbus-bin
+mesa-vulkan-drivers
+libvulkan1

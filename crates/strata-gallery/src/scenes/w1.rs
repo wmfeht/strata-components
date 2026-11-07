@@ -121,7 +121,7 @@ pub fn view(g: &Gallery, _cx: &mut Cx<Gallery>) -> El {
             .font(kit.ty.ui_compact)
             .key(format!("w1-matched-{}", c.id))
             .truncate(c.narrow)
-            .build(&kit);
+            .build(kit);
         row()
             .gap(16.0)
             .child(

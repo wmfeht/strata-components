@@ -9,7 +9,7 @@ them without touching another's files. The plan's testing rules are in
 The gallery (`crates/strata-gallery`) has an index and one page per component, plus a page
 for each contract or look work package that shows something (W1, W2, K1–K4, C10a). The
 registry in `src/scenes/mod.rs` declares every page. A work package edits only its own
-`src/scenes/<id>.rs`, which provides four items:
+`src/scenes/<id>.rs`, which provides six items:
 
 | Item | What it is |
 | --- | --- |
@@ -17,6 +17,8 @@ registry in `src/scenes/mod.rs` declares every page. A work package edits only i
 | `SCENES` | Golden scenes: each gets an accessibility golden and a PNG golden |
 | `REVIEW` | Scenes for review with `--scene` only, kept out of the goldens |
 | `view` | The page's view, `fn(&Gallery, &mut Cx<Gallery>) -> El` |
+| `on_key` | `AppSpec::on_key` for the page: keys no focused element took. True consumes the key. |
+| `poll` | `AppSpec::poll` for the page: runs every frame while it is open. True when state changed. |
 
 Page ids are the component ids (`c1`, `c14a`, `c20b`) or the work package ids (`w2`, `k3`,
 `c10a`). The index's id is `gallery`.
@@ -33,6 +35,32 @@ Scene rules, which `tests/goldens/registry.rs` enforces:
 Fake data is generated in the page file or in the component's own test fixtures. Pages never
 wait on Strata's workers or on platform shims.
 
+### Keys, polls and async results
+
+The app's hooks (`strata_gallery::spec`) route to the open page, in a window and in headless
+`--snap` and `--script` runs alike:
+
+- **Keys.** An element's own `on_key` hears keys only while it has focus. Everything else
+  (shortcuts such as Ctrl+L, and keys with nothing focused) reaches the page's `on_key`
+  first. Only a key it leaves falls back to the gallery: Escape on a page goes back to the
+  index. So a page that uses Escape (cancel a marquee, stop an autoscroll) returns true for
+  it.
+- **Polls.** The open page's `poll` runs at the start of every frame, with the clock in
+  seconds: virtual in tests and headless runs. Use it to deliver fake async results
+  (completions, highlighted lines, thumbnails, progress), and return true when state changed.
+- **Waker.** `Gallery::waker` wakes the app loop from another thread so the page's `poll` runs.
+  A fake worker on a real thread calls it after it hands over a result. In tests it is a no-op.
+
+Golden scenes must render the same every run. The in-process mount (`strata_gallery::runtime`)
+runs the page's `poll` on every frame while it settles, so results that `poll` derives from
+the clock or from state the scene set up are in the golden. A result that arrives from a real
+thread is not: a golden scene pre-fills that state, and a script waits for it on the virtual
+clock only when `poll` produces it.
+
+Test a page's keys by mounting its scene with `strata_gallery::runtime`, sending keys with
+`Runtime::key` and reading the state, or with a script. `tests/goldens/keys.rs` shows the
+routing itself: a page hook that takes Escape keeps the page open.
+
 Open the gallery with `mise run gallery`. A row on the index opens its page, and Escape
 returns to the index. `mise run gallery -- --scene c1-ten-rows-dark` opens one scene, and
 `-- --list-scenes` lists them all.
@@ -40,17 +68,21 @@ returns to the index. `mise run gallery -- --scene c1-ten-rows-dark` opens one s
 ## Goldens
 
 ```
-tests/golden/a11y/<id>/<scene>.json      accessibility tree, without bounds, scroll, selection and shortcut
+tests/golden/a11y/<id>/<scene>.json      the accessibility tree, stripped (below)
 tests/golden/png/<id>/<scene>.png        the scene rendered headless at --scale 1, 960×640
-tests/golden/scripts/<id>/<script>.json  the accessibility tree a script ends on, stripped the same way
+tests/golden/scripts/<id>/<script>.json  the accessibility tree a script ends on, stripped
 tests/scripts/<id>/<script>.json         the scripts
 ```
+
+Stripped trees leave out bounds, scroll offsets, text selection and shortcuts: layout and
+per-platform spelling, not semantics.
 
 Each page gets three tests in `crates/strata-gallery/tests/goldens/`: `<id>::a11y`,
 `<id>::png` and `<id>::scripts`. A page with no scenes or scripts passes them trivially.
 
 - A golden with no scene or script behind it fails the test. Rename or remove a scene, then
-  bless the page, and the stale golden is deleted.
+  bless the page, and the stale golden is deleted. A directory inside a page's golden folder
+  also fails.
 - A failure lists every differing item with the golden's path and a fresh copy under
   `target/tmp/goldens/<kind>/<id>/`. For a PNG it also writes `<scene>-diff.png`: each pixel's
   largest channel difference, times 4, in red.
@@ -62,11 +94,14 @@ threshold of rune-kit's gallery diff (`scripts/kit-diff.py` at the pinned Rune r
 pixel is allowed (`MAX_OFF_PIXELS = 0` in `tests/goldens/png.rs`). Blessing keeps a PNG golden
 that still matches within the tolerance, so a render on another machine doesn't churn it.
 
-PNG goldens and scripts render through the gallery binary headless, so they need a Vulkan adapter but
-never the desktop display. The harness picks the adapter in this order:
+PNG goldens and scripts render through the gallery binary headless. They need a Vulkan
+adapter, never the desktop display: the binary runs with `DISPLAY` unset and `WAYLAND_DISPLAY`
+set to a socket that doesn't exist (`mise run test` and `bless` do the same), so libwayland
+can't fall back to `wayland-0`. The harness picks the adapter in this order:
 
 1. the ICD file named by `STRATA_VK_ICD`;
-2. lavapipe (`/usr/share/vulkan/icd.d/lvp_icd*.json`), when installed;
+2. lavapipe for this architecture (`/usr/share/vulkan/icd.d/lvp_icd.x86_64.json`, say), then
+   `lvp_icd.json`, then every other `lvp_icd*.json` found, joined with `:`;
 3. the default adapter.
 
 CI renders on lavapipe (`mesa-vulkan-drivers`). A golden blessed on a hardware GPU (NVIDIA,
@@ -111,10 +146,12 @@ Any other key is an error, so typos fail. The runner starts the gallery headless
 - an `expect` entry doesn't hold, in bless mode too;
 - the accessibility tree the script ends on differs from its golden.
 
-Run one by hand with `mise run gallery -- --scene <scene> --script tests/scripts/<id>/<name>.json`,
-adding `--snap out.png` or `--tree tree.json` to see where it ends.
+Run one by hand with
+`mise run gallery -- --scene <scene> --script tests/scripts/<id>/<name>.json`, adding
+`--snap out.png` or `--tree tree.json` to see where it ends.
 
-Name scripts after the behavior group they check (`stem-selection.json`, `commit-and-cancel.json`).
+Name scripts after the behavior group they check, in lowercase kebab case
+(`stem-selection.json`, `commit-and-cancel.json`).
 
 ## Running and blessing
 
@@ -139,8 +176,17 @@ worktree.
 
 `RUNE_BLESS=1` turns blessing on, as in Rune. `STRATA_BLESS` narrows it to a page id, a scene
 name or `<id>/<script>`. While blessing, the harness skips every other item: it neither compares
-nor writes it. `mise run bless <filter>` sets both and passes the cargo filter `<id>::`. After
-blessing, run `mise run test` and review every golden diff (look at each PNG) before you commit.
+nor writes it. `mise run bless <filter>` sets both and passes the cargo filters `<id>::` and
+`registry::bless_filter_names_a_page_scene_or_script`.
+
+- The filter must be lowercase (`a-z`, `0-9`, `-`, `_`, `/`); the task rejects anything else.
+- A filter that names no page, no golden scene of its page or no script of its page fails the
+  run, so a typo never passes by blessing nothing. Review scenes have no goldens, so their
+  names fail too.
+- A script whose `expect` entries fail is never blessed.
+
+After blessing, run `mise run test` and review every golden diff (look at each PNG) before you
+commit.
 
 ## strata-platform features
 
@@ -149,6 +195,11 @@ alone, so no shim leans on another's dependencies. `mise run check` and CI run i
 
 - Each shim's feature and its optional dependencies have their own block in
   `crates/strata-platform/Cargo.toml`. Fill in only your own.
+- A crate appears once in `[dependencies]`. If another shim's block already declares a
+  dependency you need (zbus for P5 and P8, say), move it to the shared block at the top of
+  `[dependencies]`, keep it `optional = true`, and enable it with `dep:<name>` from each feature
+  that uses it. Two blocks that each declare it merge cleanly in git but make the manifest
+  invalid.
 - `_transfer` is internal: P0's substrate, enabled by `dnd`, `clipboard` and `foreign-parent`.
 - An example gates its own body on its feature, so it needs no `[[example]]` entry and builds
   in every feature combination:
@@ -167,7 +218,9 @@ alone, so no shim leans on another's dependencies. `mise run check` and CI run i
 
 Git conflicts when two branches change neighbouring lines. W0 separates the lines that
 different work packages edit with a blank line or a comment: the strata-platform features and
-dependency blocks are laid out this way. Keep those separators. Lists without them, such as
+dependency blocks, and the gallery's demo dev-dependency blocks (X1, X2, X3, plus a shared
+block for a crate two demos need, such as strata-platform with their features), are laid out
+this way. Keep those separators. Lists without them, such as
 `[workspace.dependencies]` and a crate's `[dependencies]`, can still conflict when two branches
 add neighbouring entries. Resolve those on rebase. For `Cargo.lock`, take `main`'s copy and run
 `cargo check` to regenerate it ([shared files](work/README.md#shared-files)).

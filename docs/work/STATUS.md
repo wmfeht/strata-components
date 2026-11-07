@@ -6,7 +6,7 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | --- | --- | --- | --- |
 | W0 | merged | 3 review rounds; png dev-dep approved; PNG goldens blessed on NVIDIA (lavapipe/CI pending) | d4bcd36 |
 | W1 | planning |  |  |
-| W2 | merged | 1 review round + fixes; row.sidebar/row.palette estimates for K2 to confirm; token-name review by K1/K2/C1e owners pending; PNGs on NVIDIA | 341e8cb |
+| W2 | merged | 1 review round + fixes; row.sidebar/row.palette estimates for K2 to confirm; token-name review by K1/K2/C1e owners pending; PNG goldens on NVIDIA | 341e8cb |
 | W3 | planning |  |  |
 | S1 | merged | P3: X11 shim conditional on mutter/KWin hand test; Wayland resize/menu blocked on Rune (R1-R3, R7); Hyprland/GNOME/KDE/lavapipe hand test pending | c5794e1 |
 | S2 | review 2 (fixing B1 surface lifetime) | P0 feasible w/o Rune patch on libwayland>=1.23 (Ubuntu 24.04 is 1.22); stuck pointer capture needs Rune R5; Hyprland/GNOME/KDE/Dolphin hand test pending | |
@@ -15,7 +15,7 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | S5 | waiting | | |
 | C10a | waiting | | |
 | C14a | ready | | |
-| C15 | ready | | |
+| C15 | planning | | |
 | C1a | waiting | | |
 | C20a | ready | | |
 | C20b | ready | | |

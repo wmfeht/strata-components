@@ -17,7 +17,7 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | C10a | waiting | | |
 | C14a | ready | | |
 | C15 | merged | built on Rune primitives (deviation from WP doc); 6 bullets Strata policy, O6/F13/K6 partial gaps (Rune drafts); PNG goldens on NVIDIA | b38d879 |
-| C1a | review 2 (final fixes) | plan restarted after W1b; selection as id set + index overlay (100k in <1 ms) | |
+| C1a | merged | 2 review rounds; select_all 149 us / Shift range 148 us at 100k (release, local only); hosts call before_removal + sync | b8c3b8c |
 | C20a | ready | | |
 | C20b | ready | | |
 | C20c | ready | | |
@@ -29,10 +29,10 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | C5 | ready | | |
 | C6 | ready | | |
 | C7 | ready | | |
-| C8 | ready | | |
+| C8 | planning | | |
 | C9 | coding | own split + DrawerState (not SplitView); HostedPreview trait for C10–C14; focus via focus_return stubs | |
 | K1 | ready | | |
-| K2 | planning | | |
+| K2 | coding | real Strata values (upstream/main 35ee677ab); W2 fallback fix follows as W2b; font list arrives as data | |
 | K3 | ready | | |
 | K4 | ready | | |
 | P0 | waiting | | |
@@ -48,12 +48,12 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | C13 | waiting | | |
 | C16 | ready | | |
 | C17 | ready | | |
-| C18 | waiting | | |
+| C18 | ready | | |
 | C19 | ready | | |
-| C1b | waiting | | |
-| C1c | waiting | | |
-| C1d | waiting | | |
-| C1e | waiting | | |
+| C1b | ready | | |
+| C1c | ready | | |
+| C1d | ready | | |
+| C1e | ready | | |
 | C26 | waiting | | |
 | P1 | waiting | | |
 | P2 | waiting | | |

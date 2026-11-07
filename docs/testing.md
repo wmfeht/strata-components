@@ -276,3 +276,100 @@ this way. Keep those separators. Lists without them, such as
 `[workspace.dependencies]` and a crate's `[dependencies]`, can still conflict when two branches
 add neighbouring entries. Resolve those on rebase. For `Cargo.lock`, take `main`'s copy and run
 `cargo check` to regenerate it ([shared files](work/README.md#shared-files)).
+
+## Compositor and D-Bus tests
+
+strata-platform's shims run against a real compositor and a real session bus. W3's harness
+(`crates/strata-platform/tests/support/`) gives each test a private session of its own:
+
+- a session bus: a `dbus-daemon` whose only service directory is the session's;
+- a nested headless sway (`WLR_BACKENDS=headless`), with Xwayland;
+- an input peer: a virtual pointer and keyboard (a headless seat has neither, so without them
+  no client gets pointer events or keyboard focus);
+- a private `XDG_RUNTIME_DIR` and home, removed on teardown. Logs stay in
+  `target/tmp/session/<test>/`.
+
+Every process starts with an environment built from nothing, so none can reach the desktop's
+display, bus or runtime directory.
+
+### Running them
+
+| Command | Runs |
+| --- | --- |
+| `mise run test-platform` | Every session test |
+| `mise run test-platform p2::` | One work package's |
+
+The task builds the peer and strata-platform's examples, then runs the `#[ignore]`d tests of
+`crates/strata-platform/tests/session/`. `mise run test` and `check` never start a session.
+
+| Variable | Effect |
+| --- | --- |
+| `STRATA_VK_ICD` | The Vulkan ICD clients use. Without it, lavapipe where installed, else the default driver. |
+| `STRATA_WLR_RENDERER` | sway's renderer. Without it: pixman when the ICD is lavapipe (CI's path, no GPU), else gles2. A hardware Vulkan driver presents through `linux-dmabuf`, which pixman doesn't offer. |
+| `STRATA_TEST_TIMEOUT_SCALE` | Multiplies every wait (10 s). CI sets 3. |
+| `STRATA_SWAY_DEBUG=1` | sway's debug log in `sway.log` |
+| `STRATA_TEST_PEER` | The peer binary, instead of `target/<profile>/strata-test-peer` |
+
+CI runs them in `.github/workflows/platform.yml` on Ubuntu 24.04 (sway 1.9), with the packages
+in `crates/strata-platform/tests/support/packages.txt`. A work package that needs another
+package adds its own block there.
+
+### Writing one
+
+The tests are one binary: `tests/session/main.rs` declares a module per work package
+(`w3`, `p0`–`p5`, `p8`), gated on the package's feature. Write yours in
+`tests/session/<id>.rs`; don't edit `main.rs`. Mark each test
+`#[ignore = "needs a private session: mise run test-platform"]`.
+
+```rust
+let s = Session::start();
+let cmd = s.command(example("csd"), Display::X11);
+let app = s.spawn("csd", cmd);
+app.wait_json("ready", |v| v["ev"] == "ready");
+let window = s.wait_window(app.pid());
+s.input().click_at(window.at(0.5, 0.5));
+```
+
+| Call | Does |
+| --- | --- |
+| `Session::start()`, `Session::with(Options { .. })` | A session. `compositor: false` gives the bus alone (P5, P8). |
+| `s.command(program, Display::Wayland \| X11 \| None)` | A `Command` with the session's environment |
+| `s.spawn(name, cmd)` | Starts it: stdout kept line by line, both streams logged, killed on drop |
+| `example(name)` | `target/<profile>/examples/<name>` |
+| `s.wait_window(pid)`, `s.wait_windows(&[pids])`, `s.focus(&window)` | sway's tree: a window, windows tiled apart, keyboard focus |
+| `s.input()` | The virtual pointer and keyboard: `click_at`, `pointer_move`, `button`, `path`, `key("ctrl+c")` |
+| `s.peer(display)` | A peer process ([below](#the-peer)) |
+| `s.bus()` | The bus's `address()`, and `service_dir()` for `.service` files |
+
+### The peer
+
+`strata-test-peer` (`tests/support/strata-test-peer/`) is the second process, as Strata's
+`tests/qa/foreign_drag_source.py` is: raw `wayland-client` on Wayland and `x11rb` on X11. It
+sets and reads selections (`wl_data_device`, data control, X11 `CLIPBOARD` and `PRIMARY`, with
+INCR), drags and accepts drops (Wayland and XDND), exports its window, and drives the virtual
+devices. Tests drive it with typed calls (`set_selection`, `read`, `drag_start`,
+`accept_drops`, `export`, `wait_event`) over JSON lines. Its `protocol` module documents them.
+
+### Traps
+
+- **Wait for the layout before input.** On X11 a window maps at its own size and sway tiles it
+  after. Input sent before the app lays out again can land outside its old size. The
+  harness's example logs `layout`; W3's tests wait until it matches sway's size.
+- **Map X11 windows one at a time.** Wait for each in sway's tree before mapping the next. Two
+  X windows mapped within a few milliseconds can leave one never mapped in sway (seen with sway
+  1.12 and wlroots 0.20; one X window, or two 300 ms apart, never failed).
+- **Sync clients after a relayout.** A new window re-tiles the others. `wait_windows` waits for
+  sway's tree, and a peer's `sync()` makes sure it has drawn at its new size.
+- **Focus needs the keyboard.** `wl_data_device.set_selection` needs keyboard focus on the
+  peer's window (`s.focus`); data control needs none.
+- **Floating windows.** `floating enable, resize set` didn't always reach a peer as a configure,
+  and its old, larger surface then covered the window under it. W3's tests stay tiled.
+- sway launches as `setpriv --no-new-privs sway --unsupported-gpu`. The first works around a
+  `cap_sys_nice` sway under a zero `RLIMIT_RTTIME`; the second lets sway 1.9 start on a
+  host with NVIDIA's kernel module.
+
+### Testing internal modules
+
+A session test can only spawn binaries and call strata-platform's public API, and P0's
+`transfer` module is private. How P0 reaches it under a session (a `#[doc(hidden)]` seam, an
+example behind a feature, or tests through P1's and P2's public APIs) is P0's decision.

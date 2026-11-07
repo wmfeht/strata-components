@@ -153,3 +153,31 @@ fn bless_filters_name_a_page_a_scene_or_a_script() {
     assert!(!support::blessing(None, None, "c1", "c1-empty-dark"));
     assert!(!support::blessing(Some("0"), None, "c1", "c1-empty-dark"));
 }
+
+/// `mise run bless <filter>` always runs this, so a filter that names no page, golden scene or
+/// script fails instead of blessing nothing.
+#[test]
+fn bless_filter_names_a_page_scene_or_script() {
+    let blessing = std::env::var("RUNE_BLESS").is_ok_and(|v| v != "0");
+    let filter = std::env::var("STRATA_BLESS").unwrap_or_default();
+    if blessing && !filter.trim().is_empty() {
+        support::filter_target(filter.trim(), support::script_stems)
+            .unwrap_or_else(|e| panic!("{e}"));
+    }
+}
+
+#[test]
+fn a_bless_filter_must_name_something_that_exists() {
+    let scripts = |id: &str| match id {
+        "c5" => vec!["stem-selection".to_owned()],
+        _ => Vec::new(),
+    };
+    assert!(support::filter_target("gallery", scripts).is_ok());
+    assert!(support::filter_target("c1", scripts).is_ok());
+    assert!(support::filter_target("gallery-index-dark", scripts).is_ok());
+    assert!(support::filter_target("c5/stem-selection", scripts).is_ok());
+    assert!(support::filter_target("c99", scripts).is_err());
+    assert!(support::filter_target("gallery-index-dim", scripts).is_err());
+    assert!(support::filter_target("c1-empty-dark", scripts).is_err());
+    assert!(support::filter_target("c5/commit", scripts).is_err());
+}

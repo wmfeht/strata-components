@@ -2,13 +2,14 @@
 //! accessibility tree, a headless runtime per scene, and the gallery binary run headless.
 
 use std::collections::BTreeSet;
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use rune::{Env, Runtime};
 use serde_json::Value;
+use strata_gallery::Gallery;
 use strata_gallery::scenes::{self, Page};
-use strata_gallery::{Gallery, SIZE, view};
 
 /// The repository root.
 pub fn repo() -> PathBuf {
@@ -53,6 +54,45 @@ pub fn blessing(rune_bless: Option<&str>, filter: Option<&str>, id: &str, name: 
     }
 }
 
+/// What a bless filter names, or why it names nothing. `scripts` lists a page's script stems.
+pub fn filter_target(filter: &str, scripts: impl Fn(&str) -> Vec<String>) -> Result<(), String> {
+    let id_of = |f: &str| f.split(['-', '/']).next().unwrap_or_default().to_owned();
+    let id = id_of(filter);
+    let Some(page) = scenes::find(&id) else {
+        return Err(format!("bless filter {filter:?}: no gallery page {id:?}"));
+    };
+    if filter == page.id {
+        return Ok(());
+    }
+    if let Some(stem) = filter.strip_prefix(&format!("{id}/")) {
+        return match scripts(&id).iter().any(|s| s == stem) {
+            true => Ok(()),
+            false => Err(format!(
+                "bless filter {filter:?}: page {id} has no script {stem:?}"
+            )),
+        };
+    }
+    match page.scenes.iter().any(|(n, _)| *n == filter) {
+        true => Ok(()),
+        false => Err(format!(
+            "bless filter {filter:?}: page {id} has no golden scene by that name (review scenes \
+             have no goldens)"
+        )),
+    }
+}
+
+/// The stems of `tests/scripts/<id>/*.json`.
+pub fn script_stems(id: &str) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(scripts_dir(id)) else {
+        return Vec::new();
+    };
+    entries
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|e| e == "json"))
+        .filter_map(|p| p.file_stem().and_then(|s| s.to_str()).map(str::to_owned))
+        .collect()
+}
+
 fn bless_on(rune_bless: Option<&str>) -> bool {
     rune_bless.is_some_and(|v| v != "0")
 }
@@ -94,12 +134,13 @@ pub fn pretty(v: &Value) -> String {
     serde_json::to_string_pretty(v).expect("JSON serializes") + "\n"
 }
 
-/// The gallery in `scene`, laid out and settled on the virtual clock.
+/// The gallery in `scene`, laid out and settled on the virtual clock, with the app's hooks: the
+/// open page's `poll` runs on every frame, as in the binary.
 pub fn mount(scene: fn(&mut Gallery)) -> Runtime<Gallery> {
     let mut gallery = Gallery::default();
     scene(&mut gallery);
     let env = Env::new(gallery.dark, 1.0);
-    let mut rt = Runtime::new(gallery, view, SIZE, env);
+    let mut rt = strata_gallery::runtime(gallery, env);
     rt.frame(0.0);
     rt.settle_all();
     rt.frame(1.0 / 60.0);
@@ -113,13 +154,18 @@ pub fn is_dark(scene: fn(&mut Gallery)) -> bool {
     g.dark
 }
 
-/// The gallery binary, headless: no desktop display, and Rune's GPU line on stderr. It renders
-/// on lavapipe when `STRATA_VK_ICD` names an ICD file or a lavapipe ICD is installed, so local
-/// renders match CI's; otherwise on the default adapter.
+/// A Wayland socket name that never exists. Children get it instead of the session's, so
+/// libwayland can't fall back to `wayland-0` and reach the desktop.
+pub const NO_WAYLAND: &str = "strata-test-no-wayland";
+
+/// The gallery binary, headless: no X display, a Wayland socket that doesn't exist, and Rune's
+/// GPU line on stderr. It renders on lavapipe when `STRATA_VK_ICD` names an ICD file or a
+/// lavapipe ICD is installed, so local renders match CI's; otherwise on the default adapter.
 pub fn gallery() -> Command {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_strata-gallery"));
     cmd.env_remove("DISPLAY")
-        .env_remove("WAYLAND_DISPLAY")
+        .env_remove("WAYLAND_SOCKET")
+        .env("WAYLAND_DISPLAY", NO_WAYLAND)
         .env("RUNE_GPU_LOG", "1");
     if let Some(icd) = vulkan_icd() {
         cmd.env("VK_ICD_FILENAMES", icd);
@@ -127,11 +173,20 @@ pub fn gallery() -> Command {
     cmd
 }
 
-fn vulkan_icd() -> Option<PathBuf> {
+/// `STRATA_VK_ICD`, else lavapipe's ICD for this architecture (`lvp_icd.x86_64.json`), else
+/// `lvp_icd.json`, else every lavapipe ICD found, joined with `:` for the loader to choose.
+fn vulkan_icd() -> Option<OsString> {
     if let Some(icd) = std::env::var_os("STRATA_VK_ICD").filter(|v| !v.is_empty()) {
-        return Some(icd.into());
+        return Some(icd);
     }
     let dir = Path::new("/usr/share/vulkan/icd.d");
+    let preferred = [
+        format!("lvp_icd.{}.json", std::env::consts::ARCH),
+        "lvp_icd.json".to_owned(),
+    ];
+    if let Some(icd) = preferred.iter().map(|n| dir.join(n)).find(|p| p.is_file()) {
+        return Some(icd.into_os_string());
+    }
     let mut lavapipe: Vec<PathBuf> = std::fs::read_dir(dir)
         .ok()?
         .filter_map(|e| e.ok().map(|e| e.path()))
@@ -142,7 +197,9 @@ fn vulkan_icd() -> Option<PathBuf> {
         })
         .collect();
     lavapipe.sort();
-    lavapipe.into_iter().next()
+    std::env::join_paths(lavapipe)
+        .ok()
+        .filter(|joined| !joined.is_empty())
 }
 
 /// Runs `cmd`; its stderr on success, or a description of the failure.
@@ -224,7 +281,7 @@ pub fn write(path: &Path, bytes: &[u8]) {
 }
 
 /// Goldens in `tests/golden/<kind>/<id>/` with no item behind them fail when comparing, and
-/// are deleted when blessing the whole page.
+/// are deleted when blessing the whole page. A directory there is always a failure.
 pub fn orphans(
     kind: &str,
     id: &str,
@@ -236,24 +293,36 @@ pub fn orphans(
     let Ok(entries) = std::fs::read_dir(&dir) else {
         return;
     };
+    let page_mode = mode(id, id);
     for entry in entries {
         let path = entry.expect("golden directory entry").path();
+        if page_mode == Mode::Skip {
+            continue;
+        }
+        if path.is_dir() {
+            failures.push(format!(
+                "{kind}: {} is a directory; goldens are files directly in {}",
+                path.display(),
+                dir.display()
+            ));
+            continue;
+        }
         let stem = path
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or_default()
             .to_owned();
-        let known = path.extension().is_some_and(|e| e == ext) && expected.contains(&stem);
-        if known {
+        if path.extension().is_some_and(|e| e == ext) && expected.contains(&stem) {
             continue;
         }
-        match mode(id, id) {
-            Mode::Compare => failures.push(format!(
-                "{kind}: {} has no scene or script behind it; remove it or run `mise run bless {id}`",
+        if page_mode == Mode::Bless {
+            std::fs::remove_file(&path).expect("stale golden removed");
+        } else {
+            failures.push(format!(
+                "{kind}: {} has no scene or script behind it; remove it, or run \
+                 `mise run bless {id}`",
                 path.display()
-            )),
-            Mode::Bless => std::fs::remove_file(&path).expect("stale golden removed"),
-            Mode::Skip => {}
+            ));
         }
     }
 }

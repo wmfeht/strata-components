@@ -291,7 +291,11 @@ fn index() -> &'static Page {
 }
 
 fn manifest(bullets: Value) -> Value {
-    json!({"bullets": bullets, "scene": "gallery-index-light", "events": [{"t": 0.1, "type": "tap", "key": "title"}]})
+    json!({
+        "bullets": bullets,
+        "scene": "gallery-index-light",
+        "events": [{"t": 0.1, "type": "tap", "key": "title"}],
+    })
 }
 
 #[test]

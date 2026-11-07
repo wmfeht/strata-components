@@ -9,7 +9,7 @@ meant to compile or run: they only need to look like real source to a highlighte
 | `c-50k.c` | 50,000 | Preprocessor conditionals and guards, line-continued macros, multi-line and Doxygen comments, structs with bitfields and unions, function-pointer tables, string and char escapes |
 | `js-50k.js` | 50,000 | ES modules, classes with private and static fields, arrow and async functions, template literals with nested `${}`, tagged templates, regex literals, a few lines of about 2 KB |
 | `python-50k.py` | 50,000 | Decorators, dataclasses, type hints, triple-quoted strings and docstrings, f-strings with format specs, comprehensions, `async`, `match` |
-| `markdown-50k.md` | 50,000 | Headings, lists, tables, links, images, quotes, inline HTML, and fenced code blocks (Rust, C, JS, Python, shell, JSON, YAML) on about a third of the lines |
+| `markdown-50k.md` | 50,000 | Headings, lists, tables, links, images, quotes, inline HTML, and fenced code blocks (Rust, C, JS, Python, shell, JSON, YAML). About 55 % of the lines are inside fences (62 % counting the fence lines), so this is a code-heavy, high-end case. Two lines of about 2 KB come from the JavaScript template |
 | `shell-5k.sh` | 5,000 | A `#!/usr/bin/env bash` script with functions, `case`, arrays, nested `$(…)` and quoting, heredocs and `[[ ]]`, for the editable-view tests |
 
 Every file uses LF line endings and ends with a newline.

@@ -6,41 +6,41 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | --- | --- | --- | --- |
 | W0 | merged | 3 review rounds; png dev-dep approved; PNG goldens blessed on NVIDIA (lavapipe/CI pending) | d4bcd36 |
 | W1 | planning |  |  |
-| W2 | coding | Look + token registry + slots + IconName; snake_case names; seeds list/sidebar/tabs row tokens | |
+| W2 | merged | 1 review round + fixes; row.sidebar/row.palette estimates for K2 to confirm; token-name review by K1/K2/C1e owners pending; PNGs on NVIDIA | 341e8cb |
 | W3 | planning |  |  |
 | S1 | merged | P3: X11 shim conditional on mutter/KWin hand test; Wayland resize/menu blocked on Rune (R1-R3, R7); Hyprland/GNOME/KDE/lavapipe hand test pending | c5794e1 |
-| S2 | review 1 | P0 feasible w/o Rune patch on libwayland>=1.23 (Ubuntu 24.04 is 1.22); stuck pointer capture needs Rune R5; Hyprland/GNOME/KDE/Dolphin hand test pending | |
+| S2 | review 2 (fixing B1 surface lifetime) | P0 feasible w/o Rune patch on libwayland>=1.23 (Ubuntu 24.04 is 1.22); stuck pointer capture needs Rune R5; Hyprland/GNOME/KDE/Dolphin hand test pending | |
 | S3 | merged | sway Wayland/X11 measured; Hyprland/GNOME/KDE/Firefox hand test pending (QEMU Tier B not run); 3 owner decisions | f5682e4 |
 | S4 | coding | fancy-regex vs onig; fixtures under tests/fixtures/code | |
 | S5 | waiting | | |
 | C10a | waiting | | |
-| C14a | waiting | | |
-| C15 | waiting | | |
+| C14a | ready | | |
+| C15 | ready | | |
 | C1a | waiting | | |
-| C20a | waiting | | |
-| C20b | waiting | | |
+| C20a | ready | | |
+| C20b | ready | | |
 | C20c | waiting | | |
 | C21 | waiting | | |
 | C22 | waiting | | |
-| C23 | waiting | | |
-| C24 | waiting | | |
+| C23 | ready | | |
+| C24 | ready | | |
 | C25 | waiting | | |
 | C5 | waiting | | |
 | C6 | waiting | | |
 | C7 | waiting | | |
 | C8 | waiting | | |
-| C9 | waiting | | |
-| K1 | waiting | | |
-| K2 | waiting | | |
-| K3 | waiting | | |
-| K4 | waiting | | |
+| C9 | ready | | |
+| K1 | ready | | |
+| K2 | ready | | |
+| K3 | ready | | |
+| K4 | ready | | |
 | P0 | waiting | | |
 | P3 | waiting | | |
 | P5 | waiting | | |
-| P6 | waiting | | |
-| P7 | waiting | | |
+| P6 | ready | | |
+| P7 | ready | | |
 | P8 | waiting | | |
-| P9 | waiting | | |
+| P9 | coding | own MainContext thread; results drained in poll via Waker; tests re-exec with GIO_USE_VFS=local | |
 | C10b | waiting | | |
 | C11 | waiting | | |
 | C12 | waiting | | |

@@ -15,10 +15,10 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | S1 | merged | P3: X11 shim conditional on mutter/KWin hand test; Wayland resize/menu blocked on Rune (R1-R3, R7); Hyprland/GNOME/KDE/lavapipe hand test pending | c5794e1 |
 | S2 | merged | 3 review rounds; P0 feasible w/o Rune patch on libwayland>=1.23; Ubuntu 24.04 GNOME: DnD unsupported; R1-R5 drafted; Hyprland/GNOME/KDE/Dolphin hand test pending | 702338f |
 | S3 | merged | sway Wayland/X11 measured; Hyprland/GNOME/KDE/Firefox hand test pending (QEMU Tier B not run); 3 owner decisions | f5682e4 |
-| S4 | review 2 | onig ParseState !Send and pointer-equality found in review; backend to be re-asked of owner; C10a waits | |
+| S4 | review 3 | onig ParseState !Send and pointer-equality found in review; backend to be re-asked of owner; C10a waits | |
 | S5 | merged | 2 review rounds; 16 Rune issue drafts (U1-U17, U4 withdrawn) await owner filing; crate name taken -> owner; release.yml verified locally only (GitHub run pending) | 85ca12b |
 | C10a | waiting | | |
-| C14a | ready | | |
+| C14a | coding | image zoom/pan is new vs Strata (plan asks for it): deliberate change for owner; pixels set without view commits (probed) | |
 | C15 | merged | built on Rune primitives (deviation from WP doc); 6 bullets Strata policy, O6/F13/K6 partial gaps (Rune drafts); PNG goldens on NVIDIA | b38d879 |
 | C1a | merged | 2 review rounds; select_all 149 us / Shift range 148 us at 100k (release, local only); hosts call before_removal + sync | b8c3b8c |
 | C20a | ready | | |
@@ -32,7 +32,7 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | C5 | ready | | |
 | C6 | ready | | |
 | C7 | ready | | |
-| C8 | review 1 (fixing B1 parked reorder) | own list on SidebarRow+Reorder (rune-kit Sidebar opens on arrow, no rail); keyboard pin reorder left out (no bullet) | |
+| C8 | merged | 2 review rounds; own list on SidebarRow+Reorder; keyboard pin reorder left out (no bullet); hover-time folder check needs X2 binder; Rune drafts U18-U23; PNG goldens on NVIDIA | 6277a99 |
 | C9 | merged | 3 review rounds; own split + DrawerState; HostedPreview trait; focus via focus_return stubs (Rune Tx::focus draft); PNG goldens on NVIDIA | bad5d4c |
 | K1 | ready | | |
 | K2 | merged | 1 review round + fixes; Strata values at upstream/main 35ee677ab; font list arrives as data (Rune #114/U16); Switch/Button sizes are rune-kit gaps | db41ea7 |
@@ -53,10 +53,10 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | C17 | ready | | |
 | C18 | ready | | |
 | C19 | ready | | |
-| C1b | coding | plain state machine first; C1e adapter after C1e merges (seam requests N1–N8 sent to C1e) | |
-| C1c | ready | | |
+| C1b | coding (state machine done; adapter waits on C1e merge) | 37 unit tests; PointerHandle shared settings (deviation); no rename timeout (Strata) | |
+| C1c | planning | | |
 | C1d | ready | | |
-| C1e | coding | 0 view runs over 600 scroll frames at 100k (probe); focus-on-return bullets deferred (Rune focus API) | |
+| C1e | review 1 (fixing B1 per-column accessors + 16 should-fix) | 0 view runs over 600 scroll frames at 100k (probe); focus-on-return bullets deferred (Rune focus API) | |
 | C26 | waiting | | |
 | P1 | waiting | | |
 | P2 | waiting | | |

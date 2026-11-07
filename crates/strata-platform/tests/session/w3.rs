@@ -292,8 +292,8 @@ fn drag_between_peers(display: Display) {
     let s = Session::start();
     let a = s.peer(display);
     let b = s.peer(display);
-    // sway tiles them side by side; the syncs make sure both have drawn at their tiled size
-    // before the pointer moves.
+    // sway tiles them side by side. The syncs make sure both have drawn at their tiled size;
+    // point_at makes sure the press reaches `a` (docs/testing.md, "Point, then press").
     a.map("w3 drag source");
     b.map("w3 drop target");
     let [from, to] = <[_; 2]>::try_from(s.wait_windows(&[a.pid(), b.pid()])).expect("two windows");
@@ -302,7 +302,7 @@ fn drag_between_peers(display: Display) {
     b.accept_drops(&["text/plain", UTF8], Action::Copy);
 
     let input = s.input();
-    input.pointer_move(from.at(0.5, 0.5));
+    s.point_at(&a, from.at(0.5, 0.5));
     input.button(true);
     a.wait_event("the press", |e| {
         matches!(e, Event::PointerButton { pressed: true })

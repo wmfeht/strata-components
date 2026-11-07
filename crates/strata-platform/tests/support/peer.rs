@@ -109,6 +109,20 @@ impl Peer {
         event
     }
 
+    /// Whether the pointer is in the peer's window, by its last enter or leave event.
+    pub fn pointer_inside(&self) -> bool {
+        self.proc
+            .lines()
+            .iter()
+            .rev()
+            .find_map(|line| match parse(line) {
+                Some(Message::Event(Event::PointerEnter { .. })) => Some(true),
+                Some(Message::Event(Event::PointerLeave)) => Some(false),
+                _ => None,
+            })
+            .unwrap_or(false)
+    }
+
     // ---- windows ----
 
     /// Maps the peer's toplevel (300×200 until the compositor says otherwise).

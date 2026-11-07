@@ -266,6 +266,13 @@ pub enum Event {
     Focus {
         focused: bool,
     },
+    /// The pointer entered the peer's window, at window-local points.
+    PointerEnter {
+        x: f64,
+        y: f64,
+    },
+    /// The pointer left the peer's window.
+    PointerLeave,
     /// A button went down or up on the peer's window.
     PointerButton {
         pressed: bool,

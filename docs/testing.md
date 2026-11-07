@@ -338,6 +338,7 @@ s.input().click_at(window.at(0.5, 0.5));
 | `example(name)` | `target/<profile>/examples/<name>` |
 | `s.wait_window(pid)`, `s.wait_windows(&[pids])`, `s.focus(&window)` | sway's tree: a window, windows tiled apart, keyboard focus |
 | `s.input()` | The virtual pointer and keyboard: `click_at`, `pointer_move`, `button`, `path`, `key("ctrl+c")` |
+| `s.point_at(&peer, at)` | Moves the pointer until `peer` reports it in its window |
 | `s.peer(display)` | A peer process ([below](#the-peer)) |
 | `s.bus()` | The bus's `address()`, and `service_dir()` for `.service` files |
 
@@ -364,8 +365,11 @@ devices. Tests drive it with typed calls (`set_selection`, `read`, `drag_start`,
   peers mapped at once. An app's own X11 window can't be retried this way: if
   `wait_window` times out on an X11 app, this is the likely cause (W3's example window never
   hit it in over 60 opens).
-- **Sync clients after a relayout.** A new window re-tiles the others. `wait_windows` waits for
-  sway's tree, and a peer's `sync()` makes sure it has drawn at its new size.
+- **Point, then press, after a relayout.** A new window re-tiles the others. For a moment
+  after, a pointer motion can reach no surface (likely sway's saved snapshots of windows it is
+  resizing), and a press then goes nowhere, even after `wait_windows` and a `sync()` with each
+  peer. This failed a drag on pixman about one run in ten. `s.point_at(&peer, at)` moves the
+  pointer, and moves it again a point off, until the peer reports the pointer in its window.
 - **Focus needs the keyboard.** `wl_data_device.set_selection` needs keyboard focus on the
   peer's window (`s.focus`); data control needs none.
 - **Floating windows.** `floating enable, resize set` didn't always reach a peer as a configure,

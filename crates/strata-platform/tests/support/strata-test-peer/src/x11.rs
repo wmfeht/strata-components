@@ -131,7 +131,9 @@ pub fn run() -> Result<(), String> {
         | EventMask::FOCUS_CHANGE
         | EventMask::BUTTON_PRESS
         | EventMask::BUTTON_RELEASE
-        | EventMask::POINTER_MOTION;
+        | EventMask::POINTER_MOTION
+        | EventMask::ENTER_WINDOW
+        | EventMask::LEAVE_WINDOW;
     conn.create_window(
         x11rb::COPY_DEPTH_FROM_PARENT,
         win,
@@ -581,6 +583,13 @@ impl X {
             XEvent::FocusOut(f) if f.event == self.win && f.mode == NotifyMode::NORMAL => {
                 out::event(Event::Focus { focused: false });
             }
+            XEvent::EnterNotify(e) if e.event == self.win => {
+                out::event(Event::PointerEnter {
+                    x: f64::from(e.event_x),
+                    y: f64::from(e.event_y),
+                });
+            }
+            XEvent::LeaveNotify(e) if e.event == self.win => out::event(Event::PointerLeave),
             XEvent::ButtonPress(b) if b.event == self.win => {
                 self.pressed = true;
                 out::event(Event::PointerButton { pressed: true });

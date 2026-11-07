@@ -439,15 +439,27 @@ impl Dispatch<WlPointer, ()> for St {
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        if let wl_pointer::Event::Button {
-            serial,
-            state: WEnum::Value(state),
-            ..
-        } = event
-        {
-            let pressed = state == wl_pointer::ButtonState::Pressed;
-            st.press_serial = pressed.then_some(serial);
-            out::event(Event::PointerButton { pressed });
+        // Pointer focus goes to stderr: it explains a press that went elsewhere.
+        match event {
+            wl_pointer::Event::Enter {
+                surface_x,
+                surface_y,
+                ..
+            } => out::event(Event::PointerEnter {
+                x: surface_x,
+                y: surface_y,
+            }),
+            wl_pointer::Event::Leave { .. } => out::event(Event::PointerLeave),
+            wl_pointer::Event::Button {
+                serial,
+                state: WEnum::Value(state),
+                ..
+            } => {
+                let pressed = state == wl_pointer::ButtonState::Pressed;
+                st.press_serial = pressed.then_some(serial);
+                out::event(Event::PointerButton { pressed });
+            }
+            _ => {}
         }
     }
 }

@@ -364,6 +364,36 @@ impl Session {
         }
     }
 
+    /// Moves the input peer's pointer to `at` until `peer` reports the pointer in its window.
+    ///
+    /// While sway resizes windows it shows saved snapshots of them, which take no pointer
+    /// focus, so a motion then can reach no client, and a press after it goes nowhere. A sync
+    /// with each client doesn't prove sway has applied the resize. So move, and move again a
+    /// point off, until the peer has the pointer.
+    pub fn point_at(&self, peer: &Peer, at: (f64, f64)) {
+        let deadline = std::time::Instant::now() + timeout();
+        let mut nudge = 0.0;
+        loop {
+            self.input().pointer_move((at.0 + nudge, at.1 + nudge));
+            // An enter from before this motion may still be the peer's last word: let the
+            // motion's own enter or leave arrive first.
+            std::thread::sleep(Duration::from_millis(50));
+            for _ in 0..10 {
+                if peer.pointer_inside() {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "{}: the pointer at {at:?} never reached peer {}",
+                self.name,
+                peer.pid()
+            );
+            nudge = 1.0 - nudge;
+        }
+    }
+
     /// Gives `window` keyboard focus and waits until sway reports it.
     pub fn focus(&self, window: &Window) -> Window {
         self.sway_command(&format!("[con_id={}] focus", window.id));

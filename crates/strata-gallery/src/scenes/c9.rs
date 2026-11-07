@@ -247,8 +247,7 @@ pub fn view(g: &Gallery, cx: &mut Cx<Gallery>) -> El {
             .details(["2.4 KB", "Today 09:41", "Markdown"]),
         Content::Image => HeaderInfo::new("harbour.jpg")
             .icon(look.icon(IconName::Documents))
-            .details(["3.1 MB", "Yesterday", "JPEG image"])
-            .badges(["4032 × 3024", "2 of 5 in folder"]),
+            .details(["3.1 MB", "Yesterday", "JPEG image"]),
         Content::Placeholder => HeaderInfo::default(),
     };
     let drawer = PreviewDrawer::new(&d.drawer, |g: &mut Gallery| &mut g.c9.drawer)

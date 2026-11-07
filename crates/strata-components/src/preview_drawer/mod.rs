@@ -151,14 +151,15 @@ impl Default for DrawerLabels {
     }
 }
 
-/// The previewed item in the header: its icon, name, details (size, modified, type) and
-/// badges (a position in the folder, a format).
+/// The previewed item in the header: its icon, name and one line of details (size, modified,
+/// type). The header is a bar's height, so it holds nothing more: a view's badges (a video's
+/// resolution, a route's distance, "2 of 5 in folder") belong in its own content, as C13 and
+/// C14b show them.
 #[derive(Clone, Default)]
 pub struct HeaderInfo {
     pub icon: Option<&'static Icon>,
     pub title: String,
     pub details: Vec<String>,
-    pub badges: Vec<String>,
 }
 
 impl HeaderInfo {
@@ -174,10 +175,6 @@ impl HeaderInfo {
     }
     pub fn details<T: Into<String>>(mut self, details: impl IntoIterator<Item = T>) -> Self {
         self.details = details.into_iter().map(Into::into).collect();
-        self
-    }
-    pub fn badges<T: Into<String>>(mut self, badges: impl IntoIterator<Item = T>) -> Self {
-        self.badges = badges.into_iter().map(Into::into).collect();
         self
     }
 }
@@ -429,6 +426,19 @@ impl<'a, S: 'static> PreviewDrawer<'a, S> {
                 .child(stub("preview-open-stub".into(), &files_key));
         } else {
             slot = slot.a11y_hidden();
+            if slot_width > 0.0 {
+                // The empty reserved slot keeps the divider's line, so the edge beside the
+                // columns looks the same with or without a preview.
+                slot = slot.child(
+                    el().key("preview-empty-line")
+                        .w(rules.line)
+                        .h_full()
+                        .pin(Some(0.0), Some(0.0), None, Some(0.0))
+                        .fill(look.kit.c.border_base)
+                        .a11y_hidden()
+                        .inert(),
+                );
+            }
         }
         if st.is_open() && has_body {
             slot = slot.child(fit_marker(&shared, st, solved.fits));
@@ -577,8 +587,9 @@ fn drawer_key<S: 'static>(
 
 // State markers: zero-size elements that run once, after the layout that mounts them, to
 // settle state the view can't change while it builds. Each key carries `DrawerState::marks`,
-// which every marker that acts bumps, so one needed again mounts afresh instead of staying
-// mounted unheard.
+// which every marker that acts bumps (and each open). That is defensive: a marker's own
+// handler clears its condition, so it unmounts on the next build anyway; the counter only
+// keeps a marker needed again in the same commit from staying mounted unheard.
 
 fn marker(name: &str, st: &DrawerState) -> El {
     el().key(format!("preview-{name}-marker-{}", st.marks))

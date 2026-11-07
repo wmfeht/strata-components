@@ -119,19 +119,6 @@ pub(super) fn header<S: 'static>(
                 .max_lines(1),
         );
     }
-    if !info.badges.is_empty() {
-        heading = heading.child(row().key("preview-badges").gap(look.space.xs).children(
-            info.badges.iter().enumerate().map(|(i, b)| {
-                text(b.clone())
-                    .key(format!("preview-badge-{i}"))
-                    .font(k.ty.small_medium)
-                    .color(k.c.text_muted)
-                    .px(look.space.xs)
-                    .radius(look.round(k.radius.sm))
-                    .fill(k.c.layer_02)
-            }),
-        ));
-    }
     let mut handle = row()
         .key("preview-handle")
         .grow(1.0)
@@ -148,12 +135,14 @@ pub(super) fn header<S: 'static>(
         handle = dnd.drag_source(handle, source.clone());
     }
 
+    // Sized like the window's header bar, as Strata's `.preview-header` is: the bar's height
+    // and its Frame-density inset, no vertical padding, 8 points before and 6 after.
     row()
         .key("preview-header")
         .w_full()
-        .min_h(look.frame.bar + 2.0 * look.frame.inset)
-        .px(look.space.md)
-        .py(look.space.xs)
+        .h(look.frame.bar + 2.0 * look.frame.inset)
+        .pl(look.space.md)
+        .pr(look.space.sm)
         .gap(look.space.xs)
         .items_center()
         .border_sides([0.0, 0.0, 1.0, 0.0], k.c.border_muted)

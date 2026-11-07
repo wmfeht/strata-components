@@ -5,3 +5,24 @@
 //! once Rune ships its feature, then removed in the next minor release.
 //!
 //! This crate is generic: it depends on `rune` alone and carries no Strata names in its API.
+
+#[cfg(feature = "clipboard")]
+pub mod clipboard;
+#[cfg(feature = "csd")]
+pub mod csd;
+#[cfg(feature = "dnd")]
+pub mod dnd;
+#[cfg(feature = "foreign-parent")]
+pub mod foreign_parent;
+#[cfg(feature = "glib-bridge")]
+pub mod glib_bridge;
+#[cfg(feature = "icon-theme")]
+pub mod icon_theme;
+#[cfg(feature = "media-audio")]
+pub mod media;
+#[cfg(feature = "settings")]
+pub mod settings;
+#[cfg(feature = "single-instance")]
+pub mod single_instance;
+#[cfg(feature = "_transfer")]
+mod transfer;

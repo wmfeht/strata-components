@@ -6,10 +6,71 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
-# Depends on `rune` only: never rune-kit, strata-kit or Strata (docs/plan.md §3).
-# Each shim lands behind its own cargo feature, together with its module.
+# One feature per shim, each gating one module (docs/plan.md §3). A work package fills in only
+# its own feature's list and its own block under [dependencies]. Keep the blank line and the
+# comment between entries: git conflicts when two branches edit neighbouring lines.
+#
+# Examples gate their own body on their feature (`#[cfg(feature = "csd")] fn main()`, plus a
+# `#[cfg(not(..))] fn main()` that says which feature to enable), so they need no
+# `[[example]]` entry here and still build under `mise run compile-features`.
+[features]
+default = []
+
+# P1 drag and drop: src/dnd/
+dnd = ["_transfer"]
+
+# P2 clipboard: src/clipboard/
+clipboard = ["_transfer"]
+
+# P3 client-side decorations: src/csd/
+csd = []
+
+# P4 foreign parenting: src/foreign_parent/
+foreign-parent = ["_transfer"]
+
+# P5 desktop settings: src/settings/
+settings = []
+
+# P6 icon theme lookup: src/icon_theme/
+icon-theme = []
+
+# P7 media output: src/media/
+media-audio = []
+
+# P8 single instance and activation: src/single_instance/
+single-instance = []
+
+# P9 GLib bridge: src/glib_bridge/
+glib-bridge = []
+
+# Internal, not public API: P0's transfer substrate (src/transfer/), enabled by dnd, clipboard
+# and foreign-parent.
+_transfer = []
+
+# Depends on `rune` only: never rune-kit, strata-kit or Strata (docs/plan.md §3). Each shim's
+# optional dependencies go in its own block below, enabled with `dep:` from its feature.
 [dependencies]
 rune.workspace = true
+
+# dnd (P1)
+
+# clipboard (P2)
+
+# csd (P3)
+
+# foreign-parent (P4)
+
+# settings (P5)
+
+# icon-theme (P6)
+
+# media-audio (P7)
+
+# single-instance (P8)
+
+# glib-bridge (P9)
+
+# _transfer (P0)
 
 [lints]
 workspace = true

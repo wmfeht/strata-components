@@ -5,7 +5,7 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | WP | State | Note | Merge commit |
 | --- | --- | --- | --- |
 | W0 | merged | 3 review rounds; png dev-dep approved; PNG goldens blessed on NVIDIA (lavapipe/CI pending) | d4bcd36 |
-| W1 | planning |  |  |
+| W1 | merged | 1 review round + fixes; Rune binder cannot read URIs before drop (needs Rune or P1) | 6fda6da |
 | W2 | merged | 1 review round + fixes; row.sidebar/row.palette estimates for K2 to confirm; token-name review by K1/K2/C1e owners pending; PNG goldens on NVIDIA | 341e8cb |
 | W3 | planning |  |  |
 | S1 | merged | P3: X11 shim conditional on mutter/KWin hand test; Wayland resize/menu blocked on Rune (R1-R3, R7); Hyprland/GNOME/KDE/lavapipe hand test pending | c5794e1 |
@@ -16,19 +16,19 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | C10a | waiting | | |
 | C14a | ready | | |
 | C15 | planning | | |
-| C1a | waiting | | |
+| C1a | ready | | |
 | C20a | ready | | |
 | C20b | ready | | |
-| C20c | waiting | | |
-| C21 | waiting | | |
-| C22 | waiting | | |
+| C20c | ready | | |
+| C21 | ready | | |
+| C22 | ready | | |
 | C23 | ready | | |
 | C24 | ready | | |
-| C25 | waiting | | |
-| C5 | waiting | | |
-| C6 | waiting | | |
-| C7 | waiting | | |
-| C8 | waiting | | |
+| C25 | ready | | |
+| C5 | ready | | |
+| C6 | ready | | |
+| C7 | ready | | |
+| C8 | ready | | |
 | C9 | ready | | |
 | K1 | ready | | |
 | K2 | ready | | |

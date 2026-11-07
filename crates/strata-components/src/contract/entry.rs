@@ -21,9 +21,14 @@ mod tests;
 /// column. A host that numbers each listing on its own must intern its ids instead, for
 /// example through a process-wide location-to-id table.
 ///
-/// A rename is the exception: it may give the entry a new id. A host that keeps the id across
-/// a rename should say so. A host that changes it moves what it holds by the old id to the
-/// new one; C1a's selection model provides `Selection::relocate(from, to)` for that.
+/// An id never names a different entry later in the process: when its entry goes, the id is
+/// retired, never reused. So a selection remembered for a folder can't pick up the wrong
+/// entry when the folder is shown again.
+///
+/// A rename is the exception to the lifetime rule: it may give the entry a new id. A host
+/// that keeps the id across a rename says so in its [`EntrySource`] docs. A host that changes
+/// it moves what it holds by the old id to the new one; C1a's selection model provides
+/// `Selection::relocate(from, to)` for that.
 ///
 /// Used by: C1a, C1b, C1c, C1d, C1e, C2, C3, C4, C14b, C22, C25, X2.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -239,7 +244,7 @@ impl ListSource {
     }
 
     /// Replaces every entry, as a refresh does. Ids must be unique, and an entry that is still
-    /// there keeps its id (see [`EntryId`]).
+    /// there keeps its id (a rename aside, see [`EntryId`]).
     pub fn replace(&mut self, entries: Vec<ListEntry>) {
         self.entries = entries;
         self.reindex();

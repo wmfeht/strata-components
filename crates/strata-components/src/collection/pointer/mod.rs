@@ -1,3 +1,110 @@
 //! Pointer intent and click modes (C1b).
 //!
+//! [`PointerMachine`] turns presses, moves and releases on a collection into selection
+//! operations on its [`Selection`] and [`Outcome`]s: open, a plain click (where previews
+//! follow), a file drag, a marquee, a rename, a new tab or window, a context menu. It is plain
+//! data with no Rune elements, driven through a [`Surface`]; the collection element (C1e) feeds
+//! it through its pointer seam. It follows Strata at `upstream/main` 35ee677ab:
+//! `src/ui/pointer.rs`, `src/ui/collection_interaction.rs`, `src/ui/browser_modes/clicks.rs` and
+//! `src/ui/browser/columns/rows/click.rs`.
+//!
+//! # A primary press
+//!
+//! The modifiers are the ones held at the press: letting go of Ctrl or Shift before the button
+//! changes nothing. What the press does depends on where it lands ([`Spot`]):
+//!
+//! | Press on | Plain | Ctrl | Shift | Past the threshold |
+//! | --- | --- | --- | --- | --- |
+//! | An entry's name or content | Selects it alone, now; inside a multi-selection, keeps the group | Unselected: adds it now. Selected: toggles it off on release | Ranges now | A file drag of the selection |
+//! | Blank space on a selected entry | As content | As content | As content | A file drag of the selection |
+//! | Blank space on an unselected entry | Selects it alone, now | Toggles on release | Ranges on release | A marquee |
+//! | Empty space | Clears the selection, now | Nothing | Nothing | A marquee |
+//!
+//! Ctrl+Shift ranges by [`PointerSettings::ctrl_shift`], [`Extend::Replace`] by default, as
+//! Strata's `pointer_selection` does. Alt makes any press a marquee once it drags. A drag needs
+//! [`PointerSettings::drags`].
+//!
+//! Selecting an entry the moment it is pressed is Strata's: a drag then shows and carries its
+//! real source. Blank space on an unselected entry leaves its modified operation to the
+//! release, because a drag from there is a marquee whose Ctrl or Shift applies to the selection
+//! as it was before the press.
+//!
+//! # Threshold
+//!
+//! A press becomes a drag or a marquee once it travels more than
+//! [`PointerSettings::drag_threshold`] along either axis, as GTK and Strata measure it. After
+//! that it never clicks: no opening, no preview, no rename, even if the pointer comes back.
+//! Neither does a cancelled gesture, nor a press whose entry moved during it (a re-sort or a
+//! reload), which is Strata's "recycled row" rule.
+//!
+//! # Click modes
+//!
+//! On a plain release, in Strata's order:
+//!
+//! 1. A plain press that kept a multi-selection collapses it to the entry. Strata's Columns
+//!    does it in its own release path. In Icons and List, Strata claims only modified releases
+//!    (`PointerSequence::install` in `collection_interaction.rs`), so a plain release reaches
+//!    GTK's own list-item gesture, which selects the item alone on release; a drag cancels
+//!    that gesture first, so the group still drags (`browser_modes/clicks.rs`: "Capture must
+//!    snapshot selection before GTK changes it for the bubble gesture").
+//! 2. The entry opens ([`Outcome::Activate`]) on the first click where its kind opens on one
+//!    ([`ClickModes`]), or on the second click of a pair where it opens on two. Alt doesn't
+//!    stop it, as Strata's `plain_single` reads only Ctrl and Shift.
+//! 3. Otherwise a slow click may arm a rename (below).
+//! 4. Otherwise a first click sends [`Outcome::Clicked`].
+//!
+//! A Ctrl or Shift click never opens. Pairs are counted here, from
+//! [`PointerSettings::double_click`]: Rune's own count uses a fixed 0.5 s on Linux (S5 U13).
+//!
+//! # Slow-click rename
+//!
+//! A plain first click on the name of the entry that was the only one selected before the
+//! press arms a rename, when the click doesn't open it (or the entry is
+//! [`PointerSettings::already_open`]) and [`PointerSettings::rename`] is on. An automatic pick
+//! ([`Selection::auto_select`]) counts as that only selection, as GTK shows it selected in
+//! Strata. The rename comes one double-click interval later from [`PointerMachine::tick`], so
+//! that a second press makes a double click instead. Any press, a key
+//! ([`PointerMachine::interrupt`]), a [`PointerHandle::interrupt`] or any selection change
+//! cancels it.
+//!
+//! **Deviation from the work package doc:** it asks for the second click "before a rename
+//! timeout". Strata has none: a click on the sole selection's name renames however long after
+//! the first it comes (`starts_slow_rename` in `browser_modes/clicks.rs`,
+//! `is_slow_click_rename` in `columns/rows/click.rs`). The only timer is the one-interval wait
+//! above (`schedule_click_rename` in `browser/inline_edit.rs`).
+//!
+//! # Middle and secondary presses
+//!
+//! A middle click (released within the threshold, the first of a pair) opens a folder in a new
+//! tab, or a new window with Ctrl or Shift held at the release, as Strata reads them then. On a
+//! file it selects the file and opens nothing. Strata reveals a file in its own folder, which
+//! is this one except in recursive search results; that reveal is left to C17 and C18.
+//!
+//! A secondary press selects an unselected entry alone and keeps a selection it lands in, then
+//! asks for the menu ([`Outcome::ContextMenu`]). Where the menu goes is C21's.
+//!
+//! # The shared handle
+//!
+//! Components take state by accessor, but the element keeps its controllers boxed in its
+//! `CollectionState` (C1e's seam), where no accessor reaches. So the settings live in a
+//! [`PointerHandle`] the machine and the host share: the host changes the interval (from P5),
+//! the click modes (from the preferences) and the per-view switches through its clone, and the
+//! next press reads them. This is a recorded deviation from the accessor rule.
+//!
 //! Work package: C1b, `docs/work/phase-2-composites/C1b-pointer-intent.md`.
+
+#![warn(missing_docs)]
+
+mod clicks;
+mod machine;
+mod rename;
+mod settings;
+
+#[cfg(test)]
+mod tests;
+
+pub use machine::{ActivateBy, Button, Outcome, PointerMachine, Press, Release, Spot, Surface};
+pub use settings::{ClickCount, ClickModes, PointerHandle, PointerSettings};
+
+#[cfg(doc)]
+use crate::collection::selection::{Extend, Selection};

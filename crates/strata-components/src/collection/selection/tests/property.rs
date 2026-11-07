@@ -74,9 +74,10 @@ enum ModelGesture {
     Band(BandMode),
 }
 
-/// What a delete told the model before it happened.
+/// What a delete that takes the cursor's entry told the model before it happened.
 #[derive(Clone, Debug)]
 struct Removal {
+    cursor: EntryId,
     before: Vec<EntryId>,
     gone: BTreeSet<EntryId>,
 }
@@ -136,6 +137,8 @@ impl Model {
     fn place(&mut self, s: &ListSource, i: usize) {
         self.cursor = Some(s.id_at(i));
         self.seen_at = Some(i);
+        // A cursor that moved has no removal pending.
+        self.removal = None;
     }
 
     fn pick(&mut self, s: &ListSource, i: usize, provisional: bool) {
@@ -264,10 +267,14 @@ impl Model {
     }
 
     fn before_removal(&mut self, before: &ListSource, gone: BTreeSet<EntryId>) {
-        self.removal = Some(Removal {
-            before: listed(before).collect(),
-            gone,
-        });
+        self.removal = self
+            .cursor
+            .filter(|c| gone.contains(c) && before.index_of(*c).is_some())
+            .map(|cursor| Removal {
+                cursor,
+                before: listed(before).collect(),
+                gone,
+            });
     }
 
     /// Where a cursor whose entry left goes, by the rule for how it left.
@@ -278,7 +285,7 @@ impl Model {
         removal: Option<&Removal>,
     ) -> Option<usize> {
         let n = s.len();
-        if let Some(removal) = removal
+        if let Some(removal) = removal.filter(|r| r.cursor == cursor)
             && let Some(at) = removal.before.iter().position(|&id| id == cursor)
         {
             // A delete: the next entry that survived, else the previous one.
@@ -293,13 +300,14 @@ impl Model {
     }
 
     fn sync(&mut self, s: &ListSource, rule: SyncRule) {
-        let removal = self.removal.take();
         if rule.listing == Listing::Loading {
+            // A loading listing keeps a pending removal for the complete one.
             if let Some(i) = self.cursor.and_then(|c| s.index_of(c)) {
                 self.seen_at = Some(i);
             }
             return;
         }
+        let removal = self.removal.take();
         let is_listed = |id: &EntryId| s.index_of(*id).is_some();
         self.sel.retain(is_listed);
         self.base.retain(is_listed);
@@ -317,7 +325,8 @@ impl Model {
                     };
                     match to {
                         Some(i) => {
-                            self.place(s, i);
+                            self.cursor = Some(s.id_at(i));
+                            self.seen_at = Some(i);
                             if rule.cursor_gone == CursorGone::NeighborSelected {
                                 let id = s.id_at(i);
                                 if self.gesture == ModelGesture::None {
@@ -352,10 +361,21 @@ impl Model {
                 *held = Some(to);
             }
         }
+        if let Some(r) = &mut self.removal {
+            for id in r.before.iter_mut().chain([&mut r.cursor]) {
+                if *id == from {
+                    *id = to;
+                }
+            }
+            if r.gone.remove(&from) {
+                r.gone.insert(to);
+            }
+        }
     }
 
     fn restore(&mut self, p: &Position) {
         self.end_gesture();
+        self.removal = None;
         self.sel = p.selected.iter().copied().collect();
         self.provisional =
             p.provisional && self.sel.len() == 1 && p.cursor.is_some_and(|c| self.sel.contains(&c));
@@ -417,6 +437,10 @@ struct Coverage {
     neighbours_into_a_gesture: usize,
     /// A delete where the next survivor isn't at the cursor's old index.
     deletes_past_the_old_index: usize,
+    /// A delete of the cursor's entry delivered through a loading sync first.
+    deletes_through_loading: usize,
+    /// A prepared delete that never landed, followed by a reload.
+    unfinished_deletes_then_reload: usize,
 }
 
 struct Run {
@@ -719,9 +743,16 @@ impl Run {
         });
     }
 
-    /// A delete: the host tells the selection, removes the entries, then syncs.
+    /// A delete: the host tells the selection, removes the entries, then syncs, sometimes
+    /// through a loading sync first.
     fn delete(&mut self, gone: BTreeSet<EntryId>) {
-        self.note(format!("delete {gone:?}"));
+        let through_loading = self.rng.chance(25);
+        self.note(format!(
+            "delete {gone:?}, through loading: {through_loading}"
+        ));
+        if through_loading && self.model.cursor.is_some_and(|c| gone.contains(&c)) {
+            self.coverage.borrow_mut().deletes_through_loading += 1;
+        }
         if let Some(at) = self.model.cursor.and_then(|c| self.s.index_of(c))
             && gone.contains(&self.s.id_at(at))
         {
@@ -736,12 +767,56 @@ impl Run {
         self.model.before_removal(&self.s, gone.clone());
         self.sel.before_removal(&self.s, |id| gone.contains(&id));
         self.s.retain(|e| !gone.contains(&e.id));
+        if through_loading {
+            self.sync(Listing::Loading);
+        }
         self.sync(Listing::Complete);
+    }
+
+    /// A delete the host prepares but that never lands, then a reload that drops entries,
+    /// maybe the cursor's: the reload rule applies. A host that abandons a removal of the
+    /// cursor's entry syncs before anything else, as `before_removal` asks; one that spares
+    /// the cursor records nothing, so it may go straight into the reload.
+    fn unfinished_delete(&mut self) {
+        let mut gone = self.model.sel.clone();
+        let takes_cursor = self.rng.chance(50);
+        match self.model.cursor {
+            Some(c) if takes_cursor => {
+                gone.insert(c);
+            }
+            Some(c) => {
+                gone.remove(&c);
+            }
+            None => {}
+        }
+        self.note(format!("prepare delete {gone:?}, which fails"));
+        self.model.before_removal(&self.s, gone.clone());
+        self.sel.before_removal(&self.s, |id| gone.contains(&id));
+        if takes_cursor && self.rng.chance(50) {
+            // Abandoned by moving the cursor, often onto its own entry: that ends the record.
+            let here = self.model.cursor.and_then(|c| self.s.index_of(c));
+            let i = here
+                .filter(|_| self.rng.chance(70))
+                .or_else(|| self.index());
+            if let Some(i) = i {
+                self.op(format!("move_cursor {i} Keep"), |sel, m, s| {
+                    m.move_cursor(s, i, AnchorRule::Keep);
+                    sel.move_cursor(s, i, AnchorRule::Keep)
+                });
+            }
+        } else if takes_cursor || self.rng.chance(50) {
+            self.sync(Listing::Complete);
+        }
+        if self.model.cursor.is_some() {
+            self.coverage.borrow_mut().unfinished_deletes_then_reload += 1;
+        }
+        self.reload();
     }
 
     fn random_change(&mut self) {
         let mut entries = self.s.entries().to_vec();
-        match self.rng.below(6) {
+        match self.rng.below(7) {
+            6 => return self.unfinished_delete(),
             0 => {
                 let keys: HashMap<EntryId, u64> =
                     entries.iter().map(|e| (e.id, self.rng.next())).collect();
@@ -866,6 +941,11 @@ fn random_operations_keep_cursor_and_anchor_on_listed_entries() {
         (
             "deletes past the old index",
             coverage.deletes_past_the_old_index,
+        ),
+        ("deletes through loading", coverage.deletes_through_loading),
+        (
+            "unfinished deletes then a reload",
+            coverage.unfinished_deletes_then_reload,
         ),
     ] {
         assert!(count > 0, "the property run never reached {what}");

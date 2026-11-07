@@ -92,10 +92,48 @@ impl Overlay {
                     *source_len,
                     "the source changed without a Selection::sync"
                 );
-                ranges.contains(index)
+                let inside = ranges.contains(index);
+                debug_assert!(
+                    !inside || self.copied_at(index) == Some(id),
+                    "the source changed without a Selection::sync"
+                );
+                inside
             }
             OverlayIds::Frozen(set) => set.contains(&id),
         }
+    }
+
+    /// The id a live overlay copied for `index`, if its ranges cover it.
+    fn copied_at(&self, index: usize) -> Option<EntryId> {
+        let OverlayIds::Live { ranges, ids, .. } = &self.ids else {
+            return None;
+        };
+        let mut offset = 0;
+        for r in ranges.ranges() {
+            if r.contains(&index) {
+                return ids.get(offset + index - r.start).copied();
+            }
+            offset += r.len();
+        }
+        None
+    }
+
+    /// Whether every one of a live overlay's copied ids is still at its index in `source`:
+    /// O(the range), for the paths verbs act on. A frozen overlay doesn't depend on the source.
+    fn matches_exactly<S: EntrySource + ?Sized>(&self, source: &S) -> bool {
+        let OverlayIds::Live {
+            ranges,
+            ids,
+            source_len,
+        } = &self.ids
+        else {
+            return true;
+        };
+        source.len() == *source_len
+            && ranges
+                .indices()
+                .zip(ids)
+                .all(|(i, &id)| source.id_at(i) == id)
     }
 
     fn contains<S: EntrySource + ?Sized>(&self, source: &S, id: EntryId) -> bool {
@@ -125,7 +163,8 @@ impl Overlay {
     /// Whether a live overlay's indices still name its copied ids in `source`, as far as a
     /// cheap check can tell: the same length, and the same first and last ids. A missed
     /// [`Selection::sync`](super::Selection::sync) that re-sorted the source usually fails
-    /// it. A frozen overlay doesn't depend on the source.
+    /// it; [`Overlay::matches_exactly`] catches the rest. A frozen overlay doesn't depend on
+    /// the source.
     fn matches<S: EntrySource + ?Sized>(&self, source: &S) -> bool {
         let OverlayIds::Live {
             ranges,
@@ -252,7 +291,22 @@ impl Members {
     /// Renames `from` to `to` wherever the selection holds it: in the base and in the
     /// overlay's copied ids. An open gesture goes on over the renamed id. Returns whether
     /// `from` was selected.
+    ///
+    /// `to` is a new id, so the selection doesn't hold it yet (debug builds check). If it
+    /// does, the two merge and the count follows.
     pub(super) fn relocate(&mut self, from: EntryId, to: EntryId) -> bool {
+        let holds = |m: &Self, id: EntryId| {
+            m.base.contains(&id) || m.overlay.as_ref().is_some_and(|ov| ov.holds(id))
+        };
+        let already = holds(self, to);
+        debug_assert!(
+            !already,
+            "relocate onto {to:?}, which the selection already holds"
+        );
+        if already {
+            // Copied ids must stay one per index, so merge in a set.
+            self.freeze();
+        }
         let in_base = self.base.remove(&from);
         if in_base {
             self.base.insert(to);
@@ -267,9 +321,19 @@ impl Members {
                     }
                     None => false,
                 },
-                OverlayIds::Frozen(set) => set.remove(&from) && set.insert(to),
+                OverlayIds::Frozen(set) => {
+                    let held = set.remove(&from);
+                    if held {
+                        set.insert(to);
+                    }
+                    held
+                }
             };
             was_selected = ov.op.apply(in_base, in_overlay);
+        }
+        if already {
+            // `to` was held already, so it and `from` may have merged into one member.
+            self.recount();
         }
         was_selected
     }
@@ -482,7 +546,7 @@ impl Members {
             return Vec::new();
         }
         if let Some(ov) = &self.overlay
-            && !ov.matches(source)
+            && !ov.matches_exactly(source)
         {
             // A missed sync: what verbs act on must not come from stale indices, so read the
             // copied ids instead, as a sync would have.

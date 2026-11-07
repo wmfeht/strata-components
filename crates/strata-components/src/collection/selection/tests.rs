@@ -750,3 +750,87 @@ fn unsynced_resort_still_gives_the_right_selected_ids() {
     );
     assert_eq!(sel.position(&s).selected, [4, 3, 2, 1].map(id));
 }
+
+#[test]
+fn unsynced_resort_with_the_same_ends_still_gives_the_right_ids() {
+    let mut s = listing(6);
+    let mut sel = Selection::new();
+    sel.select_only(&s, 1);
+    sel.extend_to(&s, 3, Extend::Replace);
+    // 2 and 4 swap places without a sync: the range's first (1) and last (3) ids stay put.
+    let order = [0, 1, 4, 3, 2, 5];
+    let rank = |e: &ListEntry| order.iter().position(|&r| r == e.id.get());
+    s.sort_by(|a, b| rank(a).cmp(&rank(b)));
+    assert_eq!(selected(&sel, &s), [1, 3, 2]);
+    assert_eq!(sel.targets(&s), Targets::Filled([1, 3, 2].map(id).to_vec()));
+}
+
+#[test]
+#[cfg_attr(
+    debug_assertions,
+    should_panic(expected = "which the selection already holds")
+)]
+fn relocate_onto_a_held_id_keeps_the_count_in_release() {
+    let s = listing(4);
+    let mut sel = Selection::new();
+    sel.select_only(&s, 1);
+    sel.toggle(&s, 2);
+    sel.relocate(id(1), id(2));
+    assert_eq!(sel.len(), 1);
+    assert_eq!(selected(&sel, &s), [2]);
+}
+
+#[test]
+fn removal_hint_lasts_through_loading_and_ends_at_a_complete_sync() {
+    // browser/selection: Deleting the focused entry, in Strata or externally, focuses the next visible entry, else the previous visible one, and the preview follows.
+    // A delete whose listing comes back through a loading sync still takes the next survivor.
+    let mut s = listing(10);
+    let mut sel = Selection::new();
+    sel.select_only(&s, 6);
+    delete_through_loading(&mut sel, &mut s, &[2, 3, 4, 5, 6]);
+    assert_eq!(cursor(&sel), Some(7));
+
+    // A delete that never lands: the host's next sync uses the record up, so a later reload
+    // that drops the cursor's entry takes the reload rule (the entry now at its old index).
+    let mut s = listing(12);
+    let mut sel = Selection::new();
+    sel.select_only(&s, 8);
+    sel.before_removal(&s, |id| (3..=8).contains(&id.get()));
+    assert!(!sel.sync(&s, SyncRule::default()).any());
+    reload_without(&mut sel, &mut s, 8);
+    assert_eq!(cursor(&sel), Some(9));
+}
+
+#[test]
+fn before_removal_that_spares_the_cursor_leaves_the_reload_rule() {
+    // browser/selection: A reload can drop the cursor's entry, as after a delete on a remote share. The cursor then moves to the first visible entry at or after its old index, unselected.
+    let mut s = listing(12);
+    let mut sel = Selection::new();
+    sel.select_only(&s, 8);
+    // The host prepares a removal of 0..5, which doesn't land; then a reload drops 8.
+    sel.before_removal(&s, |id| id.get() < 5);
+    reload_without(&mut sel, &mut s, 8);
+    assert_eq!(cursor(&sel), Some(9));
+}
+
+/// A delete whose listing the host delivers through a loading sync first.
+fn delete_through_loading(sel: &mut Selection, s: &mut ListSource, gone: &[u64]) {
+    sel.before_removal(s, |id| gone.contains(&id.get()));
+    remove(s, gone);
+    sel.sync(s, SyncRule::loading());
+    sel.sync(s, SyncRule::default());
+}
+
+/// A streamed reload that comes back without the entry `raw`.
+fn reload_without(sel: &mut Selection, s: &mut ListSource, raw: u64) {
+    let full: Vec<ListEntry> = s
+        .entries()
+        .iter()
+        .filter(|e| e.id.get() != raw)
+        .cloned()
+        .collect();
+    s.replace(Vec::new());
+    sel.sync(s, SyncRule::loading());
+    s.replace(full);
+    sel.sync(s, SyncRule::default());
+}

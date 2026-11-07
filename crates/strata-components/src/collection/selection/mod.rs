@@ -26,8 +26,9 @@
 //! `sync` drops ids the source no longer lists (unless the listing is still loading) and moves
 //! a cursor whose entry went to a neighbour, by the rule the caller picks ([`CursorGone`]).
 //! For a delete or a move out of the folder, the host calls [`Selection::before_removal`] with
-//! the listing as it was, so the neighbour is the next surviving entry, as in Strata; without
-//! it, the neighbour is the entry at the cursor's old index, Strata's rule after a reload.
+//! the listing as it was, in the same update and right before it changes the source, so the
+//! neighbour is the next surviving entry, as in Strata; without it, the neighbour is the entry
+//! at the cursor's old index, Strata's rule after a reload.
 //! A rename that gives the entry a new id is [`Selection::relocate`], called before the `sync`
 //! for that change.
 //!
@@ -56,8 +57,8 @@
 //! [`Selection::revision`] goes up exactly when an operation reports a change, including a
 //! cursor-only move, so it over-approximates a change of [`Selection::targets`]: a host that
 //! must know whether the targets changed (10xer `; 1` rechecks them) compares the targets.
-//! Revisions come from one process-wide counter, so a new or replaced `Selection` never
-//! repeats a revision an observer already saw. Still, hosts keep one `Selection` per
+//! Revisions come from one process-wide counter, so a revision always names one state: a new
+//! or replaced `Selection` never repeats a revision an observer already saw. Still, hosts keep one `Selection` per
 //! collection and reset it with [`Selection::clear`] or [`Selection::restore`] rather than
 //! replace it, so the element's change tracking follows one value.
 //!
@@ -204,12 +205,23 @@ pub enum Listing {
 /// The neighbour is the entry at the cursor's index hint in the new listing, or the last entry
 /// when the listing got shorter than that. The hint is:
 ///
-/// - after [`Selection::before_removal`] (a delete, a move out), the number of entries before
-///   the cursor that survive, so the neighbour is the next surviving entry, else the previous
-///   one (Strata's removal rule);
+/// - after [`Selection::before_removal`] for a removal that takes the cursor's entry (a
+///   delete, a move out), the number of entries before the cursor that survive, so the
+///   neighbour is the next surviving entry, else the previous one (Strata's removal rule);
 /// - otherwise the cursor's index when last seen, so the neighbour is the first entry at or
 ///   after its old index, else the previous one (Strata's rule after a reload). A restored
 ///   position's hint is its remembered index.
+///
+/// How Strata's removals map onto these rules:
+///
+/// - A delete, a trash or a 10xer `M` (Strata's `transfer_replacing_cursor`) replaces the
+///   cursor: [`Neighbor`](Self::Neighbor) in 10xer mode and
+///   [`NeighborSelected`](Self::NeighborSelected) in the default map, as Strata's
+///   `preserve_fill_on_removal` (on in 10xer mode) chooses.
+/// - A plain move out, such as a drag-move to another folder, is one of Strata's
+///   selectionless removals: [`Clear`](Self::Clear).
+/// - A reload that dropped the cursor's entry: [`Neighbor`](Self::Neighbor), without
+///   `before_removal`.
 ///
 /// Used by: C1e, C2, and hosts.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -218,9 +230,13 @@ pub enum CursorGone {
     #[default]
     Neighbor,
     /// The neighbour takes the cursor and joins the selection: a delete in the default map.
-    /// During an open gesture it joins the gesture's base, so the overlay still applies.
+    ///
+    /// During an open gesture it joins the gesture's base, so the gesture's range or band
+    /// still applies over it. During an [`Extend::Replace`] run, whose base each step
+    /// replaces, the next step drops it unless its range covers it.
     NeighborSelected,
-    /// No entry takes the cursor: a Columns column whose child column is open.
+    /// No entry takes the cursor: a Columns column whose child column is open, or a plain
+    /// move out of the folder (a drag-move).
     Clear,
 }
 
@@ -287,8 +303,12 @@ pub struct Selection {
     members: Members,
     gesture: Gesture,
     cursor: Option<EntryId>,
-    /// The cursor's index when last seen, for the neighbour rule once its entry is gone.
+    /// The cursor's index when last seen, for the reload rule once its entry is gone.
     cursor_hint: Option<usize>,
+    /// From [`Selection::before_removal`]: the cursor's id and how many entries before it
+    /// survive, for the removal rule. Good only while the cursor is that id, and only until
+    /// the next sync of a complete listing.
+    removal_hint: Option<(EntryId, usize)>,
     anchor: Option<EntryId>,
     provisional: bool,
     revision: u64,
@@ -308,6 +328,7 @@ impl Default for Selection {
             gesture: Gesture::None,
             cursor: None,
             cursor_hint: None,
+            removal_hint: None,
             anchor: None,
             provisional: false,
             revision: next_revision(),
@@ -665,10 +686,16 @@ impl Selection {
         }
 
         changed.selection = self.members.retain_listed(source);
+        // The first sync of a complete listing uses up the removal hint, whether or not the
+        // cursor's entry went.
+        let removal = self.removal_hint.take();
         match self.cursor {
             Some(id) => match source.index_of(id) {
                 Some(i) => self.cursor_hint = Some(i),
-                None => changed |= self.cursor_left(source, rule.cursor_gone),
+                None => {
+                    let survivors = removal.and_then(|(at, n)| (at == id).then_some(n));
+                    changed |= self.cursor_left(source, rule.cursor_gone, survivors);
+                }
             },
             None => self.cursor_hint = None,
         }
@@ -680,7 +707,14 @@ impl Selection {
         self.finish(changed)
     }
 
-    fn cursor_left<S: EntrySource + ?Sized>(&mut self, source: &S, rule: CursorGone) -> Changed {
+    /// Moves the cursor off its entry, which `source` no longer lists: to the entry at
+    /// `survivors` (the removal rule), else at its last index (the reload rule).
+    fn cursor_left<S: EntrySource + ?Sized>(
+        &mut self,
+        source: &S,
+        rule: CursorGone,
+        survivors: Option<usize>,
+    ) -> Changed {
         let mut changed = Changed {
             selection: self.set_provisional(false),
             cursor: true,
@@ -691,7 +725,7 @@ impl Selection {
             CursorGone::Clear => None,
             CursorGone::Neighbor | CursorGone::NeighborSelected if n == 0 => None,
             CursorGone::Neighbor | CursorGone::NeighborSelected => {
-                Some(self.cursor_hint.unwrap_or(0).min(n - 1))
+                Some(survivors.or(self.cursor_hint).unwrap_or(0).min(n - 1))
             }
         };
         match neighbour {
@@ -731,6 +765,11 @@ impl Selection {
             self.cursor = Some(to);
             changed.cursor = true;
         }
+        if let Some((id, _)) = &mut self.removal_hint
+            && *id == from
+        {
+            *id = to;
+        }
         if self.anchor == Some(from) {
             self.anchor = Some(to);
             changed.anchor = true;
@@ -740,19 +779,30 @@ impl Selection {
 
     /// Records where the cursor's neighbour is, before the host removes entries: `before` is
     /// the listing as it is now, still in step with the selection, and `gone` says which of
-    /// its entries are going (a delete, a move out of the folder). The next
-    /// [`Selection::sync`] that finds the cursor gone then moves it to the next surviving
-    /// entry, else the previous one, as Strata does on a removal.
+    /// its entries are going (a delete, a move out of the folder). If the cursor's entry is
+    /// among them, the next [`Selection::sync`] of a complete listing moves the cursor to the
+    /// next surviving entry, else the previous one, as Strata does on a removal.
     ///
-    /// It changes nothing visible, and costs one `gone` call per entry before the cursor.
+    /// Call it in the same update that changes the source, right before the change. The
+    /// record lasts through syncs of a loading listing, and ends at the first sync of a
+    /// complete one, at any cursor move, or at a restore. When the cursor isn't going it
+    /// records nothing, so a later reload that drops the cursor's entry uses the reload rule.
+    /// A host that abandons a removal after calling this syncs before anything else, or a
+    /// reload that starts first would still apply the record.
+    ///
+    /// It changes nothing visible, and costs one `gone` call per entry up to the cursor.
     pub fn before_removal<S: EntrySource + ?Sized>(
         &mut self,
         before: &S,
         gone: impl Fn(EntryId) -> bool,
     ) {
-        if let Some(i) = self.cursor_index(before) {
+        self.removal_hint = None;
+        let (Some(id), Some(i)) = (self.cursor, self.cursor_index(before)) else {
+            return;
+        };
+        if gone(id) {
             let survivors = (0..i).filter(|&j| !gone(before.id_at(j))).count();
-            self.cursor_hint = Some(survivors);
+            self.removal_hint = Some((id, survivors));
         }
     }
 
@@ -793,6 +843,7 @@ impl Selection {
         changed.cursor = self.cursor != position.cursor;
         self.cursor = position.cursor;
         self.cursor_hint = position.cursor.and(position.cursor_index);
+        self.removal_hint = None;
         changed.anchor = self.set_anchor(position.anchor.and(position.cursor));
         self.finish(changed)
     }
@@ -801,6 +852,7 @@ impl Selection {
 
     fn place_cursor(&mut self, id: EntryId, index: usize) -> Changed {
         self.cursor_hint = Some(index);
+        self.removal_hint = None;
         let moved = self.cursor != Some(id);
         self.cursor = Some(id);
         Changed {

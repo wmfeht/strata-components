@@ -279,6 +279,8 @@ def activate(app):
     label.set_size_request(200, 120)
     source = Gtk.DragSource(actions=Gdk.DragAction.COPY | Gdk.DragAction.MOVE)
     source.connect("prepare", lambda *_: provider())
+    source.connect("drag-cancel", lambda _s, _d, reason: print("drag-cancel", reason.value_nick) or False)
+    source.connect("drag-end", lambda _s, _d, delete: print("drag-end, delete", delete))
     label.add_controller(source)
     win.set_child(label)
     win.present()
@@ -308,8 +310,13 @@ fn main() { rune::run(AppSpec::new("u2", (340.0, 240.0), S::default, view)); }
 At least the file drop reaches `on_drop_files`, as on X11.
 
 **Actual.**
-- Wayland: nothing prints: no hover, no move, no drop. The source sees `target None`, then
-  `cancelled`.
+- Wayland: the Rune program prints nothing: no hover, no move, no drop. Nothing accepts the
+  drag. In the measured run the source was a raw `wl_data_device` client offering the same
+  three types (not the script above): it got `target` with no type while over the window, then
+  `cancelled` at the drop. With the script above, `WAYLAND_DEBUG=1` should show the same pair,
+  `wl_data_source.target(nil)` then `wl_data_source.cancelled()`, and the script should print
+  `drag-cancel no-target`, then `drag-end, delete False`. The script hasn't been run against
+  the Rune window.
 - X11: winit answers XDND itself (`XdndActionPrivate`). It takes file URIs only, of files that
   exist, and positions come from sampling `QueryPointer`.
 
@@ -637,17 +644,26 @@ window.
 **Steps.**
 1. Save the fake portal below as `fake_portal.py`. It serves the keys it is given, emits
    `SettingChanged` on a schedule, and logs every call it gets as a JSON line.
-2. Start the headless sway from the recipe above, then run U13's program on a private bus with
-   the fake portal:
+2. Make a binary crate named `u12` with the program below (any Rune window will do), and build
+   it first, so the build doesn't eat into the timed run.
+3. Start the headless sway from the recipe above, then run the window on a private bus with the
+   fake portal.
+
+```rust
+use rune::{App, AppSpec, Cx, El, col, text};
+fn view(_: &(), _: &mut Cx<()>) -> El { col().w_full().h_full().child(text("portal keys")) }
+fn main() { App::new(AppSpec::new("u12", (320.0, 160.0), || (), view)).run(); }
+```
 
 ```sh
+cargo build
 dbus-run-session -- sh -c '
   python3 -I fake_portal.py \
     --init "org.freedesktop.appearance color-scheme u 1; org.gnome.desktop.interface text-scaling-factor d 1.0; org.gnome.desktop.interface cursor-blink b true; org.gnome.desktop.interface cursor-blink-time i 1200; org.gnome.desktop.interface enable-animations b true; org.gnome.desktop.peripherals.mouse double-click i 400" \
     --schedule "3 org.gnome.desktop.interface text-scaling-factor d 1.5; 3.5 org.gnome.desktop.interface enable-animations b false; 4 org.gnome.desktop.peripherals.mouse double-click i 1200; 4.5 org.freedesktop.appearance color-scheme u 2" \
     > portal.log &
   sleep 1
-  WAYLAND_DISPLAY=wayland-1 timeout 6 cargo run
+  WAYLAND_DISPLAY=wayland-1 timeout 6 ./target/debug/u12
 '
 grep '"ev": "call"' portal.log
 ```
@@ -1130,9 +1146,13 @@ and has no `workflow_call`.
 1. The tag matches `^strata-platform-v<semver>\+rune\.[0-9a-f]{7}$`. A manual run's tag is free
    text, so it is printed only once it matches.
 2. The semver equals the crate's version from `cargo metadata`.
-3. Every `anomalyco/rune` source in `Cargo.lock` reads `?rev=<40 hex>#<the same 40>`, all
-   with one rev. Every `anomalyco/rune` dependency in the root and crate manifests pins
-   `rev = "<that rev>"`, with no `branch` or `tag`. The rev starts with the tag's seven digits.
+3. A source or dependency is Rune's when its URL, without scheme, user, port, `.git` or a
+   trailing `/`, is `github.com/anomalyco/rune`, so `rune-sys` is not, but an ssh or scp-style
+   URL is. Every Rune source in `Cargo.lock` must read
+   `https://github.com/anomalyco/rune?rev=<40 hex>#<the same 40>`, all with one rev. Every Rune
+   dependency in the root and crate manifests must use that https URL and pin
+   `rev = "<that rev>"`, with no `branch` or `tag`. No manifest may `[patch]` Rune's URL or have a
+   `[replace]` section. The rev starts with the tag's seven digits.
 4. `mise.toml`'s Rust equals `rust-toolchain.toml` at that Rune rev, read from cargo's git
    database after `cargo fetch --locked`.
 5. The commit is on `origin/main`. A dry run only warns.
@@ -1210,7 +1230,7 @@ The rule above holds while the crate is 0.x. What happens at 1.0 is an owner que
 
 ## Verification
 
-Run here on 2026-11-07, after review round 1 and the rebase onto `integration` (P9 merged), in
+Run here on 2026-11-07, after review round 2 and the rebase onto `integration` (P9 and C15 merged), in
 scratch clones under the worktree's `target/s5/`. Each failing case must fail at the step named,
 not at an earlier one. Cargo ran offline
 except for one `file://` fetch. A local runner ran `release.yml`'s own `run:` scripts, as
@@ -1221,7 +1241,7 @@ libraries are installed). A fake `gh` first on `PATH` recorded the release call.
 | Check | Expected | Result |
 | --- | --- | --- |
 | YAML loads. Triggers are a `strata-platform-v*` tag and a manual run. Default permissions are `contents: read`, and only `release` has `contents: write`. `release` runs on a push only. Every `uses:` is pinned to a 40-digit SHA used in `ci.yml`. `build`'s setup steps equal `integration`'s `ci.yml` (with `libglib2.0-dev`). No `${{ }}` inside a script. No `cargo publish` or `cargo package`. | pass | pass (15 assertions) |
-| P1: a dry run of `strata-platform-v0.0.1+rune.78d22ed` on a branch | pass, with warnings | pass. It warned that the commit isn't on main, and that it used `[Unreleased]`. |
+| P1: a dry run of `strata-platform-v0.0.1+rune.78d22ed` on a branch | pass, with warnings | pass. It warned that the commit isn't on main, and that it used `[Unreleased]`. The toolchain step found Rune's rev by trying each `git/db/rune-*` in turn. |
 | F1: tag version 0.1.0 against crate version 0.0.1 | fail at the version | fail: "the tag says 0.1.0, but strata-platform's Cargo.toml says '0.0.1'" |
 | F2: tag rev `1234567` | fail at the Rune rev | fail: "the tag names Rune 1234567, but the workspace pins 78d22ed8…" |
 | F3: malformed tags (`-rune.`, no rev, a leading zero, an uppercase rev, an 8-digit rev, the text `$(echo pwned)`) | fail at the tag, without printing it | fail, all six. The error is the fixed message; no log line prints the input. |
@@ -1234,6 +1254,13 @@ libraries are installed). A fake `gh` first on `PATH` recorded the release call.
 | F11: `rune-kit` pinned `tag = "v0.0.1"` (`?tag=v0.0.1#<rev>`) | fail at the Rune rev | fail: "Cargo.lock pins Rune as '?tag=v0.0.1#…'" |
 | F12: `rune-kit` pinned `rev = "78d22ed"` (`?rev=78d22ed#<rev>`) | fail at the Rune rev | fail: "Cargo.lock pins Rune as '?rev=78d22ed#…'" |
 | F13, F14: `branch` or `tag` in `Cargo.toml` only, the lock untouched | fail at the Rune rev | fail: "Cargo.toml: rune-kit pins Rune by {'branch': 'dev'}" and "… {'tag': 'v0.0.1'}" |
+| F15: `rune-kit`'s lock source `git+ssh://git@github.com/anomalyco/rune?rev=…#…` | fail at the Rune rev | fail: "Cargo.lock pins Rune as 'ssh://git@github.com/anomalyco/rune?rev=…', not https://github.com/anomalyco/rune?rev=<40 hex>#<the same>" |
+| F16: `rune-kit = { git = "ssh://git@github.com/anomalyco/rune", rev = … }`, the lock untouched | fail at the Rune rev | fail: "Cargo.toml: rune-kit takes Rune from 'ssh://git@github.com/anomalyco/rune'; use https://github.com/anomalyco/rune" |
+| F17: `[patch."https://github.com/anomalyco/rune"]` | fail at the Rune rev | fail: "Cargo.toml patches Rune ([patch.'https://github.com/anomalyco/rune'])" |
+| F18: `[patch."ssh://git@github.com/anomalyco/rune.git"]` | fail at the Rune rev | fail: "Cargo.toml patches Rune ([patch.'ssh://git@github.com/anomalyco/rune.git'])". The first try keyed the patch `git@github.com:anomalyco/rune.git`, and cargo itself refused that manifest ("should be a URL or registry name"), so a working manifest can't spell it that way. |
+| F19: a `[replace]` section | fail at the Rune rev | fail: "Cargo.toml has a [replace] section" |
+| P3: a `rune-sys` package pinned `?branch=dev` in the lock and the manifest, and a `[patch.crates-io]`; only the Rune step runs, since cargo would refuse the made-up lock entry | the Rune step passes | passes. The round-1 check took `rune-sys` for Rune (a prefix match), so it would have refused this. |
+| The URL normaliser on its own, against 11 spellings | Rune's: https with and without `.git` or `/`, a query, ssh, `git+ssh`, scp-style, an ssh port, mixed case; not Rune's: `rune-sys`, `runes` | as expected, once an ssh port was handled (the first version left `github.com:22/…`) |
 | F9: a push with a changelog section but no README row | fail at the notes | fail: "the README's supported Rune revs table has no row for …" |
 | P2: a push with a `[0.0.1] - 2026-11-07` section and a README row, on main | pass | pass. The section became the notes. |
 | R1: `release` on a manual run | skipped | skipped |
@@ -1243,9 +1270,9 @@ libraries are installed). A fake `gh` first on `PATH` recorded the release call.
 | `build`: the pin check at a 7-digit rev | fail, two Runes | fail: `rev=78d22ed` and the full rev listed as two `rune` packages |
 | A tag consumer: a scratch clone tagged `strata-platform-v0.0.1+rune.78d22ed`, pinned with `git = "file://…", tag = …` and Rune at the full rev | builds, one Rune | builds. `Cargo.lock` records `?tag=strata-platform-v0.0.1%2Brune.78d22ed`. One `rune` in `cargo tree`. |
 | `cargo package --list -p strata-platform` (listing only) | includes `README.md` | includes it, with no `Cargo.toml` change. Cargo warns that the manifest has no `repository`. |
-| Every draft's Rust program compiles at `78d22ed` | 13 programs build | all build, with no warnings |
-| U2's GTK 4 drag source: the content provider and the PNG, without a display | three types, a valid PNG | `text/uri-list text/plain;charset=utf-8 image/png`. Every PNG chunk CRC checks, and gdk-pixbuf decodes it as 1×1 RGBA. The window and the drag itself weren't run. |
-| U12's fake portal, as pasted, on a private bus (`dbus-run-session`) | answers and emits | `ReadOne`, `ReadAll` and `Read` answered (`gdbus`), and the draft's `--init` and `--schedule` strings parse and emit all four changes on time. Not run against a Rune window here; S1 measured that. |
+| Every draft's Rust program compiles at `78d22ed` | 14 programs build (U12's window added in round 2) | all build, with no warnings |
+| U2's GTK 4 drag source: the content provider, the PNG and the signal handlers, without a display | three types, a valid PNG, handlers connect | `text/uri-list text/plain;charset=utf-8 image/png`. Every PNG chunk CRC checks, and gdk-pixbuf decodes it as 1×1 RGBA. `drag-cancel` and `drag-end` connect, and `NO_TARGET`'s nick is `no-target`. The window and the drag itself weren't run. |
+| U12's fake portal and commands, as pasted, on a private bus (`dbus-run-session`) | answers and emits | `ReadOne`, `ReadAll` and `Read` answered (`gdbus`), and the draft's `--init` and `--schedule` strings parse and emit all four changes on time. The command block parses (`bash -n`), builds first, and runs `./target/debug/u12`. Not run against a Rune window here; S1 measured that. |
 | `dragon-drop` and `ripdrag` as U2's source, read from their source on GitHub | — | dragon: URI and text targets only (`gtk_target_list_add_uri_targets`, `add_text_targets`). ripdrag: a `GdkFileList` only. Neither offers `image/png`, so U2 now carries its own source. |
 | The headless drafts give their "Actual" | as written | U3 (rewritten in round 1), U10, U13, U14 and U15 print what the drafts quote, and U16's measurements and U4's check match |
 | `actionlint`, `act`, `zizmor` | — | not installed, so not run |

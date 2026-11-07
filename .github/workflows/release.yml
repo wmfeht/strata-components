@@ -1,0 +1,361 @@
+name: Release strata-platform
+
+# A release is a git tag naming the crate version and the Rune rev it supports:
+# strata-platform-v<semver>+rune.<the rev's first 7 hex digits>. The rules, and the shim
+# lifecycle, are in docs/decisions/S5-upstream.md. Nothing here publishes to crates.io: Rune is
+# a git dependency, so the crate can't go there yet (docs/plan.md §8).
+#
+# A manual run is a dry run: it checks the chosen commit under the tag name you give, and pushes
+# no tag and creates no release. A pushed tag runs the same checks, then creates a draft
+# prerelease for the owner to publish.
+
+on:
+  push:
+    tags: ["strata-platform-v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The tag to check, e.g. strata-platform-v0.1.0+rune.78d22ed (dry run: no tag, no release)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  CRATE: strata-platform
+  TAG_PREFIX: strata-platform-v
+  RUNE_GIT: https://github.com/anomalyco/rune
+
+jobs:
+  preflight:
+    name: Tag, versions and notes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+      rune_short: ${{ steps.tag.outputs.rune_short }}
+      rune_rev: ${{ steps.rune.outputs.rev }}
+      notes: ${{ steps.notes.outputs.notes }}
+    steps:
+      # Full history, so the main-branch check can see whether the tag is on main.
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Install the pinned toolchain
+        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+
+      # The tag arrives through env, never spliced into the script.
+      - name: Read the tag
+        id: tag
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          semver='(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?'
+          re="^${TAG_PREFIX}(${semver})\+rune\.([0-9a-f]{7})$"
+          # A manual run's tag is free text: don't print it until it matches.
+          if [[ ! "$TAG" =~ $re ]]; then
+            echo "::error::the tag isn't ${TAG_PREFIX}<semver>+rune.<7 hex digits>, e.g. ${TAG_PREFIX}0.1.0+rune.78d22ed"
+            exit 1
+          fi
+          version="${BASH_REMATCH[1]}"
+          short="${BASH_REMATCH[6]}"
+          dry=true
+          if [ "$EVENT" = push ]; then dry=false; fi
+          {
+            echo "tag=$TAG"
+            echo "version=$version"
+            echo "rune_short=$short"
+            echo "dry_run=$dry"
+          } >> "$GITHUB_OUTPUT"
+          echo "Tag $TAG: version $version, Rune $short, dry run $dry"
+
+      - name: Check the crate version
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          crate_version=$(cargo metadata --no-deps --format-version 1 --locked \
+            | python3 -c 'import json, os, sys
+          pkgs = [p for p in json.load(sys.stdin)["packages"] if p["name"] == os.environ["CRATE"]]
+          print(pkgs[0]["version"] if pkgs else "")')
+          if [ "$crate_version" != "$VERSION" ]; then
+            echo "::error::the tag says $VERSION, but $CRATE's Cargo.toml says '${crate_version}'"
+            exit 1
+          fi
+
+      # Every Rune crate pins one full rev (AGENTS.md), and the tag names its first digits. A
+      # branch or tag pin, a short rev, another URL for the same repository (ssh, say) or a
+      # [patch] or [replace] would let the build drift from what the tag says. A Rune source is
+      # one whose URL, without scheme, user, `.git` or a trailing `/`, is the repository's.
+      - name: Check the Rune rev
+        id: rune
+        env:
+          SHORT: ${{ steps.tag.outputs.rune_short }}
+        run: |
+          set -euo pipefail
+          rev=$(python3 - <<'PY'
+          import glob, os, re, sys, tomllib
+          git = os.environ["RUNE_GIT"]
+
+          def repo(url):
+              url = re.sub(r"^git\+", "", url.split("?")[0].split("#")[0]).lower()
+              url = re.sub(r"^[a-z][a-z0-9+.-]*://", "", url)
+              url = re.sub(r"^[^@/]+@", "", url)
+              url = re.sub(r"^([^/:]+):\d+/", r"\1/", url)  # host:port/path
+              url = re.sub(r"^([^/:]+):", r"\1/", url)  # scp-style git@host:path
+              url = re.sub(r"/+$", "", url)
+              return re.sub(r"\.git$", "", url)
+
+          rune_repo = repo(git)
+          spelled = r"^" + re.escape(git) + r"(?:\.git)?/?"
+          pinned = re.compile(spelled + r"(\?.*)$")  # Cargo.lock: the URL and its query
+          plain = re.compile(spelled + r"$")  # a manifest's git = "…"
+          revs = set()
+          for url in re.findall(r'^source = "git\+([^"]*)"$', open("Cargo.lock").read(), re.M):
+              if repo(url) != rune_repo:
+                  continue
+              m = pinned.match(url)
+              q = m and re.fullmatch(r"\?rev=([0-9a-f]{40})#([0-9a-f]{40})", m.group(1))
+              if not q or q.group(1) != q.group(2):
+                  sys.exit(f"::error::Cargo.lock pins Rune as '{url}', not {git}?rev=<40 hex>#<the same>")
+              revs.add(q.group(1))
+          if not revs:
+              sys.exit("::error::Cargo.lock has no Rune package")
+          if len(revs) != 1:
+              sys.exit(f"::error::Cargo.lock pins Rune at more than one rev: {sorted(revs)}")
+          rev = revs.pop()
+
+          def deps(table):
+              for key in ("dependencies", "dev-dependencies", "build-dependencies"):
+                  yield from (table.get(key) or {}).items()
+              for target in (table.get("target") or {}).values():
+                  yield from deps(target)
+
+          for path in ["Cargo.toml", *sorted(glob.glob("crates/*/Cargo.toml"))]:
+              manifest = tomllib.load(open(path, "rb"))
+              for source in manifest.get("patch") or {}:
+                  if repo(source) == rune_repo:
+                      sys.exit(f"::error::{path} patches Rune ([patch.'{source}']); a release builds the pinned rev")
+              if manifest.get("replace"):
+                  sys.exit(f"::error::{path} has a [replace] section; a release builds what Cargo.lock pins")
+              found = list(deps(manifest)) + list(deps(manifest.get("workspace") or {}))
+              for name, spec in found:
+                  if not isinstance(spec, dict) or "git" not in spec or repo(spec["git"]) != rune_repo:
+                      continue
+                  if not plain.match(spec["git"]):
+                      sys.exit(f"::error::{path}: {name} takes Rune from '{spec['git']}'; use {git}")
+                  pin = {k: spec[k] for k in ("rev", "branch", "tag") if k in spec}
+                  if list(pin) != ["rev"] or pin["rev"] != rev:
+                      sys.exit(f"::error::{path}: {name} pins Rune by {pin or 'nothing'}; it needs rev = \"{rev}\"")
+          print(rev)
+          PY
+          )
+          if [[ "$rev" != "$SHORT"* ]]; then
+            echo "::error::the tag names Rune $SHORT, but the workspace pins $rev"
+            exit 1
+          fi
+          echo "rev=$rev" >> "$GITHUB_OUTPUT"
+
+      # mise.toml's Rust follows Rune's rust-toolchain.toml at the pinned rev (AGENTS.md). Cargo
+      # may keep more than one Rune database (another URL spelling, say): use the one with the rev.
+      - name: Check the Rust toolchain against Rune's
+        env:
+          REV: ${{ steps.rune.outputs.rev }}
+        run: |
+          set -euo pipefail
+          cargo fetch --locked
+          found=
+          for db in "${CARGO_HOME:-$HOME/.cargo}"/git/db/rune-*/; do
+            if [ -d "$db" ] && git -C "$db" show "$REV:rust-toolchain.toml" > "$RUNNER_TEMP/rune-toolchain.toml" 2>/dev/null; then
+              found=$db
+              break
+            fi
+          done
+          if [ -z "$found" ]; then
+            echo "::error::no Rune checkout in cargo's git database has $REV"
+            exit 1
+          fi
+          python3 - "$RUNNER_TEMP/rune-toolchain.toml" <<'PY'
+          import sys, tomllib
+          rune = tomllib.load(open(sys.argv[1], "rb"))["toolchain"]["channel"]
+          rust = tomllib.load(open("mise.toml", "rb"))["tools"]["rust"]
+          ours = rust["version"] if isinstance(rust, dict) else rust
+          if ours != rune:
+              sys.exit(f"::error::mise.toml pins Rust {ours}, Rune's rust-toolchain.toml says {rune}")
+          print(f"Rust {ours}, as Rune pins")
+          PY
+
+      # Releases come from main. A dry run may check another branch, so it only warns.
+      - name: Check that the commit is on main
+        env:
+          DRY_RUN: ${{ steps.tag.outputs.dry_run }}
+        run: |
+          set -euo pipefail
+          if git merge-base --is-ancestor HEAD origin/main; then
+            echo "$(git rev-parse --short HEAD) is on main"
+          elif [ "$DRY_RUN" = true ]; then
+            echo "::warning::$(git rev-parse --short HEAD) isn't on main; a pushed tag here would fail"
+          else
+            echo "::error::$(git rev-parse --short HEAD) isn't on main; tag a commit on main"
+            exit 1
+          fi
+
+      # A pushed tag needs its own changelog section and README row. A dry run before them
+      # takes the [Unreleased] section and only needs the README to name the pinned rev.
+      - name: Check the changelog and README, and take the notes
+        id: notes
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          VERSION: ${{ steps.tag.outputs.version }}
+          REV: ${{ steps.rune.outputs.rev }}
+          DRY_RUN: ${{ steps.tag.outputs.dry_run }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os, re, secrets, sys
+          tag, version, rev = os.environ["TAG"], os.environ["VERSION"], os.environ["REV"]
+          dry = os.environ["DRY_RUN"] == "true"
+          log = open("CHANGELOG.md").read()
+          heads = list(re.finditer(r"^## \[([^\]]+)\](.*)$", log, re.M))
+          def section(name):
+              for i, h in enumerate(heads):
+                  if h.group(1) == name:
+                      end = heads[i + 1].start() if i + 1 < len(heads) else len(log)
+                      return h, log[h.end():end].strip()
+              return None, None
+          head, body = section(version)
+          if head is None:
+              if not dry:
+                  sys.exit(f"::error::CHANGELOG.md has no '## [{version}] - YYYY-MM-DD' section")
+              head, body = section("Unreleased")
+              if head is None:
+                  sys.exit("::error::CHANGELOG.md has neither this version's section nor [Unreleased]")
+              print(f"::warning::CHANGELOG.md has no [{version}] section; a dry run uses [Unreleased]")
+          elif not re.fullmatch(r" - \d{4}-\d{2}-\d{2}", head.group(2)):
+              sys.exit(f"::error::the [{version}] heading needs ' - YYYY-MM-DD' after it")
+          elif rev not in body:
+              sys.exit(f"::error::the [{version}] section must name the full Rune rev {rev}")
+          readme = open("crates/strata-platform/README.md").read()
+          if rev not in readme:
+              sys.exit(f"::error::the README doesn't name the pinned Rune rev {rev}")
+          if not dry and tag not in readme:
+              sys.exit(f"::error::the README's supported Rune revs table has no row for {tag}")
+          mark = "NOTES_" + secrets.token_hex(8)
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"notes<<{mark}\n{body}\n{mark}\n")
+          print(body)
+          PY
+
+  build:
+    name: Build and test the crate
+    needs: preflight
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      # The same setup as ci.yml.
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Rune links libwayland-client and libxkbcommon. mesa-vulkan-drivers is lavapipe, the
+      # software Vulkan the PNG goldens and scripts render on (docs/testing.md).
+      # strata-platform's glib-bridge feature links GLib and GIO (glib-sys, gio-sys).
+      - name: Install system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libglib2.0-dev libwayland-dev libxkbcommon-dev mesa-vulkan-drivers
+
+      - name: Install the pinned toolchain
+        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: Check formatting
+        run: mise run fmt
+
+      - name: Check each feature alone
+        run: mise run compile-features
+
+      - name: Lint the crate
+        run: cargo clippy -p "$CRATE" --all-targets --all-features --locked -- -D warnings
+
+      # Headless, as `mise run test`: nothing may reach a desktop display.
+      - name: Test the crate
+        run: |
+          env -u DISPLAY -u WAYLAND_SOCKET WAYLAND_DISPLAY=strata-test-no-wayland \
+            cargo test -p "$CRATE" --all-targets --all-features --locked
+
+      - name: Build the docs
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc -p "$CRATE" --all-features --no-deps --locked
+
+      - name: Check dependencies
+        run: mise run deny
+
+      # An app that pins Rune as the README says must get one Rune, not two. Cargo treats a
+      # short and a full rev as different sources, so the pin must match ours exactly.
+      - name: Check an app's pin
+        env:
+          REV: ${{ needs.preflight.outputs.rune_rev }}
+        run: |
+          set -euo pipefail
+          app="${RUNNER_TEMP:-$PWD/target}/pin-check"
+          rm -rf "$app" && mkdir -p "$app/src"
+          cp Cargo.lock "$app/"
+          echo 'fn main() {}' > "$app/src/main.rs"
+          cat > "$app/Cargo.toml" <<EOF
+          [package]
+          name = "pin-check"
+          version = "0.0.0"
+          edition = "2024"
+          publish = false
+
+          [workspace]
+
+          [dependencies]
+          rune = { git = "$RUNE_GIT", rev = "$REV" }
+          $CRATE = { path = "$PWD/crates/$CRATE" }
+          EOF
+          # `(*)` marks a package cargo tree already printed: the same package, not another.
+          # No colour: mise.toml sets CARGO_TERM_COLOR=always, which would hide the marker.
+          runes=$(cargo tree --manifest-path "$app/Cargo.toml" -e normal --prefix none \
+            --format '{p}' --color never | sed 's/ (\*)$//' | grep -E '^rune v' | sort -u)
+          echo "$runes"
+          if [ "$(printf '%s\n' "$runes" | grep -c .)" != 1 ]; then
+            echo "::error::an app pinning Rune at $REV builds more than one Rune"
+            exit 1
+          fi
+
+  release:
+    name: Create a draft prerelease
+    needs: [preflight, build]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      # The draft is for the owner to read and publish. Cargo pins the tag, not the release.
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+          SHORT: ${{ needs.preflight.outputs.rune_short }}
+          NOTES: ${{ needs.preflight.outputs.notes }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$NOTES" > "$RUNNER_TEMP/notes.md"
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --draft --prerelease \
+            --title "$CRATE $VERSION (Rune $SHORT)" --notes-file "$RUNNER_TEMP/notes.md"

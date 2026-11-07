@@ -1,0 +1,39 @@
+{
+  "bullets": [
+    "app/dialogs: Opening Settings fades its whole layer",
+    "app/dialogs: The first Settings open of a process fades in",
+    "app/dialogs: Closing Settings during its fade-in"
+  ],
+  "scene": "c15-openers-light",
+  "events": [
+    {
+      "t": 0.1,
+      "type": "tap",
+      "key": "c15-open-panel"
+    },
+    {
+      "t": 0.25,
+      "type": "key",
+      "name": "Escape"
+    },
+    {
+      "t": 0.8,
+      "type": "tap",
+      "key": "c15-open-panel"
+    }
+  ],
+  "expect": [
+    {
+      "key": "c15-panel-dialog",
+      "role": "dialog",
+      "name": "Settings",
+      "states": [
+        "modal"
+      ]
+    },
+    {
+      "key": "c15-panel-hidden",
+      "focused": true
+    }
+  ]
+}

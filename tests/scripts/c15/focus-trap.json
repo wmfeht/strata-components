@@ -1,0 +1,59 @@
+{
+  "bullets": [
+    "app/dialogs: While a dialog is open, focus that moves outside it"
+  ],
+  "scene": "c15-danger-light",
+  "events": [
+    {
+      "t": 0.1,
+      "type": "key",
+      "name": "Tab"
+    },
+    {
+      "t": 0.2,
+      "type": "key",
+      "name": "Tab"
+    },
+    {
+      "t": 0.30000000000000004,
+      "type": "key",
+      "name": "Tab"
+    },
+    {
+      "t": 0.4,
+      "type": "key",
+      "name": "Tab"
+    },
+    {
+      "t": 0.5,
+      "type": "key",
+      "name": "Tab"
+    },
+    {
+      "t": 0.6,
+      "type": "key",
+      "name": "Tab"
+    },
+    {
+      "t": 0.7000000000000001,
+      "type": "key",
+      "name": "Tab"
+    }
+  ],
+  "expect": [
+    {
+      "key": "c15-danger-close",
+      "focused": true
+    },
+    {
+      "key": "c15-danger-dialog",
+      "states": [
+        "modal"
+      ]
+    },
+    {
+      "key": "c15-cursor",
+      "absent": true
+    }
+  ]
+}

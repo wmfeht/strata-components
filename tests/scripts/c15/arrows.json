@@ -1,0 +1,39 @@
+{
+  "bullets": [
+    "app/dialogs: Moving keyboard focus off the confirm button",
+    "app/dialogs: With focus outside a text field, an unmodified arrow key"
+  ],
+  "scene": "c15-danger-light",
+  "events": [
+    {
+      "t": 0.2,
+      "type": "key",
+      "name": "Left"
+    },
+    {
+      "t": 0.3,
+      "type": "key",
+      "name": "Left"
+    },
+    {
+      "t": 0.5,
+      "type": "key",
+      "name": "Right"
+    },
+    {
+      "t": 0.7,
+      "type": "key",
+      "name": "Right"
+    }
+  ],
+  "expect": [
+    {
+      "key": "c15-danger-primary",
+      "focused": true
+    },
+    {
+      "key": "c15-danger-secondary",
+      "focused": false
+    }
+  ]
+}

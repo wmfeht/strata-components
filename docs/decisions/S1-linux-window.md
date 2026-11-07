@@ -10,36 +10,43 @@
 
 ## Verdicts
 
-- **P3 is "shim here" on X11 and blocked on Rune on Wayland.** Rune's public API reaches winit's
-  `drag_window` (through `.window_drag()`) and `set_maximized` (through `Tx::toggle_maximized`).
-  It doesn't reach `drag_resize_window`, `show_window_menu` or, for a borderless window,
-  `set_minimized`. `WindowHandle::with_raw_handle` gives only a raw *window* handle: an X11 id,
-  or the `wl_surface` pointer. On X11 that is enough: a second X connection can send
-  `_NET_WM_MOVERESIZE`, and it resized the window under Xwayland. On Wayland it isn't: resizing
-  needs winit's own `xdg_toplevel` and the seat's button serial. winit itself resizes fine on
-  both, so a Rune API would be a thin wrapper (repro R1).
+- **P3 is blocked on Rune on Wayland, and "shim here" on X11 only if a hand test passes.**
+  Rune's public API reaches winit's `drag_window` (through `.window_drag()`) and
+  `set_maximized` (through `Tx::toggle_maximized`). It doesn't reach `drag_resize_window`,
+  `show_window_menu` or, for a borderless window, `set_minimized`.
+  `WindowHandle::with_raw_handle` gives only a raw *window* handle: an X11 id, or the
+  `wl_surface` pointer. On X11 a second connection can send `_NET_WM_MOVERESIZE` with that id,
+  and it resized the window under Xwayland. Real X window managers are expected to refuse it,
+  because winit's connection holds the press's pointer grab (Q2), so the X11 shim depends on a
+  hand test. On Wayland the raw handle isn't enough: resizing needs winit's own `xdg_toplevel`
+  and the seat's button serial. winit itself resizes fine on both, so a Rune API would be a thin
+  wrapper (repro R1).
 - **P5 starts from `color-scheme` only.** Rune reads `org.freedesktop.appearance color-scheme`
   from the Settings portal and follows `SettingChanged` within a few milliseconds. It reads no
   other portal key. It reads reduced motion from GSettings or `kdeglobals` directly, only when a
   window is created or focused. On Hyprland, the Settings backend is xdg-desktop-portal-gtk,
-  which offers every key P5 needs.
-- **Menus scroll, submenus clip.** rune-kit menus and dropdowns shrink to the window and scroll.
-  Submenus only flip sides, so a window narrower than about three menu widths can push a
-  submenu off its edge. Tiling compositors also give a window less than its minimum size.
-- **The double-click interval is a fixed 0.5 s on Linux**, on every compositor. The desktop's
-  setting (400 ms by default) is ignored, and an app can't change it.
+  which offers every key P5 needs (simulated under sway with `XDG_CURRENT_DESKTOP=Hyprland`;
+  real session pending). That follows from `/usr/share/xdg-desktop-portal/hyprland-portals.conf`
+  (`default=hyprland;gtk`) and `/usr/share/xdg-desktop-portal/portals/hyprland.portal`, whose
+  interfaces don't include Settings.
+- **Menus scroll, submenus clip** (by source; measured headless and on sway). rune-kit menus and
+  dropdowns shrink to the window and scroll. Submenus flip sides and shift vertically, but never
+  shrink or scroll. A window narrower than about three menu widths can push a submenu off its
+  side, and one shorter than the tallest submenu pushes it off the bottom. Tiling compositors
+  also give a window less than its minimum size.
+- **The double-click interval is a fixed 0.5 s on Linux**, on every compositor (by source;
+  measured headless, on sway and through Xwayland). The desktop's setting (400 ms by default)
+  is ignored, and an app can't change it.
 
 ## Method
 
-Every run used a private headless sway: `setpriv --no-new-privs sway` with
-`WLR_BACKENDS=headless`, `WLR_LIBINPUT_NO_DEVICES=1`, a private `XDG_RUNTIME_DIR`, `env -i`,
-inside `dbus-run-session`. Clients ran through `swaymsg exec`, so they saw only the private
-display and bus. Nothing connected to the owner's Hyprland session. The harness is in the
-prototype's `harness/` directory, and its traps are listed under W3 in
-[Constraints for later WPs](#constraints-for-later-wps). The window under test is `s1-window`, a
-plain Rune app that logs layout, scale, focus, appearance, presses and window errors as JSON
-lines. `s1-winit` is winit 0.30.13 with Rune's features and no Rune. `s1-probe` reports Wayland
-globals, decoration modes and `wm_capabilities`, and drives a virtual pointer.
+Every run used a private headless sway inside a private D-Bus session, set up by the
+prototype's `harness/lib.sh`. Its setup and traps are listed under W3 in
+[Constraints for later WPs](#constraints-for-later-wps). Nothing connected to the owner's
+Hyprland session. The window under test is `s1-window`, a plain Rune app that logs layout,
+scale, focus, appearance, presses and window errors as JSON lines. `s1-winit` is winit 0.30.13
+with Rune's features and no Rune. `s1-probe` reports Wayland globals, decoration modes and
+`wm_capabilities`, and drives a virtual pointer.
 
 Hyprland could not run here. It has no headless backend, and nested inside sway it aborts:
 `invalid version for global xdg_wm_base (13): expected at most 5, got 6`. Aquamarine needs
@@ -62,12 +69,15 @@ installed; their cells give the expectation from their documented protocol suppo
 | lavapipe (QEMU images) | Hand test pending. Strata-side: no images here, and lavapipe isn't installed. | — |
 
 Notes:
-- **Rune's Linux wgpu build has Vulkan only.** wgpu is compiled with `vulkan` and `dx12`, with no
-  GL backend. A machine without a Vulkan driver gets no window. Lavapipe (`mesa-vulkan-drivers`,
-  `vulkan-swrast`) is the only software fallback; plan §8's "Vulkan or GL" doesn't hold.
-- **Rune panics when the compositor goes away.** When the Wayland or X connection drops, `run`
-  panics with `run: Exit Failure: 1` (`app.rs:503`) instead of returning. A file manager dies
-  with its compositor anyway, so this is minor.
+- **Rune's default build has no GL.** Rune asks wgpu for `Backends::all()` (`render.rs:560`), but
+  on Linux it compiles only wgpu's `vulkan` feature, not `gles`. With that build, a machine
+  without a Vulkan driver gets no window, and lavapipe (`mesa-vulkan-drivers`, `vulkan-swrast`)
+  is the only software fallback. An app that enables `wgpu/gles` itself might add a GL fallback;
+  that is untested.
+- **When the compositor goes away,** `run` panics with `run: Exit Failure: 1` by design: it
+  wraps `try_run` and panics on its error (`app.rs:500-507`). `App::try_run` returns
+  `Err("run: Exit Failure: 1")` instead, with no panic (`r8/sway/r8.log`, prototype example
+  `r8`). Strata should call `try_run`.
 
 ## Q2 Decorations off: move, resize, minimise, maximise, window menu
 
@@ -78,24 +88,36 @@ Each case is a borderless window driven by a virtual pointer and sway's rect rea
 | --- | --- | --- | --- | --- |
 | Move by dragging the header | Works (`.window_drag()`) | Works | Works (`drag_window`) | Works |
 | Resize from an edge or corner | **No API.** The shim can't get `xdg_toplevel` from the raw handle. | Works through the shim: `_NET_WM_MOVERESIZE` from a second X connection | Works (`drag_resize_window`, E, W, SE) | Works |
-| Maximise (`Tx::toggle_maximized`, header double-click) | Sent; sway ignores it (no maximize capability) | Sent; ignored | Sent; ignored | Sent; ignored |
-| Minimise | **`Tx::minimize` is ignored for borderless windows** (`rune: minimize ignored`, `window/shell_requests.rs:20`) | Same. The shim's `WM_CHANGE_STATE` is sent; sway ignores it. | Sent; sway can't minimise | Sent; ignored |
-| Window menu | No Linux path in Rune (`window/chrome.rs:95`, Windows only) | The shim's `_GTK_SHOW_WINDOW_MENU` is sent; wlroots xwm doesn't support it | `show_window_menu` sent; sway has no window menu | winit's X11 `show_window_menu` is a no-op |
+| Maximise (`Tx::toggle_maximized`, header double-click) | Requested; sway ignores it (no maximize capability) | Requested; ignored | Requested; ignored | Requested; ignored |
+| Minimise | **`Tx::minimize` is ignored for borderless windows** (`rune: minimize ignored`, `window/shell_requests.rs:20`) | Same. The shim's `WM_CHANGE_STATE` is requested; sway ignores it and the window stays visible. | Requested; sway can't minimise | Requested; ignored |
+| Window menu | No Linux path in Rune (`window/chrome.rs:95`, Windows only) | The shim's `_GTK_SHOW_WINDOW_MENU` is requested; wlroots xwm doesn't support it | `show_window_menu` requested; sway has no window menu | winit's X11 `show_window_menu` is a no-op |
 
 What each compositor offers, from `xdg_toplevel.wm_capabilities` and `_NET_SUPPORTED`:
 
 | Compositor | Move and resize | Maximise | Minimise | Window menu | Status |
 | --- | --- | --- | --- | --- | --- |
 | sway | yes | no (`wm_capabilities` = fullscreen) | no | no | Ran here (`q3/sway/probe.json`) |
-| wlroots xwm (Xwayland in sway) | `_NET_WM_MOVERESIZE` | `_NET_WM_STATE_MAXIMIZED_*` | — | no `_GTK_SHOW_WINDOW_MENU` | Ran here (`q3/sway/x11-root.txt`) |
+| wlroots xwm (Xwayland in sway) | `_NET_WM_MOVERESIZE` | `_NET_WM_STATE_MAXIMIZED_*` | `_NET_WM_STATE_HIDDEN` advertised, but a `WM_CHANGE_STATE` iconify request was ignored | no `_GTK_SHOW_WINDOW_MENU` | Ran here (`q3/sway/x11-root.txt`, `q2/rune-xwayland/node-after-x11min.json`) |
 | Hyprland | yes, with a valid button serial | yes (`wm_capabilities` = fullscreen, maximize) | no (a minimise request only emits an event) | no handler | Hand test pending; from source |
 | GNOME Wayland (mutter) | yes | yes | yes | yes | Hand test pending; from documented behaviour |
-| GNOME X11 (mutter) | `_NET_WM_MOVERESIZE` | yes | yes | `_GTK_SHOW_WINDOW_MENU` | Hand test pending. Whether the shim's second X connection works while winit's connection holds the press's implicit pointer grab is **untested**; wlroots xwm doesn't grab, so Xwayland can't show the problem. |
+| GNOME X11 (mutter), KWin on X11, other X window managers | `_NET_WM_MOVERESIZE` | yes | yes | `_GTK_SHOW_WINDOW_MENU` (mutter) | Hand test pending. **The shim is expected to fail here.** The EWMH spec says the client must release all its grabs before sending `_NET_WM_MOVERESIZE`, because the window manager then grabs the pointer itself. winit does that on its own connection (`ungrab_pointer`, `platform_impl/linux/x11/window.rs:1699`). A second connection can't release winit's implicit grab from the press, so the window manager's grab is expected to fail. wlroots xwm takes input from the compositor and doesn't grab, which is why Xwayland can't show the problem. |
 | KDE | yes | yes | yes | yes | Hand test pending; from documented behaviour |
 
 Also found:
 - Rune's `Cursor` has `ResizeColumn` and `ResizeRow` but no diagonal resize shapes. The prototype
-  used `Cursor::Move` on its corners.
+  used `Cursor::Move` on its corners. `Cursor::Image` with the app's own PNG images is the interim
+  fallback, at the cost of not following the cursor theme.
+- **No window-state query.** Rune exposes no maximised state (only `Tx::toggle_maximized` and the
+  `App::maximized` builder), and `Cx::chrome_insets()` is 0 on Linux. P3 can't tell whether to
+  show maximise or restore, or whether to hide its resize bands on a maximised window. Part of
+  R1 and R3.
+- **The header double-click ignores the desktop's titlebar action.** Off macOS, Rune always
+  toggles maximise (`window/chrome.rs:72-77`). GNOME's
+  `org.gnome.desktop.wm.preferences action-double-click-titlebar` (minimise, shade, menu,
+  none) isn't read.
+- **Pointer state stays sane after the window manager takes a drag.** Under Xwayland, after two
+  resizes run by the window manager, the next five clicks all reached Rune
+  (`q2/rune-xwayland/win.log`). The same held after `.window_drag()` moves on Wayland.
 - A `.window_drag()` region must have no press handlers of its own (`bare_drag_region`), and its
   double press always toggles maximise with Rune's fixed 0.5 s interval. P3 can't apply P5's
   interval to the header without giving up `.window_drag()`, and on Wayland that is the only way
@@ -147,18 +169,30 @@ at the corners and middle (`q5/summary.json`, `q5/*.png`).
 - Menus above or below their anchor use `anchored_fit`: they flip, shift, keep 8 pt inside the
   window, and scroll their rows. Nothing clips vertically. Presses at the bottom-right flip
   upward.
-- Submenus sit beside their row and only flip. A submenu has somewhere to go for every press
-  only when the window is at least `3 × menu width + 16` pt wide: 496 pt for 160 pt menus. By
-  that rule, at 420 pt, presses between x = 92 and 168 push it off-window; x = 130 was tested.
+- Submenus sit beside their row. Horizontally they only flip. Vertically they shift to stay
+  8 pt inside (`runtime/anchor.rs:51` clamps the cross axis): in `q5/summary.json` the submenu's
+  top moves from 84 or 90 to 8 in the 320×240 window. They never shrink or scroll, so a submenu
+  taller than the window runs off the bottom. In the R6 program, a 20-row submenu (564 pt) in
+  a 420×400 window starts at y = 8 and runs 172 pt past the bottom.
+- A submenu has somewhere to go for every press only when the window is at least
+  `3 × menu width + 16` pt wide: 496 pt for 160 pt menus. By that rule, at 420 pt, presses
+  between x = 92 and 168 push it off-window; x = 130 was tested.
 - Tiling ignores the minimum size. In sway with four tiled windows, the Rune window got 316×772
   pt at scale 1 and 209×505 pt at scale 1.5, below its 420×400 minimum. The open menu stayed
   inside (`q5/live-*/`). Hyprland tiles the same way (hand test pending).
 - `tx.popup_menu` (native menus) is unsupported on Linux and answers `None`.
+- Folder peek (C22) and other in-window popovers anchored beside an element follow the same
+  rules as submenus: they flip and shift but don't shrink.
 
-**Chooser minimum until Rune has popup surfaces:** at least `3 × W + 16` pt wide, where W is
-the widest menu that has a submenu, and tall enough for the longest context menu plus about
-16 pt of margins if it shouldn't scroll. For the 160 pt menus above that is 496 × 480.
-Floating windows honour this; tiled ones don't.
+**Chooser minimum until Rune has popup surfaces:**
+- **Width:** at least `3 × W + 16` pt, where W is the widest menu that has a submenu. Required.
+- **Height, submenus:** at least the tallest submenu plus 16 pt. Required, because submenus
+  can't scroll.
+- **Height, menus:** the longest context menu plus about 16 pt, if it shouldn't scroll.
+  Optional, because menus scroll.
+
+For the 160 pt menus above, with 8-row submenus (228 pt), that is 496 × 244 required and
+496 × 480 to avoid scrolling. Floating windows honour the minimum; tiled ones don't.
 
 ## Q6 Double-click interval
 
@@ -185,12 +219,18 @@ Floating windows honour this; tiled ones don't.
    - borderless on X11 only;
    - an X11-only P3.
 
-   **Recommendation:** start P3 now with borderless on X11 only, and on Wayland keep the native
-   frame until Rune ships R1–R3. P3 then builds its platform-neutral part: the edge-band hit
-   test and direction state machine, the button handlers, the header with `.window_drag()`, and
-   the menu trigger, all testable headless. It adds the X11 backend: `_NET_WM_MOVERESIZE`,
-   `WM_CHANGE_STATE` and `_GTK_SHOW_WINDOW_MENU` on its own x11rb connection, from the raw
-   window id. The Wayland backend becomes a one-line switch once Rune exposes the calls.
+   **Recommendation:** start P3 now with its platform-neutral part, and keep the native frame
+   on Wayland until Rune ships R1–R3. The platform-neutral part is the edge-band hit test and
+   direction state machine, the button handlers, the header with `.window_drag()`, and the menu
+   trigger, all testable headless. Borderless on X11 depends on the GNOME-on-Xorg hand test
+   (question 3): only if a real window manager accepts `_NET_WM_MOVERESIZE`, `WM_CHANGE_STATE`
+   and `_GTK_SHOW_WINDOW_MENU` from P3's own x11rb connection does P3 ship that X11 backend now.
+   Otherwise X11 keeps the native frame too.
+
+   P3's unblockers in Rune are R1 (resize, cursors, window state), R2 (minimise), R3 (window
+   menu) and R7 (the display handle). With R7, an X11 shim could send its requests on winit's
+   own connection and release the grab first, as winit does. Once Rune exposes the calls, the
+   Wayland backend is a small switch.
 
    Evidence:
    - On Hyprland the native frame costs nothing: Hyprland always answers `server_side` and
@@ -204,9 +244,11 @@ Floating windows honour this; tiled ones don't.
    ships R1–R3. Should it be narrowed to Hyprland (decorated, which draws no titlebar there) and
    X11, with GNOME Wayland deferred?
 3. **The X11 grab question.** The shim's second X connection worked under wlroots xwm, which
-   doesn't grab. Whether mutter or another real X window manager accepts `_NET_WM_MOVERESIZE`
-   while winit's connection holds the press's implicit grab needs a GNOME-on-Xorg hand test
-   (`hand/session.sh gnome-x11 --x11`). If it fails, the X11 backend also needs Rune.
+   doesn't grab. On mutter, KWin and similar window managers it is expected to fail: EWMH
+   requires the client to release its grabs before `_NET_WM_MOVERESIZE`, and only winit's own
+   connection can release the press's implicit grab (`x11/window.rs:1699`). A GNOME-on-Xorg hand
+   test (`hand/session.sh gnome-x11 --x11`) settles it. If it fails as expected, the X11 backend
+   also needs Rune (R1, or R7 for the connection).
 4. **Hand tests.** Hyprland, GNOME, KDE and lavapipe results depend on the owner running
    `hand/session.sh` in the prototype (see its `README.md`). The spike never connected to the
    owner's session.
@@ -221,8 +263,15 @@ Recommended changes. None of these files was edited here.
   - Add to the scope:
     - minimise through `Tx::minimize` is ignored for borderless windows (R2);
     - Linux has no window-menu path (R3);
-    - there are no diagonal resize cursors (R1);
-    - the header double-click uses Rune's fixed 0.5 s, not P5's interval (R4).
+    - there are no diagonal resize cursors (R1; `Cursor::Image` meanwhile);
+    - there is no maximised-state query, and `Cx::chrome_insets()` is 0 on Linux, so the
+      maximise/restore button and the resize bands can't follow the window state (R1, R3);
+    - the header double-click uses Rune's fixed 0.5 s, not P5's interval (R4), and always
+      maximises, ignoring GNOME's `action-double-click-titlebar`.
+  - The X11 shim on a second connection is expected to fail on real X window managers (Q2). Its
+    unblockers are R1, R2, R3 and R7.
+  - The W3 test "resizes from each edge under sway" can only target Xwayland (through the shim,
+    which works there) or raw winit until Rune ships R1.
   - Under W3, input reaches clients only through a virtual pointer and a virtual keyboard (see
     W3 below).
 - **P5 (`P5-desktop-settings.md`):**
@@ -230,10 +279,16 @@ Recommended changes. None of these files was edited here.
     The Done-when should name it.
   - The double-click key lives in the `org.gnome.desktop.peripherals.mouse` namespace.
   - Rune's own reduced-motion read is separate from the portal: GSettings or `kdeglobals`,
-    re-read on focus. P5's animations value should come from the portal.
+    re-read on focus. P5's animations value should come from the portal. The integration point
+    is `Cx::reduced_motion(on)` (`runtime/cx.rs:236`): the view calls it on every commit with
+    the portal's `enable-animations`, which also works around Rune's stale focus-time read. The
+    override lasts one commit, so it must be set every time the view runs.
   - Read `color-scheme = 0` as "no preference", not as light or dark.
   - `harness/fake_portal.py` in the prototype is a ready model for the fake portal under W3.
 - **W3 (`W3-compositor-harness.md`):**
+  - Run sway with `WLR_BACKENDS=headless`, `WLR_LIBINPUT_NO_DEVICES=1`, a private
+    `XDG_RUNTIME_DIR` and `env -i`, inside `dbus-run-session`, and start clients through
+    `swaymsg exec` so they see only the private display and bus.
   - Start sway as `setpriv --no-new-privs sway`. `/usr/bin/sway` has `cap_sys_nice` and goes
     realtime, and where `RLIMIT_RTTIME` is 0 the kernel kills it at once (exit 137).
   - Set `swaybg_command -`.
@@ -249,12 +304,15 @@ Recommended changes. None of these files was edited here.
   - Use the gles2 renderer: pixman offers no dmabuf, and the NVIDIA Vulkan driver then makes
     no surface.
   - Hyprland can't nest inside sway 1.12 (needs `xdg_wm_base` v6).
-- **S5 (`S5-upstream-and-release.md`):** file R1–R8 below. Beyond the list S5 has, that adds
-  borderless minimise (R2), the window menu (R3), access to the display handle (R7) and the
-  panic on disconnect (R8). Diagonal cursors and `wm_capabilities` are folded into R1 and R3.
+- **S5 (`S5-upstream-and-release.md`):** file R1–R7 below. Beyond the list S5 has, that adds
+  borderless minimise (R2), the window menu (R3) and access to the display handle (R7; shared
+  with S2 and S3, file once). Diagonal cursors, window state and `wm_capabilities` are folded
+  into R1 and R3. The panic on disconnect was dropped: `try_run` returns the error.
 - **plan.md (owner's own PR):**
   - §4 P3: replace the `drag_resize_window` premise with the Wayland/X11 split above.
-  - §8: Rune's Linux build has no GL backend, so lavapipe is the only fallback; drop "or GL".
+  - §8: Rune's default build has no GL backend (it doesn't enable wgpu's `gles` feature), so
+    lavapipe is the only fallback unless the app enables `wgpu/gles` itself, which is untested.
+    Say so instead of "Vulkan or GL".
   - §4 tier 1 intro: shims can't bind on "winit's own Wayland display" through Rune's public
     API (next item).
 - **S2, P0, P2, P4 (display handle):** Rune exposes no display handle: `with_raw_handle` gives
@@ -266,28 +324,30 @@ Recommended changes. None of these files was edited here.
 
 ## Appendix: Rune issue drafts for S5
 
-Each draft runs with no desktop display: either Rune's headless tooling, or the private headless
-sway from the prototype's `harness/lib.sh`. Common setup: a binary crate depending on `rune` at
-`78d22ed` with features `accessibility`, `dbus`, `embedded-fonts` and `svg`. The R1 and R4
-snippets compile against that rev (prototype `crates/s1-window/examples/`), and R4 reproduces
-headless: 0.45 s gives one double press, 0.55 s none.
+Common setup: a binary crate depending on `rune` at `78d22ed` with features `accessibility`,
+`dbus`, `embedded-fonts` and `svg` (R6 also needs `rune-kit` at the same rev). The R1, R2, R3, R4
+and R6 programs compile against that rev (prototype `crates/s1-window/examples/`). R4 and R6
+reproduce with Rune's headless tooling alone. "Compositor" below means any Wayland or X11
+session: a private headless sway with a virtual pointer is enough (prototype `harness/`); a
+desktop isn't needed.
 
 ### R1 Linux: no way to start an interactive resize from a borderless window
 
-Steps:
-1. Build the app below.
-2. Run it in headless sway, floating.
-3. With a virtual pointer, press 3 px inside the right edge, move 100 px right, and release.
+Needs a compositor. Steps:
+1. Run the program below in headless sway, floating.
+2. With a virtual pointer, press 3 px inside the right edge, move 100 px right, and release.
 
 Expected: the window grows by 100 px, as winit's `Window::drag_resize_window(East)` does (verified
-with plain winit 0.30.13 under the same harness).
+with plain winit 0.30.13 under the same harness, Wayland and Xwayland).
 
 Actual: nothing can start the resize. `WindowHandle::with_raw_handle` yields the `wl_surface`
-only, and `xdg_toplevel.resize` needs winit's toplevel and the button serial. `Cursor` also lacks
-diagonal resize shapes for the corners.
+only, and `xdg_toplevel.resize` needs winit's toplevel and the button serial.
 
-Ask: `.window_resize(ResizeDirection)` (like `.window_drag()`) or `Tx::drag_resize_window`, and
-`Cursor::Resize{N,S,E,W,NE,NW,SE,SW}`.
+Ask:
+- `.window_resize(ResizeDirection)` (like `.window_drag()`) or `Tx::drag_resize_window`;
+- `Cursor::Resize{N,S,E,W,NE,NW,SE,SW}`;
+- the window's maximised state for the view (none today; `Cx::chrome_insets()` is 0 on Linux),
+  so resize bands and the maximise/restore button can follow it.
 
 ```rust
 use rune::*;
@@ -309,42 +369,81 @@ fn main() {
 
 ### R2 `Tx::minimize` is ignored for borderless windows
 
-Steps: in a borderless window, a button calls `tx.minimize()`.
+Needs a compositor (any; the message comes before any request reaches it). Steps: run the program
+below as a debug build and click "Minimise".
 
 Expected: the window minimises where the compositor supports it (GNOME, KDE, X11 window
 managers). Those are exactly the windows that draw their own minimise button.
 
-Actual: debug builds print `rune: minimize ignored: a window without a minimize button can't
-minimize`. The check is `self.options.borderless || …` in `window/shell_requests.rs:20`.
+Actual: `rune: minimize ignored: a window without a minimize button can't minimize`, and no
+request. The check is `self.options.borderless || …` in `window/shell_requests.rs:20`. Seen
+under headless sway and Xwayland (prototype `out/q2/rune-*/win.log`).
 
 ```rust
-row().key("min").on_press_tx(|_: &mut S, tx: &mut Tx| tx.minimize())
+use rune::*;
+struct S;
+fn view(_: &S, _: &mut Cx<S>) -> El {
+    col().w_full().h_full()
+        .child(row().h(40.0).w_full().window_drag().child(text("borderless")))
+        .child(row().key("min").w(120.0).h(32.0).role("button").label("Minimise").child(text("Minimise"))
+            .on_press_tx(|_: &mut S, tx: &mut Tx| tx.minimize()))
+}
+fn main() {
+    App::new(AppSpec::new("R2", (400.0, 240.0), || S, view))
+        .window_options(WindowOptions { borderless: true, ..Default::default() })
+        .run();
+}
 ```
 
 ### R3 No window menu on Linux
 
-Steps: in a borderless window, right-click a bare `.window_drag()` region.
+Needs a compositor that has a window menu (GNOME, KDE; sway and Hyprland have none) to see the
+expected result; the missing call is visible in the code. Steps: run the program below and
+right-click the header.
 
-Expected: `xdg_toplevel.show_window_menu` on Wayland (GNOME, KDE), and `_GTK_SHOW_WINDOW_MENU` on
-X11 where the window manager supports it.
+Expected: `xdg_toplevel.show_window_menu` on Wayland, and `_GTK_SHOW_WINDOW_MENU` on X11 where
+the window manager supports it, as Rune already does on Windows.
 
-Actual: `take_window_menu` is only set when a Windows caption exists, and `chrome::window_menu`
-is a no-op off Windows. winit's X11 `show_window_menu` is also a no-op.
+Actual: nothing. `take_window_menu` is only set when a Windows caption exists, and
+`chrome::window_menu` is a no-op off Windows. winit's X11 `show_window_menu` is also a no-op.
 
-Ask: the window menu on Linux, plus `xdg_toplevel.wm_capabilities` exposed (sway advertises
-fullscreen only; Hyprland fullscreen and maximize), so apps can hide buttons the compositor
-can't honour.
+Ask:
+- the window menu on Linux;
+- `xdg_toplevel.wm_capabilities` exposed (sway advertises only fullscreen; Hyprland
+  fullscreen and maximize), so apps can hide buttons the compositor can't honour;
+- the maximised state (as in R1);
+- optionally, the desktop's titlebar double-click action
+  (`org.gnome.desktop.wm.preferences action-double-click-titlebar`) instead of always
+  maximising (`window/chrome.rs:72-77`).
+
+```rust
+use rune::*;
+struct S;
+fn view(_: &S, _: &mut Cx<S>) -> El {
+    // A bare drag region: on Windows a secondary click here opens the window menu.
+    col().w_full().h_full()
+        .child(row().key("header").h(40.0).w_full().window_drag().child(text("right-click me")))
+}
+fn main() {
+    App::new(AppSpec::new("R3", (400.0, 240.0), || S, view))
+        .window_options(WindowOptions { borderless: true, ..Default::default() })
+        .run();
+}
+```
 
 ### R4 The double-click interval is fixed at 0.5 s on Linux
 
-Steps: the script below on the app below: `--script dbl.json`, once with `gap` 0.45 and once
-with 0.55. Then the same under headless sway with GNOME's `double-click` set to 1200 ms.
+Headless; no compositor needed. Steps: run the program below with `--script dbl.json --tree
+out.json --at 3`, once with `gap` 0.45 and once with 0.55, and read the `doubles` text. A live
+check under headless sway with GNOME's `double-click` set to 1200 ms gives the same result.
 
-Expected: the desktop's interval: GNOME and GTK default to 400 ms, and the portal key is
-`org.gnome.desktop.peripherals.mouse double-click`. Or at least a way for the app to set it.
+Expected: the desktop's interval, or at least a way for the app to set it. GNOME and GTK default
+to 400 ms (`org.gnome.desktop.peripherals.mouse double-click`, also in the Settings portal), and
+KDE stores `DoubleClickInterval` in `kdeglobals` (also 400 ms by default).
 
-Actual: 0.45 pairs, 0.55 doesn't, and 583–1033 ms never pair with the desktop at 1200 ms.
-`Runtime::double_click_interval` is public, but windowed apps never get `&mut Runtime`.
+Actual: 0.45 pairs (`doubles 1`) and 0.55 doesn't (`doubles 0`). Under sway, 583–1033 ms never
+pair with the desktop at 1200 ms. `Runtime::double_click_interval` is public, but windowed apps
+never get `&mut Runtime`.
 
 ```rust
 use rune::*;
@@ -359,41 +458,67 @@ fn main() { App::new(AppSpec::new("R4", (400.0, 200.0), S::default, view)).run()
 
 ### R5 Settings portal keys beyond `color-scheme`
 
-Steps: run the app under a private session bus with a fake `org.freedesktop.portal.Settings`
-(the prototype's `harness/fake_portal.py`) that emits changes to `text-scaling-factor`,
-`cursor-blink`, `cursor-blink-time` and `enable-animations` (`org.gnome.desktop.interface`) and
-to `double-click` (`org.gnome.desktop.peripherals.mouse`).
+Needs a compositor and a private session bus, because Rune reads the portal only for a real
+window. Steps: run any Rune app (R4's will do) on a private bus where a fake
+`org.freedesktop.portal.Settings` emits changes to `text-scaling-factor`, `cursor-blink`,
+`cursor-blink-time` and `enable-animations` (`org.gnome.desktop.interface`) and to
+`double-click` (`org.gnome.desktop.peripherals.mouse`). The fake portal must be attached to the
+issue: prototype `harness/fake_portal.py`, about 100 lines of Python with GLib's Gio, which logs
+every call it receives.
 
 Expected: these reach the app, as `color-scheme` does.
 
-Actual: Rune issues only `ReadOne(org.freedesktop.appearance, color-scheme)` and ignores every
-other `SettingChanged`. It reads reduced motion from GSettings or `kdeglobals` on focus only,
-which skips the portal (sandboxes) and change signals.
+Actual: the fake portal's log shows one call from Rune, `ReadOne(org.freedesktop.appearance,
+color-scheme)`, and nothing else; no API exposes the other keys. Rune reads reduced motion from
+GSettings or `kdeglobals` only when a window is created or focused, which skips the portal
+(sandboxes) and change signals.
 
 ### R6 Popup surfaces for menus
 
-Steps: `--tree --scene ctx-sub-x130 --size 420x400` on the prototype's `s1-window`: a rune-kit
-context menu opened at x = 130 with its submenu open.
+Already on S5's list; this adds the repro. Headless; no compositor needed. Steps: run the program
+below with `--tree t.json --size 420x400 --at 1`, then again with `--long` added. Read the
+`ctx-item1-sub-menu` rect.
 
 Expected: the submenu stays visible, as an `xdg_popup` would.
 
-Actual: the submenu runs 28 pt past the right edge, at Rune's own default minimum size.
-Submenus flip but never shift or shrink, and `tx.popup_menu` is unsupported on Linux.
+Actual:
+- With 8 rows it sits at `[288, 90, 160, 228]`: 28 pt past the right edge of a window at Rune's
+  own default minimum size.
+- With 20 rows it shifts up to `[288, 8, 160, 564]` and still runs 172 pt past the bottom.
+
+Submenus flip and shift but never shrink or scroll, and `tx.popup_menu` is unsupported on
+Linux.
+
+```rust
+use rune::*;
+use rune_kit::{Kit, MenuEntry, MenuItem, context_menu};
+struct S;
+fn view(_: &S, _: &mut Cx<S>) -> El {
+    let k = Kit::neutral(true);
+    let rows = if rune::tooling::extra_args().iter().any(|a| a == "--long") { 20 } else { 8 };
+    let sub = (0..rows).map(|i| MenuEntry::item(MenuItem::new(format!("App {i}")))).collect();
+    let mut layer = Vec::new();
+    let trigger = context_menu("ctx", el(), Some(PointerPress { x: 130.0, y: 60.0 }))
+        .item(MenuItem::new("Open"))
+        .item(MenuItem::new("Open With").submenu(sub, true))
+        .item(MenuItem::new("Copy"))
+        .build(&k, &mut layer);
+    rune_kit::root(col().w_full().h_full().fill(k.c.bg_base).child(trigger), layer)
+}
+fn main() { App::new(AppSpec::new("R6", (420.0, 400.0), || S, view)).run(); }
+```
 
 ### R7 Public access to the native display connection
 
-Steps: an app's `on_window` hook wants to bind a Wayland protocol on winit's display
-(`xdg_foreign`, data-device, `xdg_activation`), as Rune's own `platform/activation.rs` does.
+Shared with S2 and S3 (display handle); file once. No repro program needed: it's a missing API,
+visible in `window/handle.rs:133`. Steps: an app's `App::on_window` hook wants to bind a Wayland
+protocol on winit's display (`xdg_foreign`, data-device, `xdg_activation`), as Rune's own
+`platform/activation.rs` does, or to send X11 requests on winit's connection.
 
 Expected: something like `WindowHandle::with_raw_display_handle`.
 
-Actual: only the window handle is available. On Wayland the display can be recovered from the
-surface with `wl_proxy_get_display`, which needs unsafe FFI and libwayland 1.23 or later.
-
-### R8 `run` panics when the compositor connection drops
-
-Steps: start any app under headless sway, then `swaymsg exit`.
-
-Expected: `run` returns, or the app exits cleanly.
-
-Actual: `Io error: Broken pipe`, then a panic at `app.rs:503` (`run: Exit Failure: 1`).
+Actual: only the window handle is available.
+- On Wayland the display can be recovered from the surface with `wl_proxy_get_display`, which
+  needs unsafe FFI and libwayland 1.23 or later.
+- On X11 a shim must open its own connection, and that connection can't release winit's pointer
+  grab before `_NET_WM_MOVERESIZE` (see R1 and the Q2 notes).

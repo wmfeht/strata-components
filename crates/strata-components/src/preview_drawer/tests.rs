@@ -9,7 +9,7 @@ use super::*;
 const R: DrawerRules = DrawerRules::STRATA;
 
 fn columns(navigated: f32, keep: f32) -> Arrangement {
-    Arrangement::Columns(ColumnsFit::new(navigated, keep))
+    Arrangement::Columns(ColumnsFit::new(&R, navigated, keep))
 }
 
 #[test]
@@ -63,26 +63,26 @@ fn in_icons_and_list_a_dragged_width_is_the_width_and_a_window_resize_keeps_it()
 #[test]
 fn the_content_hides_when_less_than_240_would_remain_beside_the_focused_column() {
     // Columns: 1 + 300 standard + 239 left over.
-    let fit = Arrangement::Columns(ColumnsFit::new(300.0, 300.0));
+    let fit = Arrangement::Columns(ColumnsFit::new(&R, 300.0, 300.0));
     assert!(!solve(&R, &fit, 540.0, None).fits);
     assert!(solve(&R, &fit, 541.0, None).fits);
     // Icons and List keep one standard column for the files.
     assert!(!solve(&R, &Arrangement::Icons, 540.0, None).fits);
     assert!(solve(&R, &Arrangement::Icons, 541.0, None).fits);
     // The narrow test counts the focused column at most one standard column.
-    let wide = Arrangement::Columns(ColumnsFit::new(500.0, 500.0).keep_focused_standard(300.0));
+    let wide = Arrangement::Columns(ColumnsFit::new(&R, 500.0, 500.0).keep_focused_standard(300.0));
     assert!(solve(&R, &wide, 600.0, None).fits);
 }
 
 #[test]
 fn the_reserved_slot_lends_trailing_columns_its_width_and_shrinks_to_zero() {
-    let fit = ColumnsFit::new(400.0, 300.0).trailing(250.0);
+    let fit = ColumnsFit::new(&R, 400.0, 300.0).trailing(250.0);
     let s = solve(&R, &Arrangement::Columns(fit), 1001.0, None);
     assert_eq!(s.empty_slot, 350.0);
     // A narrow window: the slot shrinks to nothing instead of going.
     let s = solve(
         &R,
-        &Arrangement::Columns(ColumnsFit::new(400.0, 400.0)),
+        &Arrangement::Columns(ColumnsFit::new(&R, 400.0, 400.0)),
         401.0,
         None,
     );
@@ -144,4 +144,26 @@ fn reopening_find_keeps_the_query_selected() {
     st.open_find();
     assert!(st.find.query.focused);
     assert_eq!(st.find.query.selected(), "needle");
+}
+
+#[test]
+fn a_closed_drawer_is_never_suspended_and_reopening_reconciles_with_the_host() {
+    let mut st = DrawerState::new();
+    st.open_at_once();
+    st.suspended = true;
+    assert!(st.is_suspended());
+    let st = in_handler(st, |st, tx| st.close(&Look::fallback(false), tx));
+    assert!(!st.is_suspended(), "nothing to pause while closed");
+    // The host last heard Suspend(true); the next open's fit marker owes it Suspend(false).
+    assert!(st.suspended);
+}
+
+#[test]
+fn the_right_pane_tells_c2_what_the_empty_slot_keeps() {
+    let fit = ColumnsFit::new(&R, 400.0, 300.0).trailing(250.0);
+    let pane = right_pane(&DrawerState::new(), &R, &fit, 1001.0);
+    assert_eq!(
+        (pane.width, pane.empty_slot, pane.preview_shown),
+        (600.0, 350.0, false)
+    );
 }

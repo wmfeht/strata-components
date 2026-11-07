@@ -292,7 +292,6 @@
                             "click",
                             "focus"
                           ],
-                          "description": "Close preview (Space)",
                           "key": "preview-close",
                           "name": "Close preview (Space)",
                           "role": "button"

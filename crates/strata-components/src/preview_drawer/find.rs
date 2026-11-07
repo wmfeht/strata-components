@@ -22,7 +22,8 @@ pub(super) fn bar<S: 'static>(
     let labels = &shared.labels;
     let access = shared.access;
     let status = caps.status.unwrap_or_default();
-    let query_empty = st.find.query.text.is_empty();
+    // No status while the query is empty, or while the view hasn't answered yet.
+    let show_status = !st.find.query.text.is_empty() && caps.status.is_some();
 
     let on_change = shared.clone();
     let on_key = shared.clone();
@@ -89,7 +90,7 @@ pub(super) fn bar<S: 'static>(
         .items_center()
         .border_sides([0.0, 0.0, 1.0, 0.0], k.c.border_muted)
         .child(field);
-    if !query_empty {
+    if show_status {
         let words = match status.current {
             Some(n) if status.total > 0 => (labels.match_of)(n, status.total),
             _ if status.total == 0 => labels.no_matches.clone(),
@@ -127,9 +128,13 @@ pub(super) fn close<S: 'static>(shared: &Shared<S>, s: &mut S, _tx: &mut Tx) {
     shared.with_view(s, |v| v.find_end());
 }
 
-/// Ends find for good (the drawer closes): the view drops its highlights.
-pub(super) fn end<S: 'static>(shared: &Shared<S>, s: &mut S) {
-    if (shared.access)(s).find.open {
-        shared.with_view(s, |v| v.find_end());
+/// Opens the find bar, and runs the query it kept on the view, as Strata's find refreshes
+/// on reopening.
+pub(super) fn open<S: 'static>(shared: &Shared<S>, s: &mut S) {
+    let st = (shared.access)(s);
+    st.open_find();
+    let query = st.find.query.text.clone();
+    if !query.is_empty() {
+        shared.with_view(s, |v| v.find(&query));
     }
 }

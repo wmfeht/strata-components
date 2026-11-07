@@ -1,6 +1,6 @@
 {
   "bullets": [
-    "preview/preview-panel/layout: Pointer-dragging the divider shows a dashed outline from the pointer to the right edge, captioned \"Preview panel minimum width\""
+    "preview/preview-panel/layout: Pointer-dragging the divider shows"
   ],
   "scene": "c9-list-open-light",
   "events": [
@@ -12,8 +12,7 @@
     {
       "t": 0.3,
       "type": "move",
-      "x": 430,
-      "y": 300
+      "key": "row-1"
     }
   ],
   "expect": [

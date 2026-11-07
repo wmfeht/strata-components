@@ -291,7 +291,6 @@
                             "click",
                             "focus"
                           ],
-                          "description": "Close preview (Space)",
                           "key": "preview-close",
                           "name": "Close preview (Space)",
                           "role": "button"
@@ -333,7 +332,7 @@
                         },
                         {
                           "key": "preview-find-status",
-                          "name": "Match 2 of 5",
+                          "name": "Match 1 of 5",
                           "role": "label",
                           "states": [
                             "live-polite"

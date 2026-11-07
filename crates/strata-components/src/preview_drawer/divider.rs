@@ -6,8 +6,9 @@
 //! - Hovering lights the line and tints the grip; resting 400 ms shows the caption.
 //! - A pointer drag sets the manual width and shows a dashed outline from the divider to the
 //!   trailing edge, captioned, which fades on release. Pressing hides the hover caption.
-//! - Focused (Strata's F8), Left and Right move it a step, Page Up and Page Down ten. No
-//!   outline shows.
+//! - Focused (Strata's F8), Left widens it a step and Right narrows it (the divider moves the
+//!   way the arrow points), Up and Down widen and narrow it as a slider's do, Page Up and Page
+//!   Down move ten steps, and Home and End go to the narrowest and widest. No outline shows.
 //! - Its accessible value is what it sets: the width shown in Icons and List, and in Columns
 //!   the session minimum (the manual width, else the width shown). Assistive increment and
 //!   decrement widen and narrow it.
@@ -56,13 +57,24 @@ pub(super) fn divider<S: 'static>(
     let keys = shared.clone();
     let steps = shared.clone();
     let hover = shared.clone();
-    let line = el().w(rules.line).h_full().fill(k.c.border_base).child(
-        el().w_full()
-            .h_full()
-            .fill(k.c.border_focus)
-            .group_opacity(0.0, 1.0),
-    );
+    let limits = shared.clone();
+    // Keyed so a script can rest the pointer on either part.
+    let line = el()
+        .key("preview-divider-line")
+        .a11y_hidden()
+        .w(rules.line)
+        .h_full()
+        .fill(k.c.border_base)
+        .child(
+            el().key("preview-divider-lit")
+                .w_full()
+                .h_full()
+                .fill(k.c.border_focus)
+                .group_opacity(0.0, 1.0),
+        );
     let grip = el()
+        .key("preview-divider-strip")
+        .a11y_hidden()
         .w(rules.grip)
         .h_full()
         .fill(k.c.hover)
@@ -93,6 +105,7 @@ pub(super) fn divider<S: 'static>(
             Phase::Down => {
                 d.data = now;
                 let st = (drag.access)(s);
+                st.drag_from = st.manual_width();
                 st.dragging = true;
                 st.hint = false;
             }
@@ -102,7 +115,15 @@ pub(super) fn divider<S: 'static>(
                 set(&drag, s, solved, d.data - d.dx);
             }
             Phase::Up => {
-                (drag.access)(s).dragging = false;
+                let st = (drag.access)(s);
+                if d.cancelled() {
+                    // Escape, or the pointer taken away: back to where it started, as
+                    // GtkPaned does.
+                    st.cancel_drag();
+                } else {
+                    st.dragging = false;
+                    st.drag_from = None;
+                }
             }
         })
         .on_key(move |s: &mut S, ev: &KeyEvent, tx: &mut Tx| {
@@ -121,9 +142,20 @@ pub(super) fn divider<S: 'static>(
             set(&keys, s, solved, now + delta);
             true
         })
+        // Up and Down, and assistive increment and decrement, reach here: Up widens.
         .on_step(move |s: &mut S, delta: i32, tx: &mut Tx| {
             tx.instant();
             set(&steps, s, solved, now + delta as f32 * step);
+        })
+        // Home and End: the narrowest and the widest.
+        .on_step_limit(move |s: &mut S, widest: bool, tx: &mut Tx| {
+            tx.instant();
+            set(
+                &limits,
+                s,
+                solved,
+                if widest { solved.max } else { solved.min },
+            );
         })
 }
 
@@ -175,7 +207,12 @@ pub(super) fn overlays<S: 'static>(
                 .border_dash(4.0, 4.0)
                 .padding(look.space.sm)
                 .raise()
-                .transition(Transition::opacity())
+                // It fades on release, unless animations are off.
+                .transition(if shared.animations {
+                    Transition::opacity()
+                } else {
+                    Transition::none()
+                })
                 .child(caption("preview-minimum-outline-caption").a11y_hidden()),
         );
     }

@@ -291,7 +291,6 @@
                             "click",
                             "focus"
                           ],
-                          "description": "Close preview (Space)",
                           "key": "preview-close",
                           "name": "Close preview (Space)",
                           "role": "button"
@@ -330,7 +329,10 @@
                           ],
                           "key": "fake-content",
                           "name": "notes.md",
-                          "role": "document"
+                          "role": "document",
+                          "states": [
+                            "focused"
+                          ]
                         }
                       ],
                       "key": "preview-body",
@@ -351,16 +353,13 @@
                   "key": "preview-grip",
                   "name": "Preview panel minimum width",
                   "range": [
-                    492.0,
+                    432.0,
                     300.0,
                     659.0,
                     8.0
                   ],
                   "role": "splitter",
-                  "states": [
-                    "focused"
-                  ],
-                  "value": "492"
+                  "value": "432"
                 }
               ],
               "key": "preview-slot",

@@ -21,6 +21,9 @@ pub struct DrawerRules {
     pub auto_share: f32,
     /// What Icons and List keep for the files beside the preview: one standard column.
     pub files_min: f32,
+    /// One standard column: the Columns minimum, unless C2 reports another
+    /// ([`ColumnsFit::standard_column`]).
+    pub standard_column: f32,
     /// The divider's line.
     pub line: f32,
     /// The grip inside the preview's leading edge that moves the divider.
@@ -40,6 +43,7 @@ impl DrawerRules {
         auto_max: 3000.0,
         auto_share: 0.45,
         files_min: 300.0,
+        standard_column: 300.0,
         line: 1.0,
         grip: 6.0,
         step: 8.0,
@@ -83,14 +87,14 @@ pub struct ColumnsFit {
 
 impl ColumnsFit {
     /// A strip whose navigated columns take `navigated` and whose focused column stays
-    /// visible in `keep_focused`. No trailing columns; a 300 point standard column.
-    pub fn new(navigated: f32, keep_focused: f32) -> Self {
+    /// visible in `keep_focused`. No trailing columns; the rules' standard column.
+    pub fn new(rules: &DrawerRules, navigated: f32, keep_focused: f32) -> Self {
         ColumnsFit {
             navigated,
             keep_focused,
             keep_focused_standard: keep_focused,
             trailing: 0.0,
-            standard_column: 300.0,
+            standard_column: rules.standard_column,
         }
     }
     pub fn keep_focused_standard(mut self, w: f32) -> Self {
@@ -178,13 +182,15 @@ pub fn solve(
 }
 
 /// The right pane in Columns, for C2: how wide the space right of the navigated columns is,
-/// and whether the preview shows in it. A trailing child column borrows the empty slot's
-/// width and is clipped at the right edge when it is wider.
+/// whether the preview shows in it, and what the empty slot keeps once trailing columns have
+/// borrowed their width. A trailing child column is clipped at the right edge when it is
+/// wider than the pane.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
 pub struct RightPane {
     pub width: f32,
     pub preview_shown: bool,
+    pub empty_slot: f32,
 }
 
 /// [`RightPane`] for `state` in a split `available` points wide.
@@ -203,5 +209,6 @@ pub fn right_pane(
     RightPane {
         width: solved.width,
         preview_shown: state.is_open() && solved.fits,
+        empty_slot: solved.empty_slot,
     }
 }

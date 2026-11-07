@@ -39,6 +39,10 @@ pub struct FindStatus {
 /// The drawer owns the find bar (the query field, the status, Previous, Next and Close find)
 /// and calls the search methods; the view owns the matches, their highlight and the
 /// selection.
+///
+/// Which views are searchable is each view's call. The feature map says PDF pages aren't
+/// searched (`preview/preview-panel/find`), while C12's work package plans find over the
+/// text layer: C12 resolves that, and either answer fits this trait.
 pub trait HostedPreview {
     /// `Some(current)` shows the switch, a single button offering the other form ("View
     /// source" while rendered, "View rendered" while showing source). The host swaps the

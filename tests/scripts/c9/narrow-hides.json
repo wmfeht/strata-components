@@ -1,6 +1,6 @@
 {
   "bullets": [
-    "preview/preview-panel/layout: When less than 240 px would remain beside the focused column, the preview content hides, media pauses, and loading is deferred"
+    "preview/preview-panel/layout: When less than 240 px would remain beside the focused column, the preview content hides"
   ],
   "scene": "c9-list-open-light",
   "events": [

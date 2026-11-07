@@ -391,8 +391,9 @@ impl<'a, S: 'static> PreviewDrawer<'a, S> {
         let has_body = !matches!(body, Body::Empty);
         // The pane shows while the drawer is open, has something to show, and fits.
         let shown = st.is_open() && has_body && solved.fits;
+        // The slot holds the divider's line and the pane beside it.
         let slot_width = if shown {
-            solved.width
+            solved.width + rules.line
         } else if columns && (st.is_reserved() || st.is_open()) {
             // Columns keeps its slot, down to zero, so the columns keep their offset.
             solved.empty_slot
@@ -431,6 +432,12 @@ impl<'a, S: 'static> PreviewDrawer<'a, S> {
         }
         if st.is_open() && has_body {
             slot = slot.child(fit_marker(&shared, solved.fits));
+        }
+        if !shown && (st.dragging || st.hint || st.find.query.focused) {
+            slot = slot.child(hidden_marker(&shared));
+        }
+        if st.find_end_pending {
+            slot = slot.child(find_end_marker(&shared));
         }
 
         let mut split = row()
@@ -525,8 +532,7 @@ fn pane<S: 'static>(
         })
         .child(header::header(shared, st, &parts, look))
         .children(
-            st.find
-                .open
+            (st.find.open && parts.caps.searchable)
                 .then(|| find::bar(shared, st, parts.caps, look)),
         )
         .child(
@@ -559,10 +565,41 @@ fn drawer_key<S: 'static>(
         return false;
     }
     if searchable && find_keys(ev) {
-        (shared.access)(s).open_find();
+        find::open(shared, s);
         return true;
     }
     false
+}
+
+/// Mounted when the pane has gone (closed, nothing to show, or too narrow) while a drag, the
+/// divider's caption or the find field's focus request is left over: it clears them, so the
+/// pane doesn't come back mid-drag or take focus when it shows again.
+fn hidden_marker<S: 'static>(shared: &Shared<S>) -> El {
+    let access = shared.access;
+    el().key("preview-hidden-marker")
+        .size(0.0, 0.0)
+        .a11y_hidden()
+        .transition(Transition::none())
+        .on_layout(move |s: &mut S, _| {
+            let st = access(s);
+            st.dragging = false;
+            st.drag_from = None;
+            st.hint = false;
+            st.find.query.focused = false;
+        })
+}
+
+/// Mounted while find has ended and the hosted view hasn't heard: tells it.
+fn find_end_marker<S: 'static>(shared: &Shared<S>) -> El {
+    let shared = shared.clone();
+    el().key("preview-find-end-marker")
+        .size(0.0, 0.0)
+        .a11y_hidden()
+        .transition(Transition::none())
+        .on_layout(move |s: &mut S, _| {
+            (shared.access)(s).find_end_pending = false;
+            shared.with_view(s, |v| v.find_end());
+        })
 }
 
 /// A zero-size stub that hands focus to `to` when it is removed (see the module docs).

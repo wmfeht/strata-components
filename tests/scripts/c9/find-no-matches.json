@@ -1,6 +1,5 @@
 {
   "bullets": [
-    "preview/preview-panel/find: The status reads \"Match 1 of N\", or \"No matches\"",
     "preview/preview-panel/find: With zero matches, **Next match** and **Previous match** are insensitive."
   ],
   "scene": "c9-list-open-light",

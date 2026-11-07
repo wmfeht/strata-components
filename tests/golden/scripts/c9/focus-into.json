@@ -9,6 +9,53 @@
                 {
                   "children": [
                     {
+                      "name": "folder-0",
+                      "role": "label"
+                    },
+                    {
+                      "name": "folder-1",
+                      "role": "label"
+                    },
+                    {
+                      "name": "folder-2",
+                      "role": "label"
+                    },
+                    {
+                      "name": "folder-3",
+                      "role": "label"
+                    },
+                    {
+                      "name": "folder-4",
+                      "role": "label"
+                    },
+                    {
+                      "name": "folder-5",
+                      "role": "label"
+                    },
+                    {
+                      "name": "folder-6",
+                      "role": "label"
+                    },
+                    {
+                      "name": "folder-7",
+                      "role": "label"
+                    },
+                    {
+                      "name": "folder-8",
+                      "role": "label"
+                    },
+                    {
+                      "name": "folder-9",
+                      "role": "label"
+                    }
+                  ],
+                  "key": "parent-column",
+                  "name": "Parent folder",
+                  "role": "list-box"
+                },
+                {
+                  "children": [
+                    {
                       "actions": [
                         "focus"
                       ],
@@ -177,40 +224,6 @@
                       "states": [
                         "unselected"
                       ]
-                    },
-                    {
-                      "actions": [
-                        "focus"
-                      ],
-                      "children": [
-                        {
-                          "name": "file-10.md",
-                          "role": "label"
-                        }
-                      ],
-                      "key": "row-10",
-                      "name": "file-10.md",
-                      "role": "list-box-option",
-                      "states": [
-                        "unselected"
-                      ]
-                    },
-                    {
-                      "actions": [
-                        "focus"
-                      ],
-                      "children": [
-                        {
-                          "name": "file-11.md",
-                          "role": "label"
-                        }
-                      ],
-                      "key": "row-11",
-                      "name": "file-11.md",
-                      "role": "list-box-option",
-                      "states": [
-                        "unselected"
-                      ]
                     }
                   ],
                   "key": "files",
@@ -231,39 +244,33 @@
                           "children": [
                             {
                               "key": "preview-title",
-                              "name": "notes.md",
+                              "name": "harbour.jpg",
                               "role": "label"
                             },
                             {
                               "key": "preview-details",
-                              "name": "2.4 KB · Today 09:41 · Markdown",
+                              "name": "3.1 MB · Yesterday · JPEG image",
                               "role": "label"
+                            },
+                            {
+                              "children": [
+                                {
+                                  "key": "preview-badge-0",
+                                  "name": "4032 × 3024",
+                                  "role": "label"
+                                },
+                                {
+                                  "key": "preview-badge-1",
+                                  "name": "2 of 5 in folder",
+                                  "role": "label"
+                                }
+                              ],
+                              "key": "preview-badges",
+                              "role": "group"
                             }
                           ],
                           "key": "preview-handle",
                           "role": "group"
-                        },
-                        {
-                          "actions": [
-                            "click",
-                            "focus"
-                          ],
-                          "key": "preview-view-switch",
-                          "name": "View rendered",
-                          "role": "button"
-                        },
-                        {
-                          "actions": [
-                            "click",
-                            "focus",
-                            "expand"
-                          ],
-                          "key": "preview-find",
-                          "name": "Find in preview (Ctrl+F)",
-                          "role": "button",
-                          "states": [
-                            "collapsed"
-                          ]
                         },
                         {
                           "actions": [
@@ -279,19 +286,6 @@
                             "click",
                             "focus"
                           ],
-                          "key": "preview-wrap",
-                          "name": "Toggle word wrap",
-                          "role": "button",
-                          "states": [
-                            "checked"
-                          ]
-                        },
-                        {
-                          "actions": [
-                            "click",
-                            "focus"
-                          ],
-                          "description": "Close preview (Space)",
                           "key": "preview-close",
                           "name": "Close preview (Space)",
                           "role": "button"
@@ -306,31 +300,9 @@
                           "actions": [
                             "focus"
                           ],
-                          "children": [
-                            {
-                              "name": "# Preview drawer",
-                              "role": "label"
-                            },
-                            {
-                              "name": "The drawer hosts every preview beside the files.",
-                              "role": "label"
-                            },
-                            {
-                              "name": "Its header shows only what the preview supports.",
-                              "role": "label"
-                            },
-                            {
-                              "name": "Find in preview searches the text the preview shows.",
-                              "role": "label"
-                            },
-                            {
-                              "name": "Resize it from its leading edge; the width holds for the window.",
-                              "role": "label"
-                            }
-                          ],
                           "key": "fake-content",
-                          "name": "notes.md",
-                          "role": "document",
+                          "name": "harbour.jpg",
+                          "role": "image",
                           "states": [
                             "focused"
                           ]
@@ -354,13 +326,13 @@
                   "key": "preview-grip",
                   "name": "Preview panel minimum width",
                   "range": [
-                    432.0,
+                    359.0,
                     300.0,
                     659.0,
                     8.0
                   ],
                   "role": "splitter",
-                  "value": "432"
+                  "value": "359"
                 }
               ],
               "key": "preview-slot",

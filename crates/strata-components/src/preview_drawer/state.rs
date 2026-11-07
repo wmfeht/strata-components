@@ -24,12 +24,31 @@ pub struct DrawerState {
     reserved: bool,
     manual: Option<f32>,
     pub(super) dragging: bool,
+    /// The manual width a pointer drag started from, put back if the drag is cancelled.
+    pub(super) drag_from: Option<f32>,
+    /// Find ended (the drawer closed, or another file is previewed) and the hosted view hasn't
+    /// heard yet: the next build tells it.
+    pub(super) find_end_pending: bool,
     pub(super) hint: bool,
     pub(super) suspended: bool,
     pub(super) focus_content: u32,
     pub(super) focus_files: u32,
     pub(super) focus_divider: u32,
     pub(super) find: FindBar,
+}
+
+impl std::fmt::Debug for DrawerState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DrawerState")
+            .field("open", &self.open)
+            .field("reserved", &self.reserved)
+            .field("manual", &self.manual)
+            .field("dragging", &self.dragging)
+            .field("suspended", &self.suspended)
+            .field("finding", &self.find.open)
+            .field("find_query", &self.find.query.text)
+            .finish_non_exhaustive()
+    }
 }
 
 /// The find bar's state. The query outlives the bar: reopening find selects it again.
@@ -69,9 +88,8 @@ impl DrawerState {
     }
 
     /// Hides the preview. Keyboard focus inside it returns to the files at once; the content
-    /// fades out with the slide. Closing ends find and clears its query, so the host calls
-    /// its view's [`find_end`](super::HostedPreview::find_end) too (the close button does it
-    /// itself).
+    /// fades out with the slide. Closing ends find and clears its query; the drawer tells the
+    /// hosted view ([`find_end`](super::HostedPreview::find_end)) on its next build.
     pub fn close(&mut self, look: &Look, tx: &mut Tx) {
         self.close_with(look.animations, tx);
     }
@@ -83,7 +101,8 @@ impl DrawerState {
         self.open = false;
         self.dragging = false;
         self.hint = false;
-        self.suspended = false;
+        // `suspended` stays: the host last heard `Suspend(true)` if it was set, and the next
+        // open's fit marker tells it otherwise.
         self.reset_find();
     }
 
@@ -134,7 +153,7 @@ impl DrawerState {
     /// media and defers loading while it does; the drawer reports each change with
     /// [`DrawerIntent::Suspend`](super::DrawerIntent::Suspend).
     pub fn is_suspended(&self) -> bool {
-        self.suspended
+        self.open && self.suspended
     }
 
     /// Moves keyboard focus into the preview's content: its first focusable element, or the
@@ -169,8 +188,12 @@ impl DrawerState {
         &self.find.query.text
     }
 
-    /// Closes find and clears its query: another file is previewed, or the drawer closed.
+    /// Closes find and clears its query: another file is previewed, or the drawer closed. The
+    /// drawer tells the hosted view on its next build.
     pub fn reset_find(&mut self) {
+        if self.find.open || !self.find.query.text.is_empty() {
+            self.find_end_pending = true;
+        }
         self.find.open = false;
         self.find.query = TextEdit::default();
     }
@@ -186,6 +209,12 @@ impl DrawerState {
     pub fn start_find(&mut self, query: &str) {
         self.find.query = TextEdit::new(query);
         self.open_find();
+    }
+
+    /// Puts back the manual width a cancelled pointer drag started from.
+    pub(super) fn cancel_drag(&mut self) {
+        self.manual = self.drag_from.take();
+        self.dragging = false;
     }
 
     /// Opens the find bar with the query selected and the field focused.

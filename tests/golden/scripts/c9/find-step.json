@@ -256,13 +256,13 @@
                           "actions": [
                             "click",
                             "focus",
-                            "expand"
+                            "collapse"
                           ],
                           "key": "preview-find",
                           "name": "Find in preview (Ctrl+F)",
                           "role": "button",
                           "states": [
-                            "collapsed"
+                            "expanded"
                           ]
                         },
                         {
@@ -291,13 +291,82 @@
                             "click",
                             "focus"
                           ],
-                          "description": "Close preview (Space)",
                           "key": "preview-close",
                           "name": "Close preview (Space)",
                           "role": "button"
                         }
                       ],
                       "key": "preview-header",
+                      "role": "group"
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [
+                            {
+                              "children": [
+                                {
+                                  "actions": [
+                                    "click",
+                                    "focus",
+                                    "set-value",
+                                    "replace-selected-text",
+                                    "set-text-selection"
+                                  ],
+                                  "key": "input",
+                                  "name": "Find in preview",
+                                  "placeholder": "Find in preview",
+                                  "role": "text-input",
+                                  "value": "preview"
+                                }
+                              ],
+                              "key": "value",
+                              "role": "group"
+                            }
+                          ],
+                          "key": "preview-find-field",
+                          "role": "group"
+                        },
+                        {
+                          "key": "preview-find-status",
+                          "name": "Match 5 of 5",
+                          "role": "label",
+                          "states": [
+                            "live-polite"
+                          ]
+                        },
+                        {
+                          "actions": [
+                            "click",
+                            "focus"
+                          ],
+                          "key": "preview-find-previous",
+                          "name": "Previous match",
+                          "role": "button",
+                          "states": [
+                            "focused"
+                          ]
+                        },
+                        {
+                          "actions": [
+                            "click",
+                            "focus"
+                          ],
+                          "key": "preview-find-next",
+                          "name": "Next match",
+                          "role": "button"
+                        },
+                        {
+                          "actions": [
+                            "click",
+                            "focus"
+                          ],
+                          "key": "preview-find-close",
+                          "name": "Close find",
+                          "role": "button"
+                        }
+                      ],
+                      "key": "preview-find-bar",
                       "role": "group"
                     },
                     {

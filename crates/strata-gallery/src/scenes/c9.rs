@@ -10,8 +10,8 @@
 
 use rune::{Cx, El, Key, KeyEvent, Tx, col, el, row, text};
 use strata_components::preview_drawer::{
-    Arrangement, ColumnsFit, DocumentView, DrawerIntent, DrawerState, FindStatus, HeaderInfo,
-    HostedPreview, PreviewDrawer,
+    Arrangement, ColumnsFit, DocumentView, DrawerIntent, DrawerRules, DrawerState, FindStatus,
+    HeaderInfo, HostedPreview, PreviewDrawer,
 };
 use strata_kit::icons::IconName;
 use strata_kit::look::Look;
@@ -61,6 +61,8 @@ pub struct FakeView {
     pub form: Option<DocumentView>,
     pub wrap: bool,
     pub busy: Option<String>,
+    /// Find has no answer yet (a view still searching).
+    pub pending: bool,
     query: String,
     matches: usize,
     current: Option<usize>,
@@ -113,7 +115,7 @@ impl HostedPreview for FakeView {
         }
     }
     fn find_status(&self) -> Option<FindStatus> {
-        Some(FindStatus {
+        (!self.pending).then_some(FindStatus {
             current: self.current,
             total: self.matches,
         })
@@ -228,7 +230,11 @@ fn arrangement(d: &Demo) -> Arrangement {
     match d.mode {
         Mode::List => Arrangement::List,
         Mode::Icons => Arrangement::Icons,
-        Mode::Columns(n) => Arrangement::Columns(ColumnsFit::new(n as f32 * COLUMN, COLUMN)),
+        Mode::Columns(n) => Arrangement::Columns(ColumnsFit::new(
+            &DrawerRules::STRATA,
+            n as f32 * COLUMN,
+            COLUMN,
+        )),
     }
 }
 

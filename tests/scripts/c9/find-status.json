@@ -1,7 +1,6 @@
 {
   "bullets": [
-    "preview/preview-panel/find: The status reads \"Match 1 of N\", or \"No matches\", and is hidden while the query is empty.",
-    "preview/preview-panel/find: Enter and **Next match** move to the next match"
+    "preview/preview-panel/find: The status reads \"Match 1 of N\""
   ],
   "scene": "c9-list-open-light",
   "events": [
@@ -14,17 +13,12 @@
       "t": 0.3,
       "type": "type",
       "text": "preview"
-    },
-    {
-      "t": 0.6,
-      "type": "key",
-      "name": "Enter"
     }
   ],
   "expect": [
     {
       "key": "preview-find-status",
-      "name": "Match 2 of 5"
+      "name": "Match 1 of 5"
     }
   ]
 }

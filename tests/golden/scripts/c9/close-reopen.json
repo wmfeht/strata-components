@@ -292,7 +292,6 @@
                             "click",
                             "focus"
                           ],
-                          "description": "Close preview (Space)",
                           "key": "preview-close",
                           "name": "Close preview (Space)",
                           "role": "button"
@@ -352,22 +351,17 @@
                   "key": "preview-grip",
                   "name": "Preview panel minimum width",
                   "range": [
-                    532.0,
+                    316.0,
                     300.0,
                     659.0,
                     8.0
                   ],
                   "role": "splitter",
-                  "value": "532"
+                  "value": "316"
                 }
               ],
               "key": "preview-slot",
               "role": "group"
-            },
-            {
-              "key": "preview-divider-caption",
-              "name": "Preview panel minimum width",
-              "role": "tooltip"
             }
           ],
           "key": "preview-split",

@@ -12,14 +12,8 @@
                       "actions": [
                         "focus"
                       ],
-                      "children": [
-                        {
-                          "name": "file-0.md",
-                          "role": "label"
-                        }
-                      ],
                       "key": "row-0",
-                      "name": "file-0.md",
+                      "name": "photo-0.jpg",
                       "role": "list-box-option",
                       "states": [
                         "unselected"
@@ -29,17 +23,10 @@
                       "actions": [
                         "focus"
                       ],
-                      "children": [
-                        {
-                          "name": "file-1.md",
-                          "role": "label"
-                        }
-                      ],
                       "key": "row-1",
-                      "name": "file-1.md",
+                      "name": "photo-1.jpg",
                       "role": "list-box-option",
                       "states": [
-                        "focused",
                         "selected"
                       ]
                     },
@@ -47,14 +34,8 @@
                       "actions": [
                         "focus"
                       ],
-                      "children": [
-                        {
-                          "name": "file-2.md",
-                          "role": "label"
-                        }
-                      ],
                       "key": "row-2",
-                      "name": "file-2.md",
+                      "name": "photo-2.jpg",
                       "role": "list-box-option",
                       "states": [
                         "unselected"
@@ -63,15 +44,9 @@
                     {
                       "actions": [
                         "focus"
-                      ],
-                      "children": [
-                        {
-                          "name": "file-3.md",
-                          "role": "label"
-                        }
                       ],
                       "key": "row-3",
-                      "name": "file-3.md",
+                      "name": "photo-3.jpg",
                       "role": "list-box-option",
                       "states": [
                         "unselected"
@@ -80,15 +55,9 @@
                     {
                       "actions": [
                         "focus"
-                      ],
-                      "children": [
-                        {
-                          "name": "file-4.md",
-                          "role": "label"
-                        }
                       ],
                       "key": "row-4",
-                      "name": "file-4.md",
+                      "name": "photo-4.jpg",
                       "role": "list-box-option",
                       "states": [
                         "unselected"
@@ -97,15 +66,9 @@
                     {
                       "actions": [
                         "focus"
-                      ],
-                      "children": [
-                        {
-                          "name": "file-5.md",
-                          "role": "label"
-                        }
                       ],
                       "key": "row-5",
-                      "name": "file-5.md",
+                      "name": "photo-5.jpg",
                       "role": "list-box-option",
                       "states": [
                         "unselected"
@@ -114,15 +77,9 @@
                     {
                       "actions": [
                         "focus"
-                      ],
-                      "children": [
-                        {
-                          "name": "file-6.md",
-                          "role": "label"
-                        }
                       ],
                       "key": "row-6",
-                      "name": "file-6.md",
+                      "name": "photo-6.jpg",
                       "role": "list-box-option",
                       "states": [
                         "unselected"
@@ -131,15 +88,9 @@
                     {
                       "actions": [
                         "focus"
-                      ],
-                      "children": [
-                        {
-                          "name": "file-7.md",
-                          "role": "label"
-                        }
                       ],
                       "key": "row-7",
-                      "name": "file-7.md",
+                      "name": "photo-7.jpg",
                       "role": "list-box-option",
                       "states": [
                         "unselected"
@@ -148,15 +99,9 @@
                     {
                       "actions": [
                         "focus"
-                      ],
-                      "children": [
-                        {
-                          "name": "file-8.md",
-                          "role": "label"
-                        }
                       ],
                       "key": "row-8",
-                      "name": "file-8.md",
+                      "name": "photo-8.jpg",
                       "role": "list-box-option",
                       "states": [
                         "unselected"
@@ -165,15 +110,9 @@
                     {
                       "actions": [
                         "focus"
-                      ],
-                      "children": [
-                        {
-                          "name": "file-9.md",
-                          "role": "label"
-                        }
                       ],
                       "key": "row-9",
-                      "name": "file-9.md",
+                      "name": "photo-9.jpg",
                       "role": "list-box-option",
                       "states": [
                         "unselected"
@@ -182,15 +121,9 @@
                     {
                       "actions": [
                         "focus"
-                      ],
-                      "children": [
-                        {
-                          "name": "file-10.md",
-                          "role": "label"
-                        }
                       ],
                       "key": "row-10",
-                      "name": "file-10.md",
+                      "name": "photo-10.jpg",
                       "role": "list-box-option",
                       "states": [
                         "unselected"
@@ -200,14 +133,8 @@
                       "actions": [
                         "focus"
                       ],
-                      "children": [
-                        {
-                          "name": "file-11.md",
-                          "role": "label"
-                        }
-                      ],
                       "key": "row-11",
-                      "name": "file-11.md",
+                      "name": "photo-11.jpg",
                       "role": "list-box-option",
                       "states": [
                         "unselected"
@@ -221,6 +148,75 @@
               ],
               "key": "preview-files",
               "role": "group"
+            },
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [
+                        {
+                          "key": "preview-handle",
+                          "role": "group"
+                        },
+                        {
+                          "actions": [
+                            "click",
+                            "focus"
+                          ],
+                          "key": "preview-close",
+                          "name": "Close preview (Space)",
+                          "role": "button"
+                        }
+                      ],
+                      "key": "preview-header",
+                      "role": "group"
+                    },
+                    {
+                      "children": [
+                        {
+                          "key": "preview-placeholder",
+                          "name": "No preview for this selection",
+                          "role": "label"
+                        }
+                      ],
+                      "key": "preview-body",
+                      "role": "group"
+                    }
+                  ],
+                  "key": "preview-drawer",
+                  "name": "Preview",
+                  "role": "region"
+                },
+                {
+                  "actions": [
+                    "focus",
+                    "increment",
+                    "decrement",
+                    "set-value"
+                  ],
+                  "key": "preview-grip",
+                  "name": "Preview panel minimum width",
+                  "range": [
+                    532.0,
+                    300.0,
+                    659.0,
+                    8.0
+                  ],
+                  "role": "splitter",
+                  "states": [
+                    "focused"
+                  ],
+                  "value": "532"
+                }
+              ],
+              "key": "preview-slot",
+              "role": "group"
+            },
+            {
+              "key": "preview-divider-caption",
+              "name": "Preview panel minimum width",
+              "role": "tooltip"
             }
           ],
           "key": "preview-split",

@@ -291,7 +291,6 @@
                             "click",
                             "focus"
                           ],
-                          "description": "Close preview (Space)",
                           "key": "preview-close",
                           "name": "Close preview (Space)",
                           "role": "button"
@@ -351,7 +350,7 @@
                   "key": "preview-grip",
                   "name": "Preview panel minimum width",
                   "range": [
-                    534.0,
+                    659.0,
                     300.0,
                     659.0,
                     8.0
@@ -360,7 +359,7 @@
                   "states": [
                     "focused"
                   ],
-                  "value": "534"
+                  "value": "659"
                 }
               ],
               "key": "preview-slot",

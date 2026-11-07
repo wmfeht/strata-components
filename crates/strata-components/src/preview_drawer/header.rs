@@ -18,10 +18,11 @@ pub(super) fn header<S: 'static>(
     let k = &look.kit;
     let caps = parts.caps;
     let labels = &shared.labels;
+    let size = control_size(look.frame.control);
     let button = |name: IconName, label: &str| {
         IconButton::new(look.icon(name))
             .variant(IconButtonVariant::GhostMuted)
-            .control_size(ControlSize::Regular)
+            .control_size(size)
             .label(label.to_owned())
     };
 
@@ -50,7 +51,7 @@ pub(super) fn header<S: 'static>(
                     if (sh.access)(s).find.open {
                         find::close(&sh, s, tx);
                     } else {
-                        (sh.access)(s).open_find();
+                        find::open(&sh, s);
                     }
                 })
                 .build(k)
@@ -90,9 +91,7 @@ pub(super) fn header<S: 'static>(
     let sh = shared.clone();
     controls.push(
         button(IconName::Close, &labels.close)
-            .help(labels.close.clone())
             .on_press_tx(move |s: &mut S, tx: &mut Tx| {
-                find::end(&sh, s);
                 (sh.access)(s).close_with(sh.animations, tx);
                 sh.emit(s, DrawerIntent::Closed, tx);
             })
@@ -160,4 +159,20 @@ pub(super) fn header<S: 'static>(
         .border_sides([0.0, 0.0, 1.0, 0.0], k.c.border_muted)
         .child(handle)
         .children(controls)
+}
+
+/// The kit's button size nearest the look's bar control size (`frame.control`). rune-kit's
+/// icon buttons come in 16, 20, 24, 28 and 36 point squares, each with its own glyph size, so
+/// a control size between them rounds to the nearest.
+fn control_size(points: f32) -> ControlSize {
+    [
+        (16.0, ControlSize::Mini),
+        (20.0, ControlSize::Small),
+        (24.0, ControlSize::Regular),
+        (28.0, ControlSize::Large),
+        (36.0, ControlSize::ExtraLarge),
+    ]
+    .into_iter()
+    .min_by(|a, b| (a.0 - points).abs().total_cmp(&(b.0 - points).abs()))
+    .map_or(ControlSize::Regular, |(_, size)| size)
 }

@@ -366,7 +366,7 @@ s.input().click_at(window.at(0.5, 0.5));
 | `s.point_until(at, reached)`, `s.point_at(&peer, at)` | Moves the pointer until `reached()` holds; until `peer` reports an enter or motion after the move |
 | `s.xwayland()`, `s.runtime_dir()`, `processes_of(dir)`, `alive(pid)` | Xwayland's pid and display, the runtime directory, the processes started with it, whether a pid runs |
 | `s.peer(display)` | A peer process ([below](#the-peer)) |
-| `s.bus()` | The bus's `address()`, and `service_dir()` for `.service` files |
+| `s.bus()` | The bus's `address()`, `add_service(name, exec)` (written whole, then the bus reloads), and `service_dir()` |
 
 ### The peer
 

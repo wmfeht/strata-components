@@ -251,42 +251,37 @@ fn the_session_bus_is_private() {
         "{} is outside the session",
         s.bus().address()
     );
-    // A service file in the session's directory becomes activatable; nothing else is.
-    std::fs::write(
-        s.bus().service_dir().join("org.strata.W3Probe.service"),
-        "[D-BUS Service]\nName=org.strata.W3Probe\nExec=/bin/false\n",
-    )
-    .expect("service file");
-    let deadline = std::time::Instant::now() + crate::support::timeout();
-    let names = loop {
-        let mut cmd = s.command("dbus-send", Display::None);
-        cmd.args([
-            "--session",
-            "--print-reply",
-            "--dest=org.freedesktop.DBus",
-            "/org/freedesktop/DBus",
-            "org.freedesktop.DBus.ListActivatableNames",
-        ]);
-        let mut send = s.spawn("dbus-send", cmd);
-        send.wait_line(0, "dbus-send's reply", |l| {
-            l.trim_start().starts_with("array [")
-        });
-        assert!(send.wait_exit().success(), "dbus-send failed");
-        let names: Vec<String> = send
-            .lines()
-            .iter()
-            .filter_map(|l| {
-                l.trim()
-                    .strip_prefix("string \"")?
-                    .strip_suffix('"')
-                    .map(str::to_owned)
-            })
-            .collect();
-        if names.iter().any(|n| n == "org.strata.W3Probe") || std::time::Instant::now() > deadline {
-            break names;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(50));
-    };
+    // A service added to the session's bus becomes activatable; nothing else is.
+    s.bus().add_service("org.strata.W3Probe", "/bin/false");
+    assert!(
+        s.bus()
+            .service_dir()
+            .join("org.strata.W3Probe.service")
+            .is_file()
+    );
+    let mut cmd = s.command("dbus-send", Display::None);
+    cmd.args([
+        "--session",
+        "--print-reply",
+        "--dest=org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus.ListActivatableNames",
+    ]);
+    let mut send = s.spawn("dbus-send", cmd);
+    send.wait_line(0, "dbus-send's reply", |l| {
+        l.trim_start().starts_with("array [")
+    });
+    assert!(send.wait_exit().success(), "dbus-send failed");
+    let names: Vec<String> = send
+        .lines()
+        .iter()
+        .filter_map(|l| {
+            l.trim()
+                .strip_prefix("string \"")?
+                .strip_suffix('"')
+                .map(str::to_owned)
+        })
+        .collect();
     let mut names = names;
     names.sort();
     assert_eq!(names, ["org.freedesktop.DBus", "org.strata.W3Probe"]);

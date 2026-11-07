@@ -190,13 +190,17 @@ impl Proc {
         "still running".into()
     }
 
-    /// Waits for the process to exit, within the session timeout.
+    /// Waits for the process to exit and for its stdout to close, within the session
+    /// timeout, so [`Proc::lines`] then holds everything it wrote.
     pub fn wait_exit(&mut self) -> ExitStatus {
         let deadline = Instant::now() + timeout();
         loop {
             let status = self.child.lock().expect("child lock").try_wait();
             match status {
-                Ok(Some(status)) => return status,
+                Ok(Some(status)) => {
+                    self.wait_closed(deadline);
+                    return status;
+                }
                 Ok(None) if Instant::now() < deadline => {
                     std::thread::sleep(std::time::Duration::from_millis(20));
                 }
@@ -207,6 +211,23 @@ impl Proc {
                 ),
                 Err(e) => panic!("{}: {e}", self.name),
             }
+        }
+    }
+
+    /// Waits until the reader has seen the end of stdout. A child of the process that keeps
+    /// stdout open can hold it past the deadline; then the lines so far are what there is.
+    fn wait_closed(&self, deadline: Instant) {
+        let (lines, ready) = &*self.out;
+        let mut l = lines.lock().expect("process output lock");
+        while !l.closed {
+            let now = Instant::now();
+            if now >= deadline {
+                return;
+            }
+            l = ready
+                .wait_timeout(l, deadline - now)
+                .expect("process output lock")
+                .0;
         }
     }
 

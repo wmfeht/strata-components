@@ -45,9 +45,14 @@ fn one(id: &str, name: &str, dark: bool, mode: Mode) -> Result<(), String> {
     let fresh = support::fresh_dir("png", id).join(format!("{name}.png"));
     std::fs::create_dir_all(fresh.parent().expect("fresh directory")).expect("fresh directory");
     let mut cmd = support::gallery();
-    cmd.arg("--snap")
-        .arg(&fresh)
-        .args(["--scene", name, "--scale", SCALE]);
+    cmd.arg("--snap").arg(&fresh).args([
+        "--scene",
+        name,
+        "--scale",
+        SCALE,
+        "--at",
+        &support::at_arg(),
+    ]);
     cmd.args(["--theme", if dark { "dark" } else { "light" }]);
     let stderr = support::run(cmd)?;
     // Blessing keeps a golden that still matches within the tolerance, so a render on another
@@ -150,4 +155,42 @@ fn decode(path: &Path) -> Result<(u32, u32, Vec<u8>), String> {
         png::ColorType::Indexed => return Err(err(&"indexed colour was not expanded")),
     };
     Ok((info.width, info.height, rgba))
+}
+
+/// The PNG run and the in-process mount end on the same clock, so the open page's `poll` has run
+/// as often for the PNG golden as for the a11y golden. `--tree` takes the same timeline as
+/// `--snap`.
+#[test]
+fn the_png_render_ends_on_the_mounts_clock() {
+    let scene = support::page("gallery").scenes[0];
+    let mount_clock = support::mount(scene.1).t;
+    let tree = support::fresh_dir("png", "clock").join("tree.json");
+    std::fs::create_dir_all(tree.parent().expect("tree directory")).expect("tree directory");
+    let mut cmd = support::gallery();
+    cmd.args([
+        "--scene",
+        scene.0,
+        "--at",
+        &support::at_arg(),
+        "--scale",
+        SCALE,
+    ]);
+    cmd.arg("--tree").arg(&tree);
+    support::run(cmd).expect("the gallery renders headless");
+    let text = std::fs::read_to_string(&tree).expect("tree written");
+    let snap: serde_json::Value = serde_json::from_str(&text).expect("tree parses");
+    let snap_clock = snap["anim_t"].as_f64().expect("anim_t in the tree");
+    // The two sums of 1/60 round differently in the last bits; a frame more or less on either
+    // side would put them 1/60 apart.
+    let same_frame = |a: f64, b: f64| (a - b).abs() < 1e-9;
+    assert!(
+        same_frame(snap_clock, mount_clock),
+        "--at {} ends at {snap_clock}, the mount at {mount_clock}",
+        support::AT
+    );
+    assert!(
+        same_frame(mount_clock, support::AT),
+        "the mount ends at {mount_clock}"
+    );
+    assert_eq!(snap["t"].as_f64(), Some(support::AT));
 }

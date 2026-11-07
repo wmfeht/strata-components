@@ -134,17 +134,41 @@ pub fn pretty(v: &Value) -> String {
     serde_json::to_string_pretty(v).expect("JSON serializes") + "\n"
 }
 
-/// The gallery in `scene`, laid out and settled on the virtual clock, with the app's hooks: the
-/// open page's `poll` runs on every frame, as in the binary.
+/// Where on the virtual clock a golden scene is captured, in seconds: late enough for entrance
+/// motion to come to rest. The PNG check passes it to `--snap` as `--at`.
+pub const AT: f64 = 1.0;
+
+/// Frames per second on the virtual clock, Rune's headless default.
+const FPS: f64 = 60.0;
+
+/// `AT` as `--at` takes it.
+pub fn at_arg() -> String {
+    format!("{AT}")
+}
+
+/// The gallery in `scene` on the virtual clock, with the app's hooks, run frame for frame as
+/// `--snap --at AT` runs it: a first frame at 0 s, then one every 1/60 s up to `AT`. So the
+/// open page's `poll` runs the same number of times, at the same clock, for the a11y golden as
+/// for the PNG golden.
 pub fn mount(scene: fn(&mut Gallery)) -> Runtime<Gallery> {
     let mut gallery = Gallery::default();
     scene(&mut gallery);
     let env = Env::new(gallery.dark, 1.0);
     let mut rt = strata_gallery::runtime(gallery, env);
     rt.frame(0.0);
-    rt.settle_all();
-    rt.frame(1.0 / 60.0);
+    for _ in 0..(AT * FPS).round() as usize {
+        rt.frame(1.0 / FPS);
+    }
     rt
+}
+
+/// `light` or `dark`, from a scene name's suffix, for the binary's `--theme`.
+pub fn theme_of(scene: &str) -> &'static str {
+    if scene.ends_with("-dark") {
+        "dark"
+    } else {
+        "light"
+    }
 }
 
 /// Whether `scene` leaves the gallery dark.

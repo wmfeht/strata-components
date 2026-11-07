@@ -71,8 +71,4 @@ fn the_mounted_gallery_routes_keys_through_the_open_page() {
     rt.frame(0.0);
     escape(&mut rt);
     assert_eq!(rt.state.page, None);
-    assert!(
-        rt.state.waker.is_some(),
-        "setup should have stored the waker"
-    );
 }

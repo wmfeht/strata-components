@@ -118,7 +118,7 @@ fn check_expect_shape(e: &Value) -> Result<(), String> {
 pub fn run(script: &Path, scene: &str, tree_out: &Path) -> Result<Value, String> {
     std::fs::create_dir_all(tree_out.parent().expect("tree directory")).expect("tree directory");
     let mut cmd = support::gallery();
-    cmd.args(["--scene", scene])
+    cmd.args(["--scene", scene, "--theme", support::theme_of(scene)])
         .arg("--script")
         .arg(script)
         .arg("--tree")

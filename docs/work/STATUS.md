@@ -9,14 +9,14 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | W2 | merged | 1 review round + fixes; row.sidebar/row.palette estimates for K2 to confirm; token-name review by K1/K2/C1e owners pending; PNG goldens on NVIDIA | 341e8cb |
 | W3 | planning |  |  |
 | S1 | merged | P3: X11 shim conditional on mutter/KWin hand test; Wayland resize/menu blocked on Rune (R1-R3, R7); Hyprland/GNOME/KDE/lavapipe hand test pending | c5794e1 |
-| S2 | review 2 (fixing B1 surface lifetime) | P0 feasible w/o Rune patch on libwayland>=1.23 (Ubuntu 24.04 is 1.22); stuck pointer capture needs Rune R5; Hyprland/GNOME/KDE/Dolphin hand test pending | |
+| S2 | merged | 3 review rounds; P0 feasible w/o Rune patch on libwayland>=1.23; Ubuntu 24.04 GNOME: DnD unsupported; R1-R5 drafted; Hyprland/GNOME/KDE/Dolphin hand test pending | 702338f |
 | S3 | merged | sway Wayland/X11 measured; Hyprland/GNOME/KDE/Firefox hand test pending (QEMU Tier B not run); 3 owner decisions | f5682e4 |
 | S4 | coding | fancy-regex vs onig; fixtures under tests/fixtures/code | |
-| S5 | waiting | | |
+| S5 | ready | | |
 | C10a | waiting | | |
 | C14a | ready | | |
 | C15 | planning | | |
-| C1a | ready | | |
+| C1a | planning | | |
 | C20a | ready | | |
 | C20b | ready | | |
 | C20c | ready | | |
@@ -40,7 +40,7 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | P6 | ready | | |
 | P7 | ready | | |
 | P8 | waiting | | |
-| P9 | coding | own MainContext thread; results drained in poll via Waker; tests re-exec with GIO_USE_VFS=local | |
+| P9 | review 1 | own MainContext thread; results drained in poll via Waker; tests re-exec with GIO_USE_VFS=local | |
 | C10b | waiting | | |
 | C11 | waiting | | |
 | C12 | waiting | | |

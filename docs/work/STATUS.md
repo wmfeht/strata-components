@@ -7,6 +7,8 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | W0 | merged | 3 review rounds; png dev-dep approved; PNG goldens blessed on NVIDIA (lavapipe/CI pending) | d4bcd36 |
 | W1 | merged | 1 review round + fixes; Rune binder cannot read URIs before drop (needs Rune or P1) | 6fda6da |
 | W1b | merged | contract doc change for C1a: EntryId lives for the process, never reused; rename may change it | 3bd5284 |
+| W1c | merged | contract additions for C1e: collection slot; geometry docs no longer rely on on_drag | 0b52156 |
+| G1 | coding | owner request: gallery index as buttons with implemented / not-built markers | |
 | W2 | merged | 1 review round + fixes; row.sidebar/row.palette estimates for K2 to confirm; token-name review by K1/K2/C1e owners pending; PNG goldens on NVIDIA | 341e8cb |
 | W3 | planning |  |  |
 | S1 | merged | P3: X11 shim conditional on mutter/KWin hand test; Wayland resize/menu blocked on Rune (R1-R3, R7); Hyprland/GNOME/KDE/lavapipe hand test pending | c5794e1 |
@@ -29,10 +31,10 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | C5 | ready | | |
 | C6 | ready | | |
 | C7 | ready | | |
-| C8 | planning | | |
-| C9 | coding | own split + DrawerState (not SplitView); HostedPreview trait for C10–C14; focus via focus_return stubs | |
+| C8 | coding | own list on SidebarRow+Reorder (rune-kit Sidebar opens on arrow, no rail); keyboard pin reorder left out (no bullet) | |
+| C9 | review 2 | own split + DrawerState (not SplitView); HostedPreview trait for C10–C14; focus via focus_return stubs | |
 | K1 | ready | | |
-| K2 | coding | real Strata values (upstream/main 35ee677ab); W2 fallback fix follows as W2b; font list arrives as data | |
+| K2 | review 1 (final fixes) | real Strata values (upstream/main 35ee677ab); W2 fallback fix follows as W2b; font list arrives as data | |
 | K3 | ready | | |
 | K4 | ready | | |
 | P0 | waiting | | |
@@ -53,7 +55,7 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | C1b | ready | | |
 | C1c | ready | | |
 | C1d | ready | | |
-| C1e | ready | | |
+| C1e | coding | 0 view runs over 600 scroll frames at 100k (probe); focus-on-return bullets deferred (Rune focus API) | |
 | C26 | waiting | | |
 | P1 | waiting | | |
 | P2 | waiting | | |

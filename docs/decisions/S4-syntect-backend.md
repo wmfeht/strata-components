@@ -17,7 +17,7 @@
 | Worst-case viewport within 8 ms (p95) | Source: only with a state cached for every line (N = 1). Markdown: never | All six fixtures at N ≤ 64 |
 | Worst-case viewport within 16.7 ms (p95) | Source: N ≤ 64. Markdown: never | All six fixtures at N ≤ 256 |
 | `ParseState` is `Send` (B1) | Yes | **No**: needs a highlighter thread or an `unsafe` wrapper |
-| `ParseState` equality (B2) | By value | **By pointer** while a capture-holding context is open, so a state never equals its own clone there |
+| `ParseState` equality (B2) | By value | **By pointer** while a capture-holding context is open, so a state never equals its own clone there. An edit inside a heredoc or fence re-parses to the block's end; on these fixtures that was still faster than `fancy-regex` (see [B2](#b2-with-onig-parsestate-equality-compares-pointers)) |
 | Grammars | 213: lacks PowerShell, JavaScript (Babel) and 5 more | All 220 |
 | Binary size added (stripped) | 2.85 MB | 1.71 MB |
 | C code in the build | None | Oniguruma, built with `cc` |
@@ -106,15 +106,17 @@ Soundness argument, for onig 6.5.3 and onig_sys 69.9.3:
   never hands out references into them.
 - So moving a whole `ParseState` to another thread moves unique ownership, and `Send` is sound.
 
-`Sync` is not: `Region::raw_mut` casts `&self` to `*mut`, so a `&ParseState` must never be
-shared across threads.
+`Sync` is not needed, and not argued: `Region::raw_mut` casts `&self` to `*mut`, so the newtype
+should not hand out a `&ParseState` to two threads at once.
 
 Costs:
 - The workspace sets `unsafe_code = "deny"`, so the newtype needs a local
   `#[expect(unsafe_code, reason = "…")]` and a `// SAFETY:` comment. That is an explicit owner
   exception.
 - The argument rests on onig internals, so every onig or syntect bump must re-check it.
-- With it, states can move into `Latest` requests (owned and moved, never shared).
+- With it, states can move into `Latest` requests. `Arc<Mutex<SendState>>` is sound too, since
+  `Mutex<T>: Sync` needs only `T: Send`. So with (b), C10a gets essentially the same design as with
+  `fancy-regex`: checkpoints behind a mutex, or moved into requests.
 
 **(c) Count it for `fancy-regex`,** whose `ParseState` is `Send + Sync`: checkpoints can sit in
 `Arc<Mutex<…>>` or move into `Latest` closures with no extra machinery.
@@ -156,10 +158,8 @@ Measured (`review edits`, A B A B, worse round's p95, max across rounds; `out/re
 | Edit, re-highlight strategy | `onig` time p95 / max (lines re-parsed p95 / max) | `fancy-regex` time p95 / max (lines p95 / max) |
 | --- | --- | --- |
 | Inside a heredoc (100 edits): per-line cache, stop on equal state | 0.08 / 0.09 (3 / 3) | 0.30 / 0.35 (1 / 1) |
-| Inside a heredoc: HighlightState + next line's ops (k = 1) | 0.07 / 0.07 (2 / 2) | 0.50 / 0.52 (2 / 2) |
 | Inside a heredoc: checkpoints only, N = 64 | 2.45 / 4.43 (128 / 192) | 5.73 / 6.09 (64 / 64) |
 | Inside a Markdown fence (30 edits): per-line cache, stop on equal state | 6.37 / 7.97 (44 / 61) | 49.1 / 130.7 (26 / 61) |
-| Inside a fence: HighlightState + next line's ops (k = 1) | 1.01 / 1.26 (2 / 2) | 50.1 / 130.8 (27 / 62) |
 | Inside a fence: checkpoints only, N = 64 | 18.7 / 29.4 (320 / 448) | 126 / 234 (64 / 128) |
 | Inside a fence: checkpoints only, N = 256 | 92.8 / 151.6 (2,048 / 3,072) | 403 / 528 (256 / 512) |
 | Rename anywhere in shell-5k (200 edits): per-line cache, stop on equal state | 0.21 / 1.64 (7 / 73) | 0.73 / 1.46 (7 / 73) |
@@ -168,21 +168,48 @@ Measured (`review edits`, A B A B, worse round's p95, max across rounds; `out/re
 On `onig` with a per-line cache, an edit inside a heredoc or fence re-parses to that block's
 end. The fixture's heredocs are 2–3 lines and its fences at most 60, so a long real heredoc or
 fenced block costs more. `fancy-regex` stops at the true convergence point (1 line for a
-heredoc). Its fence cases are slow because `fancy-regex` is slow inside fences (see
-[Markdown](#why-markdown-is-slow-on-fancy-regex)), not because it re-parses more.
+heredoc).
+
+The fence rows are grammar-confounded. On `onig`, ` ```js ` fences use `JavaScript (Babel)`; on
+`fancy-regex`, `JavaScript` (see g). The medians are close: `onig` 1.96 ms and 11 lines,
+`fancy-regex` 1.85 ms and 1 line. `fancy-regex`'s tail (26 / 61 lines, 49 / 131 ms) comes from
+two renames of a keyword in js fences, at lines 5630 and 20373, which under `JavaScript` really
+change the following lines (`onig`, under Babel, re-parses 61 and 27 lines there too). The
+reviewer's probe confirms it (`/home/wmfeht/dev/strata-spikes/s4-review2/fence-out.txt`):
+`fancy-regex` converged after 1–2 lines at the other 28 sites. So the tail is real re-parsing
+under a different grammar, plus `fancy-regex`'s cost per fenced line (see
+[Markdown](#why-markdown-is-slow-on-fancy-regex)).
+
+Scale: inside a fence, `onig` costs about 0.15 ms per re-parsed line. So a 1,000-line fenced
+block costs about 150 ms of background work per keystroke, and a foreground cap of 120 lines
+about 17 ms. In shell it is about 0.8 ms per 120 lines (f, the capped unmatched quote).
 
 Workarounds for C10a on `onig`:
 
-1. **Cap the re-parse** at the viewport plus overscan (120 lines), and finish the rest in the
-   background on the thread that owns the states (B1). This bounds the edit cost. It does not
-   restore convergence: the background pass runs to the end of the capture context.
-2. **Converge on `HighlightState` equality plus the next k lines' ops:** stop when the
-   `HighlightState` equals the cached one and re-parsing the next k lines gives the cached scope
-   ops. In 330 edits per backend (k = 1 and k = 2, two rounds) every result matched a full re-parse from the edit to the
-   end of the file. It is a heuristic, not a proof: two parse states can agree on highlighting
-   and on k lines of ops and still differ (two heredocs with different terminators, say). Pair
-   it with the cap and an occasional background check.
-3. **Upstream fix** (draft below), after which plain equality works.
+1. **Cap the foreground re-parse**, from the edited line to the bottom of the viewport plus
+   overscan (120 lines in these measurements; a taller viewport needs more). Then a background
+   pass, on the thread that owns the states (B1), continues with plain state equality until the
+   state matches or the file ends. On `onig` that means the end of the capture context. This
+   bounds the edit's foreground cost and keeps the result exact.
+2. **Upstream fix** (draft below), after which plain equality converges inside capture contexts
+   too.
+
+A third idea was dropped: stop as soon as the `HighlightState` equals the cached one and the next
+k lines re-parse to the cached scope ops. Round 2 tested it only on renames (330 per backend,
+k = 1 and 2, all correct), and renames don't change a block's terminator. The reviewer's probe
+(`/home/wmfeht/dev/strata-spikes/s4-review2/probe-out.txt`, `src/bin/probe.rs`) compared it
+against a full re-parse to the end of the file, for edits that do change a terminator:
+
+| Edit (40 sites each) | k = 1 | k = 2 | k = 4 |
+| --- | --- | --- | --- |
+| `<<EOF` → `<<EOT`, both backends | 40 wrong | 40 wrong | 0 wrong |
+| `<<'EOF'` → `<<'EOT'`, both backends | 40 wrong | 0 wrong | 0 wrong |
+| ```` ```js ```` → ```` ````js ```` (fence opener), `onig` | 40 wrong | 40 wrong | 38 wrong |
+| Unmatched `"` (both backends); change of fence language, deleted fence opener (`onig`) | 0 wrong | 0 wrong | 0 wrong |
+
+It stops too early on ordinary edits, at any k worth having. At most it may serve as a
+foreground stop inside the cap, with the background pass of workaround 1 always running plain
+equality to the end of the capture context, and then it adds nothing beyond workaround 1.
 
 Draft upstream note for rust-onig (not filed):
 
@@ -387,7 +414,10 @@ stack, syntect builds a new regex for every back-referencing pattern it tries
 (`regex_with_refs`, with `can_cache = false`; `parser.rs` `search`). `fancy-regex` compiles
 about 17× slower than `onig` (h), so fenced code costs it about 1 ms a line on average, and up
 to about 2 ms. Treat the Markdown
-numbers as a high-end case for code-heavy Markdown: prose costs far less. C11's rendered
+numbers as a high-end case for code-heavy Markdown: prose costs far less. The 21× ratio has the
+same grammar confound as the fence edits: `onig` highlights ` ```js ` fences with
+`JavaScript (Babel)`, which is about 28 % slower than the `JavaScript` grammar `fancy-regex`
+uses (c). So if anything the ratio understates the backend gap. C11's rendered
 Markdown highlights each code block on its own (with that block's grammar, no fence context), so
 this applies to Markdown *source* views.
 
@@ -446,12 +476,21 @@ WTFPL grammar content, based on the round-1 record. That record missed B1 and B2
 is asked again:
 
 1. **Backend.** The budget reading decides rule (1), as shown in the [Summary](#summary).
-   - Against `onig`: B1 (C10a needs a highlighter thread (a), or an `unsafe` wrapper (b) with a
-     lint exception); B2 (edits inside heredocs and fences converge only at the block's end
-     until rust-onig changes); and a C library built with `cc`.
-   - Against `fancy-regex`: 2.6–2.9× slower on source and about 21× on fenced Markdown; it meets
-     8 ms only with per-line state; 7 grammars are missing, including PowerShell; the binary is
-     1.1 MB bigger; and cold first colours are 5–18× slower.
+   - Against `onig`:
+     - B1: C10a needs a highlighter thread (a), or an `unsafe` wrapper (b) with a lint
+       exception. With (b) the design matches `fancy-regex`'s.
+     - B2: until rust-onig changes, an edit inside a heredoc or fence re-parses to the block's
+       end. On these fixtures that was still faster than `fancy-regex`: heredoc p95 0.08 ms
+       against 0.30 ms, fence 6.4 ms against 49 ms. It costs about 0.15 ms per fenced line, so
+       a 1,000-line fence means about 150 ms of background work per keystroke, with about
+       17 ms in the foreground under a 120-line cap. Shell costs about 0.8 ms per 120 lines.
+     - A C library, built with `cc`.
+   - Against `fancy-regex`:
+     - 2.6–2.9× slower on source and about 21× on fenced Markdown.
+     - It meets 8 ms only with per-line state.
+     - 7 grammars are missing, including PowerShell.
+     - The binary is 1.1 MB bigger, and cold first colours are 5–18× slower.
+     - It misses the 2 ms edit budget on one heredoc insertion (2.06 ms max, f).
 2. **Budget reading:** 8 ms (the commit budget) or 16.7 ms (one 60 Hz frame on the worker), at
    p95. C10a's doc should state it.
 3. **Checkpoint interval N:**
@@ -459,7 +498,7 @@ is asked again:
    | Backend | 8 ms | 16.7 ms |
    | --- | --- | --- |
    | `onig` | 64 | 256 |
-   | `fancy-regex` | 1 (a state per line, 23–60 MiB per 50k-line file) | 64 |
+   | `fancy-regex` | 1, source only (a state per line, 23–60 MiB per 50k-line file); Markdown at no N | 64, source only; Markdown at no N |
 
 4. **If `onig`, B1 option:** (a) a highlighter thread, with no `unsafe`; or (b) `SendState`, with
    an `unsafe_code` exception and a re-check of the soundness argument on each bump.
@@ -532,10 +571,16 @@ against a full parse that skips the same lines. Rune-kit's built-in highlighter 
 guard (it colours the first 32 KiB of a block).
 
 **Edits:** keep a state per line in the editable variant (scripts are small: 3.5 MiB for 5,000
-lines). With checkpoints only, a rename costs 4–5 ms p95 even at N = 64. Re-highlight up to the
-viewport plus overscan first, and finish an unconverged cascade later, on the thread that owns
-the states (B1). An unmatched quote cascaded to the end of the file in up to 24 ms (`onig`). On
-`onig`, also apply a B2 workaround.
+lines). With checkpoints only, a rename costs 4–5 ms p95 even at N = 64. Use B2's workaround 1 on
+either backend:
+- re-highlight in the foreground from the edited line to the bottom of the viewport plus
+  overscan;
+- then continue in the background, on the thread that owns the states (B1), with plain state
+  equality until the state matches the cache or the file ends.
+
+An unmatched quote cascaded to the end of the file in up to 24 ms (`onig`). Don't stop early on
+`HighlightState` plus look-ahead ops: it gives wrong colours when a heredoc or fence terminator
+changes (B2).
 
 ## Not measured
 
@@ -545,9 +590,10 @@ the states (B1). An unmatched quote cascaded to the end of the file in up to 24 
 - Checkpoint-pass overhead below N = 64, and intervals between the measured ones.
 - K1's real themes. Highlight cost grows with the number of theme selectors; this used
   OneHalfDark.
-- B1 option (a)'s queueing under real load, and (b) beyond the written argument (no Miri or
-  sanitizer run).
-- The B2 heuristic on long heredocs and fences, and on files with nested capture contexts.
+- B1 option (a)'s queueing under real load. For (b), no test backs the written argument. The
+  real gap is a ThreadSanitizer or AddressSanitizer run of a cross-thread move-and-drop test;
+  Miri can't run Oniguruma's C.
+- B2's background cost on long heredocs and fences, and on files with nested capture contexts.
 - The resident memory of a loaded syntax set, and contention when several threads share it.
 - Linking against a system Oniguruma, other CPUs, and the UI-thread commit budget (C10b's
   `RUNE_COMMIT_BUDGET_MS` runs).

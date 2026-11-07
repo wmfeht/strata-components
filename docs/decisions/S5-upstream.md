@@ -85,10 +85,10 @@ the name. U9 goes first, since five others link it.
 | [U13](#u13) | The double-click interval is fixed at 0.5 s on Linux | S1 [R4](S1-linux-window.md#r4-the-double-click-interval-is-fixed-at-05-s-on-linux) | P5, C1b, P3 | No | New | 11 | — |
 | [U14](#u14) | Popup surfaces for menus: submenus run off the window | S1 [R6](S1-linux-window.md#r6-popup-surfaces-for-menus) | C21, C22, the chooser's minimum size | No | New | 12 | — |
 | [U15](#u15) | Virtual rows are vertical only: no grid or horizontal virtualization | S5 | C3 | No | New; related #203 | 13 | — |
-| [U3](#u3) | File drops: hover handlers get no paths, and nothing reports a drag entering or leaving | W1 | W1's `Dnd::rune` binder (C1e, C6–C8, X2) | No | New | 14 | — |
+| [U3](#u3) | File drops: acceptance can't see app state or the whole drag, and no drag identity or action | W1 ([`contract/dnd/binder.rs`](../../crates/strata-components/src/contract/dnd/binder.rs)) | W1's `Dnd::rune` binder (C1e, C6–C8, X2) | No | New | 14 | — |
 | [U16](#u16) | List the installed font families | S5 | K2 | No | Comment on #114 | 15 | — |
-| [U17](#u17) | rune-kit: export the Combobox fuzzy matcher, with match positions | W1 | W1's `contract::fuzzy` (C17, C19, C20c, C20d) | No | New | 16 | — |
-| [U4](#u4) | ~~Headless file drops can't carry held modifiers~~ | W1 | — | — | Withdrawn | — | — |
+| [U17](#u17) | rune-kit: export the Combobox fuzzy matcher, with match positions | W1 ([`contract/matched.rs`](../../crates/strata-components/src/contract/matched.rs)) | W1's `contract::fuzzy` (C17, C19, C20c, C20d) | No | New | 16 | — |
+| [U4](#u4) | ~~Headless file drops can't carry held modifiers~~ | W1 ([`contract/dnd/tests.rs`](../../crates/strata-components/src/contract/dnd/tests.rs)) | — | — | Withdrawn | — | — |
 
 ## Filing
 
@@ -103,8 +103,8 @@ For the owner. Rune takes no pull requests and asks for agent-written issues (RE
    new issues that link #171. Commenting on #171 instead is an owner question.
 4. Fill the index's "Filed as" column, and the README's
    [feature table](../../crates/strata-platform/README.md#features).
-5. Each P-module's owner then replaces `Rune issue: (filed by S5)` in its own `mod.rs` with the
-   links from this index. P0 cites U9, P1 U1, U2, U9 and U10, P2 U5 and U9, P3 U6–U8, U9 and
+5. Each P-module's owner then replaces its `mod.rs` placeholder, `Rune issue: (filed by S5).` or
+   (P9's) `Rune issue: S5 drafts.`, with the links from this index. P0 cites U9, P1 U1, U2, U9 and U10, P2 U5 and U9, P3 U6–U8, U9 and
    #145, P4 U11 and U9, P5 U12 and U13, P6 "none proposed", P7 #30 (related), P8 #22, P9 "none:
    outside Rune's scope".
 
@@ -251,8 +251,46 @@ paths.
 **Compositor:** needed.
 
 **Steps.** Run the program below under sway. From another client, drag `text/uri-list`,
-`text/plain;charset=utf-8` and `image/png` onto the zone and drop. Any drag source works, such as
-`dragon-drop <file>` or `ripdrag <file>`.
+`text/plain;charset=utf-8` and `image/png` onto the zone and drop. This GTK 4 drag source
+(PyGObject) offers exactly those three types:
+
+```python
+# A drag source offering text/uri-list, text/plain and image/png (PyGObject, GTK 4).
+import gi
+gi.require_version("Gtk", "4.0")
+from gi.repository import Gdk, GLib, Gtk
+
+PNG = bytes.fromhex(
+    "89504e470d0a1a0a0000000d4948445200000001000000010806000000"
+    "1f15c4890000000d49444154789c63f8cfc0f01f00050001ff89993d1d0000000049454e44ae426082")
+
+def provider():
+    def item(mime, data):
+        return Gdk.ContentProvider.new_for_bytes(mime, GLib.Bytes.new(data))
+    return Gdk.ContentProvider.new_union([
+        item("text/uri-list", b"file:///tmp/a.txt\r\n"),
+        item("text/plain;charset=utf-8", b"hello from a drag"),
+        item("image/png", PNG),
+    ])
+
+def activate(app):
+    win = Gtk.ApplicationWindow(application=app, title="drag source")
+    label = Gtk.Label(label="drag me")
+    label.set_size_request(200, 120)
+    source = Gtk.DragSource(actions=Gdk.DragAction.COPY | Gdk.DragAction.MOVE)
+    source.connect("prepare", lambda *_: provider())
+    label.add_controller(source)
+    win.set_child(label)
+    win.present()
+
+if __name__ == "__main__":
+    app = Gtk.Application(application_id="org.example.DragSource")
+    app.connect("activate", activate)
+    app.run(None)
+```
+
+`dragon-drop` and `ripdrag` don't do for this: dragon offers only URI and text targets, and
+ripdrag only a file list. Neither offers `image/png`.
 
 ```rust
 use rune::{AppSpec, Cx, El, col, el};
@@ -276,7 +314,8 @@ At least the file drop reaches `on_drop_files`, as on X11.
   exist, and positions come from sampling `QueryPointer`.
 
 **Ask.** `on_drop(|s, DropData, tx|)` with the offered types, a typed read, the action, and a
-position on every motion, on Wayland and X11.
+position on every motion, on Wayland and X11. The file-drop hooks' own gaps, on every
+platform, are a separate issue: (U3's link).
 
 **Meanwhile** we bind `wl_data_device` on winit's display (U9's link) and put an `XdndProxy` on
 the X11 window.
@@ -590,22 +629,134 @@ hook that runs before every native window maps, X11 included.
 
 A file manager follows the desktop's text scale, double-click time, cursor blink and animations
 switch. They all live in `org.freedesktop.portal.Settings`, which Rune already reads for
-`color-scheme`.
+`color-scheme`. The double-click interval Rune uses itself is a separate issue: (U13's link).
 
 **Compositor:** needed, with a private session bus, because Rune reads the portal only for a real
 window.
 
-**Steps.** Run any Rune app (U13's will do) on a private bus where a fake
-`org.freedesktop.portal.Settings` serves and changes `text-scaling-factor`, `cursor-blink`,
-`cursor-blink-time` and `enable-animations` (`org.gnome.desktop.interface`), and `double-click`
-(`org.gnome.desktop.peripherals.mouse`). [Attach the fake portal: about 100 lines of Python
-with GLib's Gio that logs every call. It is `harness/fake_portal.py` in the S1 prototype.]
+**Steps.**
+1. Save the fake portal below as `fake_portal.py`. It serves the keys it is given, emits
+   `SettingChanged` on a schedule, and logs every call it gets as a JSON line.
+2. Start the headless sway from the recipe above, then run U13's program on a private bus with
+   the fake portal:
+
+```sh
+dbus-run-session -- sh -c '
+  python3 -I fake_portal.py \
+    --init "org.freedesktop.appearance color-scheme u 1; org.gnome.desktop.interface text-scaling-factor d 1.0; org.gnome.desktop.interface cursor-blink b true; org.gnome.desktop.interface cursor-blink-time i 1200; org.gnome.desktop.interface enable-animations b true; org.gnome.desktop.peripherals.mouse double-click i 400" \
+    --schedule "3 org.gnome.desktop.interface text-scaling-factor d 1.5; 3.5 org.gnome.desktop.interface enable-animations b false; 4 org.gnome.desktop.peripherals.mouse double-click i 1200; 4.5 org.freedesktop.appearance color-scheme u 2" \
+    > portal.log &
+  sleep 1
+  WAYLAND_DISPLAY=wayland-1 timeout 6 cargo run
+'
+grep '"ev": "call"' portal.log
+```
+
+```python
+"""A fake org.freedesktop.portal.Settings on the session bus.
+
+Usage: python3 -I fake_portal.py [--v1] [--schedule "T NS KEY TYPE VALUE; ..."] [--init "NS KEY TYPE VALUE; ..."]
+--v1 drops ReadOne (portal version 1, Read only). TYPE is a GVariant type string.
+Prints JSON lines: ready, each method call, each emitted change.
+"""
+import json
+import sys
+import time
+
+from gi.repository import Gio, GLib
+
+XML = """
+<node><interface name="org.freedesktop.portal.Settings">
+  <method name="ReadAll"><arg type="as" direction="in"/><arg type="a{sa{sv}}" direction="out"/></method>
+  <method name="Read"><arg type="s" direction="in"/><arg type="s" direction="in"/><arg type="v" direction="out"/></method>
+  <method name="ReadOne"><arg type="s" direction="in"/><arg type="s" direction="in"/><arg type="v" direction="out"/></method>
+  <signal name="SettingChanged"><arg type="s"/><arg type="s"/><arg type="v"/></signal>
+  <property name="version" type="u" access="read"/>
+</interface></node>
+"""
+
+START = time.monotonic()
+args = sys.argv[1:]
+v1 = "--v1" in args
+
+
+def opt(name):
+    return args[args.index(name) + 1] if name in args else ""
+
+
+def parse(spec):
+    out = []
+    for item in filter(None, (s.strip() for s in spec.split(";"))):
+        out.append(item.split(None, 4))
+    return out
+
+
+def log(ev, **f):
+    print(json.dumps({"t": round(time.monotonic() - START, 3), "w": int(time.time() * 1000), "ev": ev, **f}), flush=True)
+
+
+values = {}
+for ns, key, ty, val in parse(opt("--init")):
+    values[(ns, key)] = GLib.Variant.parse(GLib.VariantType(ty), val, None, None)
+
+
+def call(conn, sender, path, iface, method, params, inv):
+    p = params.unpack()
+    log("call", method=method, args=p, sender=sender)
+    if method == "ReadAll":
+        res = {}
+        for (ns, key), v in values.items():
+            if not p[0] or any(ns == want or (want.endswith("*") and ns.startswith(want[:-1])) for want in p[0]):
+                res.setdefault(ns, {})[key] = v
+        inv.return_value(GLib.Variant("(a{sa{sv}})", (res,)))
+        return
+    v = values.get((p[0], p[1]))
+    if v is None:
+        inv.return_dbus_error("org.freedesktop.portal.Error.NotFound", "no such key")
+    elif method == "ReadOne" and not v1:
+        inv.return_value(GLib.Variant.new_tuple(GLib.Variant("v", v)))
+    elif method == "ReadOne":
+        inv.return_dbus_error("org.freedesktop.DBus.Error.UnknownMethod", "ReadOne")
+    else:
+        # Read wraps the value in a second variant, as real portals do.
+        inv.return_value(GLib.Variant.new_tuple(GLib.Variant("v", GLib.Variant("v", v))))
+
+
+def get_prop(conn, sender, path, iface, name):
+    return GLib.Variant("u", 1 if v1 else 2)
+
+
+def acquired(conn, name):
+    info = Gio.DBusNodeInfo.new_for_xml(XML).interfaces[0]
+    conn.register_object("/org/freedesktop/portal/desktop", info, call, get_prop, None)
+    for at, ns, key, ty, val in parse(opt("--schedule")):
+        GLib.timeout_add(int(float(at) * 1000), change, conn, ns, key, ty, val)
+
+
+def owned(conn, name):
+    log("ready", name=name, version=1 if v1 else 2)
+
+
+def change(conn, ns, key, ty, val):
+    v = GLib.Variant.parse(GLib.VariantType(ty), val, None, None)
+    values[(ns, key)] = v
+    conn.emit_signal(None, "/org/freedesktop/portal/desktop", "org.freedesktop.portal.Settings", "SettingChanged",
+                     GLib.Variant("(ssv)", (ns, key, v)))
+    log("changed", ns=ns, key=key, value=val)
+    return False
+
+
+Gio.bus_own_name(Gio.BusType.SESSION, "org.freedesktop.portal.Desktop", Gio.BusNameOwnerFlags.NONE, acquired, owned,
+                 lambda *_: log("name-lost"))
+GLib.MainLoop().run()
+```
 
 **Expected.** These reach the app, as `color-scheme` does.
 
 **Actual.**
 - The fake portal logs one call from Rune, `ReadOne(org.freedesktop.appearance, color-scheme)`,
-  and nothing else (`platform/portal_appearance.rs`). No API exposes the other keys.
+  and nothing else (`platform/portal_appearance.rs`). When the schedule sets `color-scheme` to 2,
+  the window turns light, so Rune does follow that key's changes. No API exposes the other keys.
 - Rune reads reduced motion from GSettings or `kdeglobals`, only when a window is created or
   focused. That skips the portal (sandboxes) and its change signals. Under the GSettings keyfile
   backend the re-read stayed stale, because that backend needs a GLib main loop.
@@ -647,6 +798,8 @@ selection, and `Drag::clicks`.
 
 **Ask.** Read the desktop's interval on Linux (the Settings portal, else GSettings, else
 `kdeglobals`), or add `App::double_click_interval(secs)` and a `Tx` setter.
+
+Related: (U12's link) asks for the Settings portal's other keys, `double-click` among them.
 
 ### U14
 
@@ -754,26 +907,46 @@ for one without `.growth`.
 
 ### U3
 
-**Title:** File drops: hover handlers get no paths, and nothing reports a drag entering or leaving the window
+**Title:** File drops: acceptance can't see app state or the whole drag, and nothing says a drag entered, left or which action it gets
 
-A file manager decides at hover time whether a folder row accepts a drag (no drops into a
-read-only folder, or onto the dragged folder itself), and it builds a drag session when a drag
-enters. `on_drop_hover` and `on_drop_move` don't say what is dragged.
+A file manager decides while a drag hovers whether a folder row takes it: not into a read-only
+folder, not a folder onto itself, copy or move by the source's volume. Rune has two hooks for
+this, and both fall short:
+
+- `El::accepts_files(Fn(&Path) -> bool)` (`el/drop.rs:70`) is asked one path at a time, with no
+  `&S`. It can't read app state (is this folder writable? is it one of the dragged entries?), and
+  it can't judge the drag as a whole (refuse when any one of the paths is the target itself).
+- `El::on_drop_rejected_hover` (`el/drop.rs:123`) only says "over" or "not over", for a drag
+  `accepts_files` already turned away.
+
+Beyond those:
+
+- No drag identity, and no enter or leave for the window. Two drags in a row can't be told apart,
+  and an app can't set up or tear down a drag session.
+- The action is never asked. The drop hands over paths with no copy or move, so an app can only
+  apply its own rule at the drop, and can't show it while hovering.
+
+The paths themselves are only in the drop: `on_drop_hover` and `on_drop_move` don't get them.
+
+Related: (U2's link) asks for typed, multi-MIME drops on Wayland and X11. This issue is about the
+file-drop hooks every platform already has.
 
 **Compositor:** none; it runs headless.
 
 ```rust
 use rune::{Cx, El, Env, Runtime, col, el};
 use std::path::PathBuf;
-#[derive(Default)] struct S { log: Vec<String> }
+#[derive(Default)] struct S { log: Vec<String>, read_only: bool }
 fn view(_: &S, _: &mut Cx<S>) -> El {
     col().w_full().h_full().child(el().key("zone").size(200.0, 150.0)
+        // Asked per path, with no state: it can't see `read_only`, or the other paths.
+        .accepts_files(|path| { println!("accepts_files({})", path.display()); true })
         .on_drop_hover(|s: &mut S, over, _| s.log.push(format!("on_drop_hover({over})")))
         .on_drop_move(|s: &mut S, p, _| s.log.push(format!("on_drop_move({}, {})", p.x, p.y)))
-        .on_drop_files(|s: &mut S, files, _| s.log.push(format!("on_drop_files({files:?})"))))
+        .on_drop_files(|s: &mut S, files, _| s.log.push(format!("on_drop_files({files:?}), read_only {}", s.read_only))))
 }
 fn main() {
-    let mut rt = Runtime::new(S::default(), view, (300.0, 200.0), Env::new(true, 1.0));
+    let mut rt = Runtime::new(S { read_only: true, ..S::default() }, view, (300.0, 200.0), Env::new(true, 1.0));
     rt.frame(0.0);
     let p = vec![PathBuf::from("/home/me/a.txt"), PathBuf::from("/home/me/b.png")];
     rt.drag_files(p.clone(), Some((10.0, 10.0)));
@@ -786,25 +959,32 @@ fn main() {
 }
 ```
 
-**Expected.** The hover and move handlers can read the dragged paths, and the app hears a drag
-enter and leave the window.
+**Expected.** The app can decide acceptance from its state and the whole drag while it hovers,
+tell one drag from the next, and say which action the drop would take.
 
 **Actual** (run at `78d22ed`):
 
 ```
+accepts_files(/home/me/a.txt)
+accepts_files(/home/me/b.png)
+… (the same pair five times in all: one per path, each time Rune aims the drag)
 on_drop_hover(true)
 on_drop_move(10, 10)
 on_drop_move(60, 70)
 on_drop_hover(false)
-on_drop_files(["/home/me/a.txt", "/home/me/b.png"])
+on_drop_files(["/home/me/a.txt", "/home/me/b.png"]), read_only true
 ```
 
-The paths arrive only with the drop. The runtime holds them during the drag (`drag_files` stores
-them), but `on_drop_hover` takes `(S, bool, Tx)` and `Tx` has no `drag_paths()`. No handler hears
-a drag enter or leave the window, so an app can't tell two drags apart.
+The read-only folder took the drop: `accepts_files` had no way to see `read_only`. The paths
+reach state only with the drop. The runtime holds them during the drag (`drag_files` stores
+them), but `on_drop_hover` takes `(S, bool, Tx)`, and `Tx` has no `drag_paths()`.
 
-**Ask.** `Tx::drag_paths()` (or the paths in `on_drop_hover`) during a file drag, and window-level
-drag enter and leave callbacks.
+**Ask**, for the gaps above only:
+- An acceptance hook with `&S` and every dragged path at once, such as
+  `accepts_drag(|s: &S, paths: &[PathBuf]| -> bool)`, or `Tx::drag_paths()` in `on_drop_hover`.
+- A drag id, with window-level drag enter and leave callbacks.
+- The drop's action: the source's allowed actions, and a way for the target to pick one while
+  hovering (copy, move, link).
 
 ### U16
 
@@ -947,10 +1127,12 @@ and has no `workflow_call`.
   commit under that tag name, and creates no tag and no release. That is the WP's "dry-run tag".
 
 **`preflight`:**
-1. The tag matches `^strata-platform-v<semver>\+rune\.[0-9a-f]{7,40}$`.
+1. The tag matches `^strata-platform-v<semver>\+rune\.[0-9a-f]{7}$`. A manual run's tag is free
+   text, so it is printed only once it matches.
 2. The semver equals the crate's version from `cargo metadata`.
-3. `Cargo.lock` pins every `anomalyco/rune` crate to one full rev, `Cargo.toml` asks for the
-   same rev, and that rev starts with the tag's digits.
+3. Every `anomalyco/rune` source in `Cargo.lock` reads `?rev=<40 hex>#<the same 40>`, all
+   with one rev. Every `anomalyco/rune` dependency in the root and crate manifests pins
+   `rev = "<that rev>"`, with no `branch` or `tag`. The rev starts with the tag's seven digits.
 4. `mise.toml`'s Rust equals `rust-toolchain.toml` at that Rune rev, read from cargo's git
    database after `cargo fetch --locked`.
 5. The commit is on `origin/main`. A dry run only warns.
@@ -970,8 +1152,15 @@ crate, and fails unless `cargo tree` finds one Rune.
 <rev7>)`, with the notes. The owner publishes the draft. Cargo pins the tag, so the release page
 is for people.
 
-**Never** `cargo publish` or `cargo package --verify`. Cargo would swap the git dependency for
-`rune = "0.0.1"` from crates.io, which is the rune-rs language, not Anomaly's Rune.
+**Never** `cargo publish` or `cargo package --verify`. Cargo would drop the git source and keep
+`rune = "0.0.1"`, a crates.io requirement. The `rune` on crates.io is the rune-rs language, which
+has no 0.0.1 (its versions run 0.0.0, 0.1.0, … 0.14.2; read 2026-11-07), so the publish fails to
+resolve. If it ever resolved, it would be the wrong crate.
+
+**Follow-up, shared with `ci.yml`** (not changed here, since `ci.yml` is W0's and W3's): the
+checkout steps could set `persist-credentials: false`, since no step pushes, and the release's
+`rust-cache` step `save-if: false`, so tag runs don't write the cache that PRs read. Change both
+workflows together, in one PR.
 
 **Changelog rules** (`CHANGELOG.md`, Keep a Changelog 1.1.0):
 - Each release heading is `## [<version>] - <date>`, followed by
@@ -1021,7 +1210,9 @@ The rule above holds while the crate is 0.x. What happens at 1.0 is an owner que
 
 ## Verification
 
-Run here on 2026-11-07, in scratch clones under the worktree's `target/s5/`. Cargo ran offline
+Run here on 2026-11-07, after review round 1 and the rebase onto `integration` (P9 merged), in
+scratch clones under the worktree's `target/s5/`. Each failing case must fail at the step named,
+not at an earlier one. Cargo ran offline
 except for one `file://` fetch. A local runner ran `release.yml`'s own `run:` scripts, as
 GitHub would (`bash -eo pipefail`, with `GITHUB_OUTPUT` and the step's `env`). The `uses:` steps
 were skipped (the clone is the checkout, and mise was installed), and so was `apt-get` (the
@@ -1029,27 +1220,34 @@ libraries are installed). A fake `gh` first on `PATH` recorded the release call.
 
 | Check | Expected | Result |
 | --- | --- | --- |
-| YAML loads. Triggers are a `strata-platform-v*` tag and a manual run. Default permissions are `contents: read`, and only `release` has `contents: write`. `release` runs on a push only. Every `uses:` is pinned to a 40-digit SHA used in `ci.yml`. `build`'s setup steps are `ci.yml`'s, unchanged. No `${{ }}` inside a script. No `cargo publish` or `cargo package`. | pass | pass (15 assertions) |
+| YAML loads. Triggers are a `strata-platform-v*` tag and a manual run. Default permissions are `contents: read`, and only `release` has `contents: write`. `release` runs on a push only. Every `uses:` is pinned to a 40-digit SHA used in `ci.yml`. `build`'s setup steps equal `integration`'s `ci.yml` (with `libglib2.0-dev`). No `${{ }}` inside a script. No `cargo publish` or `cargo package`. | pass | pass (15 assertions) |
 | P1: a dry run of `strata-platform-v0.0.1+rune.78d22ed` on a branch | pass, with warnings | pass. It warned that the commit isn't on main, and that it used `[Unreleased]`. |
 | F1: tag version 0.1.0 against crate version 0.0.1 | fail at the version | fail: "the tag says 0.1.0, but strata-platform's Cargo.toml says '0.0.1'" |
 | F2: tag rev `1234567` | fail at the Rune rev | fail: "the tag names Rune 1234567, but the workspace pins 78d22ed8…" |
-| F3: malformed tags (`-rune.`, no rev, a leading zero, an uppercase rev) | fail at the tag | fail, all four |
+| F3: malformed tags (`-rune.`, no rev, a leading zero, an uppercase rev, an 8-digit rev, the text `$(echo pwned)`) | fail at the tag, without printing it | fail, all six. The error is the fixed message; no log line prints the input. |
 | F4: a push with no `[0.0.1]` changelog section | fail at the notes | fail: "CHANGELOG.md has no '## [0.0.1] - YYYY-MM-DD' section" |
 | F5: a push of a commit not on main | fail at main | fail: "… isn't on main; tag a commit on main" |
 | F6: a push whose heading has no date | fail at the notes | fail: "the [0.0.1] heading needs ' - YYYY-MM-DD' after it" |
 | F7: `mise.toml` Rust 1.99.0 against Rune's 1.99.1 | fail at the toolchain | fail: "mise.toml pins Rust 1.99.0, Rune's rust-toolchain.toml says 1.99.1" |
-| F8: one `Cargo.toml` Rune rev differing from `Cargo.lock` | fail at the Rune rev | fail: "Cargo.toml's Rune revs … don't match Cargo.lock's …" |
+| F8: `rune-kit`'s `Cargo.toml` rev differing from `Cargo.lock` | fail at the Rune rev | fail: "Cargo.toml: rune-kit pins Rune by {'rev': '…f4'}; it needs rev = "…f5"" |
+| F10: `rune-kit` pinned `branch = "dev"`, with the lock as cargo writes it (`?branch=dev#<rev>`) | fail at the Rune rev | fail: "Cargo.lock pins Rune as '?branch=dev#…', not ?rev=<40 hex>#<the same>" |
+| F11: `rune-kit` pinned `tag = "v0.0.1"` (`?tag=v0.0.1#<rev>`) | fail at the Rune rev | fail: "Cargo.lock pins Rune as '?tag=v0.0.1#…'" |
+| F12: `rune-kit` pinned `rev = "78d22ed"` (`?rev=78d22ed#<rev>`) | fail at the Rune rev | fail: "Cargo.lock pins Rune as '?rev=78d22ed#…'" |
+| F13, F14: `branch` or `tag` in `Cargo.toml` only, the lock untouched | fail at the Rune rev | fail: "Cargo.toml: rune-kit pins Rune by {'branch': 'dev'}" and "… {'tag': 'v0.0.1'}" |
 | F9: a push with a changelog section but no README row | fail at the notes | fail: "the README's supported Rune revs table has no row for …" |
 | P2: a push with a `[0.0.1] - 2026-11-07` section and a README row, on main | pass | pass. The section became the notes. |
 | R1: `release` on a manual run | skipped | skipped |
 | R2: `release` on a push | one `gh release create` | `gh release create strata-platform-v0.0.1+rune.78d22ed --repo … --verify-tag --draft --prerelease --title "strata-platform 0.0.1 (Rune 78d22ed)" --notes-file …`, with the notes written intact |
-| `build`: fmt, compile-features, clippy, headless tests, docs with `-D warnings`, deny | pass | pass |
+| `build`: fmt, compile-features, clippy, headless tests, docs with `-D warnings`, deny, with `glib-bridge` built and its 8 tests run under `--all-features` | pass | pass. The `apt-get` step isn't run here; its package list is checked against `ci.yml` above. |
 | `build`: the pin check at the full rev | pass, one Rune | pass. The first run failed: `mise.toml`'s `CARGO_TERM_COLOR=always` coloured `cargo tree`'s ` (*)` marker. The workflow now passes `--color never`. |
 | `build`: the pin check at a 7-digit rev | fail, two Runes | fail: `rev=78d22ed` and the full rev listed as two `rune` packages |
 | A tag consumer: a scratch clone tagged `strata-platform-v0.0.1+rune.78d22ed`, pinned with `git = "file://…", tag = …` and Rune at the full rev | builds, one Rune | builds. `Cargo.lock` records `?tag=strata-platform-v0.0.1%2Brune.78d22ed`. One `rune` in `cargo tree`. |
 | `cargo package --list -p strata-platform` (listing only) | includes `README.md` | includes it, with no `Cargo.toml` change. Cargo warns that the manifest has no `repository`. |
 | Every draft's Rust program compiles at `78d22ed` | 13 programs build | all build, with no warnings |
-| The headless drafts give their "Actual" | as written | U3, U10, U13, U14 and U15 print what the drafts quote, and U16's measurements and U4's check match |
+| U2's GTK 4 drag source: the content provider and the PNG, without a display | three types, a valid PNG | `text/uri-list text/plain;charset=utf-8 image/png`. Every PNG chunk CRC checks, and gdk-pixbuf decodes it as 1×1 RGBA. The window and the drag itself weren't run. |
+| U12's fake portal, as pasted, on a private bus (`dbus-run-session`) | answers and emits | `ReadOne`, `ReadAll` and `Read` answered (`gdbus`), and the draft's `--init` and `--schedule` strings parse and emit all four changes on time. Not run against a Rune window here; S1 measured that. |
+| `dragon-drop` and `ripdrag` as U2's source, read from their source on GitHub | — | dragon: URI and text targets only (`gtk_target_list_add_uri_targets`, `add_text_targets`). ripdrag: a `GdkFileList` only. Neither offers `image/png`, so U2 now carries its own source. |
+| The headless drafts give their "Actual" | as written | U3 (rewritten in round 1), U10, U13, U14 and U15 print what the drafts quote, and U16's measurements and U4's check match |
 | `actionlint`, `act`, `zizmor` | — | not installed, so not run |
 
 **Pending for the owner:**

@@ -5,6 +5,9 @@ members = [
     "crates/strata-kit",
     "crates/strata-components",
     "crates/strata-gallery",
+
+    # The compositor test harness's peer process (W3): test tooling, never published.
+    "crates/strata-platform/tests/support/strata-test-peer",
 ]
 
 [workspace.package]
@@ -23,6 +26,9 @@ rune-kit = { version = "0.0.1", git = "https://github.com/anomalyco/rune", rev =
 strata-platform = { version = "0.0.1", path = "crates/strata-platform" }
 strata-kit = { version = "0.0.1", path = "crates/strata-kit" }
 strata-components = { version = "0.0.1", path = "crates/strata-components" }
+# Test-only and never published (strata-platform's dev-dependency). cargo-deny's `wildcards`
+# ban needs the version; publishing strata-platform must drop this dev-dependency first.
+strata-test-peer = { version = "0.0.1", path = "crates/strata-platform/tests/support/strata-test-peer" }
 
 # strata-platform glib-bridge (P9)
 futures-channel = "0.3"
@@ -31,7 +37,14 @@ glib = { version = "0.22", default-features = false }
 
 # PNG goldens: decodes rendered scenes for the tolerance check (gallery dev-dependency only).
 png = "0.18"
+serde = "1"
 serde_json = "1"
+wayland-client = "0.31"
+wayland-protocols = "0.32"
+wayland-protocols-misc = "0.3"
+wayland-protocols-wlr = "0.3"
+x11rb = "0.13"
+xkbcommon = "0.9"
 
 [profile.dev.package."*"]
 debug = false

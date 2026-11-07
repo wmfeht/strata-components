@@ -7,10 +7,29 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+# Each work package adds its third-party dependencies in its own block below. Keep the blank
+# lines: git conflicts when two branches edit neighbouring lines. A crate appears once: one
+# already declared in any block is usable from every module, so use it as it is. The shared
+# block takes a crate two work packages would add at once (docs/testing.md).
+# strata-components never depends on strata-platform (docs/work/README.md, rule 1).
 [dependencies]
 rune.workspace = true
 rune-kit.workspace = true
 strata-kit.workspace = true
+
+# Shared by two or more work packages.
+
+# C10a highlighter: syntect and two-face
+
+# C11 DocumentView
+
+# C12 PdfView
+
+# C13 MediaPlayer
+
+# C14b viewers and archive preview
+
+# C25 ThumbnailStore
 
 [lints]
 workspace = true

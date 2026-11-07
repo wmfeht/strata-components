@@ -21,14 +21,56 @@ run = "cargo check --workspace --all-targets --all-features --locked"
 description = "Lint with Clippy"
 run = "cargo clippy --workspace --all-targets --all-features --locked -- -D warnings"
 
+# Headless: no X display, and a Wayland socket name that doesn't exist, so nothing can reach
+# the desktop session (libwayland would otherwise fall back to wayland-0).
 [tasks.test]
 description = "Run the tests headless, never on the desktop display"
 raw_args = true
-run = "env -u DISPLAY -u WAYLAND_DISPLAY cargo test --workspace --all-targets --all-features --locked"
+run = '''
+env -u DISPLAY -u WAYLAND_SOCKET WAYLAND_DISPLAY=strata-test-no-wayland \
+  cargo test --workspace --all-targets --all-features --locked
+'''
 
+# `mise run bless c1` rewrites only page c1's goldens (tests/golden/*/c1/). The filter is a
+# page id, a scene name (c1-empty-dark) or <id>/<script> (c5/stem-selection), in lowercase;
+# with none, every golden is rewritten. RUNE_BLESS turns blessing on, STRATA_BLESS narrows it,
+# and the cargo filter `<id>::` runs only that page's golden tests, plus the test that fails
+# when the filter names nothing (docs/testing.md).
 [tasks.bless]
-description = "Rewrite the goldens from the current output; review the diff"
-run = "env -u DISPLAY -u WAYLAND_DISPLAY RUNE_BLESS=1 cargo test --workspace --all-targets --all-features --locked"
+description = "Rewrite goldens (all, or one page, scene or script); review every diff"
+usage = '''
+arg "[filter]" help="A page (c1), a scene (c1-empty-dark) or <id>/<script>; empty: all" default=""
+'''
+run = '''
+set -eu
+f="${usage_filter:-}"
+case "$f" in
+  *[!a-z0-9_/-]*)
+    echo "bless: filter '$f' must be lowercase: a page id, a scene or <id>/<script>" >&2
+    exit 2 ;;
+esac
+set -- cargo test --workspace --all-targets --all-features --locked
+if [ -n "$f" ]; then
+  set -- "$@" -- "${f%%[-/]*}::" registry::bless_filter_names_a_page_scene_or_script
+fi
+env -u DISPLAY -u WAYLAND_SOCKET WAYLAND_DISPLAY=strata-test-no-wayland \
+  RUNE_BLESS=1 STRATA_BLESS="$f" "$@"
+'''
+
+# Each strata-platform feature alone, so no shim leans on another's dependencies. The list is
+# read from the crate's [features] table.
+[tasks.compile-features]
+description = "Check strata-platform with no features and with each feature alone"
+run = '''
+set -eu
+cargo check -p strata-platform --all-targets --no-default-features --locked
+features=$(awk '/^\[features\]/{s=1;next} /^\[/{s=0} s && /^[A-Za-z0-9_-]+ *=/{print $1}' \
+  crates/strata-platform/Cargo.toml | grep -vx default)
+for f in $features; do
+  echo "== strata-platform --features $f"
+  cargo check -p strata-platform --all-targets --no-default-features --features "$f" --locked
+done
+'''
 
 [tasks.deny]
 description = "Check advisories, licenses, bans, and sources"
@@ -40,7 +82,7 @@ run = "typos"
 
 [tasks.check]
 description = "Local pre-push quality checks"
-depends = ["fmt", "compile", "clippy", "test", "deny", "typos"]
+depends = ["fmt", "compile", "compile-features", "clippy", "test", "deny", "typos"]
 
 [tasks.gallery]
 description = "Open the component gallery"

@@ -1,0 +1,10 @@
+{
+  "events": [
+    {"t": 0.1, "type": "tap", "key": "index-c5"},
+    {"t": 0.4, "type": "key", "name": "Escape"}
+  ],
+  "expect": [
+    {"key": "index-c5", "name": "C5 InlineRenameEditor"},
+    {"key": "c5-placeholder", "absent": true}
+  ]
+}

@@ -1,12 +1,25 @@
-//! `cargo run -p strata-gallery` opens the gallery. `-- --snap out.png --scene empty-dark`
-//! renders a scene headless; `-- --script tests/scripts/<name>.json` drives one.
+//! `cargo run -p strata-gallery` opens the gallery on its index; Escape goes back to it.
+//! `-- --snap out.png --scene gallery-index-dark` renders a scene headless, and
+//! `-- --scene <scene> --script tests/scripts/<id>/<name>.json` drives one.
 
-use rune::AppSpec;
-use strata_gallery::{Gallery, SCENES, view};
+use rune::{AppSpec, Key, KeyEvent, Tx};
+use strata_gallery::{Gallery, SIZE, scenes, view};
 
 fn main() {
+    // AppSpec takes a 'static slice; the list is built once for the process.
+    let scenes = Vec::leak(scenes::all_scenes());
     rune::run(AppSpec::<Gallery> {
-        scenes: SCENES,
-        ..AppSpec::new("Strata components", (960.0, 640.0), Gallery::default, view)
+        scenes,
+        on_key: Some(on_key),
+        ..AppSpec::new("Strata components", SIZE, Gallery::default, view)
     });
+}
+
+/// Escape on a page goes back to the index.
+fn on_key(g: &mut Gallery, key: &KeyEvent, _tx: &mut Tx) -> bool {
+    if key.key == Key::Escape && g.page.is_some() {
+        g.page = None;
+        return true;
+    }
+    false
 }

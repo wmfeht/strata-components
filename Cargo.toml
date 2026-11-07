@@ -24,6 +24,8 @@ strata-platform = { version = "0.0.1", path = "crates/strata-platform" }
 strata-kit = { version = "0.0.1", path = "crates/strata-kit" }
 strata-components = { version = "0.0.1", path = "crates/strata-components" }
 
+# PNG goldens: decodes rendered scenes for the tolerance check (gallery dev-dependency only).
+png = "0.18"
 serde_json = "1"
 
 [profile.dev.package."*"]

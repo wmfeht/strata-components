@@ -38,7 +38,9 @@ impl Measure {
     }
 }
 
-/// The longest leading part of `text` at most `room` long in `measure`, on a whole character.
+/// The longest leading part of `text` at most `room` long in `measure`, on a whole character:
+/// a Unicode scalar value, as Strata's GTK field cuts (`fitting_prefix`). A combining mark
+/// typed after the cut is a character of its own, so a decomposed "é" can lose its accent.
 pub fn fit(text: &str, room: usize, measure: Measure) -> &str {
     let mut used = 0;
     for (i, c) in text.char_indices() {
@@ -65,15 +67,22 @@ pub fn trim_to_fit(edit: &mut TextEdit, room: usize, measure: Measure) {
     }
 }
 
-/// Cuts `edit` to fit `room` after an edit: the characters just before the caret go, so a
-/// typed or pasted insertion keeps its longest leading part that fits. An edit leaves the
-/// caret after what it inserted, and the text before the insertion fit.
-pub(crate) fn trim_insertion(edit: &mut TextEdit, room: usize, measure: Measure) {
+/// Cuts `edit` to fit `room` right after an edit: the characters just before the caret go, so
+/// a typed or pasted insertion keeps its longest leading part that fits.
+///
+/// Precondition: the caret sits right after the insertion (an editor leaves it there) and
+/// the text fit before the edit. Text set from outside that is already too long, with the
+/// caret anywhere, is cut to [`fit`] instead, keeping its head.
+pub fn trim_insertion(edit: &mut TextEdit, room: usize, measure: Measure) {
     let mut over = measure.of(&edit.text).saturating_sub(room);
     if over == 0 {
         return;
     }
     let caret = edit.focus.max(edit.anchor).min(edit.text.len());
+    debug_assert!(
+        edit.text.is_char_boundary(caret),
+        "the caret sits on a character boundary"
+    );
     let mut start = caret;
     for (i, c) in edit.text[..caret].char_indices().rev() {
         if over == 0 {

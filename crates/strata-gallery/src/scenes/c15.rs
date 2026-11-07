@@ -7,11 +7,11 @@
 //! path field) and a row of buttons that open each dialog, so scripts can open a dialog from
 //! an opener and check where focus returns. The golden scenes open a dialog at once.
 
-use rune::{Cx, El, KeyEvent, TextEdit, Tx, col, el, icon, row, text};
-use rune_kit::{Button, ButtonVariant, Checkbox, Progress, Select, Switch, TextArea, TextInput};
+use rune::{Cx, El, Key, KeyEvent, Mods, TextEdit, Tx, col, el, icon, row, text};
+use rune_kit::{Button, ButtonVariant, Checkbox, Progress, Select, Switch, TextInput};
 use strata_components::dialog::{
-    self, DialogShell, Focus, Measure, StrataDialog, Tone, limit_on_change, newline_on_enter,
-    remaining, trim_to_fit,
+    self, DialogShell, Focus, Measure, StrataDialog, Tone, limit_on_change, remaining, text_area,
+    trim_to_fit,
 };
 use strata_kit::icons::IconName;
 use strata_kit::look::Look;
@@ -41,6 +41,8 @@ pub enum Open {
     Take,
     /// Properties, which opens a second dialog over itself.
     Outer,
+    /// A paste conflict: Skip, Cancel and Replace, opening on Cancel.
+    Conflict,
 }
 
 /// The longest volume label, in the field's unit (a FAT label: 11 bytes).
@@ -73,6 +75,9 @@ pub struct Demo {
     /// A field outside any dialog.
     pub path: TextEdit,
     pub hidden_files: bool,
+    /// Puts focus in keyboard mode on the next frame, as a Tab and a Shift+Tab would: the
+    /// keyboard scenes show the focus ring.
+    pub keyboard: bool,
 }
 
 impl Demo {
@@ -128,6 +133,14 @@ pub const SCENES: &[Scene] = &[
     ("c15-small-window-dark", |g| {
         open_scene(g, true, Open::Small)
     }),
+    ("c15-danger-keyboard-light", |g| {
+        open_scene(g, false, Open::Danger);
+        g.c15.keyboard = true;
+    }),
+    ("c15-danger-keyboard-dark", |g| {
+        open_scene(g, true, Open::Danger);
+        g.c15.keyboard = true;
+    }),
 ];
 
 /// Scenes for review with `--scene` only, kept out of the goldens.
@@ -144,12 +157,12 @@ pub const REVIEW: &[Scene] = &[
     }),
 ];
 
-pub fn view(g: &Gallery, _cx: &mut Cx<Gallery>) -> El {
+pub fn view(g: &Gallery, cx: &mut Cx<Gallery>) -> El {
     let look = g.look();
     let mut layer = Vec::new();
     // Popups (the form's select) go above the dialogs that own them.
     let mut popups = Vec::new();
-    dialogs(g, look, &mut layer, &mut popups);
+    dialogs(g, look, cx.is_reduced_motion(), &mut layer, &mut popups);
     layer.extend(popups);
     rune_kit::root(window(g, look), layer)
 }
@@ -160,9 +173,24 @@ pub fn on_key(_g: &mut Gallery, _key: &KeyEvent, _tx: &mut Tx) -> bool {
     false
 }
 
-/// Runs at the start of every frame while this page is open, with the clock in seconds.
-pub fn poll(_g: &mut Gallery, _t: f64, _tx: &mut Tx) -> bool {
-    false
+/// Runs at the start of every frame while this page is open, with the clock in seconds. A
+/// keyboard scene sends a Tab and a Shift+Tab once its dialog is up, so focus ends where it
+/// started, shown as the keyboard shows it.
+pub fn poll(g: &mut Gallery, t: f64, tx: &mut Tx) -> bool {
+    if !g.c15.keyboard || t <= 0.0 {
+        return false;
+    }
+    g.c15.keyboard = false;
+    for shift in [false, true] {
+        tx.send_key(KeyEvent {
+            key: Key::Tab,
+            mods: Mods {
+                shift,
+                ..Mods::default()
+            },
+        });
+    }
+    true
 }
 
 fn demo(g: &mut Gallery) -> &mut Demo {
@@ -264,7 +292,8 @@ fn window(g: &Gallery, look: &Look) -> El {
         .child(opener("panel", "Settings", Open::Panel))
         .child(opener("return", "Move to Trash", Open::Return))
         .child(opener("take", "Edit path", Open::Take))
-        .child(opener("outer", "Properties", Open::Outer));
+        .child(opener("outer", "Properties", Open::Outer))
+        .child(opener("conflict", "Paste", Open::Conflict));
 
     let dismissals = match d.dismissals {
         1 => "Dismissed 1 time".to_owned(),
@@ -309,13 +338,14 @@ fn window(g: &Gallery, look: &Look) -> El {
         .child(row().w_full().grow(1.0).child(listing).child(side))
 }
 
-fn dialogs(g: &Gallery, look: &Look, layer: &mut Vec<El>, popups: &mut Vec<El>) {
+fn dialogs(g: &Gallery, look: &Look, reduced: bool, layer: &mut Vec<El>, popups: &mut Vec<El>) {
     let d = &g.c15;
     let open = d.open;
     let kit = &look.kit;
 
     StrataDialog::new("c15-basic", "Connection lost", dismissed)
         .open(open == Some(Open::Basic))
+        .reduced_motion(reduced)
         .subtitle("smb://nas.local/projects")
         .icon(IconName::Network)
         .width(dialog::MESSAGE_WIDTH)
@@ -328,6 +358,7 @@ fn dialogs(g: &Gallery, look: &Look, layer: &mut Vec<El>, popups: &mut Vec<El>) 
 
     StrataDialog::new("c15-danger", "Permanently delete 3 items?", dismissed)
         .open(open == Some(Open::Danger))
+        .reduced_motion(reduced)
         .subtitle("3 items · 4.2 MB will be permanently deleted")
         .icon(IconName::Trash)
         .tone(Tone::Danger)
@@ -347,6 +378,7 @@ fn dialogs(g: &Gallery, look: &Look, layer: &mut Vec<El>, popups: &mut Vec<El>) 
 
     StrataDialog::new("c15-error", "Couldn't delete 1 item", dismissed)
         .open(open == Some(Open::Error))
+        .reduced_motion(reduced)
         .subtitle("photo.raw")
         .icon(IconName::Error)
         .message("The file is open in another application.")
@@ -355,10 +387,22 @@ fn dialogs(g: &Gallery, look: &Look, layer: &mut Vec<El>, popups: &mut Vec<El>) 
         .initial_focus(Focus::Primary)
         .build(look, layer);
 
-    form(d, look, open == Some(Open::Form), layer, popups);
+    form(d, look, open == Some(Open::Form), reduced, layer, popups);
+
+    StrataDialog::new("c15-conflict", "Replace photo.raw?", dismissed)
+        .open(open == Some(Open::Conflict))
+        .reduced_motion(reduced)
+        .subtitle("A file with this name already exists in Pictures.")
+        .icon(IconName::Paste)
+        .action("skip", "Skip", |g: &mut Gallery| finish(g, "Skipped"))
+        .secondary("Cancel", |g: &mut Gallery| finish(g, "Cancelled"))
+        .primary("Replace", |g: &mut Gallery| finish(g, "Replaced"))
+        .initial_focus(Focus::Secondary)
+        .build(look, layer);
 
     StrataDialog::new("c15-small", "Review leftovers", dismissed)
         .open(open == Some(Open::Small))
+        .reduced_motion(reduced)
         .subtitle("40 folders left by apps you removed")
         .icon(IconName::Folder)
         .width(1000.0)
@@ -378,6 +422,7 @@ fn dialogs(g: &Gallery, look: &Look, layer: &mut Vec<El>, popups: &mut Vec<El>) 
         finish(g, "Moved to the dock")
     })
     .open(open == Some(Open::Progress))
+    .reduced_motion(reduced)
     .subtitle("To /mnt/backup")
     .icon(IconName::Copy)
     .loading(Some("Copying…".into()))
@@ -389,6 +434,7 @@ fn dialogs(g: &Gallery, look: &Look, layer: &mut Vec<El>, popups: &mut Vec<El>) 
 
     DialogShell::new("c15-panel", "Settings", dismissed)
         .open(open == Some(Open::Panel))
+        .reduced_motion(reduced)
         .fade_only()
         .width(640.0)
         .child(
@@ -414,6 +460,7 @@ fn dialogs(g: &Gallery, look: &Look, layer: &mut Vec<El>, popups: &mut Vec<El>) 
 
     StrataDialog::new("c15-return", "Move 3 items to Trash?", dismissed)
         .open(open == Some(Open::Return))
+        .reduced_motion(reduced)
         .subtitle("They can be restored from Trash.")
         .icon(IconName::Trash)
         .secondary("Cancel", |g: &mut Gallery| finish(g, "Cancelled"))
@@ -426,6 +473,7 @@ fn dialogs(g: &Gallery, look: &Look, layer: &mut Vec<El>, popups: &mut Vec<El>) 
 
     StrataDialog::new("c15-take", "Edit the path?", dismissed)
         .open(open == Some(Open::Take))
+        .reduced_motion(reduced)
         .message("The path field takes focus as this dialog closes.")
         .secondary("Cancel", |g: &mut Gallery| finish(g, "Cancelled"))
         .primary("Edit path", |g: &mut Gallery| {
@@ -449,6 +497,7 @@ fn dialogs(g: &Gallery, look: &Look, layer: &mut Vec<El>, popups: &mut Vec<El>) 
     };
     StrataDialog::new("c15-outer", "Properties", dismissed)
         .open(open == Some(Open::Outer))
+        .reduced_motion(reduced)
         .subtitle("notes.md")
         .icon(IconName::Properties)
         .child(outer_body)
@@ -459,6 +508,7 @@ fn dialogs(g: &Gallery, look: &Look, layer: &mut Vec<El>, popups: &mut Vec<El>) 
         g.c15.inner = false
     })
     .open(open == Some(Open::Outer) && d.inner)
+    .reduced_motion(reduced)
     .stacked(true)
     .message("Others will be able to read notes.md.")
     .secondary("Cancel", |g: &mut Gallery| g.c15.inner = false)
@@ -474,7 +524,14 @@ fn dialogs(g: &Gallery, look: &Look, layer: &mut Vec<El>, popups: &mut Vec<El>) 
 /// Connect to Server: a focused address field, a protocol select, a byte-limited label with
 /// its caption, notes and a checkbox. Connect needs an address, and once anything is typed a
 /// click outside no longer dismisses.
-fn form(d: &Demo, look: &Look, open: bool, layer: &mut Vec<El>, popups: &mut Vec<El>) {
+fn form(
+    d: &Demo,
+    look: &Look,
+    open: bool,
+    reduced: bool,
+    layer: &mut Vec<El>,
+    popups: &mut Vec<El>,
+) {
     let kit = &look.kit;
     let measure = d.label_measure();
     let left = remaining(&d.label.text, LABEL_ROOM, measure);
@@ -501,6 +558,7 @@ fn form(d: &Demo, look: &Look, open: bool, layer: &mut Vec<El>, popups: &mut Vec
 
     StrataDialog::new("c15-form", "Connect to Server", dismissed)
         .open(open)
+        .reduced_motion(reduced)
         .subtitle("Browse files on another computer")
         .icon(IconName::Network)
         .blocking(d.dirty())
@@ -558,11 +616,9 @@ fn form(d: &Demo, look: &Look, open: bool, layer: &mut Vec<El>, popups: &mut Vec
                 .w_full()
                 .gap(look.space.xs)
                 .child(
-                    TextArea::new(&d.notes)
+                    text_area(&d.notes, |g: &mut Gallery| &mut g.c15.notes)
                         .label("Notes")
                         .rows(3)
-                        .on_edit(|g: &mut Gallery| &mut g.c15.notes)
-                        .on_key(newline_on_enter(|g: &mut Gallery| &mut g.c15.notes))
                         .build(kit)
                         .key("c15-form-notes"),
                 )
@@ -581,11 +637,12 @@ fn form(d: &Demo, look: &Look, open: bool, layer: &mut Vec<El>, popups: &mut Vec
                 .key("c15-form-remember"),
         )
         .secondary("Cancel", |g: &mut Gallery| finish(g, "Cancelled"))
+        // Before `primary`: either order disables it.
+        .primary_enabled(!address.is_empty())
         .primary("Connect", move |g: &mut Gallery| {
             let to = g.c15.address.text.trim().to_owned();
             finish(g, &format!("Connected to {to}"));
         })
-        .primary_enabled(!address.is_empty())
         .build(look, layer);
 }
 

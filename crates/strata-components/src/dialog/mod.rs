@@ -44,9 +44,10 @@
 //!   into a Space press, which Rune applies on the next frame.
 //! - **Enter** in a single-line field, or with focus on nothing, presses the primary button
 //!   (Rune's `default_button`). A disabled primary drops its handler, so Enter does nothing.
-//! - **Enter** in a multi-line field types a newline only with [`newline_on_enter`]: Rune's
-//!   multi-line editor treats a plain Return in a paragraph as submit (a chat composer's
-//!   rule), so give every `TextArea` in a dialog `.on_key(newline_on_enter(access))`.
+//! - **Enter** in a multi-line field types a newline only in a field built with
+//!   [`text_area`] (or given [`newline_on_enter`]). Rune's multi-line editor treats a plain
+//!   Return in a paragraph as submit (a chat composer's rule), and a field with nothing to
+//!   submit presses the default button, so a plain `TextArea` in a dialog submits it.
 //! - **Left and Right** on a footer button move along the footer and stop at its ends.
 //!
 //! # Focus
@@ -68,6 +69,14 @@
 //! - [`StrataDialog::return_focus`] names where focus goes on close instead of the opener:
 //!   Strata uses it for dialogs that change the listing.
 //!
+//! # Motion
+//!
+//! Opening scales the panel from 96 % and fades it and the backdrop in over 200 ms; closing
+//! reverses it. [`DialogShell::fade_only`] drops the scale (Settings). With `look.animations`
+//! off, or [`DialogShell::reduced_motion`] on, a dialog shows and goes at once. Pass
+//! `cx.is_reduced_motion()` to `reduced_motion` for the system's Reduce Motion; P5's setting
+//! reaches the dialog as `look.animations`.
+//!
 //! # Known gaps
 //!
 //! - A chained dialog opened by a keyboard close shows its default button's focus ring
@@ -78,8 +87,65 @@
 //! - Up and Down don't move focus between body controls by position (`app/dialogs`: "With
 //!   focus outside a text field, an unmodified arrow key…", unverified). Left and Right move
 //!   along the footer, and Down opens a focused select, which is Rune's own.
+//! - A dialog whose action disables its opener (Settings → Keyboard → Reset all → Reset)
+//!   returns focus to that disabled opener: Rune's modal restore drops only an opener that has
+//!   gone (`sync_modals`, `runtime/input/focus.rs:443` at the pinned rev). Strata can name the
+//!   target with [`StrataDialog::return_focus`].
 //! - A click on the backdrop during the close fade reaches whatever is under it: the exiting
 //!   dialog is inert in Rune, as Strata's insensitive GTK layer is.
+//!
+//! # Coverage of `app/dialogs`
+//!
+//! What checks each Behavior bullet. Scripts are `tests/scripts/c15/<name>.json`; "test" is
+//! a test in `crates/strata-gallery/tests/c15.rs`, which checks what the accessibility tree
+//! doesn't show (opacity, scale, the backdrop, focus rings); "unit" is in `dialog/tests.rs`;
+//! "golden" is a scene's PNG or accessibility golden.
+//!
+//! | Bullet (opening words) | Checked by |
+//! | --- | --- |
+//! | While a dialog is open, the window content behind it is blurred… | test `the_backdrop_stays_until_the_last_stacked_dialog_closes` ([`BACKDROP_KEY`]) |
+//! | Opening an action or search dialog fades in the backdrop… | test `a_dialog_scales_and_fades_in_and_out_in_about_200_ms` |
+//! | Opening Settings fades its whole layer… | test `a_fade_only_panel_fades_without_scaling_on_its_first_open` (the shell's `fade_only`; the Settings layer itself is C20c's and Strata's) |
+//! | The first Settings open of a process fades in… | the same test: the first open after mount fades |
+//! | With Reduce motion on… | test `with_animations_off_a_dialog_shows_and_goes_at_once` |
+//! | A frame longer than 33 ms… | **known gap** (Rune; issue draft) |
+//! | Closing Settings during its fade-in… | test `closing_mid_open_fades_out_from_where_it_was` |
+//! | Clicking the backdrop outside a dialog dismisses it… | script `backdrop` |
+//! | A dialog in a non-cancellable in-progress state… | script `backdrop-blocking` |
+//! | The mount authentication dialog… / The Compress dialog… / The archive password dialog… ignores backdrop clicks | script `backdrop-dirty` (the `blocking(dirty)` mechanism); which dialogs count as dirty is **Strata policy** |
+//! | Clicking the backdrop repeatedly during the close animation… | script `backdrop-repeat` |
+//! | Confirmation dialogs open with the confirm button focused… | scripts `keyboard-confirm`, `confirm-enter`, `confirm-escape`; golden `c15-danger` (a11y) |
+//! | A keyboard-focused confirm button… shows a 3 px… halo | test `a_keyboard_focused_confirm_button_shows_its_ring_until_focus_moves`; golden `c15-danger-keyboard` (PNG) |
+//! | That halo sits flush… danger color… | golden `c15-danger-keyboard` (PNG) |
+//! | Moving keyboard focus off the confirm button… | test `a_keyboard_focused_confirm_button_shows_its_ring_until_focus_moves` |
+//! | With focus outside a text field, Enter activates the focused button… | scripts `enter-focused-button`, `enter-checkbox` |
+//! | With focus outside a text field, an unmodified arrow key… | **partial**: scripts `arrows` (footer), `arrows-select` (Down opens a select); Up and Down between body controls is a known gap |
+//! | An error dialog that offers Open as Administrator… | **Strata policy** (`initial_focus(Focus::Action(..))`, a secondary labelled Close) |
+//! | While a dialog is open, focus that moves outside it… | script `tab-cycle` |
+//! | Closing the last open dialog by any route… | scripts `restore-escape`, `chained-restore`; test `every_route_that_closes_a_dialog_returns_focus_to_its_opener` |
+//! | A dialog registered as changing the listing… | script `return-focus` (`return_focus`) |
+//! | When that widget is gone… cursor row… | **Strata policy**: Rune leaves nothing focused, and Strata's window falls back to the cursor row |
+//! | A widget that takes focus while a dialog closes keeps it | script `focus-taken` |
+//! | Closing a dialog over a modal that stays open… | script `nested` |
+//! | When the recorded opener is the remaining modal's own layer… | **not applicable**: a dialog's panel and layer never take focus, so neither is ever a recorded opener; its fallback is the next bullet's |
+//! | When the dialog's action disabled its opener… | **Rune gap** (above; issue draft), or **Strata policy** with `return_focus` |
+//! | When that opener is gone… first focusable control in the remaining modal | script `nested-opener-gone` |
+//! | That fallback skips boxes, scrolled windows, and viewports… | script `nested-opener-gone` |
+//! | When a custom action's delete fails in Settings… | **Strata policy** |
+//! | A dialog closed from the keyboard keeps the focus ring… | test `a_keyboard_close_keeps_the_ring_on_the_opener` |
+//! | A dialog closed from the keyboard over a modal that stays open… | test `a_keyboard_close_over_a_dialog_keeps_the_ring_on_its_opener_there` |
+//! | Closing a dialog by keyboard as a dialog chained on it opens… | **partial**: script `chained` (focus on the chained default button); its "no focus ring" is a known gap |
+//! | Enter in a single-line text or password field… | script `form-submit` |
+//! | Enter in a form field does nothing while the primary button is disabled | script `form-disabled` |
+//! | Enter in a multi-line text field inserts a newline… | script `form-multiline`; unit `return_in_a_dialog_text_area_types_a_newline_through_the_field` |
+//! | A form text field can be limited in bytes or UTF-16 units… | script `form-limit-cut`; unit tests |
+//! | That field's "N chars remaining" caption… | script `form-limit` |
+//! | Changing a field's limit or unit trims… | script `form-limit-unit`; unit `an_insertion_keeps_its_longest_leading_part_that_fits` |
+//! | An install command's copy button… | **Strata policy** (the updates work's dialog content) |
+//! | A dialog's shadow fades past its rounded edges… | script `backdrop` (a click 5 pt outside the panel's edge, in its shadow); the shadow's look in the PNG goldens |
+//! | A dialog larger than the window scrolls inside the window… | script `small-window` |
+//! | When the window is narrower than a dialog's minimum width plus 84 px… | golden `c15-small-window` (PNG): layout, which tests don't assert |
+//! | Message dialog text keeps Korean words… | unit `short_korean_words_are_kept_whole_and_long_runs_stay_breakable` only: CI renders without a Hangul font, so no golden draws Korean |
 //!
 //! # Follow-ups
 //!
@@ -95,9 +161,9 @@ mod text;
 #[cfg(test)]
 mod tests;
 
-pub use action::{Focus, StrataDialog, Tone};
-pub use keys::newline_on_enter;
-pub use limit::{Measure, fit, limit_on_change, remaining, trim_to_fit};
+pub use action::{Focus, RESERVED, StrataDialog, Tone};
+pub use keys::{newline_on_enter, text_area};
+pub use limit::{Measure, fit, limit_on_change, remaining, trim_insertion, trim_to_fit};
 pub use shell::DialogShell;
 pub use text::keep_words_whole;
 

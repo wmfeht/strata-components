@@ -1,7 +1,6 @@
 {
   "bullets": [
-    "app/dialogs: A dialog larger than the window scrolls inside the window",
-    "app/dialogs: When the window is narrower than a dialog's minimum width plus 84 px"
+    "app/dialogs: A dialog larger than the window scrolls inside the window"
   ],
   "scene": "c15-small-window-light",
   "events": [

@@ -2,32 +2,12 @@
   "bullets": [
     "app/dialogs: While a dialog is open, focus that moves outside it"
   ],
-  "scene": "c15-danger-light",
+  "scene": "c15-openers-light",
   "events": [
     {
       "t": 0.1,
-      "type": "key",
-      "name": "Tab"
-    },
-    {
-      "t": 0.2,
-      "type": "key",
-      "name": "Tab"
-    },
-    {
-      "t": 0.30000000000000004,
-      "type": "key",
-      "name": "Tab"
-    },
-    {
-      "t": 0.4,
-      "type": "key",
-      "name": "Tab"
-    },
-    {
-      "t": 0.5,
-      "type": "key",
-      "name": "Tab"
+      "type": "tap",
+      "key": "c15-open-conflict"
     },
     {
       "t": 0.6,
@@ -35,21 +15,36 @@
       "name": "Tab"
     },
     {
-      "t": 0.7000000000000001,
+      "t": 0.7,
+      "type": "key",
+      "name": "Tab"
+    },
+    {
+      "t": 0.8,
+      "type": "key",
+      "name": "Tab"
+    },
+    {
+      "t": 0.9,
       "type": "key",
       "name": "Tab"
     }
   ],
   "expect": [
     {
-      "key": "c15-danger-close",
-      "focused": true
-    },
-    {
-      "key": "c15-danger-dialog",
+      "key": "c15-conflict-dialog",
+      "role": "dialog",
       "states": [
         "modal"
       ]
+    },
+    {
+      "key": "c15-conflict-secondary",
+      "focused": true
+    },
+    {
+      "key": "c15-conflict-skip",
+      "name": "Skip"
     },
     {
       "key": "c15-cursor",

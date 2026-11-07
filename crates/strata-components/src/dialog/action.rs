@@ -22,7 +22,7 @@ pub enum Tone {
 }
 
 /// Where focus starts when the dialog opens.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum Focus {
     /// The first control in the body, so the first field; the first footer button when the
     /// body has none. A form opening on another field sets its `TextEdit::focused`.
@@ -32,9 +32,23 @@ pub enum Focus {
     Primary,
     /// The secondary button (Cancel), when Enter should keep things as they are.
     Secondary,
-    /// The extra footer button added as `action(key, …)`.
-    Action(&'static str),
+    /// The extra footer button added as `action(id, …)`; ids can come at runtime (C26's GIO
+    /// choices).
+    Action(String),
 }
+
+/// The parts of a dialog keyed `<key>-<part>`, which an action id can't take.
+pub const RESERVED: &[&str] = &[
+    "dialog",
+    "layer",
+    "body",
+    "title",
+    "subtitle",
+    "primary",
+    "secondary",
+    "loading",
+    "close",
+];
 
 /// A body item: an element, or message text drawn with the look at build time.
 enum Body {
@@ -96,6 +110,7 @@ pub struct StrataDialog<S> {
     secondary: Option<Action<S>>,
     primary: Option<Action<S>>,
     initial: Focus,
+    primary_enabled: bool,
     loading: Option<String>,
     close_label: String,
     shell: DialogShell<S>,
@@ -128,6 +143,7 @@ impl<S: 'static> StrataDialog<S> {
             secondary: None,
             primary: None,
             initial: Focus::First,
+            primary_enabled: true,
             loading: None,
             close_label: "Close dialog".into(),
             dismiss,
@@ -194,10 +210,9 @@ impl<S: 'static> StrataDialog<S> {
     }
 
     /// Disables the primary button while false: it can't be pressed, and Enter does nothing.
+    /// Call it before or after [`StrataDialog::primary`].
     pub fn primary_enabled(mut self, enabled: bool) -> Self {
-        if !enabled && let Some(p) = &mut self.primary {
-            p.on_press = None;
-        }
+        self.primary_enabled = enabled;
         self
     }
 
@@ -215,13 +230,25 @@ impl<S: 'static> StrataDialog<S> {
         self
     }
 
-    /// Another footer button, keyed `<key>-<id>`, before the secondary.
+    /// Another footer button, keyed `<key>-<id>`, before the secondary. `id` can't be one of
+    /// the dialog's own parts ([`RESERVED`]) or another action's.
     pub fn action(
         mut self,
         id: &str,
         label: impl Into<String>,
         on_press: impl Fn(&mut S) + 'static,
     ) -> Self {
+        debug_assert!(
+            !RESERVED.contains(&id),
+            "action id {id:?} would collide with the dialog's own <key>-{id}"
+        );
+        debug_assert!(
+            !self
+                .actions
+                .iter()
+                .any(|a| a.key == format!("{}-{id}", self.key)),
+            "two actions share the id {id:?}"
+        );
         self.actions.push(Action {
             key: format!("{}-{id}", self.key),
             label: label.into(),
@@ -253,6 +280,12 @@ impl<S: 'static> StrataDialog<S> {
         self
     }
 
+    /// See [`DialogShell::reduced_motion`].
+    pub fn reduced_motion(mut self, reduced: bool) -> Self {
+        self.shell = self.shell.reduced_motion(reduced);
+        self
+    }
+
     /// See [`DialogShell::return_focus`].
     pub fn return_focus(mut self, key: impl Into<String>) -> Self {
         self.shell = self.shell.return_focus(key);
@@ -273,7 +306,12 @@ impl<S: 'static> StrataDialog<S> {
     }
 
     /// Pushes the dialog onto `layer`, the overlays `rune_kit::root` mounts, when open.
-    pub fn build(self, look: &Look, layer: &mut Vec<El>) {
+    pub fn build(mut self, look: &Look, layer: &mut Vec<El>) {
+        if !self.primary_enabled
+            && let Some(p) = &mut self.primary
+        {
+            p.on_press = None;
+        }
         let kit = &look.kit;
         let space = look.space;
         let danger = self.tone == Tone::Danger;
@@ -297,11 +335,19 @@ impl<S: 'static> StrataDialog<S> {
         let focusable: Vec<usize> = (0..footer.len())
             .filter(|&i| footer[i].0.on_press.is_some())
             .collect();
-        let initial_key = match self.initial {
+        let initial_key = match &self.initial {
             Focus::First => None,
             Focus::Primary => self.primary.as_ref().map(|a| a.key.clone()),
             Focus::Secondary => self.secondary.as_ref().map(|a| a.key.clone()),
-            Focus::Action(id) => Some(format!("{}-{id}", self.key)),
+            Focus::Action(id) => {
+                let key = format!("{}-{id}", self.key);
+                debug_assert!(
+                    self.actions.iter().any(|a| a.key == key),
+                    "Focus::Action({id:?}) names no action of dialog {:?}",
+                    self.key
+                );
+                Some(key)
+            }
         };
         let initial =
             initial_key.and_then(|k| focusable.iter().position(|&i| footer[i].0.key == k));
@@ -365,7 +411,13 @@ impl<S: 'static> StrataDialog<S> {
                 el().key(format!("{}-loading", self.key))
                     .role("progressbar")
                     .label(desc.clone())
-                    .child(Spinner::new().size(look.icon_size.md).build(kit)),
+                    // The wrapper carries the name; the spinner itself says nothing more.
+                    .child(
+                        Spinner::new()
+                            .size(look.icon_size.md)
+                            .build(kit)
+                            .a11y_hidden(),
+                    ),
             );
         }
 

@@ -8,8 +8,8 @@
     {
       "t": 0.2,
       "type": "tap",
-      "x": 4,
-      "y": 630
+      "x": 480,
+      "y": 243
     }
   ],
   "expect": [
@@ -20,6 +20,10 @@
     {
       "key": "c15-status",
       "name": "Dismissed"
+    },
+    {
+      "key": "c15-dismissals",
+      "name": "Dismissed 1 time"
     }
   ]
 }

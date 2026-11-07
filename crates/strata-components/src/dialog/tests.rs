@@ -1,9 +1,12 @@
-use rune::{Key, KeyEvent, Mods, TextEdit, Tx};
+use rune::{Cx, El, Env, Key, KeyEvent, Mods, Runtime, TextEdit, col};
+use rune_kit::{Button, Kit};
 
 use super::keys::{Route, route, tab_indices};
-use super::limit::trim_insertion;
 use super::text::korean_word_ranges;
-use super::{Measure, fit, keep_words_whole, newline_on_enter, remaining, trim_to_fit};
+use super::{
+    Measure, fit, keep_words_whole, limit_on_change, remaining, text_area, trim_insertion,
+    trim_to_fit,
+};
 
 fn key(k: Key) -> KeyEvent {
     KeyEvent {
@@ -112,20 +115,69 @@ fn the_initial_button_starts_tab_order_and_the_cycle_keeps_document_order() {
     }
 }
 
-#[test]
-fn return_in_a_multiline_field_types_a_newline() {
-    struct S {
-        notes: TextEdit,
-    }
-    let handler = newline_on_enter(|s: &mut S| &mut s.notes);
-    let mut s = S {
-        notes: TextEdit::new("a"),
+/// A dialog's multi-line field, limited to `room` characters, beside a default button.
+#[derive(Default)]
+struct Notes {
+    notes: TextEdit,
+    room: usize,
+    submits: u32,
+}
+
+fn notes_view(s: &Notes, _cx: &mut Cx<Notes>) -> El {
+    let k = Kit::neutral(false);
+    col()
+        .child(
+            text_area(&s.notes, |s: &mut Notes| &mut s.notes)
+                .label("Notes")
+                .on_change(limit_on_change(
+                    |s: &mut Notes| &mut s.notes,
+                    |s: &Notes| (s.room, Measure::Chars),
+                ))
+                .build(&k)
+                .key("notes"),
+        )
+        .child(
+            Button::new("OK")
+                .on_press(|s: &mut Notes| s.submits += 1)
+                .build(&k)
+                .key("ok")
+                .default_button(),
+        )
+}
+
+fn type_notes(room: usize, keys: &[Key]) -> Notes {
+    let mut notes = TextEdit::new("");
+    notes.focused = true;
+    let state = Notes {
+        notes,
+        room,
+        submits: 0,
     };
-    s.notes.set_caret(1);
-    let mut tx = Tx::default();
-    assert!(handler(&mut s, &key(Key::Enter), &mut tx));
-    assert_eq!(s.notes.text, "a\n");
-    assert!(!handler(&mut s, &key(Key::Tab), &mut tx));
+    let mut rt = Runtime::new(state, notes_view, (400.0, 300.0), Env::new(false, 1.0));
+    rt.frame(0.0);
+    for k in keys {
+        rt.key(key(k.clone()));
+        // A sent key lands on the next frame.
+        rt.frame(1.0 / 60.0);
+        rt.frame(1.0 / 60.0);
+    }
+    let Runtime { state, .. } = rt;
+    state
+}
+
+#[test]
+fn return_in_a_dialog_text_area_types_a_newline_through_the_field() {
+    let s = type_notes(
+        10,
+        &[Key::Text("a".into()), Key::Enter, Key::Text("b".into())],
+    );
+    assert_eq!(s.notes.text, "a\nb");
+    assert_eq!(s.submits, 0, "Return doesn't press the default button");
+
+    // The newline goes through the field's on_change, so its limit holds.
+    let s = type_notes(3, &[Key::Text("abc".into()), Key::Enter, Key::Enter]);
+    assert_eq!(s.notes.text, "abc");
+    assert_eq!(s.submits, 0);
 }
 
 #[test]

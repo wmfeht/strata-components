@@ -157,6 +157,15 @@
                           "key": "c15-open-outer",
                           "name": "Properties",
                           "role": "button"
+                        },
+                        {
+                          "actions": [
+                            "click",
+                            "focus"
+                          ],
+                          "key": "c15-open-conflict",
+                          "name": "Paste",
+                          "role": "button"
                         }
                       ],
                       "key": "c15-openers",

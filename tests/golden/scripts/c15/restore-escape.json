@@ -75,7 +75,10 @@
                           ],
                           "key": "c15-open-basic",
                           "name": "Message",
-                          "role": "button"
+                          "role": "button",
+                          "states": [
+                            "focused"
+                          ]
                         },
                         {
                           "actions": [
@@ -93,10 +96,7 @@
                           ],
                           "key": "c15-open-danger",
                           "name": "Delete",
-                          "role": "button",
-                          "states": [
-                            "focused"
-                          ]
+                          "role": "button"
                         },
                         {
                           "actions": [
@@ -159,6 +159,15 @@
                           ],
                           "key": "c15-open-outer",
                           "name": "Properties",
+                          "role": "button"
+                        },
+                        {
+                          "actions": [
+                            "click",
+                            "focus"
+                          ],
+                          "key": "c15-open-conflict",
+                          "name": "Paste",
                           "role": "button"
                         }
                       ],

@@ -26,6 +26,13 @@
       "absent": true
     },
     {
+      "key": "c15-outer-dialog",
+      "role": "dialog",
+      "states": [
+        "modal"
+      ]
+    },
+    {
       "key": "c15-outer-permissions",
       "focused": true
     }

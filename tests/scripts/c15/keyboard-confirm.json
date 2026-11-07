@@ -1,7 +1,6 @@
 {
   "bullets": [
-    "app/dialogs: A keyboard-focused confirm button",
-    "app/dialogs: That halo sits flush"
+    "app/dialogs: Confirmation dialogs open with the confirm button focused"
   ],
   "scene": "c15-openers-light",
   "events": [

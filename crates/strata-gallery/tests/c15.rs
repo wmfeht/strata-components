@@ -1,6 +1,7 @@
 //! C15's page in process: what the accessibility tree doesn't show (motion, the backdrop,
-//! keyboard focus rings), and focus after closing by every route. The scripts in
-//! `tests/scripts/c15/` check the rest; each test names the `app/dialogs` bullets it covers.
+//! keyboard focus rings), and focus after closing by every route. These tests, not the
+//! scripts, check the motion, blur and ring bullets; the scripts in `tests/scripts/c15/` check
+//! the rest. Each test names the `app/dialogs` bullets it covers.
 
 mod c15 {
     use rune::{ElementInfo, Env, Key, KeyEvent, Mods, Runtime};
@@ -217,6 +218,15 @@ mod c15 {
         run(&mut rt, 0.3);
         assert_eq!(focused(&rt).as_deref(), Some("c15-danger-primary"));
         assert!(!focus_visible(&rt, "c15-danger-primary"));
+    }
+
+    /// The keyboard scenes' golden shows the ring: their poll puts focus in keyboard mode on
+    /// the primary, which keeps focus.
+    #[test]
+    fn the_keyboard_scene_shows_the_primary_focused_from_the_keyboard() {
+        let mut rt = mount("c15-danger-keyboard-light");
+        run(&mut rt, 0.2);
+        assert!(focus_visible(&rt, "c15-danger-primary"));
     }
 
     /// app/dialogs: "Closing the last open dialog by any route returns focus to the widget

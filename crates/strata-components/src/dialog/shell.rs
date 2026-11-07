@@ -18,7 +18,8 @@ use super::{BACKDROP_BLUR, BACKDROP_KEY, ENTRANCE_SCALE, MOTION_SECONDS, PANEL_R
 ///     .build(&look, &mut layer);
 /// ```
 ///
-/// Keys: `<key>-layer` (the full-window layer the panel centres in), `<key>-dialog` (the
+/// Keys: `<key>-layer` (the full-window layer the panel centres in, out of the accessibility
+/// tree), `<key>-dialog` (the
 /// panel: role `dialog`, named by `label`), and the shared [`BACKDROP_KEY`].
 pub struct DialogShell<S> {
     key: String,
@@ -30,6 +31,7 @@ pub struct DialogShell<S> {
     stacked: bool,
     width: f32,
     fade_only: bool,
+    reduced_motion: bool,
     return_focus: Option<String>,
     footer: Vec<String>,
     dismiss: Rc<dyn Fn(&mut S)>,
@@ -53,6 +55,7 @@ impl<S: 'static> DialogShell<S> {
             stacked: false,
             width: WIDTH,
             fade_only: false,
+            reduced_motion: false,
             return_focus: None,
             footer: Vec::new(),
             dismiss: Rc::new(on_dismiss),
@@ -105,6 +108,14 @@ impl<S: 'static> DialogShell<S> {
         self
     }
 
+    /// Opens and closes at once while true, as with animations off: pass
+    /// `cx.is_reduced_motion()`, the system's Reduce Motion as Rune sees it. Without it, Rune
+    /// already shortens the scale to a 0.15 s fade under Reduce Motion; Strata shows no fade.
+    pub fn reduced_motion(mut self, reduced: bool) -> Self {
+        self.reduced_motion = reduced;
+        self
+    }
+
     /// On close, focus goes to the element keyed `key` (or its first focusable child) instead
     /// of the element focused before the dialog opened.
     pub fn return_focus(mut self, key: impl Into<String>) -> Self {
@@ -126,7 +137,8 @@ impl<S: 'static> DialogShell<S> {
             return;
         }
         let kit = &look.kit;
-        let (panel_motion, backdrop_motion) = motion(look.animations, self.fade_only);
+        let animate = look.animations && !self.reduced_motion;
+        let (panel_motion, backdrop_motion) = motion(animate, self.fade_only);
         if !self.stacked {
             layer.push(
                 el().key(BACKDROP_KEY)
@@ -187,6 +199,9 @@ impl<S: 'static> DialogShell<S> {
         layer.push(
             col()
                 .key(format!("{}-layer", self.key))
+                // A layout box: assistive technology sees the dialog, not the full-window
+                // layer around it. The key stays, for the layer's own presence motion.
+                .role("none")
                 .absolute(0.0, 0.0)
                 .w_full()
                 .h_full()

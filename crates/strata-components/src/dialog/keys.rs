@@ -2,6 +2,7 @@
 //! Tab order that gives a dialog its initial focus.
 
 use rune::{Key, KeyEvent, Mods, TextEdit, Tx};
+use rune_kit::TextArea;
 
 /// What the panel's key handler does with a key focus inside the dialog passed on. Rune runs
 /// that handler before its default button and its own focus navigation, and never while a
@@ -79,29 +80,41 @@ pub(crate) fn tab_indices(initial: Option<usize>, footer_len: usize) -> (Vec<i32
     (footer, (footer_len - start + 1) as i32)
 }
 
-/// A multi-line field's key handler that types a newline on a plain Return, for
-/// `TextArea::on_key`: `TextArea::new(&s.notes).on_key(newline_on_enter(|s: &mut App| &mut
-/// s.notes))`.
+/// A multi-line field's key handler that types a newline on a plain Return:
+/// `TextArea::on_key(newline_on_enter())`. Prefer [`text_area`], which wires it.
 ///
 /// Rune's multi-line editor treats a plain Return in a paragraph as submit, as a chat
 /// composer does, and a field with nothing to submit passes it to the default button: the
-/// dialog's primary. In a dialog, Return in a multi-line field types a newline instead.
-pub fn newline_on_enter<S: 'static>(
-    access: impl Fn(&mut S) -> &mut TextEdit + 'static,
-) -> impl Fn(&mut S, &KeyEvent, &mut Tx) -> bool + 'static {
-    move |s, ev, _tx| {
+/// dialog's primary. The handler sends Shift+Return instead, the editor's own newline, so the
+/// edit goes through the field as typing does: its `on_change` (a length limit, say), the
+/// caret's scroll and the edited mark. Rune applies the sent key on the next frame.
+///
+/// A rune-kit field keeps one key handler: one set after this replaces it.
+pub fn newline_on_enter<S: 'static>() -> impl Fn(&mut S, &KeyEvent, &mut Tx) -> bool + 'static {
+    |_s, ev, tx| {
         if ev.key != Key::Enter || ev.mods != Mods::default() {
             return false;
         }
-        // Shift+Return is the editor's own newline.
-        let shifted = KeyEvent {
+        tx.send_key(KeyEvent {
             key: Key::Enter,
             mods: Mods {
                 shift: true,
                 ..Mods::default()
             },
-        };
-        access(s).key(&shifted, None);
+        });
         true
     }
+}
+
+/// A multi-line field for a dialog, editing the `TextEdit` `access` reaches, with Return
+/// typing a newline ([`newline_on_enter`]) instead of pressing the dialog's primary. Use it
+/// for every multi-line field in a dialog; add a label, an `on_change` and the rest as on any
+/// `TextArea`, but no other `on_key`.
+pub fn text_area<S: 'static>(
+    edit: &TextEdit,
+    access: impl for<'a> Fn(&'a mut S) -> &'a mut TextEdit + 'static,
+) -> TextArea {
+    TextArea::new(edit)
+        .on_edit(access)
+        .on_key(newline_on_enter::<S>())
 }

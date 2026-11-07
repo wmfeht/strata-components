@@ -6,12 +6,18 @@
 
 use rune::{Cx, El, KeyEvent, Tx, col, row, text};
 
+use strata_kit::look::Look;
+
 use super::PAGES;
 use crate::{Gallery, Scene};
 
 pub const SCENES: &[Scene] = &[
-    ("gallery-index-light", |g| g.dark = false),
-    ("gallery-index-dark", |g| g.dark = true),
+    ("gallery-index-light", |g| {
+        (g.dark, g.look) = (false, Look::fallback(false))
+    }),
+    ("gallery-index-dark", |g| {
+        (g.dark, g.look) = (true, Look::fallback(true))
+    }),
 ];
 
 pub const REVIEW: &[Scene] = &[];

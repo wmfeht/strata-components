@@ -1,9 +1,10 @@
 //! W3's own checks of the harness: a Rune window under headless sway and Xwayland, virtual
-//! input reaching it, the peer's clipboard on both backends, the private bus, and teardown.
+//! input reaching it, the peer's clipboard, drag and drop and export on both backends, the
+//! private bus, and teardown.
 //!
 //! Work package: W3, `docs/work/phase-0-groundwork/W3-compositor-harness.md`.
 
-use strata_test_peer::protocol::{Event, Offer, Payload, Selection, Via, fnv1a64, pattern};
+use strata_test_peer::protocol::{Action, Event, Offer, Payload, Selection, Via, fnv1a64, pattern};
 
 use crate::support::{Display, Options, Proc, Session, Shell, Window, example};
 
@@ -282,4 +283,91 @@ fn teardown_leaves_no_processes_or_files() {
         .collect();
     assert!(alive.is_empty(), "still running: {alive:?}");
     assert!(!dir.exists(), "{} is left", dir.display());
+}
+
+// ---- drag and drop, and export ----
+
+/// The input peer drags from peer `a`'s window to peer `b`'s; `b` reads the drop.
+fn drag_between_peers(display: Display) {
+    let s = Session::start();
+    let a = s.peer(display);
+    let b = s.peer(display);
+    // One at a time: two X windows mapped within milliseconds can leave one unmapped in sway
+    // (docs/testing.md). sway then tiles them side by side; the syncs make sure both have
+    // drawn at their tiled size before the pointer moves.
+    a.map("w3 drag source");
+    s.wait_window(a.pid());
+    b.map("w3 drop target");
+    let [from, to] = <[_; 2]>::try_from(s.wait_windows(&[a.pid(), b.pid()])).expect("two windows");
+    a.sync();
+    b.sync();
+    b.accept_drops(&["text/plain", UTF8], Action::Copy);
+
+    let input = s.input();
+    input.pointer_move(from.at(0.5, 0.5));
+    input.button(true);
+    a.wait_event("the press", |e| {
+        matches!(e, Event::PointerButton { pressed: true })
+    });
+    let offers = [
+        Offer::text("text/uri-list", "file:///tmp/w3\r\n"),
+        Offer::text("text/plain", TEXT),
+        Offer::text("application/x-strata-w3", "private"),
+    ];
+    a.drag_start(&offers, &[Action::Copy, Action::Move]);
+    input.path(to.at(0.5, 0.5));
+    let entered = b.wait_event("the drag entering", |e| {
+        matches!(e, Event::DropEnter { .. })
+    });
+    let Event::DropEnter { mimes } = entered else {
+        unreachable!()
+    };
+    assert_eq!(mimes.len(), 3, "{mimes:?}");
+    b.wait_event("the drag moving", |e| matches!(e, Event::DropMotion { .. }));
+    input.button(false);
+    let dropped = b.wait_event("the drop", |e| matches!(e, Event::Dropped { .. }));
+    let Event::Dropped { mime, action, data } = dropped else {
+        unreachable!()
+    };
+    assert_eq!(mime, "text/plain");
+    assert_eq!(action, Some(Action::Copy));
+    assert_eq!(data.text.as_deref(), Some(TEXT));
+    a.wait_event("the drag finishing", |e| {
+        matches!(
+            e,
+            Event::DragFinished {
+                action: Some(Action::Copy)
+            }
+        )
+    });
+}
+
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn peer_drags_to_peer_on_wayland() {
+    drag_between_peers(Display::Wayland);
+}
+
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn peer_drags_to_peer_on_x11() {
+    drag_between_peers(Display::X11);
+}
+
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn peers_export_their_windows() {
+    let s = Session::start();
+    let wayland = s.peer(Display::Wayland);
+    wayland.map("w3 export wayland");
+    let handle = wayland.export();
+    assert!(
+        handle
+            .strip_prefix("wayland:")
+            .is_some_and(|h| !h.is_empty()),
+        "{handle:?}"
+    );
+    let x11 = s.peer(Display::X11);
+    let xid = x11.map("w3 export x11").xid.expect("an X window");
+    assert_eq!(x11.export(), format!("x11:{xid:x}"));
 }

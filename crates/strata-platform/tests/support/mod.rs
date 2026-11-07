@@ -335,6 +335,35 @@ impl Session {
         }
     }
 
+    /// Waits until each of `pids` has a toplevel and no two overlap: sway has tiled them side
+    /// by side. Map X11 windows one at a time (docs/testing.md). The clients may not have
+    /// drawn at their new size yet: sync each one before sending input.
+    pub fn wait_windows(&self, pids: &[u32]) -> Vec<Window> {
+        let deadline = std::time::Instant::now() + timeout();
+        loop {
+            let all = sway::windows(&self.sway().tree());
+            let found: Vec<Window> = pids
+                .iter()
+                .filter_map(|p| all.iter().find(|w| w.pid == *p).cloned())
+                .collect();
+            let apart = found.len() == pids.len()
+                && found.iter().enumerate().all(|(i, a)| {
+                    found[i + 1..]
+                        .iter()
+                        .all(|b| !a.content.overlaps(&b.content))
+                });
+            if apart {
+                return found;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "{}: no windows of pids {pids:?} side by side in sway's tree, which has {all:#?}",
+                self.name
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
     /// Gives `window` keyboard focus and waits until sway reports it.
     pub fn focus(&self, window: &Window) -> Window {
         self.sway_command(&format!("[con_id={}] focus", window.id));

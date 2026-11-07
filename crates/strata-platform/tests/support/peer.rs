@@ -7,7 +7,8 @@ use std::path::PathBuf;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use strata_test_peer::protocol::{
-    Button, Command, Event, Mapped, Message, Offer, Received, Request, Selection, Targets, Via,
+    Action, Button, Command, Event, Exported, Mapped, Message, Offer, Received, Request, Selection,
+    Targets, Via,
 };
 
 use super::{Display, Proc, Session};
@@ -119,6 +120,11 @@ impl Peer {
         })
     }
 
+    /// `wayland:<handle>` or `x11:<xid>`.
+    pub fn export(&self) -> String {
+        self.request_as::<Exported>(Command::Export).handle
+    }
+
     // ---- virtual input (Wayland peers) ----
 
     pub(super) fn devices(&self, extent: [u32; 2]) {
@@ -137,6 +143,15 @@ impl Peer {
         self.request(Command::PointerButton {
             button: Button::Left,
             pressed,
+        });
+    }
+
+    /// Moves to `to` in 20 steps, 10 ms apart: a drag that moves rather than jumps.
+    pub fn path(&self, (x, y): (f64, f64)) {
+        self.request(Command::PointerPath {
+            to: [x, y],
+            steps: 20,
+            step_ms: 10,
         });
     }
 
@@ -176,6 +191,24 @@ impl Peer {
             via,
             mime: mime.to_owned(),
         })
+    }
+
+    // ---- drag and drop ----
+
+    /// Starts a drag from the peer's window; a press on it must still be held.
+    pub fn drag_start(&self, offers: &[Offer], actions: &[Action]) {
+        self.request(Command::DragStart {
+            offers: offers.to_vec(),
+            actions: actions.to_vec(),
+        });
+    }
+
+    /// Accept drops of the first of `mimes` offered, with `action`; none refuses them.
+    pub fn accept_drops(&self, mimes: &[&str], action: Action) {
+        self.request(Command::DropAccept {
+            mimes: mimes.iter().map(|m| (*m).to_owned()).collect(),
+            action,
+        });
     }
 
     /// Replies once everything the peer sent before has reached the server and come back.

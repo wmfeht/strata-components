@@ -242,6 +242,15 @@ pub struct Window {
     pub focused: bool,
 }
 
+impl Rect {
+    pub fn overlaps(&self, o: &Rect) -> bool {
+        self.x < o.x + o.width
+            && o.x < self.x + self.width
+            && self.y < o.y + o.height
+            && o.y < self.y + self.height
+    }
+}
+
 impl Window {
     /// A point inside the window: `fx` and `fy` are fractions of its width and height.
     pub fn at(&self, fx: f64, fy: f64) -> (f64, f64) {

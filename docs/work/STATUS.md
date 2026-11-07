@@ -8,14 +8,14 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | W1 | merged | 1 review round + fixes; Rune binder cannot read URIs before drop (needs Rune or P1) | 6fda6da |
 | W1b | merged | contract doc change for C1a: EntryId lives for the process, never reused; rename may change it | 3bd5284 |
 | W1c | merged | contract additions for C1e: collection slot; geometry docs no longer rely on on_drag | 0b52156 |
-| W2b | coding | Look::fallback = Strata defaults via K2 (bar 36, row.sidebar 24, row.palette 53, 60 % roundness); re-blesses affected goldens | |
-| G1 | coding | owner request: gallery index as buttons with implemented / not-built markers | |
-| W2 | merged | 1 review round + fixes; row.sidebar/row.palette estimates for K2 to confirm; token-name review by K1/K2/C1e owners pending; PNG goldens on NVIDIA | 341e8cb |
+| W2b | merged | Look::fallback = Strata defaults via K2; slot tokens moved off w2-tokens goldens to w2-slots review scene; confirms row.sidebar 24 / row.palette 53 | 8c12ef3 |
+| G1 | reviewed (waits on W2b rebase) | owner request: gallery index as buttons with implemented / not-built markers | |
+| W2 | merged | 1 review round + fixes; token-name review by K1/K2/C1e owners pending; PNG goldens on NVIDIA | 341e8cb |
 | W3 | planning |  |  |
 | S1 | merged | P3: X11 shim conditional on mutter/KWin hand test; Wayland resize/menu blocked on Rune (R1-R3, R7); Hyprland/GNOME/KDE/lavapipe hand test pending | c5794e1 |
 | S2 | merged | 3 review rounds; P0 feasible w/o Rune patch on libwayland>=1.23; Ubuntu 24.04 GNOME: DnD unsupported; R1-R5 drafted; Hyprland/GNOME/KDE/Dolphin hand test pending | 702338f |
 | S3 | merged | sway Wayland/X11 measured; Hyprland/GNOME/KDE/Firefox hand test pending (QEMU Tier B not run); 3 owner decisions | f5682e4 |
-| S4 | review 1 (fixing B1/B2) | onig ParseState !Send and pointer-equality found in review; backend to be re-asked of owner; C10a waits | |
+| S4 | review 2 | onig ParseState !Send and pointer-equality found in review; backend to be re-asked of owner; C10a waits | |
 | S5 | merged | 2 review rounds; 16 Rune issue drafts (U1-U17, U4 withdrawn) await owner filing; crate name taken -> owner; release.yml verified locally only (GitHub run pending) | 85ca12b |
 | C10a | waiting | | |
 | C14a | ready | | |
@@ -32,8 +32,8 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | C5 | ready | | |
 | C6 | ready | | |
 | C7 | ready | | |
-| C8 | coding | own list on SidebarRow+Reorder (rune-kit Sidebar opens on arrow, no rail); keyboard pin reorder left out (no bullet) | |
-| C9 | review 2 | own split + DrawerState (not SplitView); HostedPreview trait for C10–C14; focus via focus_return stubs | |
+| C8 | coded (waits on W2b rebase, then review 1) | own list on SidebarRow+Reorder (rune-kit Sidebar opens on arrow, no rail); keyboard pin reorder left out (no bullet) | |
+| C9 | review 2 (fixing 428 test) | own split + DrawerState (not SplitView); HostedPreview trait for C10–C14; focus via focus_return stubs | |
 | K1 | ready | | |
 | K2 | merged | 1 review round + fixes; Strata values at upstream/main 35ee677ab; font list arrives as data (Rune #114/U16); Switch/Button sizes are rune-kit gaps | db41ea7 |
 | K3 | ready | | |

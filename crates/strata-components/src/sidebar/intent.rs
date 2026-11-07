@@ -71,7 +71,8 @@ pub enum SidebarIntent {
     /// device, nor when [`super::PlacesSidebar::open_in_new_tab`] is off.
     OpenInNewTab { item: ItemId },
     /// A secondary click or the Menu key on a row, or on the sidebar outside any row
-    /// (`item` is `None`): the host opens its menu (C21) at `point`. A heading opens none.
+    /// (`item` is `None`, which a heading opens too): the host opens its menu (C21) at
+    /// `point`.
     ContextMenu {
         item: Option<ItemId>,
         point: PointerPress,

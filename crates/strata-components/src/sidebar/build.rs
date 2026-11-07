@@ -231,7 +231,7 @@ fn places<S: 'static>(
             new_tab: ctx.new_tabs,
             keycap: p.keycap.as_deref(),
             reorder: Some((i, n)),
-            lifted: ctx.state.places_reorder.dragging() == Some(i),
+            lifted: !ctx.rail && ctx.state.places_reorder.dragging() == Some(i),
         };
         let intent: Rc<dyn Fn(usize, usize) -> SidebarIntent> =
             Rc::new(|from, to| SidebarIntent::MovePlace { from, to });
@@ -290,7 +290,7 @@ fn pinned<S: 'static>(ctx: &Ctx<'_, S>, data: &SidebarData<'_>) -> Option<El> {
             new_tab: ctx.new_tabs,
             keycap: p.keycap.as_deref(),
             reorder: Some((i, n)),
-            lifted: !collapsed && ctx.state.pins_reorder.dragging() == Some(i),
+            lifted: !ctx.rail && !collapsed && ctx.state.pins_reorder.dragging() == Some(i),
         };
         let ids = ids.clone();
         let intent: Rc<dyn Fn(usize, usize) -> SidebarIntent> =

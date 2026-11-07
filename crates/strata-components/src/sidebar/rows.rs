@@ -215,6 +215,7 @@ fn activate<S: 'static>(ctx: &Ctx<'_, S>, el: El, item: ItemId, new_tab: bool) -
             }
         })
         .on_secondary_press(move |s: &mut S, point: PointerPress, tx: &mut Tx| {
+            flush_reordered(s, tx, access, &menu_emit, None);
             menu_emit(
                 s,
                 SidebarIntent::ContextMenu {

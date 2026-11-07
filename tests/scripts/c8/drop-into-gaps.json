@@ -1,7 +1,7 @@
 {
   "bullets": [
     "browser/sidebar/pins/drag-to-pin: Gaps sit before the first pin, between pins, after the last pin, and in an empty section.",
-    "browser/sidebar/pins/drag-to-pin: Remote pins have gaps beside them, although their rows accept no file drops."
+    "browser/sidebar/pins/drag-to-pin: Remote pins have gaps beside them"
   ],
   "scene": "c8-full-light",
   "events": [

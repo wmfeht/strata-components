@@ -1,6 +1,6 @@
 {
   "bullets": [
-    "browser/sidebar: In 10xer mode, `j`/`k` stop on the PINNED and DEVICES headings"
+    "browser/sidebar: In 10xer mode, `j`/`k` stop on the PINNED and DEVICES headings, and `l`, Enter, or Space on a heading toggles its section"
   ],
   "scene": "c8-tenxer-light",
   "events": [

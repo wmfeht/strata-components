@@ -288,10 +288,21 @@ strata-platform's shims run against a real compositor and a real session bus. W3
   no client gets pointer events or keyboard focus);
 - a private `XDG_RUNTIME_DIR` and home, removed on teardown. Logs stay in
   `target/tmp/session/<test>/` (`<test>-2` for a second session in the same test);
-- a watchdog, started first. If the test process dies without tearing down (SIGKILL, a CI
-  timeout), it kills every process the session recorded in `<runtime dir>/pids`, removes the
-  Xwayland lock file and socket a killed sway leaves, unmounts what is mounted in the
-  directory, and removes it.
+- a watchdog, started first, in a process group of its own that ignores SIGINT, SIGTERM and
+  SIGHUP. It knows the test process by its pid and start time. If the test dies without tearing
+  down (SIGKILL, Ctrl-C, a CI timeout), it kills the session's processes, removes the Xwayland
+  lock file and socket a killed sway leaves, unmounts what is mounted in the directory, and
+  removes it (`rm -rf --one-file-system`).
+
+A session's processes are the ones started with `XDG_RUNTIME_DIR` set to its directory, found
+by scanning `/proc/*/environ`: the bus, sway, Xwayland (which wlroots forks twice), every
+spawned process and any service the bus activates. The desktop's processes have
+`/run/user/<uid>`, so nothing outside the session matches, and no pid number that may have
+been reused is ever killed (`<runtime dir>/pids` is kept for diagnostics only). The watchdog
+finds Xwayland's display from the sockets those processes hold, so it also cleans up after a
+sway killed before it said which display it took, and removes a lock only if it names one of
+them. Dropping a session waits for the same set of processes to exit, then kills what is left
+after the timeout.
 
 Every process starts with an environment built from nothing, so none can reach the desktop's
 display, bus or runtime directory. `mise run test-platform` saves the desktop's `DISPLAY`,
@@ -316,7 +327,7 @@ The task builds the peer and strata-platform's examples, then runs the `#[ignore
 | `STRATA_TEST_TIMEOUT_SCALE` | Multiplies every wait (10 s). CI sets 3. |
 | `STRATA_SWAY_DEBUG=1` | sway's debug log in `sway.log` |
 | `STRATA_TEST_PEER` | The peer binary, instead of `target/<profile>/strata-test-peer` |
-| `STRATA_SESSION_REPORT` | A file a session appends its directory and pids to (W3's SIGKILL test) |
+| `STRATA_SESSION_REPORT` | A file a session appends its directory and pids to (W3's kill tests) |
 
 CI runs them in `.github/workflows/platform.yml` on Ubuntu 24.04 (sway 1.9), with the packages
 in `crates/strata-platform/tests/support/packages.txt`. A work package that needs another
@@ -347,12 +358,12 @@ s.input().click_at(window.at(0.5, 0.5));
 | `Session::start()`, `Session::with(Options { .. })` | A session. `compositor: false` gives the bus alone (P5, P8). |
 | `s.command(program, Display::Wayland \| X11 \| None)` | A `Command` with the session's environment |
 | `s.spawn(name, cmd)` | Starts it as a `Proc`: stdout kept line by line, both streams logged, killed on drop |
-| `proc.wait_json(what, pred)`, `proc.wait_json_from(at, what, pred)`, `proc.line_count()`, `proc.send_line(line)` | The first matching JSON line, or the first from a point on (with its index); write to stdin |
+| `proc.wait_json(what, pred)`, `proc.wait_json_from(at, what, pred)`, `proc.wait_line(at, what, pred)`, `proc.wait_for(at, what, f)`, `proc.line_count()`, `proc.send_line(line)` | The first matching JSON line, or from a point on (with its index); any line; any mapping of a line; write to stdin |
 | `example(name)` | `target/<profile>/examples/<name>` |
 | `s.wait_window(pid)`, `s.wait_window_where(what, pred)`, `s.wait_windows(&[pids])`, `s.focus(&window)`, `s.tree()` | sway's tree: a window, any window, windows tiled apart, keyboard focus, the raw tree. A `Window` has `id` (`[con_id=…]`), `pid`, `shell`, `app_id`, `title`, `content`, `focused` and `floating`. |
 | `s.input()` | The virtual pointer and keyboard: `click_at`, `right_click_at`, `pointer_move`, `button`, `button_of`, `path`, `key("ctrl+c")`, `key_down("shift")`, `key_up("shift")` |
-| `s.point_at(&peer, at)` | Moves the pointer until `peer` reports an enter or motion after the move |
-| `s.xwayland()`, `s.pids()`, `s.runtime_dir()` | Xwayland's pid and display, the recorded pids, the runtime directory |
+| `s.point_until(at, reached)`, `s.point_at(&peer, at)` | Moves the pointer until `reached()` holds; until `peer` reports an enter or motion after the move |
+| `s.xwayland()`, `s.runtime_dir()`, `processes_of(dir)`, `alive(pid)` | Xwayland's pid and display, the runtime directory, the processes started with it, whether a pid runs |
 | `s.peer(display)` | A peer process ([below](#the-peer)) |
 | `s.bus()` | The bus's `address()`, and `service_dir()` for `.service` files |
 
@@ -379,9 +390,9 @@ target's `XdndProxy`.
   first commit leaves the window unmapped for good. wlroots fixed this after 0.20.2. The X11
   peer's `map` waits until the window manager lists the window in `_NET_CLIENT_LIST`, and maps
   it again every 500 ms (times `STRATA_TEST_TIMEOUT_SCALE`) until it is, or the test's own
-  timeout fails it. About one window in five needed that when two peers mapped at once. An app's own X11 window can't be retried this way: if
-  `wait_window` times out on an X11 app, this is the likely cause (W3's example window never
-  hit it in over 60 opens).
+  timeout fails it. About one window in five needed that when two peers mapped at once. An
+  app's own X11 window can't be retried this way: if `wait_window` times out on an X11 app,
+  this is the likely cause (W3's example window never hit it in over 60 opens).
 - **Point, then press, after a relayout.** A new window re-tiles the others. For a moment
   after, a pointer motion can reach no surface (likely sway's saved snapshots of windows it is
   resizing), and a press then goes nowhere, even after `wait_windows` and a `sync()` with each

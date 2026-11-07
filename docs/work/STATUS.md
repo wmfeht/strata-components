@@ -12,12 +12,12 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | S1 | merged | P3: X11 shim conditional on mutter/KWin hand test; Wayland resize/menu blocked on Rune (R1-R3, R7); Hyprland/GNOME/KDE/lavapipe hand test pending | c5794e1 |
 | S2 | merged | 3 review rounds; P0 feasible w/o Rune patch on libwayland>=1.23; Ubuntu 24.04 GNOME: DnD unsupported; R1-R5 drafted; Hyprland/GNOME/KDE/Dolphin hand test pending | 702338f |
 | S3 | merged | sway Wayland/X11 measured; Hyprland/GNOME/KDE/Firefox hand test pending (QEMU Tier B not run); 3 owner decisions | f5682e4 |
-| S4 | review 1 | recommends onig (fancy misses 8 ms viewport budget) + 64-line checkpoints: owner decision; bincode RUSTSEC-2025-0141 ignore needed for C10a | |
-| S5 | coding | strata-platform name TAKEN on crates.io (unrelated) -> owner; 17 Rune issue drafts (U1-U17); release.yml dry-run local only | |
+| S4 | review 1 (fixing B1/B2) | onig ParseState !Send and pointer-equality found in review; backend to be re-asked of owner; C10a waits | |
+| S5 | review 2 | strata-platform name TAKEN on crates.io (unrelated) -> owner; 17 Rune issue drafts (U1-U17); release.yml dry-run local only | |
 | C10a | waiting | | |
 | C14a | ready | | |
-| C15 | coding | built on Rune modal/blur/motion primitives (not rune-kit Dialog); initial focus via tab_index workaround | |
-| C1a | coding | plan restarted after W1b; selection as id set + index overlay (100k in <1 ms) | |
+| C15 | merged | built on Rune primitives (deviation from WP doc); 6 bullets Strata policy, O6/F13/K6 partial gaps (Rune drafts); PNG goldens on NVIDIA | b38d879 |
+| C1a | review 1 (fixing B1 neighbour rule) | plan restarted after W1b; selection as id set + index overlay (100k in <1 ms) | |
 | C20a | ready | | |
 | C20b | ready | | |
 | C20c | ready | | |
@@ -30,7 +30,7 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | C6 | ready | | |
 | C7 | ready | | |
 | C8 | ready | | |
-| C9 | ready | | |
+| C9 | coding | own split + DrawerState (not SplitView); HostedPreview trait for C10–C14; focus via focus_return stubs | |
 | K1 | ready | | |
 | K2 | ready | | |
 | K3 | ready | | |
@@ -46,10 +46,10 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | C11 | waiting | | |
 | C12 | waiting | | |
 | C13 | waiting | | |
-| C16 | waiting | | |
-| C17 | waiting | | |
+| C16 | ready | | |
+| C17 | ready | | |
 | C18 | waiting | | |
-| C19 | waiting | | |
+| C19 | ready | | |
 | C1b | waiting | | |
 | C1c | waiting | | |
 | C1d | waiting | | |

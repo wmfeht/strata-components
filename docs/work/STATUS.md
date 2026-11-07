@@ -1,17 +1,17 @@
 # Work status
 
-Maintained by the coordinator on `integration`. States: ready, planning, coding, review N, merged, blocked.
+Maintained by the coordinator on `integration`. States: waiting (dependencies not merged), ready, planning, coding, review N, merged, blocked.
 
 | WP | State | Note | Merge commit |
 | --- | --- | --- | --- |
-| W0 | ready | | |
-| W1 | waiting | | |
-| W2 | waiting | | |
-| W3 | waiting | | |
-| S1 | ready | | |
-| S2 | ready | | |
-| S3 | ready | | |
-| S4 | ready | | |
+| W0 | merged | 3 review rounds; png dev-dep approved; PNG goldens blessed on NVIDIA (lavapipe/CI pending) | d4bcd36 |
+| W1 | ready |  |  |
+| W2 | ready |  |  |
+| W3 | ready |  |  |
+| S1 | review 1 | P3: X11 shim feasible, Wayland resize/menu blocked on Rune; Hyprland/GNOME/KDE hand test pending | |
+| S2 | coding | sway needs `setpriv --no-new-privs` here (cap_sys_nice + RLIMIT_RTTIME=0) | |
+| S3 | coding | QEMU guest runs not approved: those cells hand test pending | |
+| S4 | coding | fancy-regex vs onig; fixtures under tests/fixtures/code | |
 | S5 | waiting | | |
 | C10a | waiting | | |
 | C14a | waiting | | |

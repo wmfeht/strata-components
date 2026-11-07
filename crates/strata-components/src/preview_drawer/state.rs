@@ -29,6 +29,9 @@ pub struct DrawerState {
     /// Find ended (the drawer closed, or another file is previewed) and the hosted view hasn't
     /// heard yet: the next build tells it.
     pub(super) find_end_pending: bool,
+    /// Counts the drawer's state markers (see `mod.rs`): part of each marker's key, so a marker
+    /// that is needed again after it ran mounts afresh and runs again.
+    pub(super) marks: u32,
     pub(super) hint: bool,
     pub(super) suspended: bool,
     pub(super) focus_content: u32,
@@ -78,18 +81,24 @@ impl DrawerState {
     /// chooser that opens with a preview showing).
     pub fn open_at_once(&mut self) {
         self.open = true;
+        self.marks = self.marks.wrapping_add(1);
     }
 
     pub(super) fn open_with(&mut self, animations: bool, tx: &mut Tx) {
         if !self.open {
             self.slide(animations, tx);
+            // A fresh fit marker for this open, even when a close went before it in the same
+            // handler: the host hears where suspension stands.
+            self.marks = self.marks.wrapping_add(1);
         }
         self.open = true;
     }
 
     /// Hides the preview. Keyboard focus inside it returns to the files at once; the content
     /// fades out with the slide. Closing ends find and clears its query; the drawer tells the
-    /// hosted view ([`find_end`](super::HostedPreview::find_end)) on its next build.
+    /// hosted view ([`find_end`](super::HostedPreview::find_end)) on its next build, so that
+    /// build has to pass the view with [`PreviewDrawer::hosted`](super::PreviewDrawer::hosted)
+    /// (a host that drops its view when nothing previews calls `find_end` itself).
     pub fn close(&mut self, look: &Look, tx: &mut Tx) {
         self.close_with(look.animations, tx);
     }
@@ -188,10 +197,11 @@ impl DrawerState {
         &self.find.query.text
     }
 
-    /// Closes find and clears its query: another file is previewed, or the drawer closed. The
-    /// drawer tells the hosted view on its next build.
+    /// Closes find and clears its query: another file is previewed, or the drawer closed. If
+    /// the bar was open, the drawer tells the hosted view on its next build, as for
+    /// [`DrawerState::close`]; a bar already closed told the view when it closed.
     pub fn reset_find(&mut self) {
-        if self.find.open || !self.find.query.text.is_empty() {
+        if self.find.open {
             self.find_end_pending = true;
         }
         self.find.open = false;
@@ -219,6 +229,8 @@ impl DrawerState {
 
     /// Opens the find bar with the query selected and the field focused.
     pub(super) fn open_find(&mut self) {
+        // Find starts again: an end the view hasn't heard would land after the new search.
+        self.find_end_pending = false;
         self.find.open = true;
         let len = self.find.query.text.len();
         self.find.query.set_selection(0, len);

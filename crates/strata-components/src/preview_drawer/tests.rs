@@ -78,7 +78,8 @@ fn the_content_hides_when_less_than_240_would_remain_beside_the_focused_column()
 fn the_reserved_slot_lends_trailing_columns_its_width_and_shrinks_to_zero() {
     let fit = ColumnsFit::new(&R, 400.0, 300.0).trailing(250.0);
     let s = solve(&R, &Arrangement::Columns(fit), 1001.0, None);
-    assert_eq!(s.empty_slot, 350.0);
+    // The 600 point preview and the divider's line, less the 250 lent.
+    assert_eq!(s.empty_slot, 351.0);
     // A narrow window: the slot shrinks to nothing instead of going.
     let s = solve(
         &R,
@@ -164,6 +165,13 @@ fn the_right_pane_tells_c2_what_the_empty_slot_keeps() {
     let pane = right_pane(&DrawerState::new(), &R, &fit, 1001.0);
     assert_eq!(
         (pane.width, pane.empty_slot, pane.preview_shown),
-        (600.0, 350.0, false)
+        (600.0, 351.0, false)
     );
+}
+
+#[test]
+fn in_columns_a_wider_standard_column_raises_the_manual_floor() {
+    let fit = Arrangement::Columns(ColumnsFit::new(&R, 400.0, 300.0).standard_column(340.0));
+    let s = solve(&R, &fit, 701.0, Some(300.0));
+    assert_eq!((s.width, s.min), (340.0, 340.0));
 }

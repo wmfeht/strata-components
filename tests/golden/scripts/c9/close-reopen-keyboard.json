@@ -39,6 +39,7 @@
                       "name": "file-1.md",
                       "role": "list-box-option",
                       "states": [
+                        "focused",
                         "selected"
                       ]
                     },
@@ -350,22 +351,17 @@
                   "key": "preview-grip",
                   "name": "Preview panel minimum width",
                   "range": [
-                    432.0,
+                    316.0,
                     300.0,
                     659.0,
                     8.0
                   ],
                   "role": "splitter",
-                  "value": "432"
+                  "value": "316"
                 }
               ],
               "key": "preview-slot",
               "role": "group"
-            },
-            {
-              "key": "preview-divider-caption",
-              "name": "Preview panel minimum width",
-              "role": "tooltip"
             }
           ],
           "key": "preview-split",

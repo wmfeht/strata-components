@@ -351,13 +351,13 @@
                   "key": "preview-grip",
                   "name": "Preview panel minimum width",
                   "range": [
-                    316.0,
+                    300.0,
                     300.0,
                     659.0,
                     8.0
                   ],
                   "role": "splitter",
-                  "value": "316"
+                  "value": "300"
                 }
               ],
               "key": "preview-slot",

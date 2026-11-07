@@ -11,7 +11,8 @@ pub struct DrawerRules {
     /// column (Strata's `MIN_SPLIT_PREVIEW_WIDTH`). It is also the narrowest the content box
     /// is ever laid out at.
     pub hide_below: f32,
-    /// The least manual width: one standard column.
+    /// The least manual width: one standard column. In Columns the larger of this and
+    /// [`ColumnsFit::standard_column`] is the floor.
     pub manual_min: f32,
     /// The least automatic width in Icons and List (Strata's `MIN_WIDTH`).
     pub auto_min: f32,
@@ -120,8 +121,8 @@ pub struct Solved {
     /// The width the content box is laid out at: [`Self::width`], never below
     /// [`DrawerRules::hide_below`]. The slot clips it.
     pub pane: f32,
-    /// The empty reserved slot's width in Columns: the width less the trailing columns it
-    /// lends, down to 0.
+    /// The empty reserved slot's width in Columns: the width and the divider's line, as the
+    /// slot takes with the preview, less the trailing columns it lends, down to 0.
     pub empty_slot: f32,
     /// Whether the content fits beside the focused column. False is the narrow-window rule:
     /// the content hides, and the host pauses media and defers loading.
@@ -157,8 +158,12 @@ pub fn solve(
         ),
     };
     let max = (room - keep).max(0.0);
+    // The least manual width: one standard column. In Columns, C2's standard column counts
+    // too, and the larger of the two wins.
+    let manual_floor =
+        columns_min.map_or(rules.manual_min, |standard| standard.max(rules.manual_min));
     let floor = match (manual, columns_min) {
-        (Some(_), _) => rules.manual_min,
+        (Some(_), _) => manual_floor,
         (None, Some(standard)) => standard,
         (None, None) => rules.auto_min,
     };
@@ -174,10 +179,16 @@ pub fn solve(
     Solved {
         width,
         pane: width.max(rules.hide_below),
-        empty_slot: (width - trailing).max(0.0),
+        // The slot with the preview is the divider's line and the pane, so the empty one is
+        // too: dismissing the preview moves nothing.
+        empty_slot: if width > 0.0 {
+            (width + rules.line - trailing).max(0.0)
+        } else {
+            0.0
+        },
         fits: room - keep_standard >= rules.hide_below,
-        min: rules.manual_min,
-        max: max.max(rules.manual_min),
+        min: manual_floor,
+        max: max.max(manual_floor),
     }
 }
 

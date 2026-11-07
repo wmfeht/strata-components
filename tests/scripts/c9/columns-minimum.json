@@ -1,6 +1,6 @@
 {
   "bullets": [
-    "preview/preview-panel/layout: Narrowing a filled preview, by pointer drag or F8 and the arrow keys, lowers the Columns session minimum"
+    "preview/preview-panel/layout: Narrowing a filled preview, by pointer drag"
   ],
   "scene": "c9-columns-open-light",
   "events": [

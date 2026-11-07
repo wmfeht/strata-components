@@ -431,13 +431,16 @@ impl<'a, S: 'static> PreviewDrawer<'a, S> {
             slot = slot.a11y_hidden();
         }
         if st.is_open() && has_body {
-            slot = slot.child(fit_marker(&shared, solved.fits));
+            slot = slot.child(fit_marker(&shared, st, solved.fits));
         }
         if !shown && (st.dragging || st.hint || st.find.query.focused) {
-            slot = slot.child(hidden_marker(&shared));
+            slot = slot.child(hidden_marker(&shared, st));
+        } else if st.find.query.focused && !(st.find.open && caps.searchable) {
+            // The pane shows but the bar doesn't (the view has nothing to search now).
+            slot = slot.child(find_focus_marker(&shared, st));
         }
         if st.find_end_pending {
-            slot = slot.child(find_end_marker(&shared));
+            slot = slot.child(find_end_marker(&shared, st));
         }
 
         let mut split = row()
@@ -555,7 +558,8 @@ fn drawer_key<S: 'static>(
     find_keys: fn(&KeyEvent) -> bool,
     searchable: bool,
 ) -> bool {
-    let finding = (shared.access)(s).find.open;
+    // Escape is find's only while its bar shows; otherwise it goes on to the host.
+    let finding = (shared.access)(s).find.open && searchable;
     if ev.key == rune::Key::Escape && finding {
         find::close(shared, s, tx);
         return true;
@@ -571,35 +575,54 @@ fn drawer_key<S: 'static>(
     false
 }
 
+// State markers: zero-size elements that run once, after the layout that mounts them, to
+// settle state the view can't change while it builds. Each key carries `DrawerState::marks`,
+// which every marker that acts bumps, so one needed again mounts afresh instead of staying
+// mounted unheard.
+
+fn marker(name: &str, st: &DrawerState) -> El {
+    el().key(format!("preview-{name}-marker-{}", st.marks))
+        .size(0.0, 0.0)
+        .a11y_hidden()
+        .transition(Transition::none())
+}
+
 /// Mounted when the pane has gone (closed, nothing to show, or too narrow) while a drag, the
 /// divider's caption or the find field's focus request is left over: it clears them, so the
 /// pane doesn't come back mid-drag or take focus when it shows again.
-fn hidden_marker<S: 'static>(shared: &Shared<S>) -> El {
+fn hidden_marker<S: 'static>(shared: &Shared<S>, st: &DrawerState) -> El {
     let access = shared.access;
-    el().key("preview-hidden-marker")
-        .size(0.0, 0.0)
-        .a11y_hidden()
-        .transition(Transition::none())
-        .on_layout(move |s: &mut S, _| {
-            let st = access(s);
-            st.dragging = false;
-            st.drag_from = None;
-            st.hint = false;
-            st.find.query.focused = false;
-        })
+    marker("hidden", st).on_layout(move |s: &mut S, _| {
+        let st = access(s);
+        st.dragging = false;
+        st.drag_from = None;
+        st.hint = false;
+        st.find.query.focused = false;
+        st.marks = st.marks.wrapping_add(1);
+    })
 }
 
-/// Mounted while find has ended and the hosted view hasn't heard: tells it.
-fn find_end_marker<S: 'static>(shared: &Shared<S>) -> El {
+/// Mounted while the find field's focus request stands but the bar isn't built: drops the
+/// request, so the field doesn't take focus when the view is searchable again.
+fn find_focus_marker<S: 'static>(shared: &Shared<S>, st: &DrawerState) -> El {
+    let access = shared.access;
+    marker("find-focus", st).on_layout(move |s: &mut S, _| {
+        let st = access(s);
+        st.find.query.focused = false;
+        st.marks = st.marks.wrapping_add(1);
+    })
+}
+
+/// Mounted while find has ended and the hosted view hasn't heard: tells it. Needs the view
+/// passed with [`PreviewDrawer::hosted`] in that build.
+fn find_end_marker<S: 'static>(shared: &Shared<S>, st: &DrawerState) -> El {
     let shared = shared.clone();
-    el().key("preview-find-end-marker")
-        .size(0.0, 0.0)
-        .a11y_hidden()
-        .transition(Transition::none())
-        .on_layout(move |s: &mut S, _| {
-            (shared.access)(s).find_end_pending = false;
-            shared.with_view(s, |v| v.find_end());
-        })
+    marker("find-end", st).on_layout(move |s: &mut S, _| {
+        let st = (shared.access)(s);
+        st.find_end_pending = false;
+        st.marks = st.marks.wrapping_add(1);
+        shared.with_view(s, |v| v.find_end());
+    })
 }
 
 /// A zero-size stub that hands focus to `to` when it is removed (see the module docs).
@@ -611,26 +634,21 @@ fn stub(key: String, to: &str) -> El {
         .focus_return(to)
 }
 
-/// Mounted while the drawer is open with something to show, keyed by whether it fits, so each
-/// change of verdict mounts a new marker and reports it.
-fn fit_marker<S: 'static>(shared: &Shared<S>, fits: bool) -> El {
+/// Mounted while the drawer is open with something to show, keyed by whether it fits (and by
+/// the open, which bumps `marks`), so each change of verdict, and each open, mounts a new
+/// marker and reports it.
+fn fit_marker<S: 'static>(shared: &Shared<S>, st: &DrawerState, fits: bool) -> El {
     let shared = shared.clone();
-    el().key(if fits {
-        "preview-fit-shown"
-    } else {
-        "preview-fit-hidden"
-    })
-    .size(0.0, 0.0)
-    .a11y_hidden()
-    .transition(Transition::none())
-    .on_layout_tx(move |s: &mut S, _, tx: &mut Tx| {
-        let st = (shared.access)(s);
-        if st.suspended == fits {
-            st.suspended = !fits;
-            shared.emit(s, DrawerIntent::Suspend(!fits), tx);
-        } else {
-            // The verdict held: nothing to commit.
-            tx.live_only();
-        }
-    })
+    marker(if fits { "fit-shown" } else { "fit-hidden" }, st).on_layout_tx(
+        move |s: &mut S, _, tx: &mut Tx| {
+            let st = (shared.access)(s);
+            if st.suspended == fits {
+                st.suspended = !fits;
+                shared.emit(s, DrawerIntent::Suspend(!fits), tx);
+            } else {
+                // The verdict held: nothing to commit.
+                tx.live_only();
+            }
+        },
+    )
 }

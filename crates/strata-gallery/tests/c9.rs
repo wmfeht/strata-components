@@ -391,25 +391,34 @@ mod c9 {
     #[test]
     fn dismissing_in_columns_keeps_the_slot_until_released() {
         let mut rt = scene("c9-columns-open-light");
-        let kept = |rt: &Runtime<Gallery>| {
-            rt.state.c9.drawer.is_reserved()
-                && !rt.state.c9.drawer.is_open()
-                && node(rt, "preview-grip").is_none()
-                && !rt.animating
+        // The files' laid-out width: what the slot leaves them, compared, never a pixel value.
+        let files = |rt: &Runtime<Gallery>| info(rt, "preview-files").expect("the files").target[2];
+        let open = files(&rt);
+        let kept = |rt: &Runtime<Gallery>, how: &str| {
+            let d = &rt.state.c9.drawer;
+            assert!(
+                d.is_reserved() && !d.is_open(),
+                "{how}: dismissed, still reserved"
+            );
+            assert!(node(rt, "preview-grip").is_none(), "{how}: no grip");
+            assert!(!rt.animating, "{how}: nothing slides");
+            assert_eq!(files(rt), open, "{how}: the columns don't move");
         };
         tap1(&mut rt, "preview-close");
-        assert!(kept(&rt), "the close button");
+        kept(&rt, "the close button");
         space(&mut rt);
+        assert_eq!(files(&rt), open);
         key1(&mut rt, Key::Escape, Mods::default());
-        assert!(kept(&rt), "Escape");
+        kept(&rt, "Escape");
         space(&mut rt);
         key1(&mut rt, Key::Text(" ".into()), Mods::default());
-        assert!(kept(&rt), "Space");
+        kept(&rt, "Space");
         rt.update(|g, _| g.c9.drawer.reserve(false));
-        rt.frame(DT);
+        settle(&mut rt, 2);
+        assert!(!rt.state.c9.drawer.is_reserved());
         assert!(
-            !rt.state.c9.drawer.is_reserved(),
-            "Appearance → Preview panel off releases it"
+            files(&rt) > open,
+            "Appearance → Preview panel off releases the space"
         );
     }
 
@@ -568,5 +577,80 @@ mod c9 {
             "find is still open"
         );
         assert!(!in_find_field(&rt), "but widening doesn't take focus back");
+    }
+
+    #[test]
+    fn escape_goes_to_the_host_while_the_find_bar_is_hidden() {
+        let mut rt = scene("c9-find-open-light");
+        // Rendered, the fake document has nothing to search: find stays open, its bar goes.
+        tap(&mut rt, "preview-view-switch");
+        assert!(rt.state.c9.drawer.is_finding() && node(&rt, "preview-find-bar").is_none());
+        tap(&mut rt, "fake-content");
+        key(&mut rt, Key::Escape);
+        assert!(
+            !rt.state.c9.drawer.is_open(),
+            "the first Escape reaches the host"
+        );
+    }
+
+    #[test]
+    fn the_find_field_doesnt_take_focus_back_when_the_view_is_searchable_again() {
+        let mut rt = scene("c9-find-open-light");
+        assert!(in_find_field(&rt));
+        rt.update(|g, _| {
+            g.c9.view.form = Some(strata_components::preview_drawer::DocumentView::Rendered)
+        });
+        settle(&mut rt, 4);
+        tap(&mut rt, "row-2");
+        rt.update(|g, _| {
+            g.c9.view.form = Some(strata_components::preview_drawer::DocumentView::Source)
+        });
+        settle(&mut rt, 4);
+        assert!(node(&rt, "preview-find-bar").is_some());
+        assert!(!in_find_field(&rt), "focus stays on the listing");
+        assert_eq!(focused(&rt).as_deref(), Some("row-2"));
+    }
+
+    #[test]
+    fn restarting_find_in_one_handler_keeps_the_hosts_search() {
+        use strata_components::preview_drawer::HostedPreview;
+        let mut rt = scene("c9-list-open-light");
+        tap(&mut rt, "preview-find");
+        typed(&mut rt, "preview");
+        rt.update(|g, _| {
+            g.c9.drawer.reset_find();
+            g.c9.drawer.start_find("preview");
+            g.c9.view.find("preview");
+        });
+        settle(&mut rt, 4);
+        assert_eq!(
+            rt.state.c9.view_status().map(|s| s.total),
+            Some(5),
+            "no stale find_end lands after it"
+        );
+    }
+
+    #[test]
+    fn closing_the_drawer_after_find_closed_ends_find_once() {
+        use strata_components::preview_drawer::HostedPreview;
+        let mut rt = scene("c9-list-open-light");
+        tap(&mut rt, "preview-find");
+        typed(&mut rt, "preview");
+        key(&mut rt, Key::Escape);
+        assert_eq!(
+            rt.state.c9.view_status().map(|s| s.total),
+            Some(0),
+            "closing the bar ended find"
+        );
+        // The host searches on its own afterwards.
+        rt.update(|g, _| g.c9.view.find("drawer"));
+        key(&mut rt, Key::Escape);
+        settle(&mut rt, 2);
+        assert!(!rt.state.c9.drawer.is_open());
+        assert_eq!(
+            rt.state.c9.view_status().map(|s| s.total),
+            Some(2),
+            "and the close doesn't end it again"
+        );
     }
 }

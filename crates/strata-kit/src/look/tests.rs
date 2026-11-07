@@ -125,3 +125,26 @@ fn the_fallback_follows_the_appearance() {
         Look::fallback(false).kit.c.bg_base
     );
 }
+
+/// A radius Kit has no token for rounds as Kit's own do, so the two agree at every roundness.
+#[test]
+fn a_rounded_radius_matches_kit_at_the_same_base() {
+    let base = crate::shape::BASE_RADIUS;
+    for roundness in [0, 30, 60, 70, 130, 200] {
+        let look = Look::fallback(false).with_params(&LookParams {
+            roundness,
+            ..LookParams::default()
+        });
+        let r = look.kit.radius;
+        let pairs = [
+            (base.xs, r.xs),
+            (base.sm, r.sm),
+            (base.md, r.md),
+            (base.lg, r.lg),
+            (base.xl, r.xl),
+        ];
+        for (base, kit) in pairs {
+            assert_eq!(look.round(base), kit, "{base} at {roundness} %");
+        }
+    }
+}

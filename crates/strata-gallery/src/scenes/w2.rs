@@ -3,15 +3,20 @@
 //!
 //! Work package: `docs/work/phase-0-groundwork/W2-look-contract.md`.
 //!
-//! Two sheets, both read from `Gallery::look`: the tokens (colour swatches by registry name,
-//! the type ramp, spacing and sizes, radii, glow, the ladders, roundness, the animations
-//! switch and the slot tokens), and every semantic icon in each catalog. K3's catalogs
-//! replace the placeholders behind the icon sheet with no change here.
+//! Three sheets, all read from `Gallery::look`: the core tokens (colour swatches by registry
+//! name, the type ramp, spacing and sizes, radii, glow, the ladders, roundness and the
+//! animations switch), every semantic icon in each catalog, and the slot tokens. K3's
+//! catalogs replace the placeholders behind the icon sheet with no change here.
+//!
+//! The slot sheet is a review scene only. Each component's work package adds slot tokens, so
+//! a golden listing them would move on every such branch and collide between parallel ones;
+//! a slot's values show in its own page's goldens instead.
 
-use rune::{Color, Cx, El, KeyEvent, TextStyle, Tx, col, el, icon, row, text};
+use rune::{Color, Cx, El, KeyEvent, ScrollSpec, TextStyle, Tx, col, el, icon, row, text};
 use strata_kit::icons::{self, IconName, IconSet};
 use strata_kit::look::Look;
-use strata_kit::tokens::{self, Value};
+use strata_kit::slots;
+use strata_kit::tokens::{self, Kind, Value};
 
 use crate::{Gallery, Scene};
 
@@ -27,6 +32,7 @@ pub enum Sheet {
     #[default]
     Tokens,
     Icons,
+    Slots,
 }
 
 fn open(g: &mut Gallery, dark: bool, sheet: Sheet) {
@@ -44,13 +50,18 @@ pub const SCENES: &[Scene] = &[
 ];
 
 /// Scenes for review with `--scene` only, kept out of the goldens.
-pub const REVIEW: &[Scene] = &[];
+/// The slot tokens are here, not in a golden: see the module doc.
+pub const REVIEW: &[Scene] = &[
+    ("w2-slots-light", |g| open(g, false, Sheet::Slots)),
+    ("w2-slots-dark", |g| open(g, true, Sheet::Slots)),
+];
 
 pub fn view(g: &Gallery, _cx: &mut Cx<Gallery>) -> El {
     let look = g.look();
     match g.w2.sheet {
         Sheet::Tokens => tokens_sheet(look),
         Sheet::Icons => icons_sheet(look),
+        Sheet::Slots => slots_sheet(look),
     }
 }
 
@@ -120,12 +131,7 @@ fn tokens_sheet(look: &Look) -> El {
                         .gap(s.xxl)
                         .child(section(look, "glow", glow(look)))
                         .child(section(look, "shape and motion", shape_and_motion(look))),
-                )
-                .child(section(
-                    look,
-                    "slots",
-                    lengths(look, &["icons.", "list.", "sidebar.", "tabs."]),
-                )),
+                ),
         )
 }
 
@@ -163,17 +169,20 @@ fn swatches(look: &Look, prefix: &str, per_column: usize) -> El {
 }
 
 fn swatch(look: &Look, name: &str, colour: Color) -> El {
-    let k = &look.kit;
     row()
         .gap(look.space.xs)
         .items_center()
-        .child(
-            el().size(look.icon_size.sm, look.icon_size.sm)
-                .fill(colour)
-                .radius(k.radius.xs)
-                .border(1.0, k.c.border_base),
-        )
+        .child(chip(look, colour))
         .child(note(look, name.to_owned()))
+}
+
+/// A small square of `colour`.
+fn chip(look: &Look, colour: Color) -> El {
+    let k = &look.kit;
+    el().size(look.icon_size.sm, look.icon_size.sm)
+        .fill(colour)
+        .radius(k.radius.xs)
+        .border(1.0, k.c.border_base)
 }
 
 /// A sample line in each style of Kit's ramp and Strata's.
@@ -290,6 +299,69 @@ fn shape_and_motion(look: &Look) -> El {
         .gap(look.space.xxs)
         .child(note(look, format!("roundness {}", look.roundness)))
         .child(note(look, format!("animations {}", look.animations)))
+}
+
+/// The widths of the slot sheet's name and value columns.
+const SLOT_NAME: f32 = 220.0;
+const SLOT_VALUE: f32 = 110.0;
+
+/// Every slot token, a section per slot, each with its name, value and kind. Scrolls when
+/// the slots outgrow the window.
+fn slots_sheet(look: &Look) -> El {
+    let s = &look.space;
+    col()
+        .key("w2-slots")
+        .w_full()
+        .h_full()
+        .min_h(0.0)
+        .padding(s.xl)
+        .gap(s.lg)
+        .scroll(ScrollSpec {
+            stick_bottom: false,
+        })
+        .children(slots::TOKENS.iter().map(|&(id, tokens)| {
+            let body = if tokens.is_empty() {
+                note(look, "no tokens yet".to_owned())
+            } else {
+                col()
+                    .gap(s.xxs)
+                    .children(tokens.iter().map(|t| slot_token(look, t)))
+            };
+            section(look, id, body)
+        }))
+}
+
+fn slot_token(look: &Look, token: &tokens::Token) -> El {
+    let k = &look.kit;
+    let value = token.get(look);
+    let shown = match value {
+        Value::Color(c) => c.hex(),
+        Value::Length(x) | Value::Number(x) => x.to_string(),
+        Value::Flag(b) => b.to_string(),
+        _ => "?".to_owned(),
+    };
+    let kind = match token.kind() {
+        Kind::Color => "colour",
+        Kind::Length => "length",
+        Kind::Number => "number",
+        Kind::Flag => "flag",
+        _ => "?",
+    };
+    let mut line = row()
+        .gap(look.space.xs)
+        .items_center()
+        .child(note(look, token.name().to_owned()).w(SLOT_NAME))
+        .child(note(look, shown).w(SLOT_VALUE))
+        .child(
+            text(kind)
+                .font(k.ty.small)
+                .color(k.c.text_muted)
+                .w(SLOT_VALUE),
+        );
+    if let Value::Color(c) = value {
+        line = line.child(chip(look, c));
+    }
+    line
 }
 
 /// Every semantic icon, in each catalog.

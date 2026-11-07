@@ -78,6 +78,10 @@ strata-gallery's `src/lib.rs`: it adds a `look: Look` field with the accessor co
 and K4 change `g.look` (a theme, density, text size or override) only from their own
 `scenes/<id>.rs`.
 
+W2's token sheet goldens (`w2-tokens-*`) show the core tokens only. Slot tokens appear only on
+the `w2-slots-light` and `w2-slots-dark` review scenes, which have no goldens, so adding a slot
+token never moves a golden outside the component's own page.
+
 Open the gallery with `mise run gallery`. A row on the index opens its page, and Escape
 returns to the index. `mise run gallery -- --scene c1-ten-rows-dark` opens one scene, and
 `-- --list-scenes` lists them all.

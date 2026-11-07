@@ -399,23 +399,23 @@
                   "role": "label"
                 },
                 {
-                  "name": "xs 2",
+                  "name": "xs 1.8",
                   "role": "label"
                 },
                 {
-                  "name": "sm 4",
+                  "name": "sm 3",
                   "role": "label"
                 },
                 {
-                  "name": "md 6",
+                  "name": "md 3.6",
                   "role": "label"
                 },
                 {
-                  "name": "lg 8",
+                  "name": "lg 5.4",
                   "role": "label"
                 },
                 {
-                  "name": "xl 10",
+                  "name": "xl 8.4",
                   "role": "label"
                 }
               ],
@@ -559,7 +559,7 @@
                   "role": "label"
                 },
                 {
-                  "name": "frame.bar 40",
+                  "name": "frame.bar 36",
                   "role": "label"
                 },
                 {
@@ -575,11 +575,11 @@
                   "role": "label"
                 },
                 {
-                  "name": "row.sidebar 28",
+                  "name": "row.sidebar 24",
                   "role": "label"
                 },
                 {
-                  "name": "row.palette 32",
+                  "name": "row.palette 53",
                   "role": "label"
                 },
                 {
@@ -623,7 +623,7 @@
                   "role": "label"
                 },
                 {
-                  "name": "roundness 1",
+                  "name": "roundness 0.6",
                   "role": "label"
                 },
                 {
@@ -632,28 +632,6 @@
                 }
               ],
               "key": "w2-shape-and-motion",
-              "role": "group"
-            },
-            {
-              "children": [
-                {
-                  "name": "slots",
-                  "role": "label"
-                },
-                {
-                  "name": "list.row.height 26",
-                  "role": "label"
-                },
-                {
-                  "name": "sidebar.row.height 28",
-                  "role": "label"
-                },
-                {
-                  "name": "tabs.tab.height 40",
-                  "role": "label"
-                }
-              ],
-              "key": "w2-slots",
               "role": "group"
             }
           ],

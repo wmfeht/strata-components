@@ -11,15 +11,17 @@
 //! 1. the theme (K1, `theme/`): [`Look::from_kit`] on the theme's kit, then `syntax`,
 //!    `syntax_extra` and `glow`;
 //! 2. the user's shape, density and type settings (K2, `shape.rs`, `density.rs`,
-//!    `typography.rs`): `kit.radius` and `roundness`, `kit.ty` and `ty`, `space`, `frame`,
-//!    `content`, `row`, `icon_size`, `tiles` and `font`;
+//!    `typography.rs`): [`Look::apply_params`] sets `kit.radius` and `roundness`, `kit.ty`
+//!    and `ty`, `frame`, `content`, `row`, `icon_size` and `font`;
 //! 3. the user's overrides (K4, `overrides/`), by name through [`crate::tokens`];
 //! 4. last, the syntect theme for C10a (K1), built from `syntax` and `syntax_extra` as they
 //!    stand after the overrides, so an override of a `syntax.*` token reaches highlighted
 //!    code. Nothing changes the syntax colours after this step without rebuilding it.
 //!
-//! The fallback values are Strata's own defaults at its default 13 px text size, so a
-//! component built against them looks right when K1–K4 land. Only the goldens move.
+//! The fallback is [`Look::from_kit`] on rune-kit's neutral kit, then step 2 at
+//! [`LookParams::default`]: Strata's default roundness (60 %), Compact densities and 13 px
+//! text. Its shape, density and type tokens are Strata's defaults, so a component built
+//! against them keeps its sizes when K1 and K4 land; only the colours move.
 //!
 //! # Rules for components
 //!
@@ -50,6 +52,7 @@ use rune_kit::Kit;
 use rune_kit::syntax::{Syntax, SyntaxTheme};
 
 use crate::icons::{self, IconName, IconSet};
+pub use crate::shape::LookParams;
 use crate::slots::Slots;
 
 #[cfg(test)]
@@ -116,13 +119,17 @@ pub struct Look {
 
 impl Look {
     /// Strata's look before a theme is loaded: rune-kit's neutral kit, with Strata's default
-    /// shape, density and text size.
+    /// shape, density and text size ([`LookParams::default`]).
     pub fn fallback(dark: bool) -> Look {
-        Look::from_kit(Kit::neutral(dark))
+        // `apply_params` reads its base ramp from `from_kit`, never from here, so this
+        // doesn't recurse.
+        Look::from_kit(Kit::neutral(dark)).with_params(&LookParams::default())
     }
 
     /// `kit` with Strata's default extensions, the ones that follow a kit (the glow and
-    /// syntax colours, the type ramp) derived from it. K1 starts each theme's look here.
+    /// syntax colours, the type ramp) derived from it. K1 starts each theme's look here. The
+    /// shape, density and type tokens are the base step 2 starts from, not Strata's
+    /// defaults: apply [`LookParams`] before drawing.
     pub fn from_kit(kit: Kit) -> Look {
         let syntax = SyntaxTheme::from_kit(&kit);
         Look {
@@ -188,9 +195,10 @@ impl Look {
         (self.icons.named)(key)
     }
 
-    /// `base`, a radius in points that Kit has no token for, at the current roundness.
+    /// `base`, a radius in points that Kit has no token for, at the current roundness,
+    /// rounded to 0.01 pt as `kit.radius` is.
     pub fn round(&self, base: f32) -> f32 {
-        base * self.roundness
+        crate::shape::scale_radius(base, self.roundness)
     }
 }
 
@@ -315,7 +323,8 @@ pub struct RowHeights {
     pub columns: f32,
     /// PlacesSidebar rows (C8).
     pub sidebar: f32,
-    /// Result rows in the search palette and folder peek (C17, C22).
+    /// Search palette result rows (C17). Folder peek (C22) reads `columns`: Strata's peek
+    /// rows are `.file-row`s.
     pub palette: f32,
 }
 

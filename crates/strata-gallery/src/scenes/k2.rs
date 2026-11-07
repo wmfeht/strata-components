@@ -43,6 +43,9 @@ const INSTALLED: &[&str] = &[
     "Noto Sans CJK JP",
 ];
 
+/// The font picker's row for the app's own families.
+const DEFAULT_LABEL: &str = "Default";
+
 /// The desktop text scale's range and step, standing in for P5's factor.
 const SCALE_STEP: f32 = 0.25;
 const SCALE_RANGE: (f32, f32) = (0.5, 2.0);
@@ -120,13 +123,12 @@ impl Param {
     }
 
     fn step(self, p: &mut LookParams, delta: i32) {
-        let px = |scale: Scale, v: u8| {
-            (i32::from(scale.clamp(v)) + delta).clamp(0, i32::from(scale.max)) as u8
-        };
         match self {
             Param::Roundness => p.roundness = ROUNDNESS.stepped(p.roundness, delta),
-            Param::Frame => p.frame_density = px(density::FRAME, p.frame_density),
-            Param::Content => p.content_density = px(density::CONTENT, p.content_density),
+            Param::Frame => p.frame_density = density::FRAME.stepped(p.frame_density, delta),
+            Param::Content => {
+                p.content_density = density::CONTENT.stepped(p.content_density, delta)
+            }
             Param::TextSize => p.text_size = typography::step_text_size(p.text_size, delta),
             Param::TextScale => {
                 let v = p.text_scale + SCALE_STEP * delta as f32;
@@ -403,7 +405,11 @@ fn snaps(look: &Look, param: Param, scale: Scale) -> El {
 fn font_picker(g: &Gallery, look: &Look) -> El {
     let kit = &look.kit;
     let d = &g.k2;
-    let current = d.params.font.clone().unwrap_or_else(|| "Default".into());
+    let current = d
+        .params
+        .font
+        .clone()
+        .unwrap_or_else(|| DEFAULT_LABEL.into());
     let mut picker = col().gap(look.space.xs).child(
         text("Interface font")
             .font(kit.ty.small_medium)
@@ -432,13 +438,18 @@ fn font_picker(g: &Gallery, look: &Look) -> El {
             change(g, |p| p.font = font);
         }
     };
-    let mut list = col().key("k2-font-list").gap(look.space.xxs).child(
-        Button::new("Default")
-            .on_press(choose(None))
-            .build(kit)
-            .key("k2-font-default"),
-    );
-    if shown.is_empty() {
+    // The Default row is filtered by its label like any family, as Strata's picker does.
+    let default_shown = typography::font_label_matches(DEFAULT_LABEL, &d.query.text);
+    let mut list = col().key("k2-font-list").gap(look.space.xxs);
+    if default_shown {
+        list = list.child(
+            Button::new(DEFAULT_LABEL)
+                .on_press(choose(None))
+                .build(kit)
+                .key("k2-font-default"),
+        );
+    }
+    if shown.is_empty() && !default_shown {
         list = list.child(
             text("No fonts match")
                 .key("k2-font-none")
@@ -658,13 +669,13 @@ fn palette_row(look: &Look) -> El {
         .w_full()
         .h(look.row.palette)
         .px(18.0)
-        .py(10.0)
+        .py(density::PALETTE_PAD)
         .gap(look.space.lg)
         .center_y()
-        .border_sides([0.0, 0.0, 1.0, 0.0], kit.c.border_muted)
+        .border_sides([0.0, 0.0, density::PALETTE_RULE, 0.0], kit.c.border_muted)
         .child(
             row()
-                .size(32.0, 32.0)
+                .size(density::PALETTE_THUMB, density::PALETTE_THUMB)
                 .center()
                 .radius(kit.radius.sm)
                 .fill(kit.c.layer_02)
@@ -673,7 +684,7 @@ fn palette_row(look: &Look) -> El {
         .child(
             col()
                 .grow(1.0)
-                .gap(2.0)
+                .gap(density::PALETTE_LINE_GAP)
                 .child(
                     text("report.pdf")
                         .font(TextStyle {
@@ -767,6 +778,18 @@ fn radii(look: &Look) -> El {
                         .border(1.0, kit.c.border_base),
                 )
                 .child(text("circle").font(kit.ty.small).color(kit.c.text_muted)),
+        )
+        .child(
+            // A pill follows the roundness, as Strata's 999px radii do.
+            col()
+                .gap(look.space.xxs)
+                .child(
+                    el().size(56.0, 20.0)
+                        .radius(look.round(999.0).min(10.0))
+                        .fill(kit.c.layer_02)
+                        .border(1.0, kit.c.border_base),
+                )
+                .child(text("pill").font(kit.ty.small).color(kit.c.text_muted)),
         )
 }
 
@@ -865,7 +888,7 @@ fn readout(look: &Look) -> El {
 ///
 /// Ctrl++, Ctrl+= and Ctrl+− step the text size and Ctrl+0 resets it, as Strata binds them;
 /// with Alt or Super held they do nothing. Escape closes the font picker, or else puts the
-/// app's families back and leaves the page.
+/// app's families and the fallback look back and leaves the page.
 pub fn on_key(g: &mut Gallery, key: &KeyEvent, tx: &mut Tx) -> bool {
     if key.key == Key::Escape {
         if g.k2.picker {
@@ -874,6 +897,8 @@ pub fn on_key(g: &mut Gallery, key: &KeyEvent, tx: &mut Tx) -> bool {
         }
         tx.set_font_families(APP_FAMILIES.0, APP_FAMILIES.1);
         g.k2.sent = None;
+        // Leave the page on the plain fallback, so the index doesn't draw in K2's look.
+        g.look = Look::fallback(g.dark);
         return false;
     }
     if key.mods.alt || key.mods.logo {

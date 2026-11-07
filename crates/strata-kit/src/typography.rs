@@ -11,13 +11,15 @@
 //!
 //! The base ramp is rune-kit's (`ui` is 13 on 20), which is Strata's at its default 13 px,
 //! so the whole ramp and the icon sizes scale by `root / 13`. Sizes scale exactly; line
-//! heights round to whole points, so rows and bars built from them stay on whole points.
+//! heights round to whole points, so rows and bars built from them stay on whole points. At
+//! 13 px exactly the ramp is rune-kit's own, untouched (its `text_small` keeps 19.5).
 //!
 //! # The interface font
 //!
 //! strata-kit never lists fonts: the host passes the installed families in as data (from P5,
 //! or from Rune once it can list them; Rune issue #114). [`font_choices`] and
-//! [`filter_fonts`] build the picker's list from them. A chosen family goes in front of the
+//! [`filter_fonts`] build the picker's list from them, and the picker's Default row is
+//! filtered by its label like any other ([`font_label_matches`]), as Strata's is. A chosen family goes in front of the
 //! app's own sans families; the mono slot stays the app's, since previews keep their
 //! monospace font. The host hands [`Look::font`](crate::look::Look::font) to
 //! `Tx::set_font_families` when it changes.
@@ -75,13 +77,20 @@ pub fn step_text_size(size: u16, delta: i32) -> u16 {
 fn base() -> &'static (Type, Ramp, IconSizes) {
     static BASE: OnceLock<(Type, Ramp, IconSizes)> = OnceLock::new();
     BASE.get_or_init(|| {
+        // `Look::from_kit`, never `Look::fallback`: the fallback may apply `LookParams`,
+        // which calls back in here, and re-entering a `OnceLock`'s initializer deadlocks.
         let look = Look::from_kit(Kit::neutral(false));
         (look.kit.ty, look.ty, look.icon_size)
     })
 }
 
-/// `style` at `factor`: the size exactly, the line height (when set) on whole points.
+/// `style` at `factor`: the size exactly, the line height (when set) on whole points. At a
+/// factor of 1 the style is returned as it is, so Strata's default text size leaves the base
+/// ramp's line heights alone, half points included.
 pub fn scale_style(style: TextStyle, factor: f32) -> TextStyle {
+    if factor == 1.0 {
+        return style;
+    }
     TextStyle {
         size: style.size * factor,
         line_height: if style.line_height > 0.0 {
@@ -172,9 +181,11 @@ pub fn families(font: Option<&str>, app: &Families) -> Option<Families> {
     Some(Families::new(ui, app.mono.clone()))
 }
 
-/// The picker's families from the installed ones: trimmed, sorted ignoring case, one entry
-/// per name ignoring case, leaving out names [`quote_family`] can't take. The picker puts
-/// "Default" before them.
+/// The picker's families from the installed ones: trimmed, sorted ignoring case. It
+/// deliberately keeps one entry per name ignoring case (fontconfig matches families that
+/// way, so `Inter` and `inter` are one family), and deliberately leaves out names
+/// [`quote_family`] can't take, since choosing one could never apply. The picker puts a
+/// Default row before them.
 pub fn font_choices(installed: impl IntoIterator<Item = String>) -> Vec<String> {
     let mut names: Vec<(String, String)> = installed
         .into_iter()
@@ -189,12 +200,17 @@ pub fn font_choices(installed: impl IntoIterator<Item = String>) -> Vec<String> 
     names.into_iter().map(|(_, name)| name).collect()
 }
 
-/// The choices whose name contains `query`, ignoring case. An empty query keeps them all.
+/// Whether a picker row labelled `label` shows for `query`: its label contains the query,
+/// ignoring case. The Default row is filtered by its label ("Default") like a family's.
+pub fn font_label_matches(label: &str, query: &str) -> bool {
+    label.to_lowercase().contains(&query.trim().to_lowercase())
+}
+
+/// The choices that [`font_label_matches`] `query`. An empty query keeps them all.
 pub fn filter_fonts<'a>(choices: &'a [String], query: &str) -> Vec<&'a str> {
-    let query = query.trim().to_lowercase();
     choices
         .iter()
-        .filter(|name| name.to_lowercase().contains(&query))
+        .filter(|name| font_label_matches(name, query))
         .map(String::as_str)
         .collect()
 }

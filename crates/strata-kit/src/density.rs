@@ -24,7 +24,15 @@
 //! clips at large text sizes, because the row heights don't know about it. The sidebar row is
 //! a bar action's square (`frame.control`) plus the frame inset. A search palette result is
 //! a 32 px thumbnail box, or its name (`ui_compact`) and path (`small`) lines with a 2 px
-//! gap, plus 10 px of padding above and below and a 1 px rule.
+//! gap, plus 10 px of padding above and below and a 1 px rule ([`PALETTE_THUMB`],
+//! [`PALETTE_LINE_GAP`], [`PALETTE_PAD`], [`PALETTE_RULE`]).
+//!
+//! `row.columns` is a one-line Columns row. Strata's recursive-search results in Columns add
+//! the entry's path under the name, wrapped to up to two lines
+//! (`src/ui/browser/columns/rows/widgets.rs:50-61, 98-106`); that variant is taller and needs
+//! its own height, a slot of C2's. Whatever a row hosts must fit inside its height, C5's
+//! inline rename editor included (Strata puts it in the same box as the name): the editor
+//! takes the row's height and draws its text in `ui_compact`, not a taller text field.
 //!
 //! Every size here is on whole points, so a virtual list of 100,000 rows accumulates no
 //! fractions. Overrides (K4) of the type ramp come later and don't regrow rows.
@@ -57,6 +65,11 @@ impl Scale {
         px.min(self.max)
     }
 
+    /// `px` moved `delta` px, clamped to the scale, as a slider's arrow keys move it.
+    pub fn stepped(&self, px: u8, delta: i32) -> u8 {
+        (i32::from(self.clamp(px)) + delta).clamp(0, i32::from(self.max)) as u8
+    }
+
     /// The preset `px` rests on, or `None` for a Custom value. Strata saves a slider resting
     /// on a snap point as that preset.
     pub fn preset(&self, px: u8) -> Option<Preset> {
@@ -82,6 +95,17 @@ pub const CONTENT: Scale = Scale {
     airy: 8,
     max: 16,
 };
+
+/// A search palette result's padding above and below its content
+/// (`style.css` `.search-result > box`).
+pub const PALETTE_PAD: f32 = 10.0;
+/// The rule under each search palette result (`.search-result`'s bottom border).
+pub const PALETTE_RULE: f32 = 1.0;
+/// A search palette result's thumbnail box, which doesn't follow the text size
+/// (`.search-result-thumbnail`).
+pub const PALETTE_THUMB: f32 = 32.0;
+/// The gap between a search palette result's name and path lines.
+pub const PALETTE_LINE_GAP: f32 = 2.0;
 
 /// A file-view length at content pad `pad`, given its Compact and Airy values: Strata's
 /// Custom spacing, linear through both presets so a slider never jumps at either, never
@@ -134,10 +158,12 @@ pub fn rows(look: &Look, pad: f32) -> RowHeights {
     let content = label.max(look.icon_size.md);
     let file_row = between(pad, 26.0, 42.0).max(content + 2.0 * pad);
     let sidebar = look.frame.control.max(content) + 2.0 * look.frame.inset;
-    let palette = 32.0_f32.max(label + 2.0 + path) + 21.0;
+    let palette =
+        PALETTE_THUMB.max(label + PALETTE_LINE_GAP + path) + 2.0 * PALETTE_PAD + PALETTE_RULE;
     RowHeights {
         list: file_row,
-        // Columns rows follow the same rules in Strata (`.file-row` and `.list-row`).
+        // One-line Columns rows follow the same rules in Strata (`.file-row` and
+        // `.list-row`). Recursive-search rows add path lines: C2's own height.
         columns: file_row,
         sidebar,
         palette,

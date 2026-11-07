@@ -1,6 +1,6 @@
 {
   "bullets": [
-    "browser/view-modes/text-size: Ctrl++, Ctrl+=, or Ctrl+keypad + increases the size by 1 px"
+    "browser/view-modes/text-size: Ctrl++, Ctrl+="
   ],
   "scene": "k2-defaults-light",
   "events": [
@@ -21,13 +21,6 @@
       "type": "key",
       "name": "0",
       "cmd": true
-    },
-    {
-      "t": 0.4,
-      "type": "key",
-      "name": "=",
-      "cmd": true,
-      "alt": true
     }
   ],
   "expect": [

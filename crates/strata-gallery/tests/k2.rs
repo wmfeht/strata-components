@@ -6,6 +6,7 @@ mod k2 {
     use rune::{Env, Key, KeyEvent, Mods, Runtime};
     use strata_gallery::scenes::k2::APP_FAMILIES;
     use strata_gallery::{Gallery, scenes};
+    use strata_kit::look::Look;
 
     const FRAME: f64 = 1.0 / 60.0;
 
@@ -71,10 +72,12 @@ mod k2 {
     }
 
     #[test]
-    fn escape_puts_the_apps_families_back_and_leaves_the_page() {
-        let mut rt = mount("k2-defaults-light");
+    fn escape_puts_the_apps_families_and_the_fallback_look_back_and_leaves_the_page() {
+        let mut rt = mount("k2-round-light");
         pick(&mut rt, "k2-font-1");
         assert_ne!(families(&rt), app());
+        let fallback = Look::fallback(false);
+        assert_ne!(rt.state.look.roundness, fallback.roundness);
         rt.key(KeyEvent {
             key: Key::Escape,
             mods: Mods::default(),
@@ -82,6 +85,11 @@ mod k2 {
         run(&mut rt);
         assert_eq!(families(&rt), app());
         assert_eq!(rt.state.page, None, "the gallery went back to the index");
+        let look = &rt.state.look;
+        assert_eq!(look.roundness, fallback.roundness);
+        assert_eq!(look.kit.radius.md, fallback.kit.radius.md);
+        assert_eq!((look.row, look.frame), (fallback.row, fallback.frame));
+        assert_eq!(look.font, None);
     }
 
     #[test]

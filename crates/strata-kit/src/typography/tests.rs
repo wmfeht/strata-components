@@ -58,7 +58,9 @@ fn the_ramp_scales_together_and_keeps_its_order() {
                 (b.size - a.size * f).abs() < 1e-4,
                 "{size} px: {a:?} → {b:?}"
             );
-            assert_eq!(b.line_height.fract(), 0.0, "{size} px: whole-point line");
+            if size != 13 {
+                assert_eq!(b.line_height.fract(), 0.0, "{size} px: whole-point line");
+            }
             assert_eq!(
                 (a.weight, a.tracking, a.family),
                 (b.weight, b.tracking, b.family)
@@ -72,6 +74,14 @@ fn the_ramp_scales_together_and_keeps_its_order() {
             }
         }
     }
+}
+
+#[test]
+fn the_default_text_size_leaves_kits_ramp_untouched() {
+    let neutral = Look::from_kit(rune_kit::Kit::neutral(false));
+    let applied = neutral.clone().with_params(&LookParams::default());
+    assert_eq!(styles(&applied), styles(&neutral));
+    assert_eq!(applied.kit.ty.text_small.line_height, 19.5);
 }
 
 #[test]
@@ -141,4 +151,6 @@ fn the_search_keeps_names_containing_the_query_ignoring_case() {
     assert_eq!(filter_fonts(&choices, "er"), ["Inter", "Noto Serif"]);
     assert_eq!(filter_fonts(&choices, "").len(), 3);
     assert!(filter_fonts(&choices, "mono").is_empty());
+    assert!(font_label_matches("Default", "FAULT"));
+    assert!(!font_label_matches("Default", "sans"));
 }

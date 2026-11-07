@@ -661,6 +661,13 @@
                       ],
                       "name": "circle",
                       "role": "label"
+                    },
+                    {
+                      "actions": [
+                        "scroll-into-view"
+                      ],
+                      "name": "pill",
+                      "role": "label"
                     }
                   ],
                   "key": "k2-radii",

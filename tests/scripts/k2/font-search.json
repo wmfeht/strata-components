@@ -23,7 +23,7 @@
   "expect": [
     {
       "key": "k2-font-default",
-      "name": "Default"
+      "absent": true
     },
     {
       "key": "k2-font-0",

@@ -290,16 +290,6 @@
                         "focus",
                         "scroll-into-view"
                       ],
-                      "key": "k2-font-default",
-                      "name": "Default",
-                      "role": "button"
-                    },
-                    {
-                      "actions": [
-                        "click",
-                        "focus",
-                        "scroll-into-view"
-                      ],
                       "key": "k2-font-1",
                       "name": "DejaVu Sans",
                       "role": "button"
@@ -640,6 +630,13 @@
                         "scroll-into-view"
                       ],
                       "name": "circle",
+                      "role": "label"
+                    },
+                    {
+                      "actions": [
+                        "scroll-into-view"
+                      ],
+                      "name": "pill",
                       "role": "label"
                     }
                   ],

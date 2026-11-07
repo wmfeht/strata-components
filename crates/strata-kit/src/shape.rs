@@ -14,8 +14,13 @@
 //! 9 px for dialogs, menus and popovers, 14 px for the settings panel. A radius between steps
 //! (Strata also uses 4, 8, 10 and 12 px) goes through [`Look::round`] with its 100 % value.
 //!
-//! A circle (a dot, an avatar, a pill) is `radius(h / 2)`, never a Kit radius or
-//! [`Look::round`]: Strata's percentage radii stay circles at every roundness.
+//! Round ends come in two kinds, as in Strata's stylesheet:
+//!
+//! - A **circle** (an avatar, a spinner, a radio dot: Strata's `50%` radii) stays a circle at
+//!   every roundness: `radius(h / 2)`, never a Kit radius or [`Look::round`].
+//! - A **pill** (a folder colour dot, a swatch, a badge, a chip, a slider trough: Strata's
+//!   `999px` and `9999px` radii) follows the roundness and squares off at 0 %:
+//!   `radius(look.round(999.0).min(h / 2.0))`.
 //!
 //! # Building order
 //!

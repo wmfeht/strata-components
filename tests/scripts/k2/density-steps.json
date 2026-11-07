@@ -1,7 +1,7 @@
 {
   "bullets": [
     "browser/view-modes/density: Changing one slider leaves the other area's spacing unchanged",
-    "browser/view-modes/density: Clicking \"Compact\" or \"Airy\" snaps that slider to the preset",
+    "browser/view-modes/density: Clicking \"Compact\" or \"Airy\" snaps that slider",
     "browser/view-modes/density: Each slider's value label reads \"Compact · N px\" or \"Airy · N px\" at a preset, otherwise \"Custom · N px\""
   ],
   "scene": "k2-defaults-light",

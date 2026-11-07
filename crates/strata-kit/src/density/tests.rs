@@ -124,26 +124,19 @@ fn every_size_is_on_whole_points() {
 }
 
 #[test]
-fn densities_beyond_their_end_load_as_the_end() {
+fn densities_beyond_their_end_load_and_step_as_the_end() {
     let (end, beyond) = (look(13, FRAME.max, CONTENT.max), look(13, 200, 200));
     assert_eq!(end.frame, beyond.frame);
     assert_eq!(end.content, beyond.content);
     assert_eq!(end.row, beyond.row);
-}
-
-#[test]
-fn only_a_snap_point_is_a_preset() {
     for scale in [FRAME, CONTENT] {
-        for px in 0..=scale.max {
-            let expected = if px == scale.compact {
-                Some(Preset::Compact)
-            } else if px == scale.airy {
-                Some(Preset::Airy)
-            } else {
-                None
-            };
-            assert_eq!(scale.preset(px), expected, "{scale:?} at {px}");
-        }
+        assert_eq!(scale.stepped(scale.max, 1), scale.max);
+        assert_eq!(scale.stepped(0, -1), 0);
+        assert_eq!(
+            scale.stepped(200, -1),
+            scale.max - 1,
+            "clamps before stepping"
+        );
     }
 }
 

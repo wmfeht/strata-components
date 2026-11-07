@@ -29,4 +29,15 @@ Nothing is released yet. The first release is planned for milestone M1 with the 
 
 - One cargo feature per shim, each gating its own module: `dnd`, `clipboard`, `csd`,
   `foreign-parent`, `settings`, `icon-theme`, `media-audio`, `single-instance` and `glib-bridge`.
-  The modules are placeholders until their work packages land.
+  Apart from `glib-bridge`, the modules are placeholders until their work packages land.
+- `glib-bridge`: a GLib main loop for Rune apps. `GlibThread::start` runs a fresh `MainContext`
+  on its own thread and wakes the app's `poll` as answers land in its state.
+  - `Glib::spawn` runs a GIO future there, and its output lands in a `Task`.
+  - `Glib::listen` connects GObject signals and queues their arguments in a `Signal`.
+    `Glib::channel` and `Glib::attach` are its two halves, for several sources feeding one queue.
+  - `Glib::requests` carries a GLib-side question the app must answer from `poll`, such as a
+    mount operation's password prompt (`Asker::ask`, `Request`).
+  - `spawn_local` tracks GLib-side futures, so dropping or shutting down the `GlibThread` stops
+    them on its own thread.
+
+  It needs GLib and GIO; building it needs `libglib2.0-dev` or your distribution's equivalent.

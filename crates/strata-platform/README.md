@@ -1,20 +1,22 @@
 # strata-platform
 
 Linux platform shims for [Rune](https://github.com/anomalyco/rune) apps: the Wayland and X11
-pieces Rune doesn't ship yet. Any Rune app on Linux can use it. It depends on `rune` alone and
-has no app-specific names in its API.
+pieces Rune doesn't ship yet. Any Rune app on Linux can use it. Of Rune's crates it depends on
+`rune` only, and each shim adds optional dependencies of its own. It has no app-specific names in
+its API.
 
-Each shim is a module behind its own cargo feature, so an app builds only what it uses. Each one
-is asked of Rune upstream, and is deprecated once Rune ships the feature (see
-[Shim lifecycle](#shim-lifecycle)).
+Each shim is a module behind its own cargo feature, so an app builds only what it uses. Most are
+asked of Rune upstream, and a shim is deprecated once Rune ships its feature (see
+[Shim lifecycle](#shim-lifecycle)). Two aren't: icon theme lookup has no upstream ask proposed,
+and the GLib bridge is outside Rune's scope.
 
 The crate's name is still under review (`docs/decisions/S5-upstream.md`, owner questions). A
 rename, if any, happens before the first release tag.
 
 ## Features
 
-None is on by default. The modules are placeholders until their work packages land. "Issue" is
-the upstream ask, drafted in
+None is on by default. `glib-bridge` is implemented; the other modules are placeholders until
+their work packages land. "Issue" is the upstream ask, drafted in
 [`docs/decisions/S5-upstream.md`](../../docs/decisions/S5-upstream.md#draft-index), with its link
 once filed.
 
@@ -28,7 +30,7 @@ once filed.
 | `icon-theme` | `icon_theme` | Freedesktop icon theme lookup | None proposed |
 | `media-audio` | `media` | An audio sink with a playback clock | Related: upstream [#30](https://github.com/anomalyco/rune/issues/30) |
 | `single-instance` | `single_instance` | Single instance and activation over D-Bus | Upstream [#22](https://github.com/anomalyco/rune/issues/22) |
-| `glib-bridge` | `glib_bridge` | A GLib main context marshalled into Rune | None: outside Rune's scope |
+| `glib-bridge` | `glib_bridge` | A GLib main loop: Rune never iterates a `GMainContext`, so GIO's async calls, signals and monitors never dispatch. Implemented: `GlibThread` runs one on its own thread, and answers land in app state for `poll`. Needs GLib and GIO (`libglib2.0-dev` to build). | None: outside Rune's scope |
 
 Each module's own docs say what Rune lacks in detail, and the limits of the shim.
 
@@ -56,8 +58,8 @@ The tag shown is an example; take a real one from [Supported Rune revs](#support
 
 - **Copy the rev exactly, all 40 digits.** Cargo treats `rev = "78d22ed"` and the full rev as two
   different sources. It then builds Rune twice, and this crate's Rune types don't match your
-  app's. `cargo tree -e normal --prefix none --format '{p}' | grep '^rune v' | sort -u` must
-  print one Rune, ignoring the ` (*)` cargo adds to repeats.
+  app's. `cargo tree -e normal --prefix none --format '{p}' --color never | grep '^rune v' | sort -u`
+  must print one Rune, ignoring the ` (*)` cargo adds to repeats.
 - Your features of `rune` are your own: cargo merges them with this crate's.
 - Write the tag with a plain `+` in `Cargo.toml`. Only web links write it as `%2B`.
 - To move to a new Rune rev, move both pins together, to a tag that names the new rev.

@@ -1,0 +1,33 @@
+{
+  "bullets": [
+    "preview/preview-panel/layout: Hovering the grip or divider line lights the line and tints the grip; after 400 ms, \"Preview panel minimum width\" appears",
+    "preview/preview-panel/layout: Crossing between the divider line and the grip keeps the caption"
+  ],
+  "scene": "c9-list-open-light",
+  "events": [
+    {
+      "t": 0.1,
+      "type": "move",
+      "key": "preview-grip"
+    },
+    {
+      "t": 0.6,
+      "type": "move",
+      "x": 529,
+      "y": 320
+    },
+    {
+      "t": 0.7,
+      "type": "move",
+      "x": 533,
+      "y": 320
+    }
+  ],
+  "expect": [
+    {
+      "key": "preview-divider-caption",
+      "role": "tooltip",
+      "name": "Preview panel minimum width"
+    }
+  ]
+}

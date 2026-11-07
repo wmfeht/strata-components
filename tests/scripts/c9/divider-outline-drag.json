@@ -1,0 +1,25 @@
+{
+  "bullets": [
+    "preview/preview-panel/layout: Pointer-dragging the divider shows a dashed outline from the pointer to the right edge, captioned \"Preview panel minimum width\""
+  ],
+  "scene": "c9-list-open-light",
+  "events": [
+    {
+      "t": 0.1,
+      "type": "down",
+      "key": "preview-grip"
+    },
+    {
+      "t": 0.3,
+      "type": "move",
+      "x": 430,
+      "y": 300
+    }
+  ],
+  "expect": [
+    {
+      "key": "preview-minimum-outline",
+      "name": "Preview panel minimum width"
+    }
+  ]
+}

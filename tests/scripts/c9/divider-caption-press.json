@@ -1,0 +1,34 @@
+{
+  "bullets": [
+    "preview/preview-panel/layout: Crossing between the divider line and the grip keeps the caption; pressing hides it in favor of the outline"
+  ],
+  "scene": "c9-list-open-light",
+  "events": [
+    {
+      "t": 0.1,
+      "type": "move",
+      "key": "preview-grip"
+    },
+    {
+      "t": 0.7,
+      "type": "down",
+      "key": "preview-grip"
+    },
+    {
+      "t": 0.9,
+      "type": "move",
+      "x": 480,
+      "y": 320
+    }
+  ],
+  "expect": [
+    {
+      "key": "preview-divider-caption",
+      "absent": true
+    },
+    {
+      "key": "preview-minimum-outline",
+      "name": "Preview panel minimum width"
+    }
+  ]
+}

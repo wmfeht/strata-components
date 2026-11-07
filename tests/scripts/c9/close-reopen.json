@@ -1,0 +1,36 @@
+{
+  "bullets": [
+    "preview/preview-panel/layout: Dragging the divider, or moving it with the keyboard, sets a manual width of at least 300 px that survives closing, reopening"
+  ],
+  "scene": "c9-list-open-light",
+  "events": [
+    {
+      "t": 0.1,
+      "type": "drag",
+      "key": "preview-grip",
+      "dx": -100,
+      "dy": 0,
+      "dur": 0.3
+    },
+    {
+      "t": 0.6,
+      "type": "key",
+      "name": "Escape"
+    },
+    {
+      "t": 1.0,
+      "type": "key",
+      "name": " "
+    }
+  ],
+  "expect": [
+    {
+      "key": "preview-grip",
+      "value": "532"
+    },
+    {
+      "key": "preview-title",
+      "name": "notes.md"
+    }
+  ]
+}

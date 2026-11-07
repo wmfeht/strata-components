@@ -12,11 +12,18 @@ mod tests;
 
 /// An entry's opaque id, assigned by the host.
 ///
-/// It stays the same across re-sorts and live updates, so selections, cursors and drags held
-/// by id survive them. It is unique across every source the process shows at once (every
-/// pane, column and window), not just within one listing: a drag between panes carries ids,
-/// and the Columns view holds one selection per column. A host that numbers each listing on
-/// its own must intern its ids instead, for example through a process-wide path-to-id table.
+/// The same entry keeps the same id for the life of the process: across re-sorts, live
+/// updates, a full re-list (a refresh) and a revisit of its folder. So selections, cursors and
+/// drags held by id survive a re-sort or a refresh, and a selection remembered per folder
+/// still names the right entries when the folder is shown again. It is unique across every
+/// source the process shows at once (every pane, column and window), not just within one
+/// listing: a drag between panes carries ids, and the Columns view holds one selection per
+/// column. A host that numbers each listing on its own must intern its ids instead, for
+/// example through a process-wide location-to-id table.
+///
+/// A rename is the exception: it may give the entry a new id. A host that keeps the id across
+/// a rename should say so. A host that changes it moves what it holds by the old id to the
+/// new one; C1a's selection model provides `Selection::relocate(from, to)` for that.
 ///
 /// Used by: C1a, C1b, C1c, C1d, C1e, C2, C3, C4, C14b, C22, C25, X2.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -143,7 +150,8 @@ impl<'a> Entry<'a> {
 ///
 /// Controllers (selection, keyboard, marquee) take `&dyn EntrySource` with no app state;
 /// elements take it by accessor, `fn(&S) -> &E` with `E: EntrySource + ?Sized`. Sorting and
-/// filtering are the host's: a re-sort changes the order, never the ids.
+/// filtering are the host's: a re-sort or a refresh may change the order and the entries, never
+/// an entry's id (see [`EntryId`]).
 ///
 /// Used by: C1a, C1c, C1d, C1e, C2, C3, C4, C14b, C22.
 pub trait EntrySource {
@@ -172,7 +180,8 @@ pub trait EntrySource {
 /// Used by: the tests and gallery pages of C1a, C1c, C1d, C1e, C2, C3, C4, C14b and C22.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ListEntry {
-    /// The entry's id, unique across every source shown at once (see [`EntryId`]).
+    /// The entry's id: unique across every source shown at once, and the same for the same
+    /// entry for the life of the process (see [`EntryId`]).
     pub id: EntryId,
     /// The name the row shows.
     pub name: String,
@@ -229,7 +238,8 @@ impl ListSource {
         &self.entries
     }
 
-    /// Replaces every entry, as a refresh does. Ids must be unique.
+    /// Replaces every entry, as a refresh does. Ids must be unique, and an entry that is still
+    /// there keeps its id (see [`EntryId`]).
     pub fn replace(&mut self, entries: Vec<ListEntry>) {
         self.entries = entries;
         self.reindex();

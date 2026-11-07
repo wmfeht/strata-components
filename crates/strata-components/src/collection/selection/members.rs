@@ -100,11 +100,52 @@ impl Overlay {
 
     fn contains<S: EntrySource + ?Sized>(&self, source: &S, id: EntryId) -> bool {
         match &self.ids {
-            OverlayIds::Live { ranges, .. } => {
+            OverlayIds::Live {
+                ranges, source_len, ..
+            } => {
+                debug_assert_eq!(
+                    source.len(),
+                    *source_len,
+                    "the source changed without a Selection::sync"
+                );
                 source.index_of(id).is_some_and(|i| ranges.contains(i))
             }
             OverlayIds::Frozen(set) => set.contains(&id),
         }
+    }
+
+    /// Whether `id` is among the overlay's ids, read from its copy rather than the source.
+    fn holds(&self, id: EntryId) -> bool {
+        match &self.ids {
+            OverlayIds::Live { ids, .. } => ids.contains(&id),
+            OverlayIds::Frozen(set) => set.contains(&id),
+        }
+    }
+
+    /// Whether a live overlay's indices still name its copied ids in `source`, as far as a
+    /// cheap check can tell: the same length, and the same first and last ids. A missed
+    /// [`Selection::sync`](super::Selection::sync) that re-sorted the source usually fails
+    /// it. A frozen overlay doesn't depend on the source.
+    fn matches<S: EntrySource + ?Sized>(&self, source: &S) -> bool {
+        let OverlayIds::Live {
+            ranges,
+            ids,
+            source_len,
+        } = &self.ids
+        else {
+            return true;
+        };
+        debug_assert_eq!(
+            source.len(),
+            *source_len,
+            "the source changed without a Selection::sync"
+        );
+        let (Some(first), Some(last)) = (ranges.ranges().first(), ranges.ranges().last()) else {
+            return true;
+        };
+        source.len() == *source_len
+            && ids.first() == Some(&source.id_at(first.start))
+            && ids.last() == Some(&source.id_at(last.end - 1))
     }
 
     fn for_each_id(&self, mut f: impl FnMut(EntryId)) {
@@ -147,17 +188,6 @@ impl Members {
             None => in_base,
             Some(ov) => ov.op.apply(in_base, ov.contains(source, id)),
         }
-    }
-
-    /// Whether the overlay holds index ranges into the source as it is.
-    pub(super) fn is_live(&self) -> bool {
-        matches!(
-            self.overlay,
-            Some(Overlay {
-                ids: OverlayIds::Live { .. },
-                ..
-            })
-        )
     }
 
     /// Selects nothing. Returns whether anything was selected.
@@ -219,15 +249,46 @@ impl Members {
         added
     }
 
-    /// Moves `from`'s membership to `to`. Returns whether `from` was selected.
+    /// Renames `from` to `to` wherever the selection holds it: in the base and in the
+    /// overlay's copied ids. An open gesture goes on over the renamed id. Returns whether
+    /// `from` was selected.
     pub(super) fn relocate(&mut self, from: EntryId, to: EntryId) -> bool {
-        self.commit();
-        let moved = self.base.remove(&from);
-        if moved {
+        let in_base = self.base.remove(&from);
+        if in_base {
             self.base.insert(to);
         }
-        self.len = self.base.len();
-        moved
+        let mut was_selected = in_base;
+        if let Some(ov) = &mut self.overlay {
+            let in_overlay = match &mut ov.ids {
+                OverlayIds::Live { ids, .. } => match ids.iter_mut().find(|id| **id == from) {
+                    Some(id) => {
+                        *id = to;
+                        true
+                    }
+                    None => false,
+                },
+                OverlayIds::Frozen(set) => set.remove(&from) && set.insert(to),
+            };
+            was_selected = ov.op.apply(in_base, in_overlay);
+        }
+        was_selected
+    }
+
+    /// Adds `id` to the base alone, leaving an open gesture's overlay to apply over it, as
+    /// it does over the rest of the base. Returns whether that selected it.
+    pub(super) fn insert_base(&mut self, id: EntryId) -> bool {
+        self.freeze();
+        let selected = |m: &Self| {
+            let in_base = m.base.contains(&id);
+            match &m.overlay {
+                None => in_base,
+                Some(ov) => ov.op.apply(in_base, ov.holds(id)),
+            }
+        };
+        let before = selected(self);
+        self.base.insert(id);
+        self.recount();
+        selected(self) != before
     }
 
     /// Replaces the overlay with `ranges`, combined by `op` with the base, or with nothing if
@@ -303,16 +364,19 @@ impl Members {
         clear_base: bool,
         ranges: &IndexRanges,
     ) -> Option<bool> {
-        let Some(Overlay {
-            op: old_op,
-            ids: OverlayIds::Live {
-                ranges: old_ranges, ..
+        let Some(
+            old @ Overlay {
+                op: old_op,
+                ids: OverlayIds::Live {
+                    ranges: old_ranges, ..
+                },
             },
-        }) = &self.overlay
+        ) = &self.overlay
         else {
             return None;
         };
-        if *old_op != op || (clear_base && !self.base.is_empty()) {
+        if *old_op != op || (clear_base && !self.base.is_empty()) || !old.matches(source) {
+            // A missed sync leaves the old indices meaningless, possibly past the end.
             return None;
         }
         let delta = symmetric_difference(old_ranges, ranges);
@@ -417,6 +481,25 @@ impl Members {
         if self.len == 0 {
             return Vec::new();
         }
+        if let Some(ov) = &self.overlay
+            && !ov.matches(source)
+        {
+            // A missed sync: what verbs act on must not come from stale indices, so read the
+            // copied ids instead, as a sync would have.
+            let mut copied = IdSet::default();
+            ov.for_each_id(|id| {
+                copied.insert(id);
+            });
+            let selected = |id: &EntryId| ov.op.apply(self.base.contains(id), copied.contains(id));
+            let mut found: Vec<(usize, EntryId)> = self
+                .base
+                .union(&copied)
+                .filter(|id| selected(id))
+                .filter_map(|&id| source.index_of(id).map(|i| (i, id)))
+                .collect();
+            found.sort_unstable_by_key(|&(i, _)| i);
+            return found.into_iter().map(|(_, id)| id).collect();
+        }
         let n = source.len();
         // A few ids among many entries: sort them by index rather than scan the source.
         if self.overlay.is_none() && self.len.saturating_mul(16) < n {
@@ -434,26 +517,20 @@ impl Members {
             .collect()
     }
 
-    /// Whether the selection is exactly `ids`, or `None` when that needs the source (a live
-    /// overlay).
-    pub(super) fn equals(&self, ids: &IdSet) -> Option<bool> {
-        if self.is_live() {
-            return None;
-        }
+    /// Whether the selection is exactly `ids`. Freezes a live overlay first, which needs no
+    /// source: its copied ids are its members.
+    pub(super) fn equals(&mut self, ids: &IdSet) -> bool {
+        self.freeze();
         if self.len != ids.len() {
-            return Some(false);
+            return false;
         }
-        let contains = |id: &EntryId| {
+        ids.iter().all(|id| {
             let in_base = self.base.contains(id);
             match &self.overlay {
                 None => in_base,
-                Some(ov) => {
-                    let in_overlay = matches!(&ov.ids, OverlayIds::Frozen(set) if set.contains(id));
-                    ov.op.apply(in_base, in_overlay)
-                }
+                Some(ov) => ov.op.apply(in_base, ov.holds(*id)),
             }
-        };
-        Some(ids.iter().all(contains))
+        })
     }
 
     /// Selects exactly `ids`.

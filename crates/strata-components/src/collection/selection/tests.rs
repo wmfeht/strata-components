@@ -34,9 +34,17 @@ fn anchor(sel: &Selection) -> Option<u64> {
     sel.anchor().map(EntryId::get)
 }
 
-/// Removes the entries with the given ids, as a delete or a reload does.
+/// Removes the entries with the given ids, as a reload that drops them does.
 fn remove(s: &mut ListSource, gone: &[u64]) {
     s.retain(|e| !gone.contains(&e.id.get()));
+}
+
+/// Deletes the entries with the given ids the way a host does: tells the selection first,
+/// removes them, then syncs with `rule`.
+fn delete(sel: &mut Selection, s: &mut ListSource, gone: &[u64], rule: CursorGone) -> Changed {
+    sel.before_removal(s, |id| gone.contains(&id.get()));
+    remove(s, gone);
+    sel.sync(s, SyncRule::complete(rule))
 }
 
 #[test]
@@ -184,7 +192,8 @@ fn select_only_then_extend_selects_through_the_anchor() {
 
 #[test]
 fn select_all_selects_every_listed_entry() {
-    // browser/selection: Ctrl+A selects every entry in the focused column, not the deepest open column.
+    // Ctrl+A selects every listed entry (which column is focused is C2's). Ruling 1: the
+    // cursor and the anchor stay.
     let s = listing(5);
     let mut sel = Selection::new();
     sel.select_only(&s, 3);
@@ -221,7 +230,6 @@ fn select_all_leaves_entries_listed_later_unselected() {
 
 #[test]
 fn move_cursor_keeps_the_selection() {
-    // browser/selection: Returning to a column with the keyboard keeps its multi-selection.
     // integration/10xer-mode: After Space, Ctrl+A, or Ctrl+R, Home, End, and paging move the cursor and keep the selection.
     let s = listing(8);
     let mut sel = Selection::new();
@@ -304,21 +312,46 @@ fn loading_sync_holds_ids_until_complete() {
 }
 
 #[test]
-fn removed_cursor_takes_the_next_entry_else_the_previous() {
+fn delete_moves_the_cursor_to_the_next_survivor_else_the_previous() {
     // browser/selection: Deleting the focused entry, in Strata or externally, focuses the next visible entry, else the previous visible one, and the preview follows.
     let mut s = listing(5);
     let mut sel = Selection::new();
     sel.select_only(&s, 2);
-    remove(&mut s, &[2]);
-    let changed = sel.sync(&s, SyncRule::complete(CursorGone::NeighborSelected));
-    assert!(changed.cursor && changed.selection);
+    delete(&mut sel, &mut s, &[2], CursorGone::NeighborSelected);
     assert_eq!((cursor(&sel), selected(&sel, &s)), (Some(3), vec![3]));
     // At the end there's no next entry: the previous takes it.
-    remove(&mut s, &[4]);
-    sel.sync(&s, SyncRule::default());
-    remove(&mut s, &[3]);
-    sel.sync(&s, SyncRule::complete(CursorGone::NeighborSelected));
+    sel.select_only(&s, 3);
+    delete(&mut sel, &mut s, &[3, 4], CursorGone::NeighborSelected);
     assert_eq!((cursor(&sel), selected(&sel, &s)), (Some(1), vec![1]));
+
+    // A Shift range deleted whole: the next survivor is the entry after it, not the one now
+    // at the cursor's old index.
+    let mut s = listing(12);
+    let mut sel = Selection::new();
+    sel.select_only(&s, 2);
+    sel.extend_to(&s, 6, Extend::Replace);
+    let changed = delete(
+        &mut sel,
+        &mut s,
+        &[2, 3, 4, 5, 6],
+        CursorGone::NeighborSelected,
+    );
+    assert!(changed.cursor && changed.selection);
+    assert_eq!((cursor(&sel), selected(&sel, &s)), (Some(7), vec![7]));
+}
+
+#[test]
+fn deleted_cursor_neighbour_does_not_join_the_fill() {
+    // integration/10xer-mode/file-verbs: After `d` or `M`, the next item receives the cursor without joining the fill.
+    let mut s = listing(6);
+    let mut sel = Selection::new();
+    sel.select_only(&s, 0);
+    sel.toggle(&s, 3);
+    // `d` deletes the fill, 0 and 3; the next survivor after 3 is 4.
+    delete(&mut sel, &mut s, &[0, 3], CursorGone::Neighbor);
+    assert_eq!(cursor(&sel), Some(4));
+    assert!(sel.is_empty());
+    assert_eq!(sel.targets(&s), Targets::Cursor(id(4)));
 }
 
 #[test]
@@ -327,8 +360,7 @@ fn removing_every_entry_clears_cursor_and_selection() {
     let mut s = listing(1);
     let mut sel = Selection::new();
     sel.select_only(&s, 0);
-    remove(&mut s, &[0]);
-    let changed = sel.sync(&s, SyncRule::complete(CursorGone::NeighborSelected));
+    let changed = delete(&mut sel, &mut s, &[0], CursorGone::NeighborSelected);
     assert!(changed.selection && changed.cursor && changed.anchor);
     assert!(sel.is_empty());
     assert_eq!((sel.cursor(), sel.anchor()), (None, None));
@@ -353,14 +385,13 @@ fn inserts_leave_selection_and_cursor_unchanged() {
 }
 
 #[test]
-fn cursor_only_neighbour_takes_the_old_index_unselected() {
+fn reload_moves_the_cursor_to_its_old_index_unselected() {
     // browser/selection: A reload can drop the cursor's entry, as after a delete on a remote share. The cursor then moves to the first visible entry at or after its old index, unselected.
-    // integration/10xer-mode/file-verbs: After `d` or `M`, the next item receives the cursor without joining the fill.
     let mut s = listing(6);
     let mut sel = Selection::new();
     sel.select_only(&s, 0);
     sel.toggle(&s, 3);
-    // Entries 1 and 3 go: the entry now at index 3 (5) takes the cursor, unselected.
+    // A reload comes back without 1 and 3: the entry now at index 3 (5) takes the cursor.
     remove(&mut s, &[1, 3]);
     let changed = sel.sync(&s, SyncRule::default());
     assert!(changed.cursor && changed.selection);
@@ -477,19 +508,24 @@ fn selected_ids_never_include_an_unselected_cursor() {
 }
 
 #[test]
-fn revision_moves_only_on_a_real_change() {
-    // integration/10xer-mode/file-verbs: If the targets or the action list changed since `;`, the digit flashes `Selection changed` or `Actions changed` and runs nothing.
+fn no_op_operations_leave_the_revision() {
+    // What C1e relies on to announce only real changes. (The 10xer `; N` recheck compares
+    // targets, which is the host's: a cursor move bumps the revision without changing them.)
     let s = listing(6);
     let mut sel = Selection::new();
     sel.select_only(&s, 1);
     let r = sel.revision();
     assert!(!sel.select_only(&s, 1).any());
     assert!(!sel.move_cursor(&s, 1, AnchorRule::Move).any());
+    assert!(!sel.cancel_band().any());
+    assert_eq!(sel.revision(), r);
     sel.extend_to(&s, 3, Extend::Replace);
     let after_extend = sel.revision();
-    assert!(after_extend > r);
+    assert_ne!(after_extend, r);
     assert!(!sel.extend_to(&s, 3, Extend::Replace).any());
     assert_eq!(sel.revision(), after_extend);
+    // A fresh selection never repeats a revision an observer saw.
+    assert!(Selection::new().revision() > after_extend);
 }
 
 #[test]
@@ -541,7 +577,6 @@ fn band_modes_apply_to_the_selection_at_press() {
     // browser/selection/marquee: A plain marquee replaces the selection with the entries under the band.
     // browser/selection/marquee: A Ctrl-marquee toggles each crossed entry relative to the selection at press.
     // browser/selection/marquee: A Shift-marquee adds the crossed entries to the selection at press.
-    // browser/selection/marquee: Entries selected before they scrolled out of view stay selected; entries above the original anchor stay unselected.
     let s = listing(10);
     let mut sel = Selection::new();
     let press = |sel: &mut Selection| {
@@ -648,4 +683,70 @@ fn filter_round_trip_through_position() {
     sel.sync(&s, SyncRule::default());
     assert_eq!(selected(&sel, &s), [1, 4]);
     assert_eq!(cursor(&sel), Some(4));
+}
+
+#[test]
+fn delete_and_rename_mid_band_keep_the_band_going() {
+    // browser/selection/marquee: A Ctrl-marquee toggles each crossed entry relative to the selection at press.
+    let mut s = listing(10);
+    let mut sel = Selection::new();
+    sel.select_only(&s, 1);
+    sel.toggle(&s, 4);
+    sel.begin_band(BandMode::Toggle);
+    sel.band(&s, &(2..6).into());
+    // The cursor's entry (4) is deleted mid-band: its neighbour joins the selection at press.
+    delete(&mut sel, &mut s, &[4], CursorGone::NeighborSelected);
+    assert!(sel.is_banding());
+    assert_eq!(cursor(&sel), Some(5));
+    // 5 joined the base but the band still crosses it, so the band flips it out.
+    assert_eq!(selected(&sel, &s), [1, 2, 3]);
+    // Entry 1 is renamed to 21 mid-band.
+    let renamed: Vec<ListEntry> = s
+        .entries()
+        .iter()
+        .map(|e| if e.id == id(1) { entry(21) } else { e.clone() })
+        .collect();
+    s.replace(renamed);
+    sel.relocate(id(1), id(21));
+    sel.sync(&s, SyncRule::default());
+    assert!(sel.is_banding());
+    // Moving the band back off everything restores the selection at press, renamed, plus 5.
+    sel.band(&s, &IndexRanges::new());
+    assert_eq!(selected(&sel, &s), [21, 5]);
+    sel.end_band();
+    assert!(!sel.is_banding());
+    assert!(
+        !sel.band(&s, &(0..3).into()).any(),
+        "no band: nothing happens"
+    );
+}
+
+#[test]
+#[cfg_attr(
+    debug_assertions,
+    should_panic(expected = "the source changed without a Selection::sync")
+)]
+fn unsynced_shrink_then_extend_panics_only_in_debug() {
+    let mut s = listing(10);
+    let mut sel = Selection::new();
+    sel.select_only(&s, 0);
+    sel.extend_to(&s, 8, Extend::Replace);
+    remove(&mut s, &[5, 6, 7, 8, 9]); // and no sync
+    sel.extend_to(&s, 4, Extend::Replace);
+    assert_eq!(selected(&sel, &s), [0, 1, 2, 3, 4]);
+}
+
+#[test]
+fn unsynced_resort_still_gives_the_right_selected_ids() {
+    let mut s = listing(10);
+    let mut sel = Selection::new();
+    sel.select_only(&s, 1);
+    sel.extend_to(&s, 4, Extend::Replace);
+    s.sort_by(|a, b| b.id.cmp(&a.id)); // and no sync
+    assert_eq!(selected(&sel, &s), [4, 3, 2, 1]);
+    assert_eq!(
+        sel.targets(&s),
+        Targets::Filled([4, 3, 2, 1].map(id).to_vec())
+    );
+    assert_eq!(sel.position(&s).selected, [4, 3, 2, 1].map(id));
 }

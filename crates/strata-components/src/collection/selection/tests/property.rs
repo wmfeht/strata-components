@@ -1,10 +1,15 @@
-//! Random operations, re-sorts, removals, inserts, renames, streamed reloads and restores,
+//! Random operations, re-sorts, deletes, inserts, renames, streamed reloads and restores,
 //! checked step by step against a plain model of the same rules: membership at every index,
 //! the count, the cursor, the anchor, the fill and every reported change. After every step
 //! over a complete listing, the cursor and the anchor name listed entries or nothing.
 //!
+//! The model is written the slow and obvious way, from the rules rather than the code: sets
+//! of ids, and the two neighbour rules as walks over the listings (the next survivor in the
+//! old listing for a delete, the entry at the old index for a reload).
+//!
 //! Deterministic: each seed replays the same run. A failure names its seed and the steps that
-//! led to it.
+//! led to it. `STRATA_PROPTEST_SEEDS` overrides the seeds: a count (`5000`) or a range
+//! (`1000..2000`).
 
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
@@ -15,9 +20,25 @@ use std::rc::Rc;
 
 use super::*;
 
-const SEEDS: u64 = 256;
+const SEEDS: Range<u64> = 0..256;
 const STEPS: usize = 200;
 const MAX_LEN: usize = 48;
+
+/// The seeds to run: [`SEEDS`], or what `STRATA_PROPTEST_SEEDS` says.
+fn seeds() -> Range<u64> {
+    let Ok(text) = std::env::var("STRATA_PROPTEST_SEEDS") else {
+        return SEEDS;
+    };
+    let parse = |t: &str| {
+        t.trim()
+            .parse::<u64>()
+            .unwrap_or_else(|_| panic!("STRATA_PROPTEST_SEEDS: {text:?} is not N or A..B"))
+    };
+    match text.split_once("..") {
+        Some((a, b)) => parse(a)..parse(b),
+        None => 0..parse(&text),
+    }
+}
 
 /// splitmix64.
 struct Rng(u64);
@@ -53,17 +74,28 @@ enum ModelGesture {
     Band(BandMode),
 }
 
-/// The rules, written the slow and obvious way.
+/// What a delete told the model before it happened.
+#[derive(Clone, Debug)]
+struct Removal {
+    before: Vec<EntryId>,
+    gone: BTreeSet<EntryId>,
+}
+
+/// The rules, as sets of ids.
 #[derive(Clone, Debug)]
 struct Model {
     sel: BTreeSet<EntryId>,
     cursor: Option<EntryId>,
-    hint: Option<usize>,
+    /// The cursor's index when last seen.
+    seen_at: Option<usize>,
     anchor: Option<EntryId>,
     provisional: bool,
     gesture: ModelGesture,
-    /// The selection a gesture started from.
+    /// The selection an open gesture started from.
     base: BTreeSet<EntryId>,
+    /// The entries an open gesture's range or band covers.
+    covered: BTreeSet<EntryId>,
+    removal: Option<Removal>,
 }
 
 impl Model {
@@ -71,22 +103,44 @@ impl Model {
         Self {
             sel: BTreeSet::new(),
             cursor: None,
-            hint: None,
+            seen_at: None,
             anchor: None,
             provisional: false,
             gesture: ModelGesture::None,
             base: BTreeSet::new(),
+            covered: BTreeSet::new(),
+            removal: None,
         }
+    }
+
+    /// The selection an open gesture makes of its base and what it covers.
+    fn apply_gesture(&mut self) {
+        let (base, covered) = (&self.base, &self.covered);
+        self.sel = match self.gesture {
+            ModelGesture::None => return,
+            ModelGesture::Extend(Extend::Replace | Extend::Add)
+            | ModelGesture::Band(BandMode::Replace | BandMode::Add) => {
+                base.union(covered).copied().collect()
+            }
+            ModelGesture::Extend(Extend::Remove) => base.difference(covered).copied().collect(),
+            ModelGesture::Band(BandMode::Toggle) => {
+                base.symmetric_difference(covered).copied().collect()
+            }
+        };
+    }
+
+    fn end_gesture(&mut self) {
+        self.gesture = ModelGesture::None;
     }
 
     fn place(&mut self, s: &ListSource, i: usize) {
         self.cursor = Some(s.id_at(i));
-        self.hint = Some(i);
+        self.seen_at = Some(i);
     }
 
     fn pick(&mut self, s: &ListSource, i: usize, provisional: bool) {
         let id = s.id_at(i);
-        self.gesture = ModelGesture::None;
+        self.end_gesture();
         self.sel = BTreeSet::from([id]);
         self.provisional = provisional;
         self.place(s, i);
@@ -95,7 +149,7 @@ impl Model {
 
     fn toggle(&mut self, s: &ListSource, i: usize) {
         let id = s.id_at(i);
-        self.gesture = ModelGesture::None;
+        self.end_gesture();
         self.provisional = false;
         if !self.sel.remove(&id) {
             self.sel.insert(id);
@@ -113,26 +167,21 @@ impl Model {
                 i
             }
         };
-        if self.gesture != ModelGesture::Extend(mode) {
-            self.base = match mode {
-                Extend::Replace => BTreeSet::new(),
-                Extend::Add | Extend::Remove => self.sel.clone(),
-            };
-            self.gesture = ModelGesture::Extend(mode);
+        if mode == Extend::Replace {
+            self.base.clear();
+        } else if self.gesture != ModelGesture::Extend(mode) {
+            self.base = self.sel.clone();
         }
-        let range: BTreeSet<EntryId> = (a.min(i)..=a.max(i)).map(|j| s.id_at(j)).collect();
-        self.sel = match mode {
-            Extend::Replace => range,
-            Extend::Add => self.base.union(&range).copied().collect(),
-            Extend::Remove => self.base.difference(&range).copied().collect(),
-        };
+        self.gesture = ModelGesture::Extend(mode);
+        self.covered = (a.min(i)..=a.max(i)).map(|j| s.id_at(j)).collect();
+        self.apply_gesture();
         self.provisional = false;
         self.place(s, i);
     }
 
     fn move_cursor(&mut self, s: &ListSource, i: usize, rule: AnchorRule) {
         let id = s.id_at(i);
-        self.gesture = ModelGesture::None;
+        self.end_gesture();
         if self.provisional && self.cursor != Some(id) {
             self.provisional = false;
             self.sel.clear();
@@ -147,7 +196,7 @@ impl Model {
         if s.is_empty() {
             return;
         }
-        self.gesture = ModelGesture::None;
+        self.end_gesture();
         self.sel = listed(s).collect();
         self.provisional = false;
         if self.cursor.is_none() {
@@ -159,13 +208,13 @@ impl Model {
     }
 
     fn invert(&mut self, s: &ListSource) {
-        self.gesture = ModelGesture::None;
+        self.end_gesture();
         self.provisional = false;
         self.sel = listed(s).filter(|id| !self.sel.contains(id)).collect();
     }
 
     fn clear(&mut self) {
-        self.gesture = ModelGesture::None;
+        self.end_gesture();
         self.provisional = false;
         self.sel.clear();
         self.anchor = self.cursor;
@@ -173,7 +222,7 @@ impl Model {
 
     fn discard_provisional(&mut self) {
         if self.provisional {
-            self.gesture = ModelGesture::None;
+            self.end_gesture();
             self.provisional = false;
             self.sel.clear();
         }
@@ -184,72 +233,106 @@ impl Model {
             self.sel.clear();
         }
         self.base = self.sel.clone();
+        self.covered.clear();
         self.gesture = ModelGesture::Band(mode);
         self.provisional = false;
     }
 
     fn band(&mut self, s: &ListSource, crossed: &[Range<usize>]) {
-        let ModelGesture::Band(mode) = self.gesture else {
-            unreachable!("the driver bands only inside a band");
-        };
-        let crossed: BTreeSet<EntryId> = crossed
+        if !matches!(self.gesture, ModelGesture::Band(_)) {
+            return;
+        }
+        self.covered = crossed
             .iter()
             .flat_map(Clone::clone)
             .map(|i| s.id_at(i))
             .collect();
-        self.sel = match mode {
-            BandMode::Replace | BandMode::Add => self.base.union(&crossed).copied().collect(),
-            BandMode::Toggle => self.base.symmetric_difference(&crossed).copied().collect(),
-        };
+        self.apply_gesture();
     }
 
     fn end_band(&mut self) {
         if matches!(self.gesture, ModelGesture::Band(_)) {
-            self.gesture = ModelGesture::None;
+            self.end_gesture();
         }
     }
 
     fn cancel_band(&mut self) {
         if matches!(self.gesture, ModelGesture::Band(_)) {
-            self.gesture = ModelGesture::None;
+            self.end_gesture();
             self.sel = self.base.clone();
         }
     }
 
+    fn before_removal(&mut self, before: &ListSource, gone: BTreeSet<EntryId>) {
+        self.removal = Some(Removal {
+            before: listed(before).collect(),
+            gone,
+        });
+    }
+
+    /// Where a cursor whose entry left goes, by the rule for how it left.
+    fn neighbour(
+        &self,
+        s: &ListSource,
+        cursor: EntryId,
+        removal: Option<&Removal>,
+    ) -> Option<usize> {
+        let n = s.len();
+        if let Some(removal) = removal
+            && let Some(at) = removal.before.iter().position(|&id| id == cursor)
+        {
+            // A delete: the next entry that survived, else the previous one.
+            let survives = |id: &&EntryId| !removal.gone.contains(id);
+            let next = removal.before[at + 1..].iter().find(survives);
+            let previous = removal.before[..at].iter().rev().find(survives);
+            return next.or(previous).and_then(|&id| s.index_of(id));
+        }
+        // A reload: the first entry at or after the old index, else the previous one.
+        let old = self.seen_at.unwrap_or(0);
+        (old..n).next().or_else(|| (0..n).next_back())
+    }
+
     fn sync(&mut self, s: &ListSource, rule: SyncRule) {
+        let removal = self.removal.take();
         if rule.listing == Listing::Loading {
             if let Some(i) = self.cursor.and_then(|c| s.index_of(c)) {
-                self.hint = Some(i);
+                self.seen_at = Some(i);
             }
             return;
         }
         let is_listed = |id: &EntryId| s.index_of(*id).is_some();
         self.sel.retain(is_listed);
         self.base.retain(is_listed);
+        self.covered.retain(is_listed);
         match self.cursor {
             Some(c) => match s.index_of(c) {
-                Some(i) => self.hint = Some(i),
+                Some(i) => self.seen_at = Some(i),
                 None => {
                     self.provisional = false;
-                    let n = s.len();
-                    let neighbour = match rule.cursor_gone {
+                    let to = match rule.cursor_gone {
                         CursorGone::Clear => None,
-                        _ if n == 0 => None,
-                        _ => Some(self.hint.unwrap_or(0).min(n - 1)),
+                        CursorGone::Neighbor | CursorGone::NeighborSelected => {
+                            self.neighbour(s, c, removal.as_ref())
+                        }
                     };
-                    match neighbour {
+                    match to {
                         Some(i) => {
                             self.place(s, i);
                             if rule.cursor_gone == CursorGone::NeighborSelected {
-                                self.gesture = ModelGesture::None;
-                                self.sel.insert(s.id_at(i));
+                                let id = s.id_at(i);
+                                if self.gesture == ModelGesture::None {
+                                    self.sel.insert(id);
+                                } else {
+                                    self.base.insert(id);
+                                    self.apply_gesture();
+                                }
                             }
                         }
-                        None => (self.cursor, self.hint) = (None, None),
+                        None => (self.cursor, self.seen_at) = (None, None),
                     }
                 }
             },
-            None => self.hint = None,
+            None => self.seen_at = None,
         }
         if self.cursor.is_none() {
             self.anchor = None;
@@ -259,9 +342,10 @@ impl Model {
     }
 
     fn relocate(&mut self, from: EntryId, to: EntryId) {
-        self.gesture = ModelGesture::None;
-        if self.sel.remove(&from) {
-            self.sel.insert(to);
+        for set in [&mut self.sel, &mut self.base, &mut self.covered] {
+            if set.remove(&from) {
+                set.insert(to);
+            }
         }
         for held in [&mut self.cursor, &mut self.anchor] {
             if *held == Some(from) {
@@ -271,12 +355,12 @@ impl Model {
     }
 
     fn restore(&mut self, p: &Position) {
-        self.gesture = ModelGesture::None;
+        self.end_gesture();
         self.sel = p.selected.iter().copied().collect();
         self.provisional =
             p.provisional && self.sel.len() == 1 && p.cursor.is_some_and(|c| self.sel.contains(&c));
         self.cursor = p.cursor;
-        self.hint = p.cursor.and(p.cursor_index);
+        self.seen_at = p.cursor.and(p.cursor_index);
         self.anchor = p.anchor.and(p.cursor);
     }
 
@@ -298,7 +382,7 @@ impl Model {
     fn position(&self, s: &ListSource) -> Position {
         Position {
             cursor: self.cursor,
-            cursor_index: self.cursor.and_then(|c| s.index_of(c)).or(self.hint),
+            cursor_index: self.cursor.and_then(|c| s.index_of(c)).or(self.seen_at),
             anchor: self.anchor,
             selected: self.selected_in_order(s),
             provisional: self.provisional,
@@ -320,6 +404,21 @@ fn diff(before: &Model, after: &Model) -> Changed {
     }
 }
 
+/// How many times the run reached the paths that are easy to miss.
+#[derive(Debug, Default)]
+struct Coverage {
+    /// An extend run going on over a non-empty base (Add or Remove).
+    extend_runs_over_a_base: usize,
+    /// A band move over a non-empty selection at press.
+    band_moves_over_a_base: usize,
+    /// A sync or a rename while a gesture was open.
+    changes_mid_gesture: usize,
+    /// A delete's neighbour joining an open gesture's base.
+    neighbours_into_a_gesture: usize,
+    /// A delete where the next survivor isn't at the cursor's old index.
+    deletes_past_the_old_index: usize,
+}
+
 struct Run {
     rng: Rng,
     s: ListSource,
@@ -330,10 +429,11 @@ struct Run {
     log: Rc<RefCell<Vec<String>>>,
     /// Whether the source holds its whole listing (not mid-reload).
     complete: bool,
+    coverage: Rc<RefCell<Coverage>>,
 }
 
 impl Run {
-    fn new(seed: u64, log: Rc<RefCell<Vec<String>>>) -> Self {
+    fn new(seed: u64, log: Rc<RefCell<Vec<String>>>, coverage: Rc<RefCell<Coverage>>) -> Self {
         let mut rng = Rng(seed);
         let n = rng.below(25) as u64;
         Self {
@@ -345,6 +445,7 @@ impl Run {
             saved: Vec::new(),
             log,
             complete: true,
+            coverage,
         }
     }
 
@@ -353,29 +454,22 @@ impl Run {
         self.next_id + 1_000
     }
 
+    fn note(&self, what: String) {
+        self.log.borrow_mut().push(what);
+    }
+
     /// Applies `op` to both, then checks they agree and that the reported change is the
-    /// model's (or, when `exact` is false, covers it).
+    /// model's.
     fn op(
         &mut self,
         what: String,
-        exact: bool,
         f: impl FnOnce(&mut Selection, &mut Model, &ListSource) -> Changed,
     ) {
-        self.log.borrow_mut().push(what);
+        self.note(what);
         let before = self.model.clone();
         let revision = self.sel.revision();
         let changed = f(&mut self.sel, &mut self.model, &self.s);
-        let expected = diff(&before, &self.model);
-        if exact {
-            assert_eq!(changed, expected, "reported change");
-        } else {
-            assert!(
-                (!expected.selection || changed.selection)
-                    && (!expected.cursor || changed.cursor)
-                    && (!expected.anchor || changed.anchor),
-                "reported change {changed:?} misses {expected:?}"
-            );
-        }
+        assert_eq!(changed, diff(&before, &self.model), "reported change");
         let bumped = self.sel.revision() != revision;
         assert_eq!(
             bumped,
@@ -402,6 +496,11 @@ impl Run {
         assert_eq!(sel.cursor(), m.cursor, "cursor");
         assert_eq!(sel.anchor(), m.anchor, "anchor");
         assert_eq!(sel.is_provisional(), m.provisional, "provisional");
+        assert_eq!(
+            sel.is_banding(),
+            matches!(m.gesture, ModelGesture::Band(_)),
+            "banding"
+        );
         assert_eq!(sel.selected_ids(s), m.selected_in_order(s), "selected ids");
         assert_eq!(sel.targets(s), m.targets(s), "targets");
         if !self.complete {
@@ -430,12 +529,45 @@ impl Run {
         (!self.s.is_empty()).then(|| self.rng.below(self.s.len()))
     }
 
+    fn extend(&mut self, mode: Extend) {
+        let Some(i) = self.index() else { return };
+        let m = &self.model;
+        if mode != Extend::Replace && m.gesture == ModelGesture::Extend(mode) && !m.base.is_empty()
+        {
+            self.coverage.borrow_mut().extend_runs_over_a_base += 1;
+        }
+        self.op(format!("extend_to {i} {mode:?}"), |sel, m, s| {
+            m.extend(s, i, mode);
+            sel.extend_to(s, i, mode)
+        });
+    }
+
+    fn band_move(&mut self) {
+        if matches!(self.model.gesture, ModelGesture::Band(_)) && !self.model.base.is_empty() {
+            self.coverage.borrow_mut().band_moves_over_a_base += 1;
+        }
+        let crossed = self.random_ranges();
+        let mut set = IndexRanges::new();
+        for r in &crossed {
+            set.push(r.clone());
+        }
+        self.op(format!("band {crossed:?}"), |sel, m, s| {
+            m.band(s, &crossed);
+            sel.band(s, &set)
+        });
+    }
+
     fn random_op(&mut self) {
-        let in_band = matches!(self.model.gesture, ModelGesture::Band(_));
+        // Gestures go on most of the time, so runs and bands get long enough to matter.
+        match self.model.gesture {
+            ModelGesture::Band(_) if self.rng.chance(70) => return self.band_move(),
+            ModelGesture::Extend(mode) if self.rng.chance(60) => return self.extend(mode),
+            _ => {}
+        }
         match self.rng.below(16) {
             0 | 1 => {
                 if let Some(i) = self.index() {
-                    self.op(format!("select_only {i}"), true, |sel, m, s| {
+                    self.op(format!("select_only {i}"), |sel, m, s| {
                         m.pick(s, i, false);
                         sel.select_only(s, i)
                     });
@@ -443,7 +575,7 @@ impl Run {
             }
             2 => {
                 if let Some(i) = self.index() {
-                    self.op(format!("auto_select {i}"), true, |sel, m, s| {
+                    self.op(format!("auto_select {i}"), |sel, m, s| {
                         m.pick(s, i, true);
                         sel.auto_select(s, i)
                     });
@@ -451,91 +583,73 @@ impl Run {
             }
             3 | 4 => {
                 if let Some(i) = self.index() {
-                    self.op(format!("toggle {i}"), true, |sel, m, s| {
+                    self.op(format!("toggle {i}"), |sel, m, s| {
                         m.toggle(s, i);
                         sel.toggle(s, i)
                     });
                 }
             }
             5..=7 => {
-                if let Some(i) = self.index() {
-                    let mode = self
-                        .rng
-                        .pick(&[Extend::Replace, Extend::Add, Extend::Remove]);
-                    self.op(format!("extend_to {i} {mode:?}"), true, |sel, m, s| {
-                        m.extend(s, i, mode);
-                        sel.extend_to(s, i, mode)
-                    });
-                }
+                let mode = self
+                    .rng
+                    .pick(&[Extend::Replace, Extend::Add, Extend::Remove]);
+                self.extend(mode);
             }
             8 => {
                 if let Some(i) = self.index() {
                     let rule = self.rng.pick(&[AnchorRule::Keep, AnchorRule::Move]);
-                    self.op(format!("move_cursor {i} {rule:?}"), true, |sel, m, s| {
+                    self.op(format!("move_cursor {i} {rule:?}"), |sel, m, s| {
                         m.move_cursor(s, i, rule);
                         sel.move_cursor(s, i, rule)
                     });
                 }
             }
-            9 => self.op("select_all".into(), true, |sel, m, s| {
+            9 => self.op("select_all".into(), |sel, m, s| {
                 m.select_all(s);
                 sel.select_all(s)
             }),
-            10 => self.op("invert".into(), true, |sel, m, s| {
+            10 => self.op("invert".into(), |sel, m, s| {
                 m.invert(s);
                 sel.invert(s)
             }),
             11 => {
                 if self.rng.chance(50) {
-                    self.op("clear".into(), true, |sel, m, _| {
+                    self.op("clear".into(), |sel, m, _| {
                         m.clear();
                         sel.clear()
                     });
                 } else {
-                    self.op("discard_provisional".into(), true, |sel, m, _| {
+                    self.op("discard_provisional".into(), |sel, m, _| {
                         m.discard_provisional();
                         sel.discard_provisional()
                     });
                 }
             }
-            12 | 13 if in_band => match self.rng.below(5) {
-                0 => self.op("end_band".into(), true, |sel, m, _| {
+            12 | 13 => match self.rng.below(4) {
+                0 => self.op("end_band".into(), |sel, m, _| {
                     m.end_band();
                     sel.end_band();
                     Changed::NONE
                 }),
-                1 => self.op("cancel_band".into(), true, |sel, m, _| {
+                1 => self.op("cancel_band".into(), |sel, m, _| {
                     m.cancel_band();
                     sel.cancel_band()
                 }),
+                2 => self.band_move(),
                 _ => {
-                    let crossed = self.random_ranges();
-                    let set = crossed
-                        .iter()
-                        .cloned()
-                        .fold(IndexRanges::new(), |mut r, x| {
-                            r.push(x);
-                            r
-                        });
-                    self.op(format!("band {crossed:?}"), true, |sel, m, s| {
-                        m.band(s, &crossed);
-                        sel.band(s, &set)
+                    let mode = self
+                        .rng
+                        .pick(&[BandMode::Replace, BandMode::Toggle, BandMode::Add]);
+                    self.op(format!("begin_band {mode:?}"), |sel, m, _| {
+                        m.begin_band(mode);
+                        sel.begin_band(mode)
                     });
                 }
             },
-            12 | 13 => {
-                let mode = self
-                    .rng
-                    .pick(&[BandMode::Replace, BandMode::Toggle, BandMode::Add]);
-                self.op(format!("begin_band {mode:?}"), true, |sel, m, _| {
-                    m.begin_band(mode);
-                    sel.begin_band(mode)
-                });
-            }
             14 => {
                 let p = self.sel.position(&self.s);
                 assert_eq!(p, self.model.position(&self.s), "position");
-                self.log.borrow_mut().push("save position".into());
+                self.note("save position".into());
                 self.saved.push(p);
             }
             _ => {
@@ -543,7 +657,7 @@ impl Run {
                     let p = self.saved[self.rng.below(self.saved.len())].clone();
                     // Until the sync below, the restored ids may name entries gone since.
                     self.complete = false;
-                    self.op("restore".into(), false, |sel, m, _| {
+                    self.op("restore".into(), |sel, m, _| {
                         m.restore(&p);
                         sel.restore(&p)
                     });
@@ -570,6 +684,10 @@ impl Run {
         out
     }
 
+    fn mid_gesture(&self) -> bool {
+        self.model.gesture != ModelGesture::None
+    }
+
     fn sync(&mut self, listing: Listing) {
         let cursor_gone = self.rng.pick(&[
             CursorGone::Neighbor,
@@ -581,35 +699,76 @@ impl Run {
             cursor_gone,
         };
         self.complete = listing == Listing::Complete;
-        self.op(format!("sync {rule:?}"), true, |sel, m, s| {
+        if self.mid_gesture() {
+            let mut coverage = self.coverage.borrow_mut();
+            coverage.changes_mid_gesture += 1;
+            let cursor_goes = self
+                .model
+                .cursor
+                .is_some_and(|c| self.s.index_of(c).is_none());
+            if cursor_goes
+                && listing == Listing::Complete
+                && cursor_gone == CursorGone::NeighborSelected
+            {
+                coverage.neighbours_into_a_gesture += 1;
+            }
+        }
+        self.op(format!("sync {rule:?}"), |sel, m, s| {
             m.sync(s, rule);
             sel.sync(s, rule)
         });
     }
 
+    /// A delete: the host tells the selection, removes the entries, then syncs.
+    fn delete(&mut self, gone: BTreeSet<EntryId>) {
+        self.note(format!("delete {gone:?}"));
+        if let Some(at) = self.model.cursor.and_then(|c| self.s.index_of(c))
+            && gone.contains(&self.s.id_at(at))
+        {
+            let before = (0..at)
+                .filter(|&i| !gone.contains(&self.s.id_at(i)))
+                .count();
+            let next = (at..self.s.len()).find(|&i| !gone.contains(&self.s.id_at(i)));
+            if next.is_some_and(|_| before != at) {
+                self.coverage.borrow_mut().deletes_past_the_old_index += 1;
+            }
+        }
+        self.model.before_removal(&self.s, gone.clone());
+        self.sel.before_removal(&self.s, |id| gone.contains(&id));
+        self.s.retain(|e| !gone.contains(&e.id));
+        self.sync(Listing::Complete);
+    }
+
     fn random_change(&mut self) {
         let mut entries = self.s.entries().to_vec();
-        match self.rng.below(5) {
+        match self.rng.below(6) {
             0 => {
                 let keys: HashMap<EntryId, u64> =
                     entries.iter().map(|e| (e.id, self.rng.next())).collect();
-                self.log.borrow_mut().push("shuffle".into());
+                self.note("shuffle".into());
                 self.s.sort_by(|a, b| keys[&a.id].cmp(&keys[&b.id]));
             }
             1 => {
-                let percent = self.rng.pick(&[10, 30, 100]);
-                let gone: Vec<bool> = entries.iter().map(|_| self.rng.chance(percent)).collect();
-                let mut i = 0;
-                entries.retain(|_| {
-                    i += 1;
-                    !gone[i - 1]
-                });
-                self.log
-                    .borrow_mut()
-                    .push(format!("remove to {}", entries.len()));
-                self.s.replace(entries);
+                // A delete of the selection, the cursor with it, as `d` or Delete does.
+                let mut gone = self.model.sel.clone();
+                gone.extend(self.model.cursor);
+                return self.delete(gone);
             }
             2 => {
+                let percent = self.rng.pick(&[10, 30, 100]);
+                let gone: BTreeSet<EntryId> = entries
+                    .iter()
+                    .map(|e| e.id)
+                    .filter(|_| self.rng.chance(percent))
+                    .collect();
+                if self.rng.chance(50) {
+                    return self.delete(gone);
+                }
+                // A reload that comes back without them.
+                self.note(format!("drop {gone:?}"));
+                self.s.retain(|e| !gone.contains(&e.id));
+            }
+            3 => {
                 let count = 1 + self.rng.below(4);
                 for _ in 0..count {
                     if entries.len() < MAX_LEN {
@@ -618,26 +777,24 @@ impl Run {
                         entries.insert(at, entry(raw));
                     }
                 }
-                self.log
-                    .borrow_mut()
-                    .push(format!("insert to {}", entries.len()));
+                self.note(format!("insert to {}", entries.len()));
                 self.s.replace(entries);
             }
-            3 if !entries.is_empty() => {
+            4 if !entries.is_empty() => {
                 let at = self.rng.below(entries.len());
                 let from = entries[at].id;
                 let to = EntryId::new(self.fresh_id());
                 entries[at] = entry(to.get());
                 self.s.replace(entries);
-                self.op(format!("relocate {from:?} -> {to:?}"), true, |sel, m, _| {
+                if self.mid_gesture() {
+                    self.coverage.borrow_mut().changes_mid_gesture += 1;
+                }
+                self.op(format!("relocate {from:?} -> {to:?}"), |sel, m, _| {
                     m.relocate(from, to);
                     sel.relocate(from, to)
                 });
             }
-            _ => {
-                self.reload();
-                return;
-            }
+            _ => return self.reload(),
         }
         self.sync(Listing::Complete);
     }
@@ -647,9 +804,7 @@ impl Run {
     fn reload(&mut self) {
         let mut full = self.s.entries().to_vec();
         full.retain(|_| !self.rng.chance(20));
-        self.log
-            .borrow_mut()
-            .push(format!("reload to {}", full.len()));
+        self.note(format!("reload to {}", full.len()));
         self.s.replace(Vec::new());
         self.sync(Listing::Loading);
         let mut shown = 0;
@@ -676,10 +831,12 @@ impl Run {
 
 #[test]
 fn random_operations_keep_cursor_and_anchor_on_listed_entries() {
-    for seed in 0..SEEDS {
+    let coverage = Rc::new(RefCell::new(Coverage::default()));
+    let seeds = seeds();
+    for seed in seeds.clone() {
         let log = Rc::new(RefCell::new(Vec::new()));
         let result = catch_unwind(AssertUnwindSafe(|| {
-            let mut run = Run::new(seed, Rc::clone(&log));
+            let mut run = Run::new(seed, Rc::clone(&log), Rc::clone(&coverage));
             run.check();
             for _ in 0..STEPS {
                 run.step();
@@ -694,5 +851,23 @@ fn random_operations_keep_cursor_and_anchor_on_listed_entries() {
             eprintln!("seed {seed} failed; its last steps:\n{steps}");
             resume_unwind(panic);
         }
+    }
+    let coverage = coverage.borrow();
+    eprintln!("selection property test, seeds {seeds:?}: {coverage:#?}");
+    // Each path the model exists to check must come up, or the weights have drifted.
+    for (what, count) in [
+        ("extend runs over a base", coverage.extend_runs_over_a_base),
+        ("band moves over a base", coverage.band_moves_over_a_base),
+        ("changes mid-gesture", coverage.changes_mid_gesture),
+        (
+            "neighbours into a gesture",
+            coverage.neighbours_into_a_gesture,
+        ),
+        (
+            "deletes past the old index",
+            coverage.deletes_past_the_old_index,
+        ),
+    ] {
+        assert!(count > 0, "the property run never reached {what}");
     }
 }

@@ -17,13 +17,22 @@
 //! After **every** change to the source (a re-sort, a live update, a reload batch, a filter),
 //! the host calls [`Selection::sync`] before anything else reads or changes the selection
 //! with that source. A range is held by index until then, so it can cover 100,000 entries in
-//! well under a millisecond; `sync` turns it into ids. Debug builds catch a missing `sync`
-//! that changed the source's length.
+//! well under a millisecond; `sync` turns it into ids. Debug builds panic on a missing `sync`
+//! that changed the source's length. Release builds don't panic, and the ids verbs act on
+//! ([`Selection::selected_ids`], [`Selection::targets`], [`Selection::position`]) fall back to
+//! the range's copied ids when a cheap check (the length, the first and the last id) shows
+//! the indices went stale; drawn rows may still be wrong until the `sync`.
 //!
 //! `sync` drops ids the source no longer lists (unless the listing is still loading) and moves
 //! a cursor whose entry went to a neighbour, by the rule the caller picks ([`CursorGone`]).
+//! For a delete or a move out of the folder, the host calls [`Selection::before_removal`] with
+//! the listing as it was, so the neighbour is the next surviving entry, as in Strata; without
+//! it, the neighbour is the entry at the cursor's old index, Strata's rule after a reload.
 //! A rename that gives the entry a new id is [`Selection::relocate`], called before the `sync`
 //! for that change.
+//!
+//! An open gesture (an extend run or a marquee band) survives a sync and a rename: the band
+//! still restores the selection at press when moved back.
 //!
 //! # The cursor, the anchor and the fill
 //!
@@ -42,8 +51,15 @@
 //!
 //! Each operation returns [`Changed`]: whether the selection, the cursor or the anchor really
 //! changed. An operation that changes nothing returns [`Changed::NONE`], so the element
-//! announces only real changes to assistive technology. [`Selection::revision`] goes up
-//! exactly when an operation reports a change.
+//! announces only real changes to assistive technology.
+//!
+//! [`Selection::revision`] goes up exactly when an operation reports a change, including a
+//! cursor-only move, so it over-approximates a change of [`Selection::targets`]: a host that
+//! must know whether the targets changed (10xer `; 1` rechecks them) compares the targets.
+//! Revisions come from one process-wide counter, so a new or replaced `Selection` never
+//! repeats a revision an observer already saw. Still, hosts keep one `Selection` per
+//! collection and reset it with [`Selection::clear`] or [`Selection::restore`] rather than
+//! replace it, so the element's change tracking follows one value.
 //!
 //! # Decisions
 //!
@@ -75,6 +91,7 @@ mod restore;
 mod tests;
 
 use std::ops::{BitOr, BitOrAssign};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 pub use restore::{Position, RestoreMemory, ScrollMemo};
 
@@ -184,8 +201,15 @@ pub enum Listing {
 
 /// Where the cursor goes when its entry leaves a complete listing.
 ///
-/// Every rule takes the entry at the cursor's last index in the new listing, or the last
-/// entry when the listing got shorter than that: the next entry, else the previous one.
+/// The neighbour is the entry at the cursor's index hint in the new listing, or the last entry
+/// when the listing got shorter than that. The hint is:
+///
+/// - after [`Selection::before_removal`] (a delete, a move out), the number of entries before
+///   the cursor that survive, so the neighbour is the next surviving entry, else the previous
+///   one (Strata's removal rule);
+/// - otherwise the cursor's index when last seen, so the neighbour is the first entry at or
+///   after its old index, else the previous one (Strata's rule after a reload). A restored
+///   position's hint is its remembered index.
 ///
 /// Used by: C1e, C2, and hosts.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -194,6 +218,7 @@ pub enum CursorGone {
     #[default]
     Neighbor,
     /// The neighbour takes the cursor and joins the selection: a delete in the default map.
+    /// During an open gesture it joins the gesture's base, so the overlay still applies.
     NeighborSelected,
     /// No entry takes the cursor: a Columns column whose child column is open.
     Clear,
@@ -257,7 +282,7 @@ enum Gesture {
 /// See the [module docs](self) for the rules every operation follows.
 ///
 /// Used by: C1b, C1c, C1d, C1e, C2 (one per column), C3, C4, C18.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct Selection {
     members: Members,
     gesture: Gesture,
@@ -267,6 +292,27 @@ pub struct Selection {
     anchor: Option<EntryId>,
     provisional: bool,
     revision: u64,
+}
+
+/// The process-wide source of [`Selection::revision`] values.
+static REVISIONS: AtomicU64 = AtomicU64::new(0);
+
+fn next_revision() -> u64 {
+    REVISIONS.fetch_add(1, Ordering::Relaxed) + 1
+}
+
+impl Default for Selection {
+    fn default() -> Self {
+        Self {
+            members: Members::default(),
+            gesture: Gesture::None,
+            cursor: None,
+            cursor_hint: None,
+            anchor: None,
+            provisional: false,
+            revision: next_revision(),
+        }
+    }
 }
 
 impl Selection {
@@ -324,7 +370,8 @@ impl Selection {
         self.provisional
     }
 
-    /// A counter that goes up whenever an operation reports a change.
+    /// A value that goes up whenever an operation reports a change, unique across the
+    /// process. See the [module docs](self#change-notifications).
     pub fn revision(&self) -> u64 {
         self.revision
     }
@@ -546,11 +593,18 @@ impl Selection {
         self.finish(changed)
     }
 
-    /// Applies the entries the band crosses now to the selection at press. Moving the band
-    /// back off an entry restores that entry. Outside a band this does nothing.
+    /// Whether a marquee band is open: between [`Selection::begin_band`] and
+    /// [`Selection::end_band`] or [`Selection::cancel_band`]. Any other selecting operation
+    /// also ends it.
+    pub fn is_banding(&self) -> bool {
+        matches!(self.gesture, Gesture::Band(_))
+    }
+
+    /// Applies the entries the band crosses now (indices into `source`) to the selection at
+    /// press. Moving the band back off an entry restores that entry. With no band open
+    /// ([`Selection::is_banding`]), it does nothing and reports no change.
     pub fn band<S: EntrySource + ?Sized>(&mut self, source: &S, crossed: &IndexRanges) -> Changed {
         let Gesture::Band(mode) = self.gesture else {
-            debug_assert!(false, "Selection::band outside begin_band");
             return Changed::NONE;
         };
         let op = match mode {
@@ -646,9 +700,12 @@ impl Selection {
                 self.cursor = Some(id);
                 self.cursor_hint = Some(i);
                 if rule == CursorGone::NeighborSelected {
-                    // Joining the selection ends any open gesture, whose base it would skip.
-                    self.gesture = Gesture::None;
-                    changed.selection |= self.members.insert(id);
+                    changed.selection |= if self.gesture == Gesture::None {
+                        self.members.insert(id)
+                    } else {
+                        // An open gesture keeps going over its base, which gains the neighbour.
+                        self.members.insert_base(id)
+                    };
                 }
             }
             None => {
@@ -661,12 +718,11 @@ impl Selection {
 
     /// Moves what the selection holds by `from` to `to`: a rename that gave the entry a new
     /// id. Call it before the [`Selection::sync`] for that change, or the sync drops `from` as
-    /// gone. It ends an open gesture.
+    /// gone. An open gesture goes on over the renamed id.
     pub fn relocate(&mut self, from: EntryId, to: EntryId) -> Changed {
         if from == to {
             return Changed::NONE;
         }
-        self.gesture = Gesture::None;
         let mut changed = Changed {
             selection: self.members.relocate(from, to),
             ..Changed::NONE
@@ -680,6 +736,24 @@ impl Selection {
             changed.anchor = true;
         }
         self.finish(changed)
+    }
+
+    /// Records where the cursor's neighbour is, before the host removes entries: `before` is
+    /// the listing as it is now, still in step with the selection, and `gone` says which of
+    /// its entries are going (a delete, a move out of the folder). The next
+    /// [`Selection::sync`] that finds the cursor gone then moves it to the next surviving
+    /// entry, else the previous one, as Strata does on a removal.
+    ///
+    /// It changes nothing visible, and costs one `gone` call per entry before the cursor.
+    pub fn before_removal<S: EntrySource + ?Sized>(
+        &mut self,
+        before: &S,
+        gone: impl Fn(EntryId) -> bool,
+    ) {
+        if let Some(i) = self.cursor_index(before) {
+            let survivors = (0..i).filter(|&j| !gone(before.id_at(j))).count();
+            self.cursor_hint = Some(survivors);
+        }
     }
 
     // Position restore.
@@ -701,13 +775,12 @@ impl Selection {
     /// listing: ids gone since leave, and a cursor whose entry went moves to the neighbour at
     /// its remembered index.
     ///
-    /// It reports a selection change unless it can tell the selection is the same without a
-    /// source (it can't while a range is held by index).
+    /// It reports exactly what changed, comparing by id.
     pub fn restore(&mut self, position: &Position) -> Changed {
         self.gesture = Gesture::None;
         let mut ids = IdSet::with_capacity_and_hasher(position.selected.len(), Default::default());
         ids.extend(position.selected.iter().copied());
-        let same = self.members.equals(&ids).unwrap_or(false);
+        let same = self.members.equals(&ids);
         // A provisional pick is the cursor's entry alone.
         let provisional = position.provisional
             && ids.len() == 1
@@ -750,7 +823,7 @@ impl Selection {
 
     fn finish(&mut self, changed: Changed) -> Changed {
         if changed.any() {
-            self.revision += 1;
+            self.revision = next_revision();
         }
         changed
     }

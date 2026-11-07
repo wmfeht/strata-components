@@ -129,7 +129,8 @@ impl<K: Eq + Hash> RestoreMemory<K> {
         if count > self.id_budget || self.capacity == 0 {
             return false;
         }
-        while self.folders.len() >= self.capacity || self.ids + count > self.id_budget {
+        while self.folders.len() >= self.capacity || self.ids.saturating_add(count) > self.id_budget
+        {
             self.forget_oldest();
         }
         self.clock += 1;

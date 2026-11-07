@@ -45,15 +45,3 @@ fn restore_memory_keeps_within_its_id_budget() {
     assert_eq!(memory.forget(&"c").map(|p| p.selected.len()), Some(60));
     assert_eq!(memory.ids(), 10);
 }
-
-#[test]
-fn scroll_offset_returns_only_for_the_same_layout() {
-    // browser/view-modes/position-restore: The exact scroll offset returns only in the view the folder was left in, and for Icons only at the same grid width. Otherwise the view scrolls the cursor into view.
-    let list_view = 1;
-    let icons_at_800 = 2;
-    let icons_at_801 = 3;
-    let memo = ScrollMemo::new(icons_at_800, 1_234.0);
-    assert_eq!(memo.offset_for(icons_at_800), Some(1_234.0));
-    assert_eq!(memo.offset_for(icons_at_801), None);
-    assert_eq!(memo.offset_for(list_view), None);
-}

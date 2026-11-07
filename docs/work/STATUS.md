@@ -12,7 +12,7 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | S1 | merged | P3: X11 shim conditional on mutter/KWin hand test; Wayland resize/menu blocked on Rune (R1-R3, R7); Hyprland/GNOME/KDE/lavapipe hand test pending | c5794e1 |
 | S2 | merged | 3 review rounds; P0 feasible w/o Rune patch on libwayland>=1.23; Ubuntu 24.04 GNOME: DnD unsupported; R1-R5 drafted; Hyprland/GNOME/KDE/Dolphin hand test pending | 702338f |
 | S3 | merged | sway Wayland/X11 measured; Hyprland/GNOME/KDE/Firefox hand test pending (QEMU Tier B not run); 3 owner decisions | f5682e4 |
-| S4 | coding | fancy-regex vs onig; fixtures under tests/fixtures/code | |
+| S4 | review 1 | recommends onig (fancy misses 8 ms viewport budget) + 64-line checkpoints: owner decision; bincode RUSTSEC-2025-0141 ignore needed for C10a | |
 | S5 | coding | strata-platform name TAKEN on crates.io (unrelated) -> owner; 17 Rune issue drafts (U1-U17); release.yml dry-run local only | |
 | C10a | waiting | | |
 | C14a | ready | | |
@@ -41,7 +41,7 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | P6 | ready | | |
 | P7 | ready | | |
 | P8 | waiting | | |
-| P9 | review 1 | own MainContext thread; results drained in poll via Waker; tests re-exec with GIO_USE_VFS=local | |
+| P9 | merged | 1 review round + fixes; ci.yml gains libglib2.0-dev (approved exception); example compiled, not run; no desktop hand test | 54786b4 |
 | C10b | waiting | | |
 | C11 | waiting | | |
 | C12 | waiting | | |

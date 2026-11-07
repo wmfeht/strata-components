@@ -1,0 +1,107 @@
+//! What the dialog does with a key, as plain decisions the panel's key handler acts on, and the
+//! Tab order that gives a dialog its initial focus.
+
+use rune::{Key, KeyEvent, Mods, TextEdit, Tx};
+
+/// What the panel's key handler does with a key focus inside the dialog passed on. Rune runs
+/// that handler before its default button and its own focus navigation, and never while a
+/// text field has focus.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Route {
+    /// Leave the key to Rune: the default button, focus navigation, the window.
+    Pass,
+    /// Press the focused control: Enter does what Space does.
+    Press,
+    /// Move focus to the next Tab stop.
+    Forward,
+    /// Move focus to the previous Tab stop.
+    Back,
+    /// Take the key and do nothing.
+    Consume,
+}
+
+/// How the dialog routes `ev`, with `focused` the key of the focused element (`Tx::focused`),
+/// `panel` the panel's own key and `footer` the footer buttons that can take focus, in
+/// document order.
+pub(crate) fn route(
+    ev: &KeyEvent,
+    repeat: bool,
+    focused: Option<&str>,
+    panel: &str,
+    footer: &[String],
+) -> Route {
+    if ev.mods != Mods::default() {
+        return Route::Pass;
+    }
+    match ev.key {
+        Key::Enter => match focused {
+            // Nothing in the dialog has focus: Return goes to the primary, the default button.
+            None => Route::Pass,
+            Some(f) if f == panel => Route::Pass,
+            // A held Return presses once.
+            Some(_) if repeat => Route::Consume,
+            Some(_) => Route::Press,
+        },
+        Key::Left | Key::Right => {
+            let Some(i) = focused.and_then(|f| footer.iter().position(|k| k == f)) else {
+                return Route::Pass;
+            };
+            match ev.key {
+                Key::Left if i == 0 => Route::Consume,
+                Key::Left => Route::Back,
+                _ if i + 1 == footer.len() => Route::Consume,
+                _ => Route::Forward,
+            }
+        }
+        _ => Route::Pass,
+    }
+}
+
+/// The Tab indices that make footer button `initial` the dialog's first Tab stop, for
+/// `footer_len` footer buttons and the close button after them: `(footer, close)`. Rune visits
+/// positive indices first, in order, then everything else in document order. Numbering the
+/// initial button, the footer buttons after it and the close button (the last element in
+/// document order) keeps Tab's cycle what document order makes it, only starting at the
+/// initial button. With no initial button, every index is 0: document order.
+pub(crate) fn tab_indices(initial: Option<usize>, footer_len: usize) -> (Vec<i32>, i32) {
+    let Some(start) = initial.filter(|&i| i < footer_len) else {
+        return (vec![0; footer_len], 0);
+    };
+    let footer = (0..footer_len)
+        .map(|j| {
+            if j >= start {
+                (j - start + 1) as i32
+            } else {
+                0
+            }
+        })
+        .collect();
+    (footer, (footer_len - start + 1) as i32)
+}
+
+/// A multi-line field's key handler that types a newline on a plain Return, for
+/// `TextArea::on_key`: `TextArea::new(&s.notes).on_key(newline_on_enter(|s: &mut App| &mut
+/// s.notes))`.
+///
+/// Rune's multi-line editor treats a plain Return in a paragraph as submit, as a chat
+/// composer does, and a field with nothing to submit passes it to the default button: the
+/// dialog's primary. In a dialog, Return in a multi-line field types a newline instead.
+pub fn newline_on_enter<S: 'static>(
+    access: impl Fn(&mut S) -> &mut TextEdit + 'static,
+) -> impl Fn(&mut S, &KeyEvent, &mut Tx) -> bool + 'static {
+    move |s, ev, _tx| {
+        if ev.key != Key::Enter || ev.mods != Mods::default() {
+            return false;
+        }
+        // Shift+Return is the editor's own newline.
+        let shifted = KeyEvent {
+            key: Key::Enter,
+            mods: Mods {
+                shift: true,
+                ..Mods::default()
+            },
+        };
+        access(s).key(&shifted, None);
+        true
+    }
+}

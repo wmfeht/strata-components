@@ -46,7 +46,7 @@ media-audio = []
 single-instance = []
 
 # P9 GLib bridge: src/glib_bridge/
-glib-bridge = []
+glib-bridge = ["dep:futures-channel", "dep:gio", "dep:glib"]
 
 # Internal, not public API: P0's transfer substrate (src/transfer/), enabled by dnd, clipboard
 # and foreign-parent.
@@ -76,6 +76,9 @@ rune.workspace = true
 # single-instance (P8)
 
 # glib-bridge (P9)
+futures-channel = { workspace = true, optional = true }
+gio = { workspace = true, optional = true }
+glib = { workspace = true, optional = true }
 
 # _transfer (P0)
 

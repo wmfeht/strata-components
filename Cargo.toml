@@ -52,6 +52,15 @@ xkbcommon = "0.9"
 [profile.dev.package."*"]
 debug = false
 
+# Perf tests (`cargo test --profile perf … -- --ignored`), as Rune's own workspace sets it.
+[profile.perf]
+inherits = "release"
+opt-level = 3
+codegen-units = 16
+lto = false
+debug = false
+incremental = false
+
 [workspace.lints.rust]
 unsafe_code = "deny"
 unsafe_op_in_unsafe_fn = "deny"

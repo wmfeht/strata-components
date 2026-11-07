@@ -5,7 +5,7 @@
 //! state and the count as its description. A click toggles the section without taking focus;
 //! from the keyboard it is a stop in the list, toggled by Enter or Space (and 10xer `l`).
 
-use rune::{El, Key, KeyEvent, PointerPress, Tx, el, icon, row, text};
+use rune::{El, Key, KeyEvent, Tx, el, icon, row, text};
 use strata_kit::icons::IconName;
 use strata_kit::slots::sidebar as slot;
 
@@ -22,7 +22,7 @@ pub fn count_words(n: usize) -> String {
 }
 
 /// Whether a heading draws its count: collapsed, with at least one row.
-pub fn shows_count(collapsed: bool, rows: usize) -> bool {
+pub(crate) fn shows_count(collapsed: bool, rows: usize) -> bool {
     collapsed && rows > 0
 }
 
@@ -96,12 +96,12 @@ pub(crate) fn heading<S: 'static>(
     let access = ctx.access;
     let tenxer = ctx.tenxer;
     let toggle = move |s: &mut S, tx: &mut Tx, emit: &super::Emit<S>| {
+        super::rows::flush_reordered(s, tx, access, emit, None);
         let collapsed = access(s).toggle(section);
         emit(s, SidebarIntent::SectionToggled { section, collapsed }, tx);
     };
     let press_emit = ctx.emit.clone();
     let key_emit = ctx.emit.clone();
-    let menu_emit = ctx.emit.clone();
     h.on_press_tx(move |s: &mut S, tx: &mut Tx| toggle(s, tx, &press_emit))
         .on_key(move |s: &mut S, ev: &KeyEvent, tx: &mut Tx| {
             let activate = |s: &mut S, tx: &mut Tx| {
@@ -114,8 +114,5 @@ pub(crate) fn heading<S: 'static>(
                 _ if tenxer => tenxer_key(s, ev, tx, &key_emit, activate),
                 _ => false,
             }
-        })
-        .on_secondary_press(move |s: &mut S, point: PointerPress, tx: &mut Tx| {
-            menu_emit(s, SidebarIntent::ContextMenu { item: None, point }, tx)
         })
 }

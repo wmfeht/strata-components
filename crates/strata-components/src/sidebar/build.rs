@@ -2,7 +2,7 @@
 
 use std::rc::Rc;
 
-use rune::{Drag, El, Mods, Phase, ScrollSpec, Tx, col, el};
+use rune::{Drag, El, Mods, Phase, PointerPress, ScrollSpec, Tx, col, el};
 use strata_kit::look::Look;
 use strata_kit::slots::sidebar as slot;
 
@@ -185,7 +185,13 @@ impl<'a, S: 'static> PlacesSidebar<'a, S> {
                 .scroll(ScrollSpec {
                     stick_bottom: false,
                 })
-                .child(list),
+                .child(list)
+                .on_secondary_press({
+                    let emit = self.emit.clone();
+                    move |s: &mut S, point: PointerPress, tx: &mut Tx| {
+                        emit(s, SidebarIntent::ContextMenu { item: None, point }, tx)
+                    }
+                }),
         );
         if let Some(f) = self.footer {
             root = root.child(f(shown));
@@ -225,6 +231,7 @@ fn places<S: 'static>(
             new_tab: ctx.new_tabs,
             keycap: p.keycap.as_deref(),
             reorder: Some((i, n)),
+            lifted: ctx.state.places_reorder.dragging() == Some(i),
         };
         let intent: Rc<dyn Fn(usize, usize) -> SidebarIntent> =
             Rc::new(|from, to| SidebarIntent::MovePlace { from, to });
@@ -283,6 +290,7 @@ fn pinned<S: 'static>(ctx: &Ctx<'_, S>, data: &SidebarData<'_>) -> Option<El> {
             new_tab: ctx.new_tabs,
             keycap: p.keycap.as_deref(),
             reorder: Some((i, n)),
+            lifted: !collapsed && ctx.state.pins_reorder.dragging() == Some(i),
         };
         let ids = ids.clone();
         let intent: Rc<dyn Fn(usize, usize) -> SidebarIntent> =
@@ -342,9 +350,10 @@ fn gap<S: 'static>(
         .w_full()
         .h(height + 2.0 * reach)
         .raise();
-    let band = ctx
-        .dnd
-        .drop_zone(band, drops::gap(ctx.access, &ctx.emit, gap, verdict));
+    let band = ctx.dnd.drop_zone(
+        band,
+        drops::gap(ctx.access, &ctx.emit, gap, verdict, &ctx.state.pin_check),
+    );
     let mut g = col()
         .key(format!("{}-gap-{i}", ctx.key))
         .w_full()

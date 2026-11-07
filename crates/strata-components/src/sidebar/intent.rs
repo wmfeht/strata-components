@@ -70,8 +70,8 @@ pub enum SidebarIntent {
     /// Open a row's location in a new tab (a middle click). Never sent for an unmounted
     /// device, nor when [`super::PlacesSidebar::open_in_new_tab`] is off.
     OpenInNewTab { item: ItemId },
-    /// A secondary click or the Menu key on a row, or on the sidebar (`item` is `None`): the
-    /// host opens its menu (C21) at `point`.
+    /// A secondary click or the Menu key on a row, or on the sidebar outside any row
+    /// (`item` is `None`): the host opens its menu (C21) at `point`. A heading opens none.
     ContextMenu {
         item: Option<ItemId>,
         point: PointerPress,

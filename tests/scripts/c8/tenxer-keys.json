@@ -32,10 +32,20 @@
     {
       "t": 0.6,
       "type": "key",
-      "name": "l"
+      "name": "Down"
+    },
+    {
+      "t": 0.7,
+      "type": "key",
+      "name": "Up"
     },
     {
       "t": 0.8,
+      "type": "key",
+      "name": "l"
+    },
+    {
+      "t": 1.0,
       "type": "key",
       "name": "h"
     }

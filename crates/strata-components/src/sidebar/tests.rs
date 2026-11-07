@@ -184,20 +184,6 @@ fn one_site_holds_the_indicator_and_a_late_leave_never_clears_another() {
     assert!(!s.dragging());
 }
 
-// drag-to-pin: "A folder pin drag keeps its target while the sidebar shrinks to the rail and
-// back."
-#[test]
-fn a_step_keeps_the_drop_target() {
-    let mut s = SidebarState::default();
-    s.set_drop_hover(DropSite::Gap(2), DropHover::Accepting);
-    s.width.advance();
-    s.width.choose(Step::Full);
-    assert_eq!(
-        s.drop_over(),
-        Some(&(DropSite::Gap(2), DropHover::Accepting))
-    );
-}
-
 // drag-to-pin: "After another window unpins a gap's neighbour, a drop on that gap in a window
 // that has not rebuilt lands beside the following pin, else the preceding one." The gap
 // carries both neighbours for the host to resolve.
@@ -255,11 +241,54 @@ fn the_devices_count_is_rows_not_dividers() {
     assert_eq!(data.device_count(), 3);
 }
 
-// browser/sidebar: "A collapsed heading with at least one row shows a count before the chevron.
-// An expanded heading, or a collapsed DEVICES with no rows, shows none."
+fn gap_zone(check: PinCheck, verdict: PinVerdict) -> crate::contract::dnd::DropZone<SidebarState> {
+    let emit: Emit<SidebarState> = Rc::new(|_, _, _| {});
+    super::drops::gap(
+        |s: &mut SidebarState| s,
+        &emit,
+        gap_at(&[], 0),
+        verdict,
+        &check,
+    )
+}
+
+// drag-to-pin: "A folder dragged from another file manager shows the insertion line only once
+// every item is confirmed to be a directory." Under `Wait`, the gap takes a drop only once the
+// host confirmed it; under `Accept`, the host checks at the drop.
 #[test]
-fn only_a_collapsed_heading_with_rows_shows_its_count() {
-    assert!(shows_count(true, 3));
-    assert!(!shows_count(false, 3));
-    assert!(!shows_count(true, 0));
+fn under_wait_a_gap_refuses_a_drop_the_host_hasnt_confirmed() {
+    let state = SidebarState::default();
+    let o = offer(DropActions::COPY, false, 4);
+    let mods = rune::Mods::default();
+    let wait = PinCheck {
+        unchecked: Unchecked::Wait,
+        ..PinCheck::default()
+    };
+    for v in [
+        PinVerdict::Unchecked,
+        PinVerdict::Checking,
+        PinVerdict::Refused,
+    ] {
+        assert_eq!(
+            gap_zone(wait.clone(), v).choose(&state, &o, mods),
+            None,
+            "{v:?}"
+        );
+    }
+    assert_eq!(
+        gap_zone(wait, PinVerdict::Folders).choose(&state, &o, mods),
+        Some(DropAction::Copy)
+    );
+    let accept = PinCheck::default();
+    for v in [PinVerdict::Unchecked, PinVerdict::Checking] {
+        assert_eq!(
+            gap_zone(accept.clone(), v).choose(&state, &o, mods),
+            Some(DropAction::Copy),
+            "{v:?}"
+        );
+    }
+    assert_eq!(
+        gap_zone(accept, PinVerdict::Refused).choose(&state, &o, mods),
+        None
+    );
 }

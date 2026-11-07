@@ -5,6 +5,7 @@ use rune_kit::shell::{PaneState, Reorder};
 use strata_kit::look::Look;
 use strata_kit::slots::sidebar as slot;
 
+use super::data::ItemId;
 use super::intent::DropSite;
 use crate::contract::dnd::{DropHover, DropOffer};
 
@@ -156,12 +157,26 @@ pub struct PinCheck {
 impl PinCheck {
     /// The verdict for a drag offering `offer`.
     pub fn verdict(&self, offer: &DropOffer) -> PinVerdict {
-        if offer.local {
+        self.verdict_for(offer.local, offer.serial)
+    }
+
+    /// The verdict for a drag from this process or not, with serial `serial`.
+    fn verdict_for(&self, local: bool, serial: u64) -> PinVerdict {
+        if local {
             return self.local;
         }
         match self.foreign {
-            Some((serial, v)) if serial == offer.serial => v,
+            Some((s, v)) if s == serial => v,
             _ => PinVerdict::Unchecked,
+        }
+    }
+
+    /// Whether a gap takes a drop of a drag with `verdict`: one it shows, or under
+    /// [`Unchecked::Accept`] any it hasn't refused, for the host to check at the drop.
+    pub fn takes(&self, verdict: PinVerdict) -> bool {
+        match self.unchecked {
+            Unchecked::Accept => verdict != PinVerdict::Refused,
+            Unchecked::Wait => self.shows(verdict),
         }
     }
 
@@ -193,9 +208,12 @@ pub struct SidebarState {
     drop: Option<(DropSite, DropHover)>,
     /// The drag over the sidebar, as its offer said: from this process, and its serial.
     pub(crate) drag: Option<(bool, u64)>,
-    /// A reorder just dropped, and the move it made. Rune presses the row on the release that
-    /// ends the drag (U21), and that press reports the move instead of opening the row.
-    pub(crate) reordered: Option<super::SidebarIntent>,
+    /// A reorder just dropped: the row dragged, and the move it made. The drop runs with no
+    /// `Tx`, and Rune presses the row on the release that ends the drag when the pointer is
+    /// still over it (U21). That press reports the move instead of opening the row; any other
+    /// activation reports it first; and the host drains one no press followed with
+    /// [`SidebarState::take_reordered`].
+    pub(crate) reordered: Option<(ItemId, super::SidebarIntent)>,
 }
 
 impl SidebarState {
@@ -266,12 +284,15 @@ impl SidebarState {
     /// The host's verdict on the drag over the gaps.
     pub fn gap_verdict(&self) -> PinVerdict {
         match self.drag {
-            Some((true, _)) => self.pin_check.local,
-            Some((false, serial)) => match self.pin_check.foreign {
-                Some((s, v)) if s == serial => v,
-                _ => PinVerdict::Unchecked,
-            },
+            Some((local, serial)) => self.pin_check.verdict_for(local, serial),
             None => PinVerdict::Unchecked,
         }
+    }
+
+    /// A reorder's move that no press has reported yet: the drag was released off its row
+    /// (U21). Call it from the app's poll every frame and handle the intent it returns; a
+    /// press or key on the sidebar reports one itself, before acting.
+    pub fn take_reordered(&mut self) -> Option<super::SidebarIntent> {
+        self.reordered.take().map(|(_, intent)| intent)
     }
 }

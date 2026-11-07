@@ -29,6 +29,7 @@
                   "children": [
                     {
                       "actions": [
+                        "context-menu",
                         "scroll-up",
                         "scroll-down",
                         "set-scroll-offset"
@@ -208,7 +209,6 @@
                                   "actions": [
                                     "click",
                                     "focus",
-                                    "context-menu",
                                     "collapse",
                                     "scroll-into-view"
                                   ],
@@ -280,7 +280,6 @@
                                   "actions": [
                                     "click",
                                     "focus",
-                                    "context-menu",
                                     "collapse",
                                     "scroll-into-view"
                                   ],

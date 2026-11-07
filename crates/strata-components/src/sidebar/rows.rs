@@ -24,11 +24,11 @@ pub const PENDING_RELEASE: &str = "Writing data to the drive. Do not unplug it."
 /// rail (U18), so the rail builds its own row: a list item that takes focus, selects and
 /// hovers as `SidebarRow` does, without its reorder drag.
 fn rail_row(look: &Look, icon: El, selected: bool) -> El {
-    let size = look.icon_size.md;
+    let size = slot::ICON_BOX;
     let r = row()
         .w_full()
         .h(slot::row_height(look))
-        .pl(look.space.md)
+        .pl(slot::ROW_INSET)
         .center_y()
         .radius(look.kit.radius.md)
         .focusable(true)
@@ -71,6 +71,50 @@ pub(crate) struct Spec<'a> {
     pub keycap: Option<&'a str>,
     /// The row's place in its reorderable list: index and count.
     pub reorder: Option<(usize, usize)>,
+    /// The row is lifted by its reorder drag.
+    pub lifted: bool,
+}
+
+/// Source-over of straight-alpha colours, mixed as the window blends: rune-kit's own `over`,
+/// which isn't public (U22).
+fn over(top: rune::Color, bottom: rune::Color) -> rune::Color {
+    use rune::theme::{blends_srgb, srgb_decode, srgb_encode};
+    let a = top.a + bottom.a * (1.0 - top.a);
+    if a <= 0.0 {
+        return rune::Color::TRANSPARENT;
+    }
+    type Channel = fn(f32) -> f32;
+    let (enc, dec): (Channel, Channel) = if blends_srgb() {
+        (srgb_encode, srgb_decode)
+    } else {
+        (|c| c, |c| c)
+    };
+    let mix = |t: f32, b: f32| dec((enc(t) * top.a + enc(b) * bottom.a * (1.0 - top.a)) / a);
+    rune::Color {
+        r: mix(top.r, bottom.r),
+        g: mix(top.g, bottom.g),
+        b: mix(top.b, bottom.b),
+        a,
+    }
+}
+
+/// Reports a reorder's parked move, if any, before an activation acts (U21). True when the
+/// move came from `item`: Rune's press on the release that ended the drag, which reports the
+/// move and nothing else.
+pub(crate) fn flush_reordered<S>(
+    s: &mut S,
+    tx: &mut Tx,
+    access: fn(&mut S) -> &mut SidebarState,
+    emit: &Emit<S>,
+    item: Option<&ItemId>,
+) -> bool {
+    match access(s).reordered.take() {
+        Some((source, moved)) => {
+            emit(s, moved, tx);
+            item == Some(&source)
+        }
+        None => false,
+    }
 }
 
 /// A row's icon: the semantic or catalog icon, in the accent on the current row, else the
@@ -104,7 +148,7 @@ pub(crate) fn trash_icon(
         IconName::Trash
     };
     let glyph = row_icon(look, &RowIcon::Name(name), None, selected);
-    let size = look.icon_size.md;
+    let size = slot::ICON_BOX;
     let target = row()
         .key(trash_target_key(key))
         .size(size, size)
@@ -129,9 +173,9 @@ fn activate<S: 'static>(ctx: &Ctx<'_, S>, el: El, item: ItemId, new_tab: bool) -
     let mut el = el
         .on_press_tx(move |s: &mut S, tx: &mut Tx| {
             // Rune presses a row on the release that ends its reorder drag (U21): that
-            // release moved the row and reports the move, not an open.
-            if let Some(moved) = access(s).reordered.take() {
-                press_emit(s, moved, tx);
+            // release reports the move, not an open. A move parked by another row is
+            // reported first, then this press acts.
+            if flush_reordered(s, tx, access, &press_emit, Some(&press_item)) {
                 return;
             }
             let item = press_item.clone();
@@ -152,6 +196,7 @@ fn activate<S: 'static>(ctx: &Ctx<'_, S>, el: El, item: ItemId, new_tab: bool) -
         })
         .on_key(move |s: &mut S, ev: &KeyEvent, tx: &mut Tx| {
             let open = |s: &mut S, tx: &mut Tx| {
+                flush_reordered(s, tx, access, &key_emit, None);
                 key_emit(
                     s,
                     SidebarIntent::Open {
@@ -226,9 +271,14 @@ fn dress<S>(ctx: &Ctx<'_, S>, el: El, spec: &Spec<'_>) -> El {
         Some((DropSite::Item(i), DropHover::Accepting)) if *i == spec.item
     );
     let mut el = el.key(spec.item.key(ctx.key)).label(spec.label);
-    if spec.selected {
+    if spec.selected && spec.lifted {
+        // Lifted, the row keeps rune-kit's opaque lift fill under the tint, so the rows it
+        // passes don't show through.
+        let lift = over(c.pressed, c.bg_deep);
+        el = el.fill(over(slot::selected_fill(look), lift));
+    } else if spec.selected {
         el = el.fill(slot::selected_fill(look));
-    } else if hovered {
+    } else if hovered && !spec.lifted {
         el = el.fill(slot::hover_fill(look));
     }
     if hovered {
@@ -285,8 +335,9 @@ pub(crate) fn folder_row<S: 'static>(
         let sidebar = ctx.access;
         // The drop runs without a `Tx`, and Rune presses the row on the same release (U21):
         // keep the move for that press to report, instead of opening the row.
+        let source = spec.item.clone();
         r = r.reorder(state, index, count, access, move |s: &mut S, from, to| {
-            sidebar(s).reordered = Some(intent(from, to));
+            sidebar(s).reordered = Some((source.clone(), intent(from, to)));
         });
     }
     let el = activate(ctx, r.build(&look.kit), spec.item.clone(), spec.new_tab);
@@ -321,6 +372,7 @@ pub(crate) fn device_row<S: 'static>(ctx: &Ctx<'_, S>, d: &Device, selected: boo
         new_tab: ctx.new_tabs && d.mounted,
         keycap: None,
         reorder: None,
+        lifted: false,
     };
     let el = if ctx.rail {
         rail_row(look, icon, selected)
@@ -351,6 +403,7 @@ pub(crate) fn device_row<S: 'static>(ctx: &Ctx<'_, S>, d: &Device, selected: boo
 /// step rows, and the row's menu (C21) has the same actions.
 fn device_actions<S: 'static>(ctx: &Ctx<'_, S>, d: &Device) -> El {
     let look = ctx.look;
+    let access = ctx.access;
     let mut actions = row().gap(look.space.xxs).center_y();
     let button = |key: String, glyph: IconName, label: &str, intent: SidebarIntent| {
         let emit = ctx.emit.clone();
@@ -359,7 +412,10 @@ fn device_actions<S: 'static>(ctx: &Ctx<'_, S>, d: &Device) -> El {
             .control_size(ControlSize::Small)
             .label(label)
             .help(label)
-            .on_press_tx(move |s: &mut S, tx: &mut Tx| emit(s, intent.clone(), tx))
+            .on_press_tx(move |s: &mut S, tx: &mut Tx| {
+                flush_reordered(s, tx, access, &emit, None);
+                emit(s, intent.clone(), tx)
+            })
             .build(&look.kit)
             .key(key)
             .focusable(false)

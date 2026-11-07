@@ -33,14 +33,17 @@ pub fn pin_action(offer: &DropOffer, verdict: PinVerdict) -> Option<DropAction> 
 }
 
 /// A pin gap's zone. `verdict` is the host's verdict on the drag over the gaps as the view
-/// was built: a refused drag is stopped here, showing "can't drop", rather than passed to the
-/// row around it.
+/// was built, and `check` the host's checks: under [`super::Unchecked::Wait`] the gap refuses
+/// a drop the host hasn't confirmed ([`super::PinCheck::takes`]). A refused drag is stopped
+/// here, showing "can't drop", rather than passed to the row around it.
 pub(crate) fn gap<S: 'static>(
     access: fn(&mut S) -> &mut SidebarState,
     emit: &Emit<S>,
     gap: Gap,
     verdict: PinVerdict,
+    check: &super::PinCheck,
 ) -> DropZone<S> {
+    let takes = check.takes(verdict);
     let index = gap.index;
     let on_drop = emit.clone();
     let on_hover = emit.clone();
@@ -79,7 +82,13 @@ pub(crate) fn gap<S: 'static>(
             tx,
         );
     })
-    .action(move |_: &S, offer, _: Mods| pin_action(offer, verdict));
+    .action(move |_: &S, offer, _: Mods| {
+        if takes {
+            pin_action(offer, verdict)
+        } else {
+            None
+        }
+    });
     if verdict == PinVerdict::Refused {
         zone.on_reject(move |s: &mut S, _, _| access(s).end_drag())
     } else {
@@ -129,6 +138,8 @@ pub(crate) fn row<S: 'static>(
 pub(crate) fn background<S: 'static>(access: fn(&mut S) -> &mut SidebarState) -> DropZone<S> {
     DropZone::new(|_: &mut S, _, _| {})
         .mime_types(&[])
+        // `DropZone::new` takes drags from this process; this zone takes none, so a local
+        // drag over the background is refused too, not reported to its source as a copy.
         .local(false)
         .on_hover(move |s: &mut S, hover, _: &DropOffer, _| {
             access(s).set_drop_hover(DropSite::Background, hover)

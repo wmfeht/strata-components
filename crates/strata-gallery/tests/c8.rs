@@ -6,8 +6,10 @@ mod c8 {
     use std::path::PathBuf;
 
     use rune::{ElementInfo, Env, Key, KeyEvent, Mods, Runtime};
-    use strata_components::sidebar::TRASH_TARGET;
+    use strata_components::sidebar::{ItemId, TRASH_TARGET};
     use strata_gallery::{Gallery, scenes};
+    use strata_kit::look::Look;
+    use strata_kit::shape::LookParams;
 
     const FRAME: f64 = 1.0 / 60.0;
 
@@ -232,5 +234,98 @@ mod c8 {
         assert!(first < open, "animated: {first} then {open}");
         let (first, open) = gap_height_after_a_frame(false);
         assert_eq!(first, open, "at once");
+    }
+
+    /// Drags `key` by (dx, dy) with the pointer, frame by frame, and releases it there.
+    fn drag(rt: &mut Runtime<Gallery>, key: &str, dx: f32, dy: f32) {
+        let (x, y) = centre(rt, key);
+        rt.pointer_down(x, y);
+        rt.frame(FRAME);
+        for i in 1..=12 {
+            let f = i as f32 / 12.0;
+            rt.pointer_move(x + dx * f, y + dy * f);
+            rt.frame(FRAME);
+        }
+        rt.pointer_up(x + dx, y + dy);
+        rt.frame(FRAME);
+    }
+
+    // browser/sidebar/pins: "Dropping a pinned row on the upper or lower half of another pinned
+    // row moves it before or after that row." A drag released off its row gets no press from
+    // Rune (U21): with no host draining it, the next click on another row reports the move
+    // first and then opens that row.
+    #[test]
+    fn a_reorder_released_off_its_row_is_reported_before_the_next_click() {
+        let mut rt = mount("c8-full-light");
+        rt.poll = None;
+        drag(&mut rt, "places-pin-projects", 400.0, 60.0);
+        tap(&mut rt, "places-place-downloads");
+        let pins: Vec<&str> = rt.state.c8.pins.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(pins, ["photos", "nas", "projects"]);
+        assert_eq!(rt.state.c8.current, Some(ItemId::Place("downloads".into())));
+        assert_eq!(rt.state.c8.log, "Open downloads (pointer)");
+    }
+
+    // The selected row keeps an opaque fill while it is lifted, so the rows it passes don't
+    // show through (rune-kit's lift fill under the accent tint).
+    #[test]
+    fn a_lifted_selected_row_is_opaque() {
+        let mut rt = mount("c8-full-light");
+        let (x, y) = centre(&rt, "places-place-home");
+        rt.pointer_down(x, y);
+        for i in 1..=6 {
+            rt.pointer_move(x, y + 8.0 * i as f32);
+            rt.frame(FRAME);
+        }
+        // Held still while the fill settles.
+        run(&mut rt, 0.5);
+        let home = element(&rt, "places-place-home").expect("home");
+        assert!(home.fill.a > 0.99, "lifted fill {:?}", home.fill);
+        rt.pointer_up(x, y + 48.0);
+    }
+
+    /// The Trash icon's centre, across a step from full to the rail, at text size `size`.
+    fn icon_x_across_a_step(size: u16) -> (f32, f32) {
+        let mut rt = mount_with("c8-full-light", |g| {
+            g.look = Look::fallback(false).with_params(&LookParams {
+                text_size: size,
+                ..LookParams::default()
+            });
+        });
+        let before = centre(&rt, TRASH_TARGET).0;
+        press(&mut rt, Key::Command('b'));
+        run(&mut rt, 1.0);
+        (before, centre(&rt, TRASH_TARGET).0)
+    }
+
+    // browser/sidebar/rail: "At text size 10, pressing Ctrl+B between the full sidebar and the
+    // rail moves no row icon."
+    #[test]
+    fn a_step_to_the_rail_moves_no_icon_at_any_text_size() {
+        for size in [10, 13, 20] {
+            let (full, rail) = icon_x_across_a_step(size);
+            assert_eq!(full, rail, "text size {size}");
+        }
+    }
+
+    // browser/sidebar: "Dragging files over a pinned folder's row body shows a highlight and an
+    // accent outline". The highlight is the row's fill while the drag is over it; the outline
+    // (a border, which `ElementInfo` doesn't report) is in the c8-drop-row PNG.
+    #[test]
+    fn a_drag_over_a_pin_row_highlights_it_until_it_leaves() {
+        let mut rt = mount("c8-full-light");
+        let fill = |rt: &Runtime<Gallery>| element(rt, "places-pin-projects").expect("pin").fill;
+        assert_eq!(fill(&rt).a, 0.0);
+        let at = centre(&rt, "places-pin-projects");
+        rt.drag_files(vec![PathBuf::from("/home/demo/notes.txt")], Some(at));
+        for _ in 0..10 {
+            rt.frame(FRAME);
+            rt.drag_files_to(Some(at));
+        }
+        assert_eq!(rt.drop_hovered().as_deref(), Some("places-pin-projects"));
+        assert!(fill(&rt).a > 0.0, "highlighted");
+        rt.drag_files_leave();
+        run(&mut rt, 0.5);
+        assert_eq!(fill(&rt).a, 0.0, "cleared on leave");
     }
 }

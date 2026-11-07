@@ -476,9 +476,15 @@ pub fn on_key(g: &mut Gallery, key: &KeyEvent, _tx: &mut Tx) -> bool {
     }
 }
 
-/// Runs at the start of every frame while this page is open, with the clock in seconds.
-/// Deliver fake async results here; a worker wakes the loop with `Gallery::waker`. True when
-/// state changed.
-pub fn poll(_g: &mut Gallery, _t: f64, _tx: &mut Tx) -> bool {
-    false
+/// Runs at the start of every frame while this page is open, with the clock in seconds. It
+/// drains a reorder's move that no press reported (a drag released off its row), as a host
+/// must. True when state changed.
+pub fn poll(g: &mut Gallery, _t: f64, _tx: &mut Tx) -> bool {
+    match g.c8.sidebar.take_reordered() {
+        Some(moved) => {
+            g.c8.apply(moved);
+            true
+        }
+        None => false,
+    }
 }

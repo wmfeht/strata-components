@@ -115,14 +115,25 @@
 //!   end, with no way to cancel a drop outside the list; with `pointer_buttons([Middle])` a
 //!   middle-button drag reorders too; `Reorder::follow` is private, so an app can't drive it
 //!   from its own row; `SidebarRow::reorder` takes a plain `fn` accessor (no capture); and its
-//!   drop runs with no `Tx`, after which Rune presses the row on the same release
-//!   (`runtime/input/pointer.rs`, `release`). Here: [`PlacesSidebar::reorder`] takes the host's
-//!   accessors, the drop parks its move intent in the state, and the press that follows reports
-//!   it instead of opening the row. A drag that lands in place moves nothing and still presses.
-//! - **U22** rune-kit: `SidebarRow`'s icon box is fixed at 16 points, and its selected fill
-//!   is fixed to `c.pressed`. Here: the fill set over the built row, and the icon passed as an
-//!   `avatar` coloured by the sidebar. An icon size above 16 (K2 at large text sizes) would
-//!   overflow the box.
+//!   drop runs with no `Tx`. Rune then presses the row on the same release, but only when the
+//!   pointer is still over it (`runtime/input/pointer.rs`, `release`), so a drag released off
+//!   the row ends with no press at all. Here: [`PlacesSidebar::reorder`] takes the host's
+//!   accessors, and the drop parks its move in the state with the row it came from. That row's
+//!   press reports the move instead of opening the row; any other press or key activation
+//!   reports it first and then acts; and the host drains a move no press followed with
+//!   [`SidebarState::take_reordered`] from its poll, so no move is lost or reported late. A drag
+//!   that lands in place moves nothing and still presses.
+//! - **U22** rune-kit: `SidebarRow`'s icon box is fixed at 16 points
+//!   ([`strata_kit::slots::sidebar::ICON_BOX`]), and its row inset is a private 8
+//!   ([`strata_kit::slots::sidebar::ROW_INSET`]); its selected fill is fixed to `c.pressed`;
+//!   its busy spinner is `icon_muted`, where Strata's pending-release spinner takes the accent;
+//!   it names the row by its label only, so the pending row's "Writing data to the drive. Do
+//!   not unplug it." is its description, where Strata makes it the row's and spinner's label;
+//!   and its colour `over` isn't public. Here: the fill set over the built row (with the lift
+//!   fill kept under the tint while the row is lifted), the icon passed as an `avatar` coloured
+//!   by the sidebar, the rail's icon box and inset matching rune-kit's so a step moves no icon
+//!   at any text size, and `over` copied. An icon larger than the box (K2 at large text sizes)
+//!   overflows it, centred, in both widths.
 //! - **U23** Rune: a press handler can't tell a click from a keyboard press (`Tx::button` says
 //!   only which pointer button). Strata opens a place with its first item selected from the
 //!   keyboard only. Here: each row's `on_key` takes Return and Space before the list's focus
@@ -152,7 +163,7 @@ pub use data::{
     Device, DeviceGroup, ItemId, LockState, Pin, Place, PlaceKind, Release, RowIcon, SidebarData,
 };
 pub use drops::pin_action;
-pub use heading::{count_words, shows_count};
+pub use heading::count_words;
 pub use intent::{DropSite, Gap, Section, SidebarIntent, Via};
 pub use rows::PENDING_RELEASE;
 pub use state::{MAX_WIDTH, MIN_WIDTH, PinCheck, PinVerdict, SidebarState, Step, Unchecked, Width};

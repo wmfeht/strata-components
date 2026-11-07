@@ -26,6 +26,7 @@
                   "children": [
                     {
                       "actions": [
+                        "context-menu",
                         "scroll-up",
                         "scroll-down",
                         "set-scroll-offset"
@@ -53,7 +54,7 @@
                                   "position": 1,
                                   "role": "list-item",
                                   "states": [
-                                    "selected"
+                                    "unselected"
                                   ]
                                 },
                                 {
@@ -143,7 +144,8 @@
                                   "position": 7,
                                   "role": "list-item",
                                   "states": [
-                                    "unselected"
+                                    "focused",
+                                    "selected"
                                   ]
                                 },
                                 {
@@ -205,11 +207,10 @@
                                   "actions": [
                                     "click",
                                     "focus",
-                                    "context-menu",
                                     "collapse",
                                     "scroll-into-view"
                                   ],
-                                  "description": "4 items",
+                                  "description": "3 items",
                                   "key": "places-heading-pinned",
                                   "name": "PINNED",
                                   "role": "button",
@@ -224,24 +225,9 @@
                                     "context-menu",
                                     "scroll-into-view"
                                   ],
-                                  "key": "places-pin-projects",
-                                  "name": "Projects",
-                                  "position": 1,
-                                  "role": "list-item",
-                                  "states": [
-                                    "unselected"
-                                  ]
-                                },
-                                {
-                                  "actions": [
-                                    "click",
-                                    "focus",
-                                    "context-menu",
-                                    "scroll-into-view"
-                                  ],
                                   "key": "places-pin-photos",
                                   "name": "Photos 2026",
-                                  "position": 2,
+                                  "position": 1,
                                   "role": "list-item",
                                   "states": [
                                     "unselected"
@@ -256,7 +242,7 @@
                                   ],
                                   "key": "places-pin-nas",
                                   "name": "nas.local",
-                                  "position": 3,
+                                  "position": 2,
                                   "role": "list-item",
                                   "states": [
                                     "unselected"
@@ -269,9 +255,9 @@
                                     "context-menu",
                                     "scroll-into-view"
                                   ],
-                                  "key": "places-pin-work",
-                                  "name": "Work",
-                                  "position": 4,
+                                  "key": "places-pin-projects",
+                                  "name": "Projects",
+                                  "position": 3,
                                   "role": "list-item",
                                   "states": [
                                     "unselected"
@@ -281,7 +267,7 @@
                               "key": "places-section-pinned",
                               "name": "PINNED",
                               "role": "group",
-                              "setSize": 4
+                              "setSize": 3
                             },
                             {
                               "actions": [
@@ -292,7 +278,6 @@
                                   "actions": [
                                     "click",
                                     "focus",
-                                    "context-menu",
                                     "collapse",
                                     "scroll-into-view"
                                   ],
@@ -422,7 +407,7 @@
                     },
                     {
                       "key": "c8-log",
-                      "name": "Pinned Work at 3",
+                      "name": "Open downloads (pointer)",
                       "role": "label"
                     }
                   ],

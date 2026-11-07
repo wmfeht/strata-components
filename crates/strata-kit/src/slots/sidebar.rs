@@ -18,6 +18,15 @@ use crate::tokens::Token;
 /// lgse/strata `upstream/main` 35ee677ab).
 pub const DEFAULT_PANE_WIDTH: f32 = 201.0;
 
+/// The inset rune-kit's `SidebarRow` puts before its icon (its private `INSET`, at the pinned
+/// Rune rev). The rail's own row uses it too, so a step moves no icon.
+pub const ROW_INSET: f32 = 8.0;
+
+/// The box rune-kit's `SidebarRow` draws its icon in (its 16 point avatar box; C8's U22 asks for
+/// it to be settable). The rail's icon box matches it at any text size, so a step moves no
+/// icon even when K2 scales the icons past it.
+pub const ICON_BOX: f32 = 16.0;
+
 /// PlacesSidebar's slot tokens. `None` inherits.
 #[derive(Clone, Debug, Default)]
 #[non_exhaustive]
@@ -114,13 +123,13 @@ pub fn heading_height(look: &Look) -> f32 {
         .unwrap_or(look.frame.control)
 }
 
-/// The icon rail's width: `sidebar.rail.width`, else a row icon with the row's and the
-/// list's insets on each side (`icon_size.md + 2 × (space.md + space.xs)`).
+/// The icon rail's width: `sidebar.rail.width`, else the row icon's box with the row's and
+/// the list's insets on each side (`ICON_BOX + 2 × (ROW_INSET + space.xs)`).
 pub fn rail_width(look: &Look) -> f32 {
     look.slots
         .sidebar
         .rail_width
-        .unwrap_or(look.icon_size.md + 2.0 * (look.space.md + look.space.xs))
+        .unwrap_or(ICON_BOX + 2.0 * (ROW_INSET + look.space.xs))
 }
 
 /// The full sidebar's starting width, before the user resizes it: `sidebar.pane.width`, else

@@ -14,7 +14,7 @@
 | # | Question | Answer | Where it ran |
 | --- | --- | --- | --- |
 | Q1 | Reach winit's `wl_display` and a seat without patching Rune? | **Yes, on libwayland ≥ 1.23.** `wl_proxy_get_display` on the surface from `WindowHandle::with_raw_handle`, then `Backend::from_foreign_display`. No on 1.22 (Ubuntu 24.04) without a private-ABI read. | sway |
-| Q2 | A second event queue, and who dispatches it? | **Yes, and we must dispatch it.** Rune's own watcher pattern races and loses events for up to one unrelated wake (p99 279 ms). A reader thread that takes part in libwayland's read protocol, with dispatch on the UI thread, gives p99 0.9–1.1 ms. | sway |
+| Q2 | A second event queue, and who dispatches it? | **Yes, and we must dispatch it.** A watcher thread that only polls the fd (driver A) races: without an every-turn hook, events wait for an unrelated wake (p99 123–279 ms). A reader thread that takes part in libwayland's read protocol, with dispatch on the UI thread (driver C), gave p99 0.92 ms at 200 changes × 30 ms and 1.13 ms at 500 × 5 ms, one run each. | sway |
 | Q3 | Start a `wl_data_device` drag from a press Rune saw; does Rune's capture stay sane? | **The drag works; the capture doesn't.** winit gets a pointer leave and never the release. Rune stays `pressing()` through the whole drag. Afterwards it is cleaned up only by accident (sway bounces keyboard focus at the drop). Without that, `on_drag` keeps getting moves with no button held until the next press. | sway |
 | Q4 | Drops with any MIME type and a position per motion, in Rune's coordinates? | **Yes.** Six types were offered and read intact, 8 MiB included. There was one motion event per pointer motion. Surface coordinates equal Rune window points at scales 1, 1.5 and 2: zero hit-test mismatches. Nautilus ↔ Rune works in both directions. | sway, Nautilus in sway |
 | Q5 | Data-control on Hyprland, sway, GNOME, KDE; fallback cost? | **Sway and Hyprland have both protocols, KWin has ext only, mutter has neither.** Without data-control, P2 hears the clipboard only while focused, and a write needs a fresh input serial. | sway; others from docs, hand test pending |
@@ -38,7 +38,7 @@ the protocol headers Hyprland 0.56.2 installs under `/usr/include/hyprland`, nev
 running session.
 
 The prototype has four crates:
-- `probe`: display access, three queue drivers, data device, data-control, X11 selections,
+- `probe`: display access, four queue drivers (A, A2, B, C), data device, data-control, X11 selections,
   XDND proxy target and grab-less source, element snapshot.
 - `app`: a Rune window with a drag-out tile (`on_drag`), a button and three drop zones, the probe
   bound beside winit. It logs every Rune callback, `Runtime::pressing()`, layout and transfer
@@ -60,7 +60,7 @@ The prototype has four crates:
 | Globals and seat | 57 globals on sway (`logs/globals-*`). A second `wl_seat` object with its own `wl_pointer` and `wl_keyboard` gets the same events and serials as winit's. |
 | Rune still draws and takes input | Yes: frames keep drawing; a virtual click reached Rune's `on_press` and our `wl_pointer` saw the same button, before and after 100 hide/show cycles. |
 | Hide/show 100× | On Wayland each show recreates the window: `on_window` ran 101 times. Rebinding only the surface worked every time; fds stayed at 59 (`logs/q1-150037`). |
-| Attach/detach 1000× | No leak. Each new `wl_keyboard` makes sway resend the keymap to **every** keyboard of the client, winit's included, so 2 fds sit in queues until the loop turns, then return (2,059 → 59). Without a keyboard there is no growth. Destroying without draining didn't leak on libwayland 1.26 (`logs/churn-*`). |
+| Attach/detach 1000× | No leak. Each new `wl_keyboard` makes sway resend the keymap to **every** keyboard of the client, winit's included, so 2 fds per bind sit in queues until the loop turns. The count reached 2,059 during the loop and returned to 59 once it turned. Without a keyboard there is no growth. Destroying without draining didn't leak on libwayland 1.26 (`logs/churn-*`). |
 | libwayland < 1.23 | Simulated (`S2_FORCE_NO_GET_DISPLAY`): no display, and the app runs without transfer. |
 
 The first prototype called `wl_seat.get_pointer` on headless sway's seat, which had no pointer
@@ -72,42 +72,69 @@ pointer and keyboard only from the `capabilities` event, as Rune's layer shell d
 
 The queue gets events only when someone reads the socket, and only our code dispatches it. winit
 reads the socket, but dispatches only its own queue. Rune has no hook that runs on every loop
-turn. Three drivers were measured with 200 selection changes 30 ms apart (data-control set by the
-peer, stamped in the MIME type), plus a 500 × 5 ms stress run. Each driver was run twice; table
-cells give the range. Latency is peer send to the UI thread handling the event.
+turn that a shim can use. Four drivers were measured with selection changes set by the peer
+through data-control, each stamped in its MIME type. Latency is peer send to the UI thread
+handling the event.
 
-| Driver | How | p50 / p99 / max (ms), 200 × 30 ms | 500 × 5 ms | Idle wakes / 10 s | Stop |
-| --- | --- | --- | --- | --- | --- |
-| A | Rune's layer-shell `Watch`: a thread polls the fd, wakes the UI, UI calls `dispatch_pending` | 0.38–0.51 / **123–279** / 154–309 | 0.25 / 36.5 / 57.1 | 9–12 | 0.07–0.19 |
-| A2 | A, plus a non-blocking read on the UI thread when nothing was pending | 0.52 / 276 / 307 | — | 9 | 0.11 |
-| B | Own thread: `prepare_read`, poll, `read`, `dispatch_pending`, then `AppHandle::update` | 0.42–0.46 / 0.77–1.85 / 2.6–24.9 | 0.31 / 1.51 / 2.26 | 22–24 | 0.25–0.54 |
-| **C** | Own thread joins the read protocol (`prepare_read`, poll, `read`), then wakes the UI with `update_if`; UI calls `dispatch_pending` | **0.53 / 0.92 / 1.29** | **0.28 / 1.13 / 1.72** | 0–6 | 0.06–0.30 |
+| Driver | How |
+| --- | --- |
+| A | The shape of Rune's layer-shell `Watch`, without Rune's every-turn dispatch: a thread polls the fd and wakes the UI, and the UI calls `dispatch_pending` |
+| A2 | A, plus a non-blocking read on the UI thread when nothing was pending |
+| B | Own thread: `prepare_read`, poll, `read`, `dispatch_pending`, then `AppHandle::update` |
+| **C** | Own thread joins the read protocol (`prepare_read`, poll, `read`), then wakes the UI with `update_if`; the UI calls `dispatch_pending` |
+
+Each row is one run (`logs/q2-<driver>-<time>`). "Ticker" means a 10 ms `AppHandle` update
+thread was on to measure UI lag; it dominates idle CPU. The 500 × 5 ms runs idled 3 s, the
+others 10 s.
+
+| Run | Load | Ticker | p50 / p99 / max (ms) | Idle wakes | Idle CPU (ms) | Stop (ms) |
+| --- | --- | --- | --- | --- | --- | --- |
+| a-144048 | 200 × 30 ms | on | 0.38 / **123.3** / 154.2 | 9 in 10 s | 90.2 | 0.19 |
+| a-144200 | 200 × 30 ms | off | 0.51 / **278.6** / 309.4 | 12 in 10 s | 19.0 | 0.07 |
+| a-144446 | 500 × 5 ms | on | 0.25 / **36.5** / 57.1 | 7 in 3 s | 31.6 | 0.11 |
+| a2-144218 | 200 × 30 ms | off | 0.52 / **276.3** / 307.1 | 9 in 10 s | 25.9 | 0.11 |
+| b-144106 | 200 × 30 ms | on | 0.42 / 0.77 / 2.62 | 24 in 10 s | 96.9 | 0.54 |
+| b-144236 | 200 × 30 ms | off | 0.46 / 1.85 / 24.87 | 22 in 10 s | 25.1 | 0.25 |
+| b-144453 | 500 × 5 ms | on | 0.31 / 1.51 / 2.26 | 15 in 3 s | 29.4 | 0.44 |
+| **c-144420** | 200 × 30 ms | off | **0.53 / 0.92 / 1.29** | 6 in 10 s | 14.7 | 0.06 |
+| **c-144500** | 500 × 5 ms | on | **0.28 / 1.13 / 1.72** | 0 in 3 s | 29.8 | 0.30 |
+
+`q2-c-144329` is not in the table: it was the first C build, which saw no events at all (see
+below). A2 ran once and C once per load, so these are single samples, not distributions.
 
 - **A races.** When winit's loop reads the socket before the watcher polls it, the watcher never
   wakes. The events wait in our queue for the next unrelated socket activity: 35 of 200 were
   late by a multiple of the 30 ms step (`logs/q2-a-144048`). Reading on the UI thread (A2)
-  doesn't help, because the data is already gone from the socket. Rune's own layer-shell
-  overlays use this pattern.
+  doesn't help, because the data is already gone from the socket.
+- **Rune's own overlays don't hit this.** `Windows::about_to_wait` (`window.rs:330`) draws each
+  host every loop turn, and the layer-shell host's draw calls `layer.dispatch()` or
+  `drain_hidden` (`overlay/draw.rs:67`). winit emits `AboutToWait` on every iteration
+  (`wayland/event_loop/mod.rs:515`), so Rune dispatches its private queue whatever woke the
+  loop. The race hits only code with no every-turn hook, which is P0's position: Rune exposes
+  none.
 - **A must use `update_if`.** With `update`, each wake commits and redraws. The redraw's frame
   callback makes the shared fd readable, which wakes the watcher again: about 100 wakes per
   second, none with events.
 - **C can't miss a read.** While C holds a read intent, libwayland lets no reader read alone:
   winit's `read_events` waits for C's. calloop-wayland-source holds no read guard while sources
   dispatch, so neither side blocks the other. No deadlock and no UI stall showed in any run.
-  No UI-thread tick ran more than 20 ms late, apart from window creation.
+  No UI-thread tick ran more than 20 ms late, apart from window creation. The flip side:
+  winit's UI thread can wait on C's read, so C must never block on the UI while it holds a read
+  intent (P0 step 4).
 - In wayland-backend's sys backend, all wayland-rs queues of one `Backend` share **one**
   libwayland queue, so a guard covers the backend, not the Rust queue. `ReadEventsGuard::read`
   also moves events into the Rust queues, so `prepare_read` succeeds again with events waiting.
   C must wake the UI after every read that returned events. The first C build missed every
   event because of this.
-- Idle cost for the whole app over 10 s: 15–26 ms of CPU and 6–7 Rune frames, with any
-  driver.
+- Idle cost for the whole app over 10 s without the ticker: 15–26 ms of CPU and 6–7 Rune
+  frames, with any driver. With the ticker on, 90–97 ms.
 
 ## Q3 Drag out from a Rune press
 
 The tile has `on_drag` (Rune's `drag_out` is macOS-only; see R1). At 8 pt from the press, the
 handler calls `wl_data_device.start_drag` with our `wl_seat`'s last button serial and winit's
-surface as origin. Our `wl_pointer` had that serial before the threshold in every run.
+surface as origin. Our `wl_pointer` had that serial before the threshold in every run. That
+is luck of timing, not an ordering guarantee; see P1 in the constraints.
 `start_drag` took 0.04 ms. The peer accepted `text/plain;charset=utf-8` and read it intact.
 The source saw `target`, `action`, `dnd_drop_performed`, `send`, then `dnd_finished`. sway then
 also sent `cancelled`, which P1 must ignore.
@@ -156,7 +183,8 @@ The peer dragged six types across all three zones and dropped on one: `text/uri-
   action with Shift and Ctrl; that wasn't checked here. KWin is unknown. Hyprland's
   `DataDevice.hpp` declares no modifier listener for its drag state. All three are hand tests
   pending.
-- **Nautilus 51.1** ran in the nested sway with a private D-Bus. Dragging a file into the Rune
+- **Nautilus 51.1** ran in the nested sway with a private D-Bus. This was observed by hand
+  from ad-hoc scripts; no log was kept, so P1 must re-record it. Dragging a file into the Rune
   zone offered `application/x-gtk-local-dnd`, `text/plain;charset=utf-8`, `text/uri-list`,
   `application/vnd.portal.filetransfer` and `application/vnd.portal.files`, with actions
   copy|move|ask, and read `file:///tmp/s2files/alpha.txt`. Dragging the Rune tile into Nautilus
@@ -231,6 +259,9 @@ Results on Xvfb (`logs/x11-xvfb-145518`) and Xwayland (`logs/x11-xwayland-145447
   in the run) and then a real Up, not cancelled. P1 must ignore the element's moves until that
   Up. Nothing is stuck afterwards. The cursor can't show drag feedback, because only the
   grabbing client can change the grab cursor.
+- The grab-less source has no keyboard grab either, so Escape can't cancel the drag through
+  X. Escape reaches Rune's window as a key event (it has focus), and P1 has to cancel from
+  there. Unverified.
 - Not built: modifier-driven actions (read `QueryPointer`'s mask), `MULTIPLE` targets, a drag
   icon window.
 
@@ -248,6 +279,9 @@ Results on Xvfb (`logs/x11-xvfb-145518`) and Xwayland (`logs/x11-xwayland-145447
 - **Cost** (`snap ours`): cold 154–255 ms, of which GPU init is 132–165 ms; warm p50 7.0–7.9 ms,
   max 8.6 ms, mostly `Renderer::new`. In the app, the first snapshot at drag start blocked the
   UI thread for 158 ms. P1 must warm the GPU and renderer at attach, or render at the press.
+- **Second device:** `Gpu::headless` creates its own wgpu instance and device beside the
+  window's. That costs VRAM, and on a hybrid-GPU machine it may pick a different adapter from
+  the window's. Only one GPU was present here.
 - **Wayland icon:** a `wl_shm` ARGB8888 (premultiplied BGRA) surface passed to `start_drag` was
   accepted and the drag ran. Scale-2 icons (`set_buffer_scale`) weren't tried.
 - **Limit:** the snapshot is a second `Runtime` over a state the caller supplies, not the live
@@ -272,22 +306,66 @@ No Rune patch. Everything goes behind P0's internal `transfer` module; P1, P2 an
    (else `zwlr` v2), `wl_compositor` and `wl_shm` for icons, and `zxdg_importer_v2` for P4. Bind
    `wl_pointer` and `wl_keyboard` only from `capabilities`. The pointer and keyboard are for
    serials and modifiers, never for input: Rune keeps that.
-3. **Surface.** On every `on_window`, rebind only the surface: `ObjectId::from_ptr` +
+3. **Surfaces.** On every `on_window`, rebind the surface: `ObjectId::from_ptr` +
    `WlSurface::from_id`, as `platform/activation.rs` does. Wayland recreates the window on each
    show.
+   - `ObjectId::from_ptr` on a foreign proxy has no liveness tracking. Clear the surface when
+     its window closes or hides (`App::on_close`, and before any hide P0 can see). Never use a
+     surface from an earlier `on_window`: it may point at a destroyed proxy.
+   - Keep a map from surface to window, filled by `on_window` (one entry per Rune window when
+     an app opens several). Route `wl_data_device.enter` and `wl_pointer.enter` by surface.
+   - Reject surfaces not in the map. On compositors without server-side decorations, winit's
+     adwaita frame draws on subsurfaces of its own (sctk-adwaita), and a drag over the frame
+     enters those. By source; not seen on sway, which decorates server-side.
 4. **Driver C.** One reader thread per display that takes part in libwayland's read protocol.
    After each read that returned events, it wakes the UI with a caller-supplied waker:
    `AppHandle::update_if`, returning whether anything changed. The UI side calls
    `dispatch_pending`, so protocol handlers and hit tests run on the UI thread. A stop pipe ends
-   the thread in under 1 ms. Stop it before `run` returns (see W3).
+   the thread in under 1 ms. Three invariants, because winit's `read_events` waits for C's read
+   while C holds a read intent:
+   - C never waits on the UI thread while it holds a read intent. It reads or `cancel_read`s
+     first, and only then wakes the UI and waits for the turn.
+   - The stop wake (the pipe) makes C `cancel_read` before it exits; it never leaves an intent
+     behind.
+   - After the stop flag is set, C makes no libwayland call at all.
+
+   C's turn wait has a timeout (100 ms in the prototype). Once the loop has ended no turn comes,
+   which is why the late stop in the teardown runs below took 100 ms in 4 of 5 runs.
 5. **Data off the UI thread.** Offers are read through a pipe on a worker thread, and the result
    comes back through the waker. Sources write each type lazily, on a worker, from bytes cached
-   per source.
+   per source. fd hygiene:
+   - every pipe `O_CLOEXEC`;
+   - close our write end right after `receive` (and the flush), or the read never sees EOF;
+   - a read timeout, so a source that never writes doesn't pin a worker;
+   - ignore `SIGPIPE` and treat `EPIPE` on a source write as "the reader left".
+6. **Teardown.** Objects bound on winit's display must be gone before winit closes it.
+   - On the UI thread, in `App::on_close` for the last window and on the app's quit path
+     (before `AppHandle::quit` or `Tx::quit`), first stop and join the reader thread.
+   - Then destroy sources, offers, devices, pointer, keyboard and seat, and drop the `Backend`.
+     wayland-backend's `ConnectionState::drop` (`sys/client_impl/mod.rs:1129–1152`) calls
+     `wl_proxy_destroy` on every proxy it still knows, then `wl_event_queue_destroy`.
+   - Never leave them to a `static`, `thread_local` or other destructor that runs after `run`
+     returns. If no hook ran, leak them with `mem::forget`.
+   - Measured here (`logs/teardown/`), 5 runs each under sway, driver C:
+     - dropped on the UI thread before quitting: 5 of 5 exit 0;
+     - stopped and leaked before quitting: 5 of 5 exit 0;
+     - reader left running, stopped and dropped after `run` returned: **5 of 5 SIGSEGV**. The
+       core shows `wl_proxy_destroy` ← `ConnectionState::drop` ← the `Backend` drop.
+   - This matches S3's E1.7 (`docs/decisions/S3-foreign-parent.md`). The earlier claim that an
+     un-stopped reader was harmless was wrong: the prototype held the binding in a `static`, so
+     its destructor never ran.
+   - R4's lifetime hook would remove this rule.
 
 **X11.** A second x11rb connection and window:
 - selections with `TARGETS`, INCR and XFixes owner tracking;
 - an XDND target behind `XdndProxy` set on Rune's window;
-- a grab-less XDND source on XI2 raw events.
+- a grab-less XDND source on XI2 raw events;
+- an event thread (`X::run` in the prototype) that blocks in `wait_for_event` and wakes the UI
+  with `AppHandle::update_if`, returning whether any event arrived (the same reason as A's
+  `update_if` rule);
+- `XdndProxy` set again on every `on_window`, since a recreated window starts without it;
+- at teardown, `XdndProxy` deleted from Rune's window before our window and connection go.
+  Otherwise sources keep sending to a window that no longer exists. Unverified.
 
 **Starting point.** The prototype's `probe` (`wl.rs` drivers B and C, `x11.rs`, `display.rs`,
 `snapshot.rs`), the peer and the harness scripts are on the local branch `spike/s2-prototype`
@@ -302,7 +380,7 @@ and that branch must not be merged. P0 should rewrite them to the repository's l
 | Linux `drag_out`, with several MIME types, lazy data, action negotiation, the live-frame snapshot as icon, and the outcome | P1's source half; with it, R5 stops mattering for drags | R1 |
 | Drops on Wayland with arbitrary MIME types and a position per motion (and the same types on X11) | P1's target half | R2 |
 | Clipboard writes with custom MIME types and images, reads by type, and an ownership-change notification | P2 | R3 |
-| The display handle, `with_raw_display_handle` (Wayland display, X11 connection), and a guarantee or hook for when it is dropped | P0's route without `wl_proxy_get_display`, and an X11 route on winit's connection. Same as S1's R7 and S3's issue: file once. | R4 |
+| The display handle, `with_raw_display_handle` (Wayland display, X11 connection), and a guarantee or hook for when it is dropped | P0's route without `wl_proxy_get_display`, an X11 route on winit's connection, and a safe teardown point. One issue with S1's R7 and S3's display-handle ask; the union is under R4. | R4 |
 | A public way to end a pointer capture (`Tx::release_pointer()` or similar) that delivers the cancelled Up | A shim-started drag otherwise leaves Rune pressing, with moves reaching `on_drag` with no button held | R5 |
 
 ## Constraints for later WPs
@@ -332,20 +410,28 @@ Recommended changes. None of these files was edited here.
   - Nautilus nests fine under `dbus-run-session` with `GSK_RENDERER=cairo GTK_A11Y=none`. `grim`
     on the nested display gives screenshots for locating icons.
   - Rune draws on Xvfb with the NVIDIA driver here.
-  - Stop P0's reader thread before `run` returns. Nothing crashed when it wasn't stopped,
-    because the process exited, but the thread then polls a display winit has freed.
+  - Tests must exercise P0's teardown (step 6): stop and destroy on the UI thread before `run`
+    returns. A late drop crashed 5 of 5 runs.
 - **P0 (`P0-transfer-substrate.md`):**
   - Display access is the `wl_proxy_get_display` route above, with an `Unsupported` result on
     libwayland < 1.23. Put "Ubuntu 24.04: no Wayland transfer through winit's display" in Done
     when, unless the owner decides otherwise (question 1).
-  - Use driver C. Don't copy Rune's layer-shell watcher: it races (Q2).
-  - Protocol hygiene, since any error on our objects kills winit's connection:
-    - capability-gated `get_pointer` and `get_keyboard`;
-    - `wl_data_source.set_actions` only on drag sources (on a selection source it is a
-      protocol error);
-    - destroy the previous selection offer;
-    - keep a dropped offer until `finish`;
-    - never reuse a data-control source.
+  - Use driver C. A watcher that only polls the fd (driver A) races without the every-turn
+    dispatch Rune's own overlays get from `about_to_wait` (Q2).
+  - Protocol hygiene, since any error on our objects kills winit's connection. The fatal errors
+    on P0's objects:
+    - `wl_seat`: `missing_capability` (gate `get_pointer` and `get_keyboard` on capabilities);
+    - `wl_data_offer`: `invalid_finish` (`finish` after `accept(NULL)` or before any `action`
+      event), `invalid_offer` (`finish` or `set_actions` on a selection offer),
+      `invalid_action_mask`, `invalid_action`;
+    - `wl_data_source`: `invalid_action_mask`, `invalid_source` (`set_actions` on a selection
+      source, or a drag source used for the selection);
+    - `wl_data_device`: `role` (an icon surface that already has another role);
+    - data-control: `invalid_offer` (`offer` after `set_selection`) and `used_source` (a
+      source reused).
+
+    Also destroy the previous selection offer, and keep a dropped offer until `finish`.
+  - Teardown is step 6 of the approach: stop, join and destroy on the UI thread, or leak.
   - Bind one `wl_keyboard` per display, not per window: each bind makes the compositor resend
     keymaps to winit's keyboards too.
   - Track the newest key and button serial on P0's own `wl_keyboard`/`wl_pointer`. Expose it to
@@ -357,7 +443,10 @@ Recommended changes. None of these files was edited here.
     is a starting point for W3's peer.
 - **P1 (`P1-drag-and-drop.md`):**
   - **Source on Wayland:**
-    - Start from Rune's `on_drag` at the threshold with P0's press serial.
+    - Start from Rune's `on_drag` at the threshold with P0's press serial. At the threshold,
+      call P0's `dispatch_pending` synchronously on the UI thread before reading the serial,
+      so a button event that has been read is applied. If the serial is still missing, start on
+      the next wake rather than block on a read on the UI thread.
     - From then on, swallow that element's moves and its Up, and end the swallow on the next
       button event P0 sees.
     - Treat sway's `Up { cancelled: true }` after the drop as no-op, and ignore `cancelled`
@@ -375,9 +464,12 @@ Recommended changes. None of these files was edited here.
   - **Drag icon:** warm the GPU and renderer at attach; render from a copy of the element's
     state with `srgb_blend` on.
   - **In-process fast path:**
-    - Wayland: our own drags arrive on our own data device.
-    - X11: through our proxy, with `source == our window`.
-    - Detect both, and carry the typed payload instead.
+    - Offer a private MIME type carrying a per-drag token, such as
+      `application/x-strata-drag;token=<pid>-<counter>`, and match it at `enter` against the
+      drag this process started. Seeing the drag on our own data device isn't enough: another
+      process's drag arrives there too.
+    - X11: compare `XdndEnter`'s source window with our own window as well.
+    - On a match, carry the typed payload instead of serialized URIs. Unverified: not built.
   - `XdndProxy` turns off Rune's X11 `on_drop_files`, so P1 must cover file drops on X11 too.
   - Nautilus's offer list (Q4) is the reference set for GTK sources.
 - **P2 (`P2-clipboard.md`):**
@@ -387,6 +479,8 @@ Recommended changes. None of these files was edited here.
     - writes need the triggering event's serial;
     - a stale serial is dropped silently: detect it by the missing echo.
   - Cache writer output per source.
+  - For `set_selection` from Ctrl+C, call P0's `dispatch_pending` synchronously before reading
+    the newest key serial, as P1 does for the press serial.
   - Data-control needs no surface or serial, so P2's data-control path could run on its own
     connection, which would also work on libwayland 1.22 (the peer does exactly that). Only the
     `wl_data_device` fallback needs winit's display.
@@ -397,12 +491,25 @@ Recommended changes. None of these files was edited here.
   v1. S3's note that `dispatch_pending` from a Rune update is enough holds only for
   request/response traffic. Events that arrive unprompted need driver C.
 - **S5 (`S5-upstream-and-release.md`):**
-  - File R1–R5. R4 is S1's R7 and S3's display-handle issue: file it once and link all three.
-  - Optionally, a sixth issue: Rune's layer-shell `Watch` has the Q2 race. An idle interactive
-    overlay's input can wait for an unrelated wake.
+  - File R1–R5. R4 merges S1's R7 and S3's display-handle ask: file it once, with the union
+    given under R4 below, and link all three records.
+  - Optionally add to R4 an ask for a public every-turn hook (Rune's `about_to_wait` already
+    drives its own overlays). With it, a shim could dispatch like Rune does, without driver C.
 - **plan.md (owner's own PR):** §4 tier 1 says shims bind "the same way Rune binds
-  `zwlr_layer_shell_v1`". True for binding, but Rune's dispatch pattern races; cite driver C.
-  §8's DnD risk is retired except for the capture problem (R5) and libwayland 1.22.
+  `zwlr_layer_shell_v1`". True for binding. Rune dispatches its queue from `about_to_wait`,
+  which shims can't reach, so P0 uses driver C. §8's DnD risk is retired except for the capture
+  problem (R5), teardown order (P0 step 6) and libwayland 1.22.
+
+## What P0, P1 and P2 still have to decide
+
+- **P0:**
+  - where the transfer handle lives: reached through an app-state accessor, as components take
+    state, or a process-wide value per display;
+  - how P1, P2 and P4 subscribe to its events, given one reader and one waker per display;
+  - the CI GPU route (lavapipe with pixman, untested here; see W3).
+- **P1:** scale-2 drag icons (`set_buffer_scale`), the X11 drag-icon window, touch-started
+  drags.
+- **P2:** `PRIMARY` (data-control and X11), X11 `MULTIPLE`, mutter's behaviour (hand test).
 
 ## Open questions for the owner
 
@@ -427,12 +534,23 @@ Recommended changes. None of these files was edited here.
 - A Scale-2 drag icon, the X11 drag icon window, X11 modifier actions, X11 `MULTIPLE`, a
   primary-selection round trip, and touch-started drags: not built.
 - libwayland 1.22 was simulated by skipping the symbol, not run on a 1.22 system.
+- Designed but not run: the fast-path token (P1), deleting `XdndProxy` at teardown, Escape to
+  cancel an X11 drag, the surface map's rejection of CSD subsurfaces, fd timeouts and `EPIPE`
+  handling.
 
 ## Appendix: Rune issue drafts for S5
 
 Each was run against the pinned rev. The sources are in the prototype's `repros/`.
 
+Common setup: each program is `src/main.rs` of a binary crate whose only dependency is
+`rune = { git = "https://github.com/anomalyco/rune", rev = "78d22ed8eef60d76ac3f322ffc5883f3fcbc57f5", default-features = false, features = ["accessibility", "dbus", "embedded-fonts", "svg"] }`.
+Where a compositor is needed, a headless sway (`WLR_BACKENDS=headless`) with a
+`zwlr_virtual_pointer_v1` client to press and move is enough; no real session is involved.
+
 ### R1 Linux: `drag_out` is ignored
+
+Compositor: none for the headless part; a Wayland or X11 session (headless sway plus a virtual
+pointer is enough) for the windowed part.
 
 Steps:
 1. Run the program below in a Wayland or X11 session.
@@ -468,8 +586,12 @@ fn main() { rune::run(AppSpec::new("r1", (320.0, 200.0), S::default, view)); }
 
 ### R2 Wayland: drops reach no handler, and no handler takes MIME types
 
+Compositor: needed (headless sway plus a virtual pointer is enough).
+
 Steps: run the program below under sway. From another client, drag `text/uri-list`,
-`text/plain;charset=utf-8` and `image/png` onto the zone, and drop.
+`text/plain;charset=utf-8` and `image/png` onto the zone, and drop. Any drag source works, for
+example `dragon-drop <file>` (GTK 3) or `ripdrag <file>` (GTK 4). The run here used the
+prototype's peer, which offers the three types. Neither tool was run here.
 
 Expected:
 - the drop reaches a handler with the offered types and a position on every motion;
@@ -497,6 +619,9 @@ fn main() { rune::run(AppSpec::new("r2", (340.0, 240.0), S::default, view)); }
 ```
 
 ### R3 Clipboard: no custom MIME types, no image writes
+
+Compositor: needed, with data-control for `wl-paste` (headless sway plus a virtual pointer is
+enough).
 
 Steps: run the program below under sway, click the tile, then run `wl-paste --list-types`.
 
@@ -528,7 +653,19 @@ fn main() { rune::run(AppSpec::new("r3", (320.0, 200.0), S::default, view)); }
 
 ### R4 `WindowHandle` has no display handle
 
-The same issue as S1's R7 and S3's display-handle draft: file once.
+Compositor: any Wayland session, or Xvfb for X11. No input needed.
+
+This is one issue for three records; file it once. The union of the asks:
+- **The display handle** (S1's R7, S3, S2): `WindowHandle::with_raw_display_handle(|d| ..)`,
+  giving winit's `wl_display` on Wayland and its Xlib display or xcb connection on X11.
+- **A lifetime guarantee or drop hook** (S2): how long that display lives, or a callback on the
+  UI thread before winit closes it. Shims must destroy their objects first (P0 step 6), and today
+  they must guess the moment from `on_close` and their own quit path.
+- Optionally (S2), a public every-turn hook such as Rune's internal `about_to_wait`, so a shim
+  can dispatch its queue the way Rune's own overlays do.
+
+S3's hook that runs before an X11 window is mapped stays in S3's own issue (foreign parenting);
+it isn't part of this one.
 
 Steps: run the program below on Wayland and on X11.
 
@@ -556,7 +693,7 @@ fn main() {
 
 ### R5 No public way to end a pointer capture
 
-Headless; run the program below.
+Compositor: none; it runs headless. Run the program below.
 
 Steps: press an `on_drag` element and drag past the threshold. The pointer then leaves without a
 release (a Wayland compositor's `wl_pointer.leave` when another drag starts; any system that

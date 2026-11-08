@@ -47,7 +47,7 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | P5 | fixing round 2 (blocker: late reply can overwrite a newer change; round 3 review is last; ruling: a key a restarted portal lacks resets to default; covered window: state current, view waits for uncover, #139) | zbus 6 portal reader (bare workspace deps shared with P8); reads 4 extra keys (drag threshold, recent files, blink timeout, reduced motion); no GSettings/XSETTINGS/kdeglobals fallback (X11 without portal gets defaults); GTK-only text-scaling bullets proposed N/A (owner) | |
 | P6 | ready | | |
 | P7 | ready | | |
-| P8 | fixing round 2 (blocker: release right after answering can double a launch; round 3 review is last; U-P8-1 text in S5 appendix; 11 unit + 17 session tests incl. GLib interop) | GApplication-compatible protocol; opt-in FileManager1 Reveal in the shim (deviation from WP doc: policy stays in Strata); zbus 6 + tokio deps (already locked); zbus types exposed (major bump = minor release) | |
+| P8 | review 3 (final; round 2 fixed: 2c8fb07, release drains answered launches; U-P8-1 text in S5 appendix; 11 unit + 17 session tests incl. GLib interop) | GApplication-compatible protocol; opt-in FileManager1 Reveal in the shim (deviation from WP doc: policy stays in Strata); zbus 6 + tokio deps (already locked); zbus types exposed (major bump = minor release) | |
 | P9 | merged | 1 review round + fixes; ci.yml gains libglib2.0-dev (approved exception); example compiled, not run; no desktop hand test | 54786b4 |
 | C10b | waiting | | |
 | C11 | waiting | | |

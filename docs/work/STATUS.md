@@ -32,7 +32,7 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | C21 | ready | | |
 | C22 | ready | | |
 | C23 | ready | | |
-| C24 | review 2 queued (round 1 fixed: a bar press keeps focus, secondary press taken, Other buttons stop autoscroll, U-C24-8 restated, text-field check inside the listing, Escape in the dead zone stops at once; CSS sizes became slot tokens) | own overlay scrollbar instead of rune-kit ScrollBar (it collides across collections and can't sit outside C4's scroll_x: deviation from plan §4, owner edit); small C1e edit (edge part + on_scroll); modal autoscroll shield (wheel/keys blocked while running); follow-ups: row-margin middle press (C1b/C1e), retrofit bars + popover wheel bullets (X1) | |
+| C24 | review 2 (round 1 fixed: a bar press keeps focus, secondary press taken, Other buttons stop autoscroll, U-C24-8 restated, text-field check inside the listing, Escape in the dead zone stops at once; CSS sizes became slot tokens) | own overlay scrollbar instead of rune-kit ScrollBar (it collides across collections and can't sit outside C4's scroll_x: deviation from plan §4, owner edit); small C1e edit (edge part + on_scroll); modal autoscroll shield (wheel/keys blocked while running); follow-ups: row-margin middle press (C1b/C1e), retrofit bars + popover wheel bullets (X1) | |
 | C25 | review 1 queued (coded: 10 scripts, 6 PNG goldens; store sync p95 23 us; budget held; 3 Rune drafts; API list for C3; plan rulings: keyed by ThumbKey, visible rows win over the budget, 4 deviations from Strata) | | |
 | C5 | ready | | |
 | C6 | ready | | |
@@ -67,7 +67,7 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | P2 | ready | | |
 | P4 | ready | | |
 | X1 | planning (builds Strata's header component; never tags a release: owner item) | | |
-| C14b | coding (plan approved: 5 viewers over C14a and C1e; no orbit drag, follows Strata; canvas elevation profile; ArchivePrompt in C14b; host allocator for archive ids; layout.rs shareable with C13; no 2x upscale cap, deviation) | carries C14a round-3 should-fix: key the rescale child by target scale (`{key}-rescale-{scale bits}`) + regression test (2x, one frame, 1x) | |
+| C14b | review 1 queued (coded: 5 viewers, 43 scripts, 20 PNG and 20 a11y goldens; rescale-key fix shown failing first; perf not measured; 2 new Rune drafts: no AT busy state, no wait cursor; plan rulings: no orbit drag, canvas elevation profile, ArchivePrompt in, host allocator for archive ids, no 2x upscale cap) | carries C14a round-3 should-fix: key the rescale child by target scale (`{key}-rescale-{scale bits}`) + regression test (2x, one frame, 1x) | |
 | C2 | waiting (C24) | | |
 | C3 | waiting (C25) | | |
 | C4 | review 3 (final; round 2 fixed: a held-back sort click is cleared at the next build instead of predicting Rune's press; header-strip rule takes the primary button only; splitters hidden from AT) | no rune-kit Table fork (built on C1e; Table drafts R-K1..7); heading-strip marquee via a small C1e edit in C4; widths scale with text size; headings not Tab stops and fit double-click at Rune 0.5 s (deviations) | |

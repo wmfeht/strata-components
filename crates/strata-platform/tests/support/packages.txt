@@ -17,3 +17,12 @@ libvulkan1
 
 # P9: `--all-features` builds glib-bridge, which links GLib and GIO.
 libglib2.0-dev
+
+# P0: the X11 client libraries winit loads at run time (x11-dl): Xlib, Xlib-xcb, Xcursor, XInput2
+# and Xrandr. The 24.04 runner image carried them; a bare Ubuntu 26.04 doesn't, and without them
+# no Rune window opens on X11.
+libx11-6
+libx11-xcb1
+libxcursor1
+libxi6
+libxrandr2

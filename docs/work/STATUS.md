@@ -69,7 +69,7 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | C14b | ready | carries C14a round-3 should-fix: key the rescale child by target scale (`{key}-rescale-{scale bits}`) + regression test (2x, one frame, 1x) | |
 | C2 | waiting (C24) | | |
 | C3 | waiting (C25) | | |
-| C4 | planning | | |
+| C4 | coding | no rune-kit Table fork (built on C1e; Table drafts R-K1..7); heading-strip marquee via a small C1e edit in C4; widths scale with text size; headings not Tab stops and fit double-click at Rune 0.5 s (deviations) | |
 | X3 | waiting | | |
 | C20d | waiting | | |
 | X2 | waiting | from C1f: drop-by-point routing in row.rs has no test that fails without it; the system binder (never sends on_move) must test it | |

@@ -9,7 +9,7 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | W1b | merged | contract doc change for C1a: EntryId lives for the process, never reused; rename may change it | 3bd5284 |
 | W1c | merged | contract additions for C1e: collection slot; geometry docs no longer rely on on_drag | 0b52156 |
 | W2b | merged | Look::fallback = Strata defaults via K2; slot tokens moved off w2-tokens goldens to w2-slots review scene; confirms row.sidebar 24 / row.palette 53 | 8c12ef3 |
-| W1d | waiting (for a slot) | contract changes for C1c: UniformRows::page_step = rows that fit minus one (Strata); C1a toggle_in_run for Space inside v/V | |
+| W1d | merged | contract changes for C1c: UniformRows::page_step = rows that fit minus one (meaning changed, 10->9); Selection::toggle_in_run for Space inside v/V | 21f28e7 |
 | G1 | merged | owner request: index is rune-kit Buttons grouped by lane; markers from registry (has golden scenes); index goldens hide markers, review scene shows them | 9b4bf5c |
 | W2 | merged | 1 review round + fixes; token-name review by K1/K2/C1e owners pending; PNG goldens on NVIDIA | 341e8cb |
 | W3 | planning |  |  |
@@ -18,8 +18,8 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | S3 | merged | sway Wayland/X11 measured; Hyprland/GNOME/KDE/Firefox hand test pending (QEMU Tier B not run); 3 owner decisions | f5682e4 |
 | S4 | merged | owner: onig + dedicated highlighter thread, N=64, RUSTSEC ignore, WTFPL ok; 3 review rounds + 1 owner-allowed fix round; plan §4 C10/C10a doc edits are owner items | 183f7e2 |
 | S5 | merged | 2 review rounds; 16 Rune issue drafts (U1-U17, U4 withdrawn) await owner filing; crate name taken -> owner; release.yml verified locally only (GitHub run pending) | 85ca12b |
-| C10a | ready | | |
-| C14a | coding | image zoom/pan is new vs Strata (plan asks for it): deliberate change for owner; pixels set without view commits (probed) | |
+| C10a | planning | | |
+| C14a | review 1 | image zoom/pan is new vs Strata (plan asks for it): deliberate change for owner; pixels set without view commits (probed) | |
 | C15 | merged | built on Rune primitives (deviation from WP doc); 6 bullets Strata policy, O6/F13/K6 partial gaps (Rune drafts); PNG goldens on NVIDIA | b38d879 |
 | C1a | merged | 2 review rounds; select_all 149 us / Shift range 148 us at 100k (release, local only); hosts call before_removal + sync | b8c3b8c |
 | C20a | ready | | |
@@ -55,8 +55,8 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | C18 | ready | | |
 | C19 | ready | | |
 | C1b | coding (state machine done; adapter waits on C1e merge) | 37 unit tests; PointerHandle shared settings (deviation); no rename timeout (Strata) | |
-| C1c | coding (machine first; merge waits on W1d and C1e) | default + 10xer maps; layout-aware chord workaround (U-C1c-1) | |
-| C1d | planning | | |
+| C1c | coding (machine done, 50 tests; adapter waits on C1e, Space-in-range on W1d) | default + 10xer maps; layout-aware chord workaround (U-C1c-1) | |
+| C1d | coding (machine first; adapter waits on C1e + C1b adapter) | ~10 Hz apply while auto-scrolling keeps perf meter silent (deviation) | |
 | C1e | review 1 (fixing B1 per-column accessors + 16 should-fix) | 0 view runs over 600 scroll frames at 100k (probe); focus-on-return bullets deferred (Rune focus API) | |
 | C26 | waiting | | |
 | P1 | waiting | | |

@@ -1112,20 +1112,20 @@ fn type_ahead_takes_space_only_inside_a_prefix_and_is_off_by_default() {
 // Review round 1.
 
 #[test]
-fn ctrl_left_and_right_stop_silently_at_an_edge() {
-    // browser/selection/keyboard-navigation: In Icons, Left on the first tile focuses the visible sidebar; in List, Left from any entry does.
-    // Only a plain Left reaches the sidebar: Ctrl+Left in List stays, GTK's grid does nothing
-    // at the first tile, and Columns passes Ctrl-held arrows on (Strata's key_routing.rs).
+fn ctrl_left_and_right_report_no_edge_and_pass_at_one() {
+    // C1c scope: only a plain Left goes towards the sidebar (Strata's single_pane_arrow_action).
+    // Ctrl+Left and Ctrl+Right report no edge; at one they aren't taken, so a Columns column
+    // hands them to C2, as Strata's directory_navigation proceeds with Ctrl held.
     let mut r = Rig::list(5);
     r.click(2);
-    assert!(r.ctrl(Key::Left) && r.ctrl(Key::Right));
+    assert!(!r.ctrl(Key::Left) && !r.ctrl(Key::Right), "passed on");
     assert!(r.take().is_empty(), "no edge");
     assert_eq!((r.selected(), r.cursor()), (vec![2], Some(2)));
     let mut g = Rig::grid(8, 4);
     g.click(0);
-    assert!(g.ctrl(Key::Left));
+    assert!(!g.ctrl(Key::Left));
     assert!(g.take().is_empty());
-    g.ctrl(Key::Right);
+    assert!(g.ctrl(Key::Right), "a nudge that moves is taken");
     assert_eq!(
         (g.selected(), g.cursor()),
         (vec![0], Some(1)),
@@ -1281,12 +1281,100 @@ fn an_edge_reached_by_a_held_key_is_reported_once() {
 
 #[test]
 fn reset_drops_queued_commands() {
-    // integration/10xer-mode: In Columns, `g g` and `G` in a column with no cursor land on its first and last entry.
-    // A `g g` queued for a folder that was left doesn't run in the next one.
+    // C1c scope: a folder change drops what is in progress. A `g g` queued for a folder that was left doesn't run in the next one.
     let mut t = Rig::tenxer(5);
     t.handle.run(Command::Cursor(Target::Last));
     t.m.reset();
     assert!(!t.handle.pending());
     assert!(!t.m.tick(&mut t.f));
     assert_eq!(t.cursor(), None);
+}
+
+// Review round 2.
+
+#[test]
+fn an_empty_collection_passes_sideways_shift_steps() {
+    // C1c scope: a sideways Shift step with no neighbour is the view's (C2's Shift+Right enters,
+    // Shift+Left opens the parent), in an empty folder too.
+    let mut r = Rig::list(0);
+    assert!(!r.shift(Key::Left) && !r.shift(Key::Right));
+    assert!(r.shift(Key::Down), "a vertical one is still taken");
+}
+
+#[test]
+fn an_exact_binding_wins_over_a_tolerated_match() {
+    // C1c scope: the key map is configurable (Strata's keymap rebinding, C20).
+    // Shift+Escape bound to Select all takes it from Escape, which tolerates Shift.
+    let mut map = KeyMap::default_map();
+    map.bind(
+        Chord::new(ChordKey::Escape).with(rune::ChordMod::Shift),
+        Command::SelectAll,
+    );
+    // Ctrl+Shift+Up bound to the first entry takes it from Shift+Up, which tolerates Ctrl.
+    map.bind(
+        Chord::new(ChordKey::Up)
+            .with(rune::ChordMod::Ctrl)
+            .with(rune::ChordMod::Shift),
+        Command::Select(Target::First),
+    );
+    let mut r = Rig::list_with(
+        8,
+        KeySettings {
+            map,
+            ..KeySettings::default()
+        },
+    );
+    r.click(4);
+    assert!(r.press(Key::Escape, SHIFT));
+    assert_eq!(r.selected(), range(0, 7), "Shift+Escape selects all");
+    assert!(r.press(
+        Key::Up,
+        Mods {
+            shift: true,
+            ..CTRL
+        }
+    ));
+    assert_eq!(
+        (r.selected(), r.cursor()),
+        (vec![0], Some(0)),
+        "Ctrl+Shift+Up jumps"
+    );
+}
+
+#[test]
+fn unbinding_a_tolerated_chord_takes_it_off_its_binding() {
+    // C1c scope: the key map is configurable (Strata's keymap rebinding, C20).
+    let super_page_down = Chord::new(ChordKey::PageDown).with(rune::ChordMod::Super);
+    let sup = Mods {
+        logo: true,
+        ..Mods::default()
+    };
+    let mut map = KeyMap::default_map();
+    map.unbind_chord(super_page_down);
+    let mut r = Rig::list_with(
+        40,
+        KeySettings {
+            map: map.clone(),
+            ..KeySettings::default()
+        },
+    );
+    r.click(2);
+    assert!(
+        !r.press(Key::PageDown, sup),
+        "Super+Page Down no longer pages"
+    );
+    assert!(r.key(Key::PageDown), "plain Page Down still does");
+    assert_eq!(r.cursor(), Some(2 + r.page()));
+    // Rebound, it runs the new command.
+    map.bind(super_page_down, Command::Select(Target::Last));
+    let mut r = Rig::list_with(
+        40,
+        KeySettings {
+            map,
+            ..KeySettings::default()
+        },
+    );
+    r.click(2);
+    assert!(r.press(Key::PageDown, sup));
+    assert_eq!(r.cursor(), Some(39));
 }

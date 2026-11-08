@@ -70,10 +70,11 @@ pub enum Command {
     /// move: at an edge it reports [`Outcome::Edge`](super::Outcome::Edge), which 10xer List
     /// and Columns turn into the parent folder or the folder under the cursor.
     Cursor(Target),
-    /// Move the cursor one step and keep the selection, stopping silently at an edge: Ctrl+Left
-    /// and Ctrl+Right in the default map. Strata sends only a plain Left to the sidebar
-    /// (`single_pane_arrow_action`), keeps a Ctrl-held arrow in List, leaves it to GTK in Icons
-    /// (which does nothing at the first tile), and passes it on in Columns.
+    /// Move the cursor one step and keep the selection: Ctrl+Left and Ctrl+Right in the default
+    /// map. At an edge it reports no edge and isn't taken, so the view hears the key: Strata
+    /// sends only a plain Left to the sidebar (`single_pane_arrow_action`), and Columns'
+    /// `directory_navigation` passes Ctrl-held keys on. (Strata's List also keeps the key; a
+    /// host that passes it on there does nothing with it either.)
     Nudge(Direction),
     /// Flip the cursor's entry in or out of the selection: Ctrl+Space.
     Toggle,

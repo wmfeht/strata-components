@@ -1,6 +1,6 @@
 //! The key map: which chords run which [`Command`]s, and which keys stand in for the arrows.
 
-use rune::{Chord, ChordKey, ChordMod};
+use rune::{Chord, ChordKey, ChordMod, KeyPlatform};
 
 use super::command::{Command, RangeKind, Target, Vertical};
 use super::settings::Letters;
@@ -21,7 +21,10 @@ use crate::contract::Direction;
 /// ([`KeyMap::bind_tolerating`]), as Strata's matchers do (`src/ui/window/keyboard/items.rs`):
 /// in the default map, Shift+Up and Shift+Down extend with Ctrl, Alt or Super held too, the
 /// page keys ignore Super, and Escape ignores Shift. Ctrl+Up and Ctrl+Down tolerate nothing,
-/// so with Alt or Super they don't jump, and with Shift they extend.
+/// so with Alt or Super they don't jump, and with Shift they extend. A binding of the exact
+/// chord always wins over a tolerated match, so a host that rebinds Shift+Escape or
+/// Ctrl+Shift+Up gets its own command, and [`KeyMap::unbind_chord`] removes tolerated matches
+/// too.
 ///
 /// Bindings apply whatever [`Letters`] says. An alias stands in for an arrow, as `h j k l` do
 /// in the default map; one on a plain printable key (no Ctrl, Alt or Super) applies only with
@@ -43,21 +46,31 @@ pub struct Binding {
     pub chord: Chord,
     /// Modifiers that may also be held: Strata's `ignoring(..)`.
     pub tolerates: Vec<ChordMod>,
+    /// Chords with tolerated modifiers that no longer match: what [`KeyMap::unbind_chord`]
+    /// took off this binding.
+    pub excludes: Vec<Chord>,
     /// What it runs.
     pub command: Command,
 }
 
 impl Binding {
-    /// Whether `input` is this chord, with any of the tolerated modifiers held too.
-    fn matches(&self, input: &KeyInput<'_>) -> bool {
+    /// The chord with each combination of tolerated modifiers held too, the chord itself
+    /// left out, and without the excluded ones.
+    fn variants(&self) -> impl Iterator<Item = Chord> + '_ {
         let n = self.tolerates.len();
-        (0..1u32 << n).any(|subset| {
-            let chord = (0..n)
-                .filter(|i| subset & (1 << i) != 0)
-                .fold(self.chord, |c, i| c.with(self.tolerates[i]));
-            input.matches(&chord)
-        })
+        (1..1u32 << n)
+            .map(move |subset| {
+                (0..n)
+                    .filter(|i| subset & (1 << i) != 0)
+                    .fold(self.chord, |c, i| c.with(self.tolerates[i]))
+            })
+            .filter(|v| !self.excludes.iter().any(|x| same(x, v)))
     }
+}
+
+/// Whether two chords are the same keys here ("mod+a" and "ctrl+a" are, off macOS).
+fn same(a: &Chord, b: &Chord) -> bool {
+    a.same_keys(b, KeyPlatform::current())
 }
 
 impl KeyMap {
@@ -178,6 +191,7 @@ impl KeyMap {
         self.bindings.push(Binding {
             chord,
             tolerates: tolerates.to_vec(),
+            excludes: Vec::new(),
             command,
         });
         self
@@ -189,9 +203,16 @@ impl KeyMap {
         self
     }
 
-    /// Removes the binding of `chord`, whatever it runs.
+    /// Removes the binding of `chord`, whatever it runs: a binding of exactly that chord goes,
+    /// and a binding that matched it only through a tolerated modifier (Super+Page Down, for
+    /// Page Down tolerating Super) stops matching it, and keeps its other chords.
     pub fn unbind_chord(&mut self, chord: Chord) -> &mut Self {
-        self.bindings.retain(|b| b.chord != chord);
+        self.bindings.retain(|b| !same(&b.chord, &chord));
+        for b in &mut self.bindings {
+            if b.variants().any(|v| same(&v, &chord)) {
+                b.excludes.push(chord);
+            }
+        }
         self
     }
 
@@ -230,8 +251,18 @@ impl KeyMap {
     }
 
     /// The command `input` runs.
+    ///
+    /// A binding of the exact chord wins over one that matches only through a tolerated
+    /// modifier, wherever each sits in the table: binding Shift+Escape to another command
+    /// takes it from Escape, which tolerates Shift.
     pub(super) fn lookup(&self, input: &KeyInput<'_>, letters: Letters) -> Option<Command> {
-        if let Some(b) = self.bindings.iter().find(|b| b.matches(input)) {
+        let exact = self.bindings.iter().find(|b| input.matches(&b.chord));
+        let tolerated = || {
+            self.bindings
+                .iter()
+                .find(|b| b.variants().any(|v| input.matches(&v)))
+        };
+        if let Some(b) = exact.or_else(tolerated) {
             return Some(b.command);
         }
         self.aliases

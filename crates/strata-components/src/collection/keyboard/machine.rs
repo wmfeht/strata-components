@@ -241,12 +241,15 @@ impl KeyMachine {
                 }
                 true
             }
-            Command::Nudge(d) => {
-                if let Landing::At(i) = self.land(Target::Step(d), s) {
+            Command::Nudge(d) => match self.land(Target::Step(d), s) {
+                Landing::At(i) => {
                     self.cursor_to(i, s);
+                    true
                 }
-                true
-            }
+                // Not taken at an edge, so a Columns column hands Ctrl+Left and Ctrl+Right to
+                // the view, as Strata's directory_navigation proceeds with Ctrl held.
+                Landing::Edge(_) | Landing::Nowhere => false,
+            },
             Command::Toggle => {
                 if len > 0 {
                     let i = cursor_or_first(s);
@@ -318,7 +321,7 @@ impl KeyMachine {
     fn extend(&mut self, target: Target, s: &mut dyn Surface) -> bool {
         let len = s.source().len();
         if len == 0 {
-            return true;
+            return !matches!(target, Target::Step(Direction::Left | Direction::Right));
         }
         let cursor = s.selection().cursor_index(s.source());
         let origin = cursor.unwrap_or(if forward(target) { 0 } else { len - 1 });

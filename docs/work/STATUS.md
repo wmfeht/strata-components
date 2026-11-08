@@ -22,7 +22,7 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | S3 | merged | sway Wayland/X11 measured; Hyprland/GNOME/KDE/Firefox hand test pending (QEMU Tier B not run); 3 owner decisions | f5682e4 |
 | S4 | merged | owner: onig + dedicated highlighter thread, N=64, RUSTSEC ignore, WTFPL ok; 3 review rounds + 1 owner-allowed fix round; plan §4 C10/C10a doc edits are owner items | 183f7e2 |
 | S5 | merged | 2 review rounds; 16 Rune issue drafts (U1-U17, U4 withdrawn) await owner filing; crate name taken -> owner; release.yml verified locally only (GitHub run pending) | 85ca12b |
-| C10a | fix round 5 queued (OWNER allowed a 5th round; review 4 found B1: two Markdown views on one block pool evict each other forever; fix: start the current build at an epoch bump; review 5 is final) | gallery rune-kit markdown feature, Vim modelines, editor goldens; perf p95 2.4-6.98 ms; C11 gets no colour past 32 KiB of a block | |
+| C10a | fixing round 5 (OWNER allowed a 5th round; review 4 found B1: two Markdown views on one block pool evict each other forever; fix: start the current build at an epoch bump; review 5 is final) | gallery rune-kit markdown feature, Vim modelines, editor goldens; perf p95 2.4-6.98 ms; C11 gets no colour past 32 KiB of a block | |
 | C14a | merged | 3 review rounds; Ctrl+wheel follows Rune's dy sign, on_magnify macOS only; scale-only change resynced via rescale child (Rune draft); script runner passes --scale 2 (sanctioned); round-3 should-fix (rescale key by target scale) carried to C14b; image zoom/pan is new vs Strata (plan asks for it): deliberate change for owner; pixels set without view commits (probed) | 86a335e |
 | C15 | merged | built on Rune primitives (deviation from WP doc); 6 bullets Strata policy, O6/F13/K6 partial gaps (Rune drafts); PNG goldens on NVIDIA | b38d879 |
 | C1a | merged | 2 review rounds; select_all 149 us / Shift range 148 us at 100k (release, local only); hosts call before_removal + sync | b8c3b8c |
@@ -32,7 +32,7 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | C21 | ready | | |
 | C22 | ready | | |
 | C23 | ready | | |
-| C24 | review 1 (coded: 15 scripts; one allowed thumb-drag perf warning, U-C24-8) | own overlay scrollbar instead of rune-kit ScrollBar (it collides across collections and can't sit outside C4's scroll_x: deviation from plan §4, owner edit); small C1e edit (edge part + on_scroll); modal autoscroll shield (wheel/keys blocked while running); follow-ups: row-margin middle press (C1b/C1e), retrofit bars + popover wheel bullets (X1) | |
+| C24 | fix round 1 queued (review 1: no blockers; taking 6 should-fixes because C2 builds on it: bar press takes focus, secondary press reaches the row, Other buttons don't stop autoscroll, U-C24-8 draft facts, autoscroll-filter script proves nothing, stale stopping after Escape) | own overlay scrollbar instead of rune-kit ScrollBar (it collides across collections and can't sit outside C4's scroll_x: deviation from plan §4, owner edit); small C1e edit (edge part + on_scroll); modal autoscroll shield (wheel/keys blocked while running); follow-ups: row-margin middle press (C1b/C1e), retrofit bars + popover wheel bullets (X1) | |
 | C25 | coding (plan approved: keyed by ThumbKey; visible rows win over the budget; 4 deviations from Strata recorded; API review list for C3) | |
 | C5 | ready | | |
 | C6 | ready | | |

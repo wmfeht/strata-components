@@ -72,6 +72,28 @@ for f in $features; do
 done
 '''
 
+# strata-platform's compositor and D-Bus tests (W3): the #[ignore]d tests in
+# crates/strata-platform/tests/session/, each in its own headless sway, Xwayland and session bus
+# (crates/strata-platform/tests/support/). Nothing reaches the desktop's display or bus. Builds
+# the peer and the examples first: a test can't make cargo build another package's binary, and
+# `cargo test` leaves examples under hashed names only.
+[tasks.test-platform]
+description = "Run strata-platform's compositor tests, each in a private headless sway session"
+usage = '''
+arg "[args]..." help="libtest arguments: a filter (w3::, p2::), --test-threads=1, --nocapture" var=#true
+'''
+run = '''
+set -eu
+# The harness refuses a session display that is the desktop's, so tell it what they were.
+export STRATA_OUTER_DISPLAY="${DISPLAY:-}" STRATA_OUTER_WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-}"
+export STRATA_OUTER_XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-}"
+unset DISPLAY WAYLAND_SOCKET HYPRLAND_INSTANCE_SIGNATURE SWAYSOCK I3SOCK DBUS_SESSION_BUS_ADDRESS
+export WAYLAND_DISPLAY=strata-test-no-wayland
+cargo build -p strata-test-peer -p strata-platform --bins --examples --all-features --locked
+eval "set -- ${usage_args:-}"
+cargo test -p strata-platform --all-targets --all-features --locked -- --ignored "$@"
+'''
+
 [tasks.deny]
 description = "Check advisories, licenses, bans, and sources"
 run = "cargo deny check"

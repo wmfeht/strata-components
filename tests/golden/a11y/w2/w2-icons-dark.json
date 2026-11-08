@@ -353,7 +353,7 @@
             {
               "children": [
                 {
-                  "name": "catppuccin",
+                  "name": "catppuccin-mocha",
                   "role": "label"
                 },
                 {
@@ -693,7 +693,7 @@
                   "role": "label"
                 }
               ],
-              "key": "w2-catppuccin",
+              "key": "w2-catppuccin-mocha",
               "role": "group"
             }
           ],

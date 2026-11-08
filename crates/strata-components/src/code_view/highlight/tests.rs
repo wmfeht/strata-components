@@ -860,6 +860,19 @@ fn closing_a_text_stops_its_pass() {
 
 // The thread.
 
+/// Waits up to `WAIT` for `cond`: the thread wakes the window just after sending replies, so
+/// a wake can land just after `settle` returns.
+fn eventually(cond: impl Fn() -> bool) -> bool {
+    let deadline = std::time::Instant::now() + WAIT;
+    while !cond() {
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    true
+}
+
 #[test]
 fn the_thread_wakes_the_window_and_an_idle_text_stays_idle() {
     let wakes = Arc::new(AtomicUsize::new(0));
@@ -871,8 +884,11 @@ fn the_thread_wakes_the_window_and_an_idle_text_stays_idle() {
     let mut doc = h.open(Source::new("fn main() { let x = 1; }\n").file_name("a.rs"));
     doc.show(0..1);
     assert!(doc.settle(WAIT));
-    assert!(wakes.load(Ordering::SeqCst) > 0);
+    assert!(eventually(|| wakes.load(Ordering::SeqCst) > 0));
     assert!(doc.line_spans(0).is_some_and(|s| !s.is_empty()));
+    // The thread wakes the window after sending its replies, so the last wake can land just
+    // after `settle` returns.
+    std::thread::sleep(Duration::from_millis(50));
     let after = wakes.load(Ordering::SeqCst);
     std::thread::sleep(Duration::from_millis(50));
     assert!(!doc.poll(), "nothing more lands");
@@ -1086,7 +1102,7 @@ fn a_waker_set_after_the_thread_starts_is_used() {
     }));
     doc.show(0..1);
     assert!(doc.settle(WAIT));
-    assert!(woke.lock().is_ok_and(|b| *b));
+    assert!(eventually(|| woke.lock().is_ok_and(|b| *b)));
 }
 
 /// A grammar the random-edit test runs on, with lines and line prefixes that open and close

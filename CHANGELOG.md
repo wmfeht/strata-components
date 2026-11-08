@@ -87,6 +87,9 @@ Nothing is released yet. The first release is planned for milestone M1 with the 
   - Events arrive in order: one `Event::Snapshot`, then an `Event::Changed` per change, and an
     `Event::Fallback` the first time each fallback happens (no bus, no portal, an unset key, an
     unusable value, the portal leaving). The module never prints.
+  - A portal slower than `Options::timeout` gets the defaults at the timeout, and its answer as
+    changes when it lands. A restarted portal is read again; a key it lacks goes back to its
+    default.
 
   The portal is the only source: without one (an X11 session with only XSETTINGS, say) the
   values are the defaults. Rune's own double press keeps its fixed 0.5 s (draft U13). It uses

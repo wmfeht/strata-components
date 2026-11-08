@@ -12,10 +12,12 @@ use super::keys::Key;
 pub enum Fallback {
     /// No session bus to connect to: every value stays its default.
     NoBus(String),
-    /// The Settings portal didn't answer: not running, not activatable, or it failed. Values
-    /// stay as they were, and the watcher reads again if a portal takes the name.
+    /// The Settings portal didn't answer in time: not running, not activatable, slow, or it
+    /// failed (or the watcher couldn't start its connection's runtime). Values stay as they
+    /// were. A slow portal's late answer still arrives as changes, and the watcher reads again
+    /// when a portal takes the name.
     NoPortal(String),
-    /// The portal's answer lacks this key, so it keeps its default or its last value.
+    /// The portal's answer lacks this key, so it has its default and isn't known.
     Unset(Key),
     /// The portal sent this key a value of the wrong type, or an unusable one: the key keeps
     /// its value. `value` is the portal's, as text.

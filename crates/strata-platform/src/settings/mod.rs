@@ -28,8 +28,9 @@
 //!
 //! [`Watcher::start`] runs a thread ([`THREAD_NAME`]) with its own session-bus connection. It
 //! subscribes to the portal's `SettingChanged` and to the portal's name owner, then reads every
-//! key in one `ReadAll`. After that it only waits on the
-//! connection: no timers, no polling. Its sink hears [`Event`]s in order: one
+//! key in one `ReadAll`, taking changes all the while (those that arrive during the read apply
+//! after its answer, in order). After that it only waits on the connection: no timers, no
+//! polling. Its sink hears [`Event`]s in order: one
 //! [`Event::Snapshot`], then an [`Event::Changed`] per change and an [`Event::Fallback`] the
 //! first time each fallback happens. [`follow`] is the sink that applies them to the app's state
 //! through `AppHandle::update_if`, so the view re-runs only when a value changed:
@@ -75,8 +76,11 @@
 //! - No session bus: the defaults and [`Fallback::NoBus`].
 //! - No portal, one that can't be activated, or a failed read: the defaults and
 //!   [`Fallback::NoPortal`]. The watcher reads again when a portal takes the name.
-//! - The portal leaving the bus keeps its values ([`Fallback::PortalLost`]); a new portal is
-//!   read again, and what differs arrives as changes.
+//! - A portal slower than [`Options::timeout`]: the defaults and [`Fallback::NoPortal`] at the
+//!   timeout, and its answer as changes when it lands.
+//! - The portal leaving the bus keeps its values, still known ([`Fallback::PortalLost`]). A new
+//!   portal is read again and what differs arrives as changes; a key the new portal lacks goes
+//!   back to its default and is no longer known.
 //!
 //! The portal is the only source. There is no fallback to GSettings, XSETTINGS (`Xft/DPI`,
 //! `Net/DoubleClickTime`) or `kdeglobals`, so a session without a Settings portal (an X11 window
@@ -85,15 +89,6 @@
 //! xdg-desktop-portal-gtk (Hyprland's Settings backend; xdg-desktop-portal-hyprland has none).
 //! xdg-desktop-portal-kde serves only `org.freedesktop.appearance` and `org.kde.kdeglobals.*`,
 //! so on KDE without the GTK backend only `reduced-motion` is known.
-//!
-//! # Strata's GTK-only behaviour (proposed not applicable, owner to confirm)
-//!
-//! Three of the feature map's `settings/themes/portal-text-scaling` bullets describe GTK's
-//! `no-portals` workaround and have no counterpart here: a process activated with
-//! `GDK_DEBUG=no-portals` already set doesn't read the factor; a `strata --portal` process
-//! restarted with `no-portals` reads it at startup; and the factor sets `gtk-xft-dpi` to
-//! factor × 96 × 1024. Without GTK, every process reads the portal the same way, and the app
-//! multiplies its text size by the factor once. Proposed not applicable; the owner confirms.
 
 mod fallback;
 mod keys;

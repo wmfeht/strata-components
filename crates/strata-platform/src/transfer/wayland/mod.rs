@@ -172,9 +172,12 @@ impl State {
 
     /// The extension state of type `T`, made with `Default` on first use. For other modules'
     /// handlers on this queue; see [`Conn::with_globals`].
-    #[expect(
-        dead_code,
-        reason = "the extension point for P1 and P4, which have no handlers yet"
+    #[cfg_attr(
+        not(feature = "dnd"),
+        expect(
+            dead_code,
+            reason = "the extension point for P1 and P4; only P1 (dnd) uses it yet"
+        )
     )]
     pub(crate) fn extension<T: Any + Send + Default>(&mut self) -> &mut T {
         self.extensions
@@ -247,6 +250,23 @@ impl State {
                     .unwrap_or(false)
             })
             .map(|w| w.key().to_owned())
+    }
+
+    /// The connection is dead: nothing is held or heard on it. owns() turns false for every
+    /// source, and no offer is left to read or finish: the selections, the drag over a window
+    /// and the dropped offers not yet finished all close (P0's review, S3), so a handle the
+    /// app still holds answers `Gone` instead of sending on a dead connection.
+    fn forget_all(&mut self) {
+        self.sources.clear();
+        for (_, current) in self.selections.drain() {
+            current.offer.close();
+        }
+        if let Some(drag) = self.drag.take() {
+            drag.offer.close();
+        }
+        for offer in self.dropped.drain(..) {
+            offer.close();
+        }
     }
 
     /// A drag that left without a drop is over: its offer goes.
@@ -476,15 +496,7 @@ impl Conn {
     /// no more.
     fn report_failure(&self, message: String) {
         if !self.failed.swap(true, Ordering::AcqRel) {
-            // Nothing is held or heard on a dead connection: owns() turns false for every
-            // source, and no current offer is left to read. Its proxies need no destroy.
-            {
-                let mut state = lock(&self.state);
-                state.sources.clear();
-                for (_, current) in state.selections.drain() {
-                    current.offer.close();
-                }
-            }
+            lock(&self.state).forget_all();
             self.subs.emit(vec![Event::Failed { message }]);
         }
     }
@@ -493,9 +505,12 @@ impl Conn {
     /// `zxdg_importer_v2`). The module binding it implements `Dispatch<I, U> for State` for its
     /// objects and keeps its state in [`State::extension`]. None after shutdown, or off the
     /// UI thread on winit's display.
-    #[expect(
-        dead_code,
-        reason = "the extension point for P1 and P4, which have no handlers yet"
+    #[cfg_attr(
+        not(feature = "dnd"),
+        expect(
+            dead_code,
+            reason = "the extension point for P1 and P4; only P1 (dnd) uses it yet"
+        )
     )]
     pub(crate) fn with_globals<R>(
         &self,
@@ -649,6 +664,65 @@ impl Conn {
         drop(lock(&self.queue).take());
     }
 }
+
+/// What P1 (`dnd`) reads of the queue's state, from its own handlers on this queue and from
+/// [`Conn::with_globals`]. Read-only: P0's handlers keep these fields.
+#[cfg(feature = "dnd")]
+impl State {
+    pub(crate) fn data_device_manager(&self) -> Option<&WlDataDeviceManager> {
+        self.ddm.as_ref()
+    }
+
+    pub(crate) fn data_device(&self) -> Option<&WlDataDevice> {
+        self.device.as_ref()
+    }
+
+    pub(crate) fn compositor(&self) -> Option<&WlCompositor> {
+        self.compositor.as_ref()
+    }
+
+    pub(crate) fn shm(&self) -> Option<&WlShm> {
+        self.shm.as_ref()
+    }
+
+    /// The newest left-button press serial, for `start_drag`.
+    pub(crate) fn press_serial(&self) -> Option<u32> {
+        self.press_serial
+    }
+}
+
+#[cfg(feature = "dnd")]
+impl Conn {
+    /// Sends what was queued. Requests P1 makes through [`Conn::with_globals`] need it.
+    pub(crate) fn flush(&self) {
+        self.home.flush();
+    }
+
+    /// The connection failed: no request should be made on it.
+    pub(crate) fn is_failed(&self) -> bool {
+        self.failed.load(Ordering::Acquire)
+    }
+
+    /// Runs `f` with a proxy for `window`'s `wl_surface` on this connection, for that call
+    /// only. Winit's display only, on the UI thread.
+    pub(crate) fn with_window_surface<R>(
+        &self,
+        window: &WindowHandle,
+        f: impl FnOnce(&WlSurface) -> R,
+    ) -> Result<R, Error> {
+        if self.home.ui.is_none() {
+            return Err(Error::Refused("a connection of our own has no app windows"));
+        }
+        if !self.home.here() {
+            return Err(Error::Refused(ON_UI));
+        }
+        let backend = self.home.backend.upgrade().ok_or(Error::Shutdown)?;
+        display::with_surface(&Connection::from_backend(backend), window, f)
+    }
+}
+
+#[cfg(test)]
+mod tests;
 
 // ---- handlers ----
 

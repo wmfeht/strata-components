@@ -27,11 +27,35 @@ pub(super) struct Owned {
     time: u32,
 }
 
+#[cfg(feature = "dnd")]
+impl Owned {
+    pub(super) fn id(&self) -> SourceId {
+        self.id
+    }
+
+    pub(super) fn time(&self) -> u32 {
+        self.time
+    }
+}
+
 /// An ownership request waiting for the server's timestamp.
 pub(super) struct Owning {
-    selection: Selection,
+    /// The selection's atom: `CLIPBOARD`, `PRIMARY`, or another a module built on the actor
+    /// owns (P1's `XdndSelection`).
+    sel: Atom,
     id: SourceId,
     spec: SourceSpec,
+}
+
+#[cfg(feature = "dnd")]
+impl Owning {
+    pub(super) fn new(sel: Atom, id: SourceId, spec: SourceSpec) -> Owning {
+        Owning { sel, id, spec }
+    }
+
+    pub(super) fn sel(&self) -> Atom {
+        self.sel
+    }
 }
 
 /// A `SelectionRequest` to answer.
@@ -65,18 +89,39 @@ pub(super) enum Then {
     /// An app's read.
     User(Reply),
     /// The `TARGETS` of a new owner, to announce its offer.
-    Targets(Window),
+    Targets(Selection, Window),
 }
 
 /// A read waiting for a free property.
 pub(super) struct Wanted {
-    selection: Selection,
+    /// The selection's atom.
+    sel: Atom,
+    /// The conversion's time: `CurrentTime` for `CLIPBOARD` and `PRIMARY`, the drop's time
+    /// for `XdndSelection`.
+    time: u32,
     target: Atom,
     limits: ReadLimits,
     then: Then,
 }
 
 impl Wanted {
+    #[cfg(feature = "dnd")]
+    pub(super) fn new(
+        sel: Atom,
+        time: u32,
+        target: Atom,
+        limits: ReadLimits,
+        then: Then,
+    ) -> Wanted {
+        Wanted {
+            sel,
+            time,
+            target,
+            limits,
+            then,
+        }
+    }
+
     pub(super) fn fail(self, e: ReadError) {
         if let Then::User(done) = self.then {
             done.send(Err(e));
@@ -121,20 +166,8 @@ impl Actor {
                 id,
                 spec,
             } => {
-                // ICCCM: own with a real timestamp, never CurrentTime. A zero-length append to
-                // our own window makes the server send a PropertyNotify carrying its time.
-                let _ = self.conn.change_property8(
-                    PropMode::APPEND,
-                    self.win,
-                    self.atoms.TRANSFER_TIME,
-                    AtomEnum::STRING,
-                    &[],
-                );
-                self.owning.push_back(Owning {
-                    selection,
-                    id,
-                    spec,
-                });
+                let sel = self.selection_atom(selection);
+                self.take_with_server_time(Owning { sel, id, spec });
             }
             Cmd::Read {
                 selection,
@@ -149,8 +182,10 @@ impl Actor {
                 let Some(target) = self.atom(&mime) else {
                     return done.send(Err(ReadError::Io("couldn't intern the type".into())));
                 };
+                let sel = self.selection_atom(selection);
                 self.start_read(Wanted {
-                    selection,
+                    sel,
+                    time: CURRENT_TIME,
                     target,
                     limits,
                     then: Then::User(done),
@@ -161,6 +196,10 @@ impl Actor {
                 // KillClient on a resource of ours closes our own connection.
                 let _ = self.conn.kill_client(self.win);
             }
+            #[cfg(feature = "dnd")]
+            Cmd::Install(hook) => self.hook = Some(hook),
+            #[cfg(feature = "dnd")]
+            Cmd::Hook(cmd) => self.with_hook(|h, cx| h.command(cx, cmd)),
             Cmd::Quit => {}
         }
     }
@@ -172,6 +211,9 @@ impl Actor {
             XEvent::SelectionNotify(n) => self.converted(n),
             XEvent::SelectionClear(c) => self.cleared(c),
             XEvent::XfixesSelectionNotify(n) => self.owner_changed(n),
+            #[cfg(feature = "dnd")]
+            other => self.with_hook(|h, cx| h.event(cx, &other)),
+            #[cfg(not(feature = "dnd"))]
             _ => {}
         }
     }
@@ -203,8 +245,22 @@ impl Actor {
         }
     }
 
+    /// ICCCM: own with a real timestamp, never CurrentTime. A zero-length append to our own
+    /// window makes the server send a PropertyNotify carrying its time, and [`Actor::own`]
+    /// then takes the selection.
+    pub(super) fn take_with_server_time(&mut self, owning: Owning) {
+        let _ = self.conn.change_property8(
+            PropMode::APPEND,
+            self.win,
+            self.atoms.TRANSFER_TIME,
+            AtomEnum::STRING,
+            &[],
+        );
+        self.owning.push_back(owning);
+    }
+
     fn own(&mut self, o: Owning, time: u32) {
-        let sel = self.selection_atom(o.selection);
+        let sel = o.sel;
         let _ = self.conn.set_selection_owner(self.win, sel, time);
         let ours = self
             .conn
@@ -286,11 +342,13 @@ impl Actor {
             return;
         }
         let targets = self.atoms.TARGETS;
+        let sel = self.selection_atom(selection);
         self.start_read(Wanted {
-            selection,
+            sel,
+            time: CURRENT_TIME,
             target: targets,
             limits: ReadLimits::default(),
-            then: Then::Targets(owner),
+            then: Then::Targets(selection, owner),
         });
     }
 
@@ -311,15 +369,14 @@ impl Actor {
 
     // ---- reading another client's selection ----
 
-    fn start_read(&mut self, want: Wanted) {
+    pub(super) fn start_read(&mut self, want: Wanted) {
         let Some(property) = self.take_prop() else {
             self.queued.push_back(want);
             return;
         };
-        let sel = self.selection_atom(want.selection);
         let _ = self
             .conn
-            .convert_selection(self.win, sel, want.target, property, CURRENT_TIME);
+            .convert_selection(self.win, want.sel, want.target, property, want.time);
         let deadline = Instant::now() + want.limits.idle;
         self.incoming.push(Incoming {
             want,
@@ -335,14 +392,12 @@ impl Actor {
         if n.requestor != self.win {
             return;
         }
-        let Some(selection) = self.selection_of(n.selection) else {
-            return;
-        };
+        let selection = n.selection;
         let found = if n.property == NONE {
             // A refusal names no property: match the waiting conversion by what it asked.
             self.incoming
                 .iter()
-                .position(|r| !r.incr && r.want.selection == selection && r.want.target == n.target)
+                .position(|r| !r.incr && r.want.sel == selection && r.want.target == n.target)
         } else {
             self.incoming
                 .iter()
@@ -440,9 +495,9 @@ impl Actor {
     fn finish(&mut self, read: Incoming, result: Result<Vec<u8>, ReadError>) {
         match read.want.then {
             Then::User(done) => done.send(result),
-            Then::Targets(owner) => {
+            Then::Targets(selection, owner) => {
                 // Only the owner we asked still counts; a newer one has its own request.
-                if self.owner_of.get(&read.want.selection) != Some(&owner) {
+                if self.owner_of.get(&selection) != Some(&owner) {
                     return self.pump();
                 }
                 // ICCCM: TARGETS is a list of atoms, format 32. Anything else lists nothing.
@@ -466,7 +521,7 @@ impl Actor {
                     .filter(|a| *a != NONE && !meta.contains(a))
                     .filter_map(|a| self.name(a))
                     .collect();
-                self.announce(read.want.selection, owner, mimes);
+                self.announce(selection, owner, mimes);
             }
         }
         self.pump();
@@ -634,6 +689,15 @@ impl Actor {
     // ---- timeouts ----
 
     pub(super) fn expire(&mut self, now: Instant) {
+        #[cfg(feature = "dnd")]
+        if self
+            .hook
+            .as_ref()
+            .and_then(|h| h.deadline())
+            .is_some_and(|d| d <= now)
+        {
+            self.with_hook(|h, cx| h.tick(cx, now));
+        }
         self.outgoing.retain(|o| o.deadline > now);
         let mut i = 0;
         while i < self.incoming.len() {

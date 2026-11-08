@@ -10,6 +10,8 @@
 //! large data with INCR, reads others' selections (INCR too), and hears every ownership change
 //! through XFixes, so a lost selection shows at once.
 
+#[cfg(feature = "dnd")]
+pub(crate) mod hook;
 mod selection;
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -73,6 +75,12 @@ enum Cmd {
     },
     /// A test switch: has the server kill our own connection, so it fails.
     KillSelf,
+    /// Installs the module that runs on the actor thread (P1's XDND).
+    #[cfg(feature = "dnd")]
+    Install(Box<dyn hook::Hook>),
+    /// A command for the installed hook.
+    #[cfg(feature = "dnd")]
+    Hook(Box<dyn std::any::Any + Send>),
     Quit,
 }
 
@@ -194,6 +202,10 @@ impl X11 {
         let mut actor = Actor {
             conn: xconn,
             win,
+            #[cfg(feature = "dnd")]
+            root,
+            #[cfg(feature = "dnd")]
+            hook: None,
             atoms,
             names: HashMap::new(),
             atom_of: HashMap::new(),
@@ -242,6 +254,19 @@ impl X11 {
         };
         self.mailbox.post(own).map_err(|_| Error::Shutdown)?;
         Ok(id)
+    }
+
+    /// Installs `hook` on the actor thread, replacing any earlier one. False if the actor is
+    /// gone.
+    #[cfg(feature = "dnd")]
+    pub(crate) fn install_hook(&self, hook: Box<dyn hook::Hook>) -> bool {
+        self.mailbox.post(Cmd::Install(hook)).is_ok()
+    }
+
+    /// Posts `cmd` to the installed hook, from any thread. False if the actor is gone.
+    #[cfg(feature = "dnd")]
+    pub(crate) fn post_hook(&self, cmd: Box<dyn std::any::Any + Send>) -> bool {
+        self.mailbox.post(Cmd::Hook(cmd)).is_ok()
     }
 
     /// A test switch: makes the X server end our connection, to check how the actor's
@@ -297,6 +322,11 @@ impl ReadOffer for XOffer {
 struct Actor {
     conn: RustConnection,
     win: Window,
+    #[cfg(feature = "dnd")]
+    root: Window,
+    /// The module built on the actor (P1's XDND), once installed.
+    #[cfg(feature = "dnd")]
+    hook: Option<Box<dyn hook::Hook>>,
     atoms: Atoms,
     names: HashMap<Atom, String>,
     atom_of: HashMap<String, Atom>,
@@ -396,6 +426,8 @@ impl Actor {
     }
 
     fn quit(&mut self) {
+        #[cfg(feature = "dnd")]
+        self.with_hook(|h, cx| h.stop(cx));
         self.abort_reads();
         let _ = self.conn.destroy_window(self.win);
         let _ = self.conn.flush();
@@ -465,10 +497,15 @@ impl Actor {
     }
 
     fn next_deadline(&self) -> Option<Instant> {
+        #[cfg(feature = "dnd")]
+        let hook = self.hook.as_ref().and_then(|h| h.deadline());
+        #[cfg(not(feature = "dnd"))]
+        let hook = None;
         self.incoming
             .iter()
             .map(Incoming::deadline)
             .chain(self.outgoing.iter().map(Outgoing::deadline))
+            .chain(hook)
             .min()
     }
 }

@@ -21,7 +21,7 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | S3 | merged | sway Wayland/X11 measured; Hyprland/GNOME/KDE/Firefox hand test pending (QEMU Tier B not run); 3 owner decisions | f5682e4 |
 | S4 | merged | owner: onig + dedicated highlighter thread, N=64, RUSTSEC ignore, WTFPL ok; 3 review rounds + 1 owner-allowed fix round; plan §4 C10/C10a doc edits are owner items | 183f7e2 |
 | S5 | merged | 2 review rounds; 16 Rune issue drafts (U1-U17, U4 withdrawn) await owner filing; crate name taken -> owner; release.yml verified locally only (GitHub run pending) | 85ca12b |
-| C10a | coding (plan approved: gallery rune-kit markdown feature, Vim modelines, editor goldens) | | |
+| C10a | review 1 (gallery rune-kit markdown feature, Vim modelines, editor goldens; perf p95 2.4-6.96 ms) | | |
 | C14a | merged | 3 review rounds; Ctrl+wheel follows Rune's dy sign, on_magnify macOS only; scale-only change resynced via rescale child (Rune draft); script runner passes --scale 2 (sanctioned); round-3 should-fix (rescale key by target scale) carried to C14b; image zoom/pan is new vs Strata (plan asks for it): deliberate change for owner; pixels set without view commits (probed) | 86a335e |
 | C15 | merged | built on Rune primitives (deviation from WP doc); 6 bullets Strata policy, O6/F13/K6 partial gaps (Rune drafts); PNG goldens on NVIDIA | b38d879 |
 | C1a | merged | 2 review rounds; select_all 149 us / Shift range 148 us at 100k (release, local only); hosts call before_removal + sync | b8c3b8c |

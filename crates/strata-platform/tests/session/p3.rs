@@ -7,7 +7,9 @@
 //! X11 resize works here whatever mutter and KWin do (a hand test, still pending).
 //!
 //! Feature map: `app/window`, "dragging … header moves the window and dragging a window edge
-//! resizes it", and "Minimize minimizes the window and Close closes it".
+//! resizes it", and "Minimize minimizes the window and Close closes it": Close on both backends,
+//! Minimise as far as the request reaching the window manager (sway minimises nothing).
+//! Maximise is a hand test: floating sway ignores it, so only the request is checked.
 //!
 //! Work package: P3, `docs/work/phase-1-leaves/P3-client-side-decorations.md`.
 
@@ -44,17 +46,17 @@ struct App {
     xid: Option<u32>,
 }
 
-/// Opens the example with `args` and waits until it is linked to its window (on X11, until
-/// the watcher has reported), floating, and laid out at sway's size.
+/// Opens the example with `args` and waits until it is linked to its window (on X11 that
+/// includes the first read of its state and the window manager's capabilities), floating, and
+/// laid out at sway's size.
 fn open(s: &Session, display: Display, args: &[&str]) -> (App, Window) {
     let mut cmd = s.command(example("csd"), display);
     cmd.args(args);
     let proc = s.spawn("csd", cmd);
     let (_, ready) = proc.wait_json_from(0, "ready", |v| v["ev"] == "ready");
     proc.wait_json("the first frame", |v| v["ev"] == "frame");
-    let x11 = display == Display::X11 && !args.contains(&"native");
     let (_, csd) = proc.wait_json_from(0, "the window linked", |v| {
-        v["ev"] == "csd" && (!x11 || v["notice"] == "report")
+        v["ev"] == "csd" && v["notice"] == "attached"
     });
     let window = s.wait_window_where("the floating example", |w| {
         w.pid == proc.pid() && w.floating && w.content.width > 0.0
@@ -94,6 +96,14 @@ fn drag(s: &Session, from: (f64, f64), to: (f64, f64)) {
     input.button(false);
 }
 
+/// A click at `at`, after the pointer has moved there twice and settled, as [`drag`] does.
+fn click(s: &Session, at: (f64, f64)) {
+    let input = s.input();
+    input.pointer_move((at.0 + 1.0, at.1));
+    std::thread::sleep(Duration::from_millis(200));
+    input.click_at(at);
+}
+
 /// The centre of a button the example logged, in layout points.
 fn button(app: &Proc, window: &Window, key: &str) -> (f64, f64) {
     let (_, r) = app.wait_json_from(0, key, |v| v["ev"] == "rect" && v["key"] == key);
@@ -119,6 +129,13 @@ fn border(s: &Session, pid: u32) -> String {
 }
 
 fn border_now(s: &Session, pid: u32) -> String {
+    node(s, pid)
+        .and_then(|n| n["border"].as_str().map(str::to_owned))
+        .unwrap_or_default()
+}
+
+/// sway's tree node for the window of `pid`.
+fn node(s: &Session, pid: u32) -> Option<Value> {
     fn find(node: &Value, pid: u32) -> Option<&Value> {
         if node["pid"].as_u64() == Some(u64::from(pid)) {
             return Some(node);
@@ -128,11 +145,28 @@ fn border_now(s: &Session, pid: u32) -> String {
             .flat_map(|k| node[*k].as_array().into_iter().flatten())
             .find_map(|n| find(n, pid))
     }
-    let tree = s.tree();
-    find(&tree, pid)
-        .and_then(|n| n["border"].as_str())
-        .unwrap_or_default()
-        .to_owned()
+    find(&s.tree(), pid).cloned()
+}
+
+/// The geometry sway gives the window's container (`rect`): what the window manager did,
+/// whether or not the X client has caught up with it yet (see [`followed`]).
+fn wm_rect(s: &Session, pid: u32) -> [f64; 4] {
+    let r = node(s, pid).map(|n| n["rect"].clone()).unwrap_or_default();
+    let at = |k: &str| r[k].as_f64().unwrap_or(0.0);
+    [at("x"), at("y"), at("width"), at("height")]
+}
+
+/// Waits for sway's container geometry to pass `pred`.
+fn wait_wm_rect(s: &Session, pid: u32, what: &str, pred: impl Fn([f64; 4]) -> bool) {
+    let deadline = Instant::now() + timeout();
+    loop {
+        let r = wm_rect(s, pid);
+        if pred(r) {
+            return;
+        }
+        assert!(Instant::now() < deadline, "{what}: sway's rect is {r:?}");
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
 
 /// A resize from an edge or a corner: its name, where to press (fractions of the window), how
@@ -179,10 +213,14 @@ fn inside(window: &Window, (fx, fy): (f64, f64)) -> (f64, f64) {
 /// Whether the window followed a drag of `by` points with a change of `moved`: the same way, at
 /// least half as far, and no further than the pointer went; no change where `by` is 0.
 ///
-/// It follows less far for two reasons, both sway's: it starts a move or resize a step or two
-/// into the drag ((76, 57) for (80, 60) here), and under Xwayland the client can stay a step
-/// short of the final size of a resize (seen: width +26 for a left edge moved by 38; W3's
-/// "floating windows" trap, where sway's configure doesn't always reach an X11 client).
+/// sway starts a move or resize a step or two into the drag, so the window follows a little
+/// less far than the pointer went ((76, 57) for (80, 60) here).
+///
+/// The resize test reads sway's container geometry, not the client's: under Xwayland the
+/// client can stay short of the size sway gave it (seen: a left edge moved by 38 while the
+/// client grew by only 6 or 26; W3's "floating windows" trap, where sway's configure doesn't
+/// always reach an X11 client). That is between wlroots and Xwayland; this module's part ends
+/// once the window manager has taken the resize.
 fn followed(moved: f64, by: f64) -> bool {
     if by == 0.0 {
         moved.abs() <= 3.0
@@ -209,26 +247,45 @@ fn x11_window_resizes_from_each_edge() {
             app.csd["capabilities"]["resize"], true,
             "wlroots lists _NET_WM_MOVERESIZE"
         );
-        let before = window.content;
+        let start = wm_rect(&s, app.proc.pid());
+        let x = Observer::new(&s);
         let from = inside(&window, at);
         drag(&s, from, (from.0 + by.0, from.1 + by.1));
-        wait_rect(
-            &s,
-            app.proc.pid(),
-            &format!("the window resized from {name}"),
-            |w| {
-                let c = w.content;
-                followed(c.x - before.x, change[0])
-                    && followed(c.y - before.y, change[1])
-                    && followed(c.width - before.width, change[2])
-                    && followed(c.height - before.height, change[3])
-            },
+        // EWMH: the pointer on the root window, the direction, the left button, and 1 for a
+        // request from an application. sway's layout points are root pixels at scale 1.
+        let xid = app.xid.expect("the window's X id");
+        let sent = x
+            .message("_NET_WM_MOVERESIZE", xid, timeout())
+            .expect("_NET_WM_MOVERESIZE");
+        let root = |v: u32| f64::from(v.cast_signed());
+        assert!(
+            (root(sent[0]) - from.0).abs() <= 1.0 && (root(sent[1]) - from.1).abs() <= 1.0,
+            "{name}: sent at {sent:?}, pressed at {from:?}"
         );
+        assert_eq!(sent[2..], [direction(name), 1, 1], "{name}: {sent:?}");
+        let pid = app.proc.pid();
+        wait_wm_rect(&s, pid, &format!("the window resized from {name}"), |r| {
+            (0..4).all(|i| followed(r[i] - start[i], change[i]))
+        });
         let request = format!("Resize({})", edge_name(name));
         app.proc
             .wait_json(&format!("the {name} resize request"), |v| {
                 v["ev"] == "outcome" && v["route"] == "X11" && v["request"] == request.as_str()
             });
+    }
+}
+
+/// `_NET_WM_MOVERESIZE`'s direction for an edge: 0 is top-left, then clockwise.
+fn direction(short: &str) -> u32 {
+    match short {
+        "nw" => 0,
+        "n" => 1,
+        "ne" => 2,
+        "e" => 3,
+        "se" => 4,
+        "s" => 5,
+        "sw" => 6,
+        _ => 7,
     }
 }
 
@@ -332,13 +389,13 @@ fn x11_buttons_reach_the_window_manager() {
     let x = Observer::new(&s);
     let input = s.input();
 
-    input.click_at(button(&app.proc, &window, "minimize"));
+    click(&s, button(&app.proc, &window, "minimize"));
     let iconify = x
         .message("WM_CHANGE_STATE", xid, timeout())
         .expect("WM_CHANGE_STATE");
     assert_eq!(iconify[0], 3, "IconicState");
 
-    input.click_at(button(&app.proc, &window, "maximize"));
+    click(&s, button(&app.proc, &window, "maximize"));
     let state = x
         .message("_NET_WM_STATE", xid, timeout())
         .expect("_NET_WM_STATE");
@@ -369,6 +426,48 @@ fn x11_buttons_reach_the_window_manager() {
         2,
         "minimise and maximise only: {outcomes:?}"
     );
+}
+
+/// Close goes through Rune on every backend: the window leaves sway's tree and the app, whose
+/// only window it was, exits.
+fn close_closes(display: Display) {
+    let s = session();
+    let (mut app, window) = open(&s, display, &[]);
+    let pid = app.proc.pid();
+    click(&s, button(&app.proc, &window, "close"));
+    let outcome = app
+        .proc
+        .wait_json("Close's outcome", |v| v["ev"] == "outcome");
+    assert_eq!(
+        (&outcome["request"], &outcome["route"]),
+        (&"Close".into(), &"Rune".into())
+    );
+    let status = app.proc.wait_exit();
+    assert!(status.success(), "the app exits cleanly: {status}");
+    let deadline = Instant::now() + timeout();
+    // Compact JSON, so `"pid":N` is followed by `,` or `}`: no other pid's prefix matches.
+    let gone = |t: &str| {
+        !t.contains(&format!("\"pid\":{pid},")) && !t.contains(&format!("\"pid\":{pid}}}"))
+    };
+    while !gone(&s.tree().to_string()) {
+        assert!(
+            Instant::now() < deadline,
+            "the window is still in sway's tree"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn x11_close_closes_the_window() {
+    close_closes(Display::X11);
+}
+
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn wayland_close_closes_the_window() {
+    close_closes(Display::Wayland);
 }
 
 #[test]
@@ -418,7 +517,7 @@ fn wayland_window_is_borderless_without_resize_minimise_or_menu() {
     let before = window.content;
     let from = inside(&window, (1.0, 0.5));
     drag(&s, from, (from.0 + 40.0, from.1));
-    s.input().click_at(button(&app.proc, &window, "minimize"));
+    click(&s, button(&app.proc, &window, "minimize"));
     let outcome = app
         .proc
         .wait_json("Minimise's outcome", |v| v["ev"] == "outcome");

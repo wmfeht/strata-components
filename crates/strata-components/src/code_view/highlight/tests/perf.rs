@@ -371,3 +371,47 @@ fn viewport_through_the_thread() {
         "viewport {name} through the thread (request to reply): p50 {p50:.2} ms, p95 {p95:.2} ms, max {max:.2} ms"
     );
 }
+
+/// The UI thread's side of the block cache (review 5, SF5): one build asking `n` blocks, then
+/// the trims at the next bumps once the host has moved to a small document. The blocks name a
+/// language with no grammar, so the thread answers them at once and only the cache's own work
+/// is timed.
+fn block_cache_costs(n: usize, block: impl Fn(usize) -> String) {
+    let mut pump = super::Pump::new(light());
+    let mut blocks = pump.blocks();
+    let codes: Vec<String> = (0..n).map(block).collect();
+    let t = Instant::now();
+    for c in &codes {
+        blocks.highlight(Some("zzz"), c);
+    }
+    let ask = t.elapsed();
+    pump.run();
+    let t = Instant::now();
+    blocks.poll();
+    let first = t.elapsed();
+    let mut trims = Vec::new();
+    for k in 0..3 {
+        blocks.highlight(Some("zzz"), &format!("g({k});\n"));
+        pump.run();
+        let t = Instant::now();
+        blocks.poll();
+        trims.push(ms(t.elapsed()));
+    }
+    println!(
+        "block cache, {n} blocks: one build asks them in {:.1} ms; landing poll {:.1} ms; next trims {:?} ms",
+        ms(ask),
+        ms(first),
+        trims.iter().map(|t| format!("{t:.1}")).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+#[ignore = "perf: run with --profile perf (see the module docs)"]
+fn block_cache_trims_and_misses() {
+    release_only();
+    // The reviewer's cases: 15k blocks of 1 KiB (a document over the cap), then 80k tiny ones.
+    block_cache_costs(15_000, |i| {
+        format!("// {i}\n{}\n", "let x = 1;".repeat(100))
+    });
+    block_cache_costs(80_000, |i| format!("f({i});\n"));
+}

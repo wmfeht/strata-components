@@ -37,7 +37,7 @@ use super::worker::Request;
 const CACHE_BYTES: usize = 4 << 20;
 
 /// How far the cap stretches (512 blocks at the 32 KiB cut). A miss past it first evicts
-/// blocks not asked for since the last bump; a block that would still take the cache past it
+/// blocks not asked for since the last bump, down to three quarters of it; a block that would still take the cache past it
 /// answers plain and is never asked for, so nothing lands, nothing wakes the host, and memory
 /// stays bounded. A host that never polls (one that waits on misses) never trims, so its
 /// cache grows to here.
@@ -91,6 +91,8 @@ struct Blocks {
     rx: Receiver<Reply>,
     entries: HashMap<u64, Entry>,
     bytes: usize,
+    /// The bytes of the blocks asked for since the last bump, kept as they are asked.
+    current: usize,
     /// Counts `highlight` calls.
     tick: u64,
     /// The tick at the last epoch bump: blocks asked for after it belong to the current build.
@@ -105,6 +107,9 @@ struct Blocks {
     /// Tests force keys (to collide them) with this.
     #[cfg(test)]
     key_fn: Option<fn(&str, &str) -> u64>,
+    /// Entries looked at by misses and trims, for tests of their cost.
+    #[cfg(test)]
+    visits: u64,
 }
 
 impl CodeBlocks {
@@ -121,6 +126,7 @@ impl CodeBlocks {
                 rx,
                 entries: HashMap::new(),
                 bytes: 0,
+                current: 0,
                 tick: 0,
                 build_start: 0,
                 prev_start: 0,
@@ -130,6 +136,8 @@ impl CodeBlocks {
                 hasher: RandomState::new(),
                 #[cfg(test)]
                 key_fn: None,
+                #[cfg(test)]
+                visits: 0,
             })),
         }
     }
@@ -161,6 +169,12 @@ impl CodeBlocks {
     #[cfg(test)]
     pub(crate) fn key_with(&self, f: fn(&str, &str) -> u64) {
         self.state.borrow_mut().key_fn = Some(f);
+    }
+
+    /// Entries the cache's misses and trims have looked at so far.
+    #[cfg(test)]
+    pub(crate) fn visits(&self) -> u64 {
+        self.state.borrow().visits
     }
 
     #[cfg(test)]
@@ -257,10 +271,13 @@ impl Blocks {
     fn bump(&mut self) {
         self.epoch += 1;
         let spare_after = self.prev_start;
-        self.evict(CACHE_BYTES, 0, spare_after);
+        self.evict(CACHE_BYTES, 0, CACHE_BYTES, spare_after);
         if self.tick > self.build_start {
             self.prev_start = self.build_start;
             self.build_start = self.tick;
+            // Every block is now from an earlier build. (Trims and misses only ever drop
+            // blocks from earlier builds, so `current` needs no other upkeep.)
+            self.current = 0;
         }
     }
 
@@ -298,7 +315,12 @@ impl Blocks {
         self.tick += 1;
         let key = self.key(lang, code);
         match self.entries.get_mut(&key) {
-            Some(e) if *e.lang == *lang && *e.code == *code => e.used = self.tick,
+            Some(e) if *e.lang == *lang && *e.code == *code => {
+                if e.used <= self.build_start {
+                    self.current += e.code.len();
+                }
+                e.used = self.tick;
+            }
             _ => {
                 if !self.request(key, lang, code) {
                     return Some(Vec::new());
@@ -342,16 +364,17 @@ impl Blocks {
                 self.forget(vec![key]);
             }
         }
-        let current: usize = self
-            .entries
-            .values()
-            .filter(|e| e.used > self.build_start)
-            .map(|e| e.code.len())
-            .sum();
-        if current + code.len() > CACHE_CEILING {
+        if self.current + code.len() > CACHE_CEILING {
             return false;
         }
-        self.evict(CACHE_CEILING, code.len(), self.build_start);
+        // Past the ceiling, free a quarter of it at once, as `Budget` does, so a host that
+        // never polls doesn't sort the cache again on every miss.
+        self.evict(
+            CACHE_CEILING,
+            code.len(),
+            CACHE_CEILING / 4 * 3,
+            self.build_start,
+        );
         let Some(tx) = &self.tx else {
             return false;
         };
@@ -368,6 +391,7 @@ impl Blocks {
             return false;
         }
         self.bytes += code.len();
+        self.current += code.len();
         let entry = Entry {
             lang: lang.into(),
             code,
@@ -378,18 +402,32 @@ impl Blocks {
         true
     }
 
-    /// Drops the least recently asked blocks asked for at or before tick `spare_after` until
-    /// `extra` more bytes fit under `limit`. The thread drops the jobs of those still pending.
-    fn evict(&mut self, limit: usize, extra: usize, spare_after: u64) {
+    /// When `extra` more bytes don't fit under `limit`, drops the least recently asked blocks
+    /// asked for at or before tick `spare_after` until they fit under `target`. The thread
+    /// drops the jobs of those still pending.
+    ///
+    /// It sorts the candidates once, as rune-kit's `Budget::evict` does, so a trim of `n`
+    /// blocks costs `n log n` on the UI thread rather than `n` per block dropped.
+    fn evict(&mut self, limit: usize, extra: usize, target: usize, spare_after: u64) {
+        if self.bytes + extra <= limit {
+            return;
+        }
+        #[cfg(test)]
+        {
+            self.visits += self.entries.len() as u64;
+        }
+        let mut old: Vec<(u64, u64)> = self
+            .entries
+            .iter()
+            .filter(|(_, e)| e.used <= spare_after)
+            .map(|(&k, e)| (e.used, k))
+            .collect();
+        old.sort_unstable();
         let mut forgotten = Vec::new();
-        while self.bytes + extra > limit {
-            let oldest = self
-                .entries
-                .iter()
-                .filter(|(_, e)| e.used <= spare_after)
-                .min_by_key(|(_, e)| e.used)
-                .map(|(&k, _)| k);
-            let Some(key) = oldest else { break };
+        for (_, key) in old {
+            if self.bytes + extra <= target {
+                break;
+            }
             if let Some(e) = self.entries.remove(&key) {
                 self.bytes = self.bytes.saturating_sub(e.code.len());
                 if e.tokens.is_none() {

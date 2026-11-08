@@ -2024,3 +2024,45 @@ fn a_block_from_the_last_build_outlives_one_trim() {
         blocks.cached_bytes()
     );
 }
+
+/// At most `8 n log2 n` entries looked at: what sorting once and keeping running totals cost.
+fn n_log_n_bound(n: usize) -> u64 {
+    8 * n as u64 * u64::from(usize::BITS - n.leading_zeros())
+}
+
+#[test]
+fn misses_and_trims_cost_n_log_n() {
+    // Review 5, SF5: each miss summed the current build's bytes over every entry, and each
+    // trim looked for the oldest entry once per entry it dropped, both on the UI thread.
+    let n = 5000;
+    let mut pump = Pump::new(light());
+    let mut blocks = pump.blocks();
+    // 5000 blocks of about 1 KiB, over the 4 MiB cap, in a language the thread answers at
+    // once.
+    let codes: Vec<String> = (0..n)
+        .map(|i| format!("// {i}\n{}\n", "x".repeat(1024)))
+        .collect();
+    for c in &codes {
+        blocks.highlight(Some("zzz"), c);
+    }
+    let misses = blocks.visits();
+    pump.run();
+    blocks.poll();
+    // Two builds of something else: the second trim drops the old document to the cap.
+    for k in 0..2 {
+        blocks.highlight(Some("zzz"), &format!("g({k});\n"));
+        pump.run();
+        blocks.poll();
+    }
+    let trims = blocks.visits() - misses;
+    assert!(blocks.cached_bytes() <= 4 << 20, "trimmed to the cap");
+    let bound = n_log_n_bound(n);
+    assert!(
+        misses <= bound,
+        "{n} misses looked at {misses} entries (bound {bound})"
+    );
+    assert!(
+        trims <= bound,
+        "the trims looked at {trims} entries (bound {bound})"
+    );
+}

@@ -628,8 +628,9 @@ fn a_drop_left_on_ask_refuses_finish_and_the_app_lives_on() {
     });
     input.button(false);
     probe.wait(at, "the drop", |v| v["ev"] == "drop");
+    // Move isn't the source's: after the drop that answer is refused, and ask stands.
     let (_, answered) = probe.wait(at, "the answer", |v| v["ev"] == "ask-answered");
-    assert_eq!(answered["ok"], true, "{answered}");
+    assert_eq!(answered["ok"], false, "{answered}");
     let (_, refused) = probe.wait(at, "the refused finish", |v| {
         v["ev"] == "drop-error" || v["ev"] == "drop-finished"
     });
@@ -653,6 +654,72 @@ fn a_drop_left_on_ask_refuses_finish_and_the_app_lives_on() {
         .filter(|l| l.contains("\"failed\""))
         .count();
     assert_eq!(failed, 0, "a connection failed");
+}
+
+/// Review round 3's repro: a copy drop, then set_actions(none) after it. wlroots would then
+/// have no action, its answer can't reach a dropped offer (leave came with the drop), and a
+/// finish would be a protocol error ending winit's connection. The request must be refused,
+/// the drop finish as a copy, and the app quit cleanly. Shared.
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn actions_set_after_a_drop_are_refused_and_the_drop_finishes() {
+    let s = Session::start();
+    let mut probe = Probe::start(&s, Display::Wayland, &["--clear-actions-after-drop"]);
+    if !probe.shared() {
+        return;
+    }
+    let a = s.peer(Display::Wayland);
+    a.map("p0 copy source");
+    let windows = s.wait_windows(&[a.pid(), probe.app.pid()]);
+    let from = windows
+        .iter()
+        .find(|w| w.pid == a.pid())
+        .expect("a's window");
+    let to = windows
+        .iter()
+        .find(|w| w.pid == probe.app.pid())
+        .expect("the probe's window");
+    a.sync();
+    let input = s.input();
+    s.point_at(&a, from.at(0.5, 0.5));
+    input.button(true);
+    a.wait_event("the press", |e| {
+        matches!(e, Event::PointerButton { pressed: true })
+    });
+    let at = probe.app.line_count();
+    a.drag_start(&three(), &[Action::Copy, Action::Move]);
+    input.path(to.at(0.5, 0.5));
+    probe.wait(at, "the drag entering", |v| v["ev"] == "drag-enter");
+    a.wait_event("the probe accepting copy", |e| {
+        matches!(
+            e,
+            Event::DragAction {
+                action: Some(Action::Copy)
+            }
+        )
+    });
+    input.button(false);
+    let (_, cleared) = probe.wait(at, "set_actions after the drop", |v| {
+        v["ev"] == "actions-cleared"
+    });
+    assert_eq!(cleared["ok"], false, "{cleared}");
+    probe.wait(at, "the drop finished", |v| v["ev"] == "drop-finished");
+    a.wait_event("the drag finishing with copy", |e| {
+        matches!(
+            e,
+            Event::DragFinished {
+                action: Some(Action::Copy)
+            }
+        )
+    });
+    let at = probe.send(json!({ "cmd": "quit" }));
+    probe.wait(at, "the shutdown", |v| v["ev"] == "shutdown");
+    let status = probe.app.wait_exit();
+    assert!(
+        status.success(),
+        "the probe exited with {status}: winit's connection died?"
+    );
+    probe.no_errors();
 }
 
 /// User and system CPU time of `pid`, in clock ticks.
@@ -714,6 +781,17 @@ fn a_dead_wayland_connection_is_reported_once_and_goes_quiet() {
         1,
         "the own connection's reader"
     );
+    // A source held on the connection of our own (data control goes there).
+    let source = probe.own(
+        Via::DataControl,
+        Selection::Clipboard,
+        &[Offer::text(UTF8, TEXT)],
+    );
+    let owns = |probe: &Probe| {
+        let at = probe.send(json!({ "cmd": "owns", "source": source }));
+        probe.wait(at, "owns", |v| v["ev"] == "owns").1["owns"].as_bool()
+    };
+    assert_eq!(owns(&probe), Some(true));
     let at = probe.send(json!({ "cmd": "break-own" }));
     let (_, broke) = probe.wait(at, "the protocol error asked for", |v| {
         v["ev"] == "broke-own"
@@ -747,6 +825,21 @@ fn a_dead_wayland_connection_is_reported_once_and_goes_quiet() {
         "the reader exited"
     );
     assert!(probe_stderr_len() < 1 << 20, "the probe's stderr grew");
+    // Nothing is held on a dead connection, and nothing more is taken there.
+    assert_eq!(
+        owns(&probe),
+        Some(false),
+        "a source still held on a dead connection"
+    );
+    let at = probe.send(json!({
+        "cmd": "own", "via": Via::DataControl, "selection": Selection::Clipboard,
+        "offers": [Offer::text(UTF8, TEXT)],
+    }));
+    let (_, refused) = probe.wait(at, "own", |v| v["ev"] == "owned" || v["ev"] == "own-error");
+    assert_eq!(
+        refused["ev"], "own-error",
+        "taken on a dead connection: {refused}"
+    );
     let at = probe.send(json!({ "cmd": "quit" }));
     probe.wait(at, "the shutdown", |v| v["ev"] == "shutdown");
     let status = probe.app.wait_exit();
@@ -933,6 +1026,58 @@ fn an_x11_window_hears_it_lost_the_clipboard() {
     let got = probe.read(Via::X11, Selection::Clipboard, UTF8);
     assert_eq!(got["text"], "the peer's");
     probe.no_errors();
+}
+
+/// The X server ends our X11 connection (the probe's test switch): one Failed, no source
+/// held any more (`owns` false), and no more taken; the app still quits cleanly.
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn a_failed_x11_connection_holds_and_takes_nothing() {
+    let s = Session::start();
+    let mut probe = Probe::start(&s, Display::X11, &[]);
+    let source = probe.own(Via::X11, Selection::Clipboard, &[Offer::text(UTF8, TEXT)]);
+    let owns = |probe: &Probe| {
+        let at = probe.send(json!({ "cmd": "owns", "source": source }));
+        probe.wait(at, "owns", |v| v["ev"] == "owns").1["owns"].as_bool()
+    };
+    // The take completes on the X11 thread.
+    let deadline = std::time::Instant::now() + timeout();
+    while owns(&probe) != Some(true) {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the selection was never held"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let at = probe.send(json!({ "cmd": "break-x11" }));
+    let (_, broke) = probe.wait(at, "the kill asked for", |v| v["ev"] == "broke-x11");
+    assert_eq!(broke["ok"], true, "{broke}");
+    probe.wait(at, "the failure", |v| v["ev"] == "failed");
+    assert_eq!(
+        owns(&probe),
+        Some(false),
+        "a source still held on a dead connection"
+    );
+    let at = probe.send(json!({
+        "cmd": "own", "via": Via::X11, "selection": Selection::Clipboard,
+        "offers": [Offer::text(UTF8, TEXT)],
+    }));
+    let (_, refused) = probe.wait(at, "own", |v| v["ev"] == "owned" || v["ev"] == "own-error");
+    assert_eq!(
+        refused["ev"], "own-error",
+        "taken on a dead connection: {refused}"
+    );
+    let failed = probe
+        .app
+        .lines()
+        .iter()
+        .filter(|l| l.contains("\"failed\""))
+        .count();
+    assert_eq!(failed, 1, "Failed is reported once");
+    let at = probe.send(json!({ "cmd": "quit" }));
+    probe.wait(at, "the shutdown", |v| v["ev"] == "shutdown");
+    let status = probe.app.wait_exit();
+    assert!(status.success(), "the probe exited with {status}");
 }
 
 #[test]

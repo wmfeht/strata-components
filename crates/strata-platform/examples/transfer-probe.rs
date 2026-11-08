@@ -16,9 +16,10 @@
 //! `--data-control ext|wlr` (which protocol first), `--no-shared` (don't bind on winit's
 //! display), `--as-if-libwayland-1-22` (behave as on libwayland < 1.23, which has no route to
 //! winit's display: a test switch), `--answer-ask-with-move` (prefer ask on enter, answer the
-//! drop with move). The `break-own` command makes the compositor end the Wayland connection
+//! drop with move), `--clear-actions-after-drop` (set no actions once dropped). The `break-own` command makes the compositor end the Wayland connection
 //! of our own with a protocol error (a test switch); `shutdown-elsewhere` calls the shutdown
-//! from another thread, which must refuse.
+//! from another thread, which must refuse; `break-x11` has the X server end the X11
+//! connection (a test switch).
 
 #[cfg(feature = "_transfer")]
 fn main() {
@@ -40,8 +41,8 @@ mod probe {
     use rune::{App, AppHandle, AppSpec, Cx, El, Tx, WindowHandle, col, text};
     use serde_json::{Value, json};
     use strata_platform::transfer::{
-        Action, DataControl, DragOffer, Event, Prefer, ReadLimits, Route, Selection, SourceSpec,
-        Transfer, Turn, Wants, Writer,
+        Action, DataControl, DragOffer, Event, Prefer, ReadLimits, Route, Selection, SourceId,
+        SourceSpec, Transfer, Turn, Wants, Writer,
     };
     use strata_test_peer::protocol::{self, Offer, Via, fnv1a64};
 
@@ -171,6 +172,8 @@ mod probe {
     static DRAG: Mutex<Option<DragOffer>> = Mutex::new(None);
     /// `--answer-ask-with-move`: prefer ask on enter, then answer the drop with move.
     static ANSWER_ASK_WITH_MOVE: AtomicBool = AtomicBool::new(false);
+    /// `--clear-actions-after-drop`: after the drop, set no actions (which must be refused).
+    static CLEAR_ACTIONS_AFTER_DROP: AtomicBool = AtomicBool::new(false);
 
     fn events() -> bool {
         let Some(sub) = ATTACHED.get() else {
@@ -247,6 +250,13 @@ mod probe {
                             let r =
                                 offer.set_actions(&[Action::Move, Action::Ask], Some(Action::Move));
                             log("ask-answered", json!({ "ok": r.is_ok() }));
+                        }
+                        if CLEAR_ACTIONS_AFTER_DROP.load(Ordering::SeqCst) {
+                            let r = offer.set_actions(&[], None);
+                            log(
+                                "actions-cleared",
+                                json!({ "ok": r.is_ok(), "error": r.err().map(|e| e.to_string()) }),
+                            );
                         }
                         read_drop(offer);
                     }
@@ -356,6 +366,17 @@ mod probe {
                     None => log("read-error", json!({ "mime": mime, "error": "no offer" })),
                 }
             }
+            "owns" => {
+                let source = cmd["source"].as_u64().unwrap_or_default();
+                log(
+                    "owns",
+                    json!({ "source": source, "owns": t.owns(SourceId::from_raw(source)) }),
+                );
+            }
+            "break-x11" => log(
+                "broke-x11",
+                json!({ "ok": t.provoke_x11_connection_failure() }),
+            ),
             "break-own" => log(
                 "broke-own",
                 json!({ "ok": t.provoke_protocol_error_on_own_connection() }),
@@ -417,6 +438,7 @@ mod probe {
             .and_then(|i| args.get(i + 1))
             .map_or("transfer-probe", |t| t.as_str());
         ANSWER_ASK_WITH_MOVE.store(flag("--answer-ask-with-move"), Ordering::SeqCst);
+        CLEAR_ACTIONS_AFTER_DROP.store(flag("--clear-actions-after-drop"), Ordering::SeqCst);
         let wants = Wants {
             shared: !flag("--no-shared"),
             data_control: if flag("--own-data-control") {

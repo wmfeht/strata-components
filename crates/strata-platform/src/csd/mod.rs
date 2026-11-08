@@ -83,7 +83,7 @@
 //! | Move | the header (`.window_drag()`) | the header | the frame and the header |
 //! | Resize | **none** (U6): no bands; only compositor shortcuts | bands send `_NET_WM_MOVERESIZE` | the frame |
 //! | Maximise | `Tx::toggle_maximized` | `Tx::toggle_maximized` | `Tx::toggle_maximized` |
-//! | Maximised state | unknown (U6) | `_NET_WM_STATE`, watched | unknown on Wayland, else not read |
+//! | Maximised state | unknown (U6) | `_NET_WM_STATE`, watched | unknown on Wayland (U6), watched on X11 |
 //! | Minimise | **unsupported** (U7) | `WM_CHANGE_STATE` | `Tx::minimize` |
 //! | Window menu | **none** (U8) | `_GTK_SHOW_WINDOW_MENU` where `_NET_SUPPORTED` lists it | the frame's own |
 //! | Close | `Tx::close_window` | `Tx::close_window` | `Tx::close_window` |

@@ -151,7 +151,12 @@ impl Csd {
     /// wires it for them.
     ///
     /// [`attach`]: super::attach
-    pub fn apply(&mut self, report: Report) {
+    pub fn apply(&mut self, mut report: Report) {
+        if self.frame == Frame::Native {
+            // The frame resizes and has the window menu; the app's own controls for them don't.
+            report.capabilities.resize = Some(false);
+            report.capabilities.window_menu = Some(false);
+        }
         if report != self.report {
             self.report = report;
             self.revision += 1;

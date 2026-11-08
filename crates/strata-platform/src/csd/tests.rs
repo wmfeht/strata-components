@@ -317,6 +317,26 @@ fn each_request_goes_where_it_can_work() {
     assert_eq!(RuneMinimize.rune_draft(), Some("U7"));
     assert_eq!(RuneWindowMenu.rune_draft(), Some("U8"));
 
+    // A native frame on X11 follows the window's state, but the frame keeps resizing and the
+    // window menu, whatever the window manager supports.
+    let mut native_x11 = Csd::new(Frame::Native, Backend::X11);
+    let mut report = Report::default();
+    report.state.maximized = Some(true);
+    report.capabilities = Capabilities {
+        resize: Some(true),
+        minimize: Some(true),
+        maximize: Some(true),
+        window_menu: Some(true),
+    };
+    native_x11.apply(report);
+    assert_eq!(native_x11.state().maximized, Some(true));
+    let caps = native_x11.capabilities();
+    assert_eq!(
+        (caps.resize, caps.window_menu, caps.minimize),
+        (Some(false), Some(false), Some(true))
+    );
+    assert!(!native_x11.shows_bands() && !native_x11.shows_window_menu());
+
     // X11 before `attach` links a window, and a window manager that lists no window menu.
     let mut x11 = borderless(Backend::X11);
     assert_eq!(

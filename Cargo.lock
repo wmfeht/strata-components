@@ -3048,12 +3048,14 @@ dependencies = [
 name = "strata-gallery"
 version = "0.0.1"
 dependencies = [
+ "gio",
  "png 0.18.1",
  "rune",
  "rune-kit",
  "serde_json",
  "strata-components",
  "strata-kit",
+ "strata-platform",
 ]
 
 [[package]]

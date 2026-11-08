@@ -17,6 +17,7 @@ pub mod document_view;
 pub mod filter_bar;
 pub mod folder_peek;
 pub mod footer;
+pub mod header;
 pub mod icons_grid;
 pub mod list_table;
 pub mod location_bar;

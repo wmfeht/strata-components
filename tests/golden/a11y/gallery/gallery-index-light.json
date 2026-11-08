@@ -256,6 +256,15 @@
               "role": "button"
             },
             {
+              "actions": [
+                "click",
+                "focus"
+              ],
+              "key": "index-x1",
+              "name": "X1 Shell demo",
+              "role": "button"
+            },
+            {
               "level": 2,
               "name": "Preview",
               "role": "heading"

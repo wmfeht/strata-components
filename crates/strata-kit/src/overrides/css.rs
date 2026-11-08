@@ -18,8 +18,10 @@
 //! | `.sidebar-row.active` | `background`, `background-color` | `sidebar.selected.fill` | 2378: `alpha(@strata_accent, 0.18)` |
 //! | `.sidebar-row.active image` | `color` | `sidebar.selected.icon` | 2386: `@strata_accent` |
 //!
-//! Lengths convert from `px` (or a bare `0`), colours from the forms a theme file takes
-//! ([`Rgba8::parse`]). Within a selector list, each selector converts on its own.
+//! Lengths convert from `px` (or a bare `0`). Colours convert from the forms a theme file
+//! takes ([`Rgba8::parse`]), from Strata's `@strata_*` colours, as references to the tokens
+//! K1 maps each onto ([`STRATA_COLORS`]), and from `alpha()` of either, so a converted colour
+//! keeps following the theme. Within a selector list, each selector converts on its own.
 //!
 //! Some near matches are left out on purpose, because their token isn't the same thing:
 //!
@@ -32,7 +34,7 @@
 //!
 //! Everything else is listed as unconverted with its location and a [`Reason`]: other
 //! selectors (including `.sidebar-shell` from Strata's own documentation), other properties,
-//! relative units, `@strata_*` colours and `alpha()`, `shade()`, `mix()`, `!important`,
+//! relative units, `shade()`, `mix()`, `lighter()`, `!important`,
 //! `@define-color` (a theme colour belongs in a custom theme) and every other at-rule.
 
 use std::fmt;
@@ -278,7 +280,7 @@ impl Out<'_> {
                 let problem = match prop {
                     Prop::Background | Prop::Color => match color(value) {
                         Some(c) => {
-                            self.set(token, format!("{:?}", c.hex()), *at);
+                            self.set(token, format!("{c:?}"), *at);
                             None
                         }
                         None => Some(unconverted(Reason::Value)),
@@ -375,9 +377,48 @@ impl Out<'_> {
     }
 }
 
-/// A colour value, as a theme file takes one.
-fn color(value: &str) -> Option<Rgba8> {
-    Rgba8::parse(value)
+/// Strata's stylesheet colours (`@define-color strata_*` in `src/ui/theme/generated_css.rs`,
+/// and `@strata_glow`) and the token K1 maps each theme colour onto (`theme/map.rs`).
+pub(super) const STRATA_COLORS: &[(&str, &str)] = &[
+    ("strata_bg", "color.bg_base"),
+    ("strata_surface", "color.bg_deep"),
+    ("strata_text", "color.text_base"),
+    ("strata_accent", "color.bg_accent"),
+    ("strata_danger", "color.danger.fg"),
+    ("strata_muted", "fill.muted"),
+    ("strata_highlight", "fill.highlight"),
+    ("strata_border", "color.std_border"),
+    ("strata_dim_text", "color.text_muted"),
+    ("strata_glow", "glow.color"),
+];
+
+/// A colour value as the override file writes it: a literal's hex, a reference to the token
+/// a `@strata_*` colour maps onto, or `alpha()` of either.
+fn color(value: &str) -> Option<String> {
+    let v = value.trim();
+    let alpha_args = v
+        .get(..6)
+        .filter(|f| f.eq_ignore_ascii_case("alpha("))
+        .and_then(|_| v[6..].strip_suffix(')'));
+    if let Some(args) = alpha_args {
+        let (inner, factor) = args.rsplit_once(',')?;
+        let factor: f32 = factor.trim().parse().ok()?;
+        return (0.0..=1.0)
+            .contains(&factor)
+            .then(|| Some(format!("alpha({}, {factor})", operand(inner.trim())?)))?;
+    }
+    operand(v)
+}
+
+/// A literal colour as hex, or a `@strata_*` colour as a reference.
+fn operand(v: &str) -> Option<String> {
+    match v.strip_prefix('@') {
+        Some(name) => STRATA_COLORS
+            .iter()
+            .find(|(strata, _)| *strata == name)
+            .map(|(_, token)| format!("@{token}")),
+        None => Rgba8::parse(v).map(Rgba8::hex),
+    }
 }
 
 /// Every length in `value`, each `<n>px` or a bare `0`, none negative; `None` if anything

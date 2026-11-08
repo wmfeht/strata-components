@@ -443,3 +443,83 @@ fn a_rewrite_that_changes_nothing_parses_equal() {
         Overrides::parse(&a.replace("30", "31"))
     );
 }
+
+/// Ruling Q2. settings/themes: "Rules in the file may use the active theme's `@strata_*`
+/// colors; switching themes keeps the override and updates those colors."
+#[test]
+fn a_colour_taken_from_a_token_follows_the_theme() {
+    let o = Overrides::parse(
+        "sidebar.hover.fill = \"alpha(@color.text_base, 0.5)\"\ncolor.scrim = \"@color.bg_accent\"\n",
+    );
+    assert_eq!(messages(&o), Vec::<String>::new());
+    let mut seen = Vec::new();
+    for dark in [false, true] {
+        let base = theme_look(dark);
+        let look = o.applied(base.clone());
+        let text = base.kit.c.text_base;
+        assert_eq!(
+            slots::sidebar::hover_fill(&look),
+            base.kit.alpha(text, text.a * 0.5)
+        );
+        assert_eq!(look.kit.c.scrim, base.kit.c.bg_accent);
+        seen.push(look.kit.c.scrim);
+    }
+    assert_ne!(seen[0], seen[1], "each theme's own accent");
+}
+
+#[test]
+fn references_read_the_literal_overrides_and_never_chain() {
+    let o = Overrides::parse(
+        "color.text_accent = \"@color.bg_accent\"\ncolor.bg_accent = \"@color.border_focus\"\ncolor.border_focus = \"#ff9e64\"\n",
+    );
+    let base = theme_look(true);
+    let look = o.applied(base.clone());
+    // A reference sees the literal override of its target...
+    assert_eq!(look.kit.c.bg_accent, color("#ff9e64"));
+    // ...but not another reference's result.
+    assert_eq!(look.kit.c.text_accent, base.kit.c.bg_accent);
+}
+
+#[test]
+fn alpha_scales_the_colours_own_opacity() {
+    let o = Overrides::parse("fill.muted = \"alpha(rgba(255, 0, 0, 0.5), 0.5)\"");
+    assert_eq!(messages(&o), Vec::<String>::new());
+    let base = theme_look(false);
+    let look = o.applied(base.clone());
+    let red = color("rgba(255, 0, 0, 0.5)");
+    assert_eq!(look.fill.muted, base.kit.alpha(red, red.a * 0.5));
+    assert!((red.a * 0.5 - 0.25).abs() < 0.01);
+}
+
+#[test]
+fn a_bad_reference_is_reported_and_keeps_the_themes_value() {
+    let reference = |target: &str| Problem::Reference {
+        name: "fill.muted",
+        target: target.into(),
+    };
+    let bad = |value: &str| Problem::BadColor {
+        name: "fill.muted",
+        value: value.into(),
+    };
+    for (value, problem) in [
+        ("@color.bg_basee", reference("color.bg_basee")),
+        ("@row.list", reference("row.list")),
+        ("alpha(@nope, 0.5)", reference("nope")),
+        ("alpha(@color.text_base)", bad("alpha(@color.text_base)")),
+        ("alpha(red, 2)", bad("alpha(red, 2)")),
+        (
+            "alpha(alpha(red, 0.5), 0.5)",
+            bad("alpha(alpha(red, 0.5), 0.5)"),
+        ),
+    ] {
+        let o = Overrides::parse(&format!("fill.muted = \"{value}\""));
+        let problems: Vec<_> = o.errors().iter().map(|e| e.problem.clone()).collect();
+        assert_eq!(problems, [problem], "{value}");
+        let base = theme_look(true);
+        assert_eq!(o.applied(base.clone()).fill.muted, base.fill.muted);
+    }
+    assert_eq!(
+        messages(&Overrides::parse("fill.muted = \"@row.list\"")),
+        ["line 1, column 14: `fill.muted` refers to `@row.list`, which isn't a colour token"]
+    );
+}

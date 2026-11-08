@@ -18,6 +18,10 @@ color.border_focus = "#ff9e64"
 [sidebar.row]
 height = 32
 
+# A colour can follow the theme: another colour token, or a share of its opacity.
+[sidebar.hover]
+fill = "alpha(@color.text_base, 0.06)"
+
 # Values for light or dark themes only.
 [dark]
 color.bg_base = "#101018"
@@ -40,11 +44,12 @@ On first launch, Strata converts what of an existing `style.css` it can into
 `style.css`.
 
 A rule converts only where a token stands for exactly what it styled: plain `px` lengths and
-literal colours on the file rows' margins and corner radius (`.file-list row`), and the
+colours (literal ones, Strata's `@strata_*` colours and `alpha()` of either, which keep
+following the theme) on the file rows' margins and corner radius (`.file-list row`), and the
 sidebar's hover and current-row fills and current-row icon (`.sidebar-row:hover`,
 `.sidebar-row.active`, `.sidebar-row.active image`). Everything else stays in the notice,
 with its line: other selectors (GTK class names were never a stable interface), relative
-units, `!important`, at-rules, and `@define-color` (to change a theme colour, make a custom
+units, `shade()` and `mix()`, `!important`, at-rules, and `@define-color` (to change a theme colour, make a custom
 theme).
 
 ## Settings that are gone

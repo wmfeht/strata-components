@@ -141,7 +141,7 @@
                   "actions": [
                     "scroll-into-view"
                   ],
-                  "name": "  background: #ff9e6426;",
+                  "name": "  background: alpha(@strata_accent, 0.15);",
                   "role": "label"
                 },
                 {
@@ -561,7 +561,7 @@
                   "actions": [
                     "scroll-into-view"
                   ],
-                  "name": "fill = \"#ff9e6426\" # style.css line 9",
+                  "name": "fill = \"alpha(@color.bg_accent, 0.15)\" # style.css line 9",
                   "role": "label"
                 },
                 {
@@ -961,7 +961,7 @@
                       "actions": [
                         "scroll-into-view"
                       ],
-                      "name": "#ff9e6426",
+                      "name": "#7aa2f726",
                       "role": "label"
                     },
                     {

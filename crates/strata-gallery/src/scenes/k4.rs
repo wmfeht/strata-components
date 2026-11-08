@@ -32,8 +32,8 @@ use strata_kit::tokens::Value;
 
 use crate::{Gallery, Scene};
 
-/// The page's override file: a token of each kind, slot tables, both scopes, and one row of
-/// each problem a user can make.
+/// The page's override file: a token of each kind, slot tables, colours taken from another
+/// token, both scopes, and one row of each problem a user can make.
 pub const FIXTURE: &str = r##"# The gallery's overrides.toml
 radius.md = 2
 color.border_focus = "#ff9e64"
@@ -42,8 +42,8 @@ color.border_focus = "#ff9e64"
 height = 34
 
 [sidebar.selected]
-fill = "#ff9e6440"
-icon = "#ff9e64"
+fill = "alpha(@color.border_focus, 0.25)"
+icon = "@color.border_focus"
 
 [list.row]
 height = 32
@@ -72,7 +72,7 @@ pub const STYLESHEET: &str = "/* ~/.config/strata/style.css */
 
 .sidebar-row:hover,
 .sidebar-device:hover {
-  background: #ff9e6426;
+  background: alpha(@strata_accent, 0.15);
 }
 
 .sidebar-row.active {

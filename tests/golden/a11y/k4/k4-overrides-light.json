@@ -141,7 +141,7 @@
                   "actions": [
                     "scroll-into-view"
                   ],
-                  "name": "fill = \"#ff9e6440\"",
+                  "name": "fill = \"alpha(@color.border_focus, 0.25)\"",
                   "role": "label"
                 },
                 {
@@ -155,7 +155,7 @@
                   "actions": [
                     "scroll-into-view"
                   ],
-                  "name": "icon = \"#ff9e64\"",
+                  "name": "icon = \"@color.border_focus\"",
                   "role": "label"
                 },
                 {

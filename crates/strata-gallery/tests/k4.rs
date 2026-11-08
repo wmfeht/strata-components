@@ -64,6 +64,14 @@ mod k4 {
                 let highlight = if dark { "#5a3a20" } else { "#ffd8b8" };
                 assert_eq!(g.look.fill.highlight, hex(highlight), "{name}");
                 assert_eq!(g.k4.overrides.errors().len(), 4, "{name}");
+                // Colours taken from a token read its override.
+                let focus = hex("#ff9e64");
+                assert_eq!(slots::sidebar::selected_icon(&g.look), focus, "{name}");
+                assert_eq!(
+                    slots::sidebar::selected_fill(&g.look),
+                    g.look.kit.alpha(focus, 0.25),
+                    "{name}"
+                );
             } else {
                 // What the stylesheet migrated to is what the page draws with.
                 let m = g.k4.migration.as_ref().expect("a migration scene");

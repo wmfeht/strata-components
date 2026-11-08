@@ -196,3 +196,96 @@ fn every_rule_sets_a_registry_token_of_its_kind() {
         assert_eq!(token.kind(), kind, "{selector} → {name}");
     }
 }
+
+/// Strata's own rules for these selectors (`src/style.css` at lgse/strata 35ee677ab, lines
+/// 5061–5079 and 2373–2389): converted, they set every slot to its default, so each row of
+/// the table is one-to-one.
+const STRATA_RULES: &str = ".file-list row,
+.file-list-mode row,
+.preview-archive-list row {
+  background: transparent;
+  color: @strata_text;
+  border-radius: 6px;
+  transition: color 160ms ease-out;
+}
+
+.file-list row,
+.file-list-mode row {
+  margin: 1px 8px;
+  padding: 0;
+}
+
+.file-list row {
+  margin-left: 5px;
+  margin-right: 5px;
+}
+
+.sidebar-row:hover,
+.sidebar-device:hover {
+  background: alpha(@strata_text, 0.06);
+}
+
+.sidebar-row.active,
+.sidebar-row.active:hover,
+.sidebar-device.active,
+.sidebar-device.active:hover {
+  background: alpha(@strata_accent, 0.18);
+  color: @strata_text;
+}
+
+.sidebar-row.active image,
+.sidebar-device.active .sidebar-row image {
+  color: @strata_accent;
+}
+";
+
+#[test]
+fn stratas_own_rules_migrate_to_the_slots_defaults() {
+    let m = migrate_css(STRATA_RULES);
+    assert!(
+        m.toml
+            .contains("fill = \"alpha(@color.text_base, 0.06)\" # style.css line 23\n"),
+        "{}",
+        m.toml
+    );
+    let o = Overrides::parse(&m.toml);
+    assert_eq!(o.errors(), &[]);
+    assert_eq!(o.len(), 5);
+    // Strata's radii are at 100 % roundness.
+    let params = LookParams {
+        roundness: 100,
+        ..LookParams::default()
+    };
+    for id in ["tokyo-night", "omarchy-light"] {
+        let base = bundled_theme(id)
+            .expect("bundled")
+            .look()
+            .with_params(&params);
+        let look = o.applied(base.clone());
+        type Reader = fn(&crate::look::Look) -> rune::Color;
+        let colours: [(&str, Reader); 3] = [
+            ("hover", slots::sidebar::hover_fill),
+            ("selected fill", slots::sidebar::selected_fill),
+            ("selected icon", slots::sidebar::selected_icon),
+        ];
+        for (what, read) in colours {
+            assert_eq!(read(&look), read(&base), "{id}: {what}");
+        }
+        assert_eq!(
+            slots::collection::row_inset(&look),
+            slots::collection::row_inset(&base)
+        );
+        assert_eq!(
+            slots::collection::row_radius(&look),
+            slots::collection::row_radius(&base)
+        );
+    }
+}
+
+#[test]
+fn every_strata_colour_maps_onto_a_colour_token() {
+    for (strata, name) in STRATA_COLORS {
+        let token = tokens::find(name).unwrap_or_else(|| panic!("{name} is a token"));
+        assert_eq!(token.kind(), Kind::Color, "@{strata} → {name}");
+    }
+}

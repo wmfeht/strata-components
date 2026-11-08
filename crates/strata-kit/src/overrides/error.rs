@@ -42,8 +42,10 @@ pub enum Problem {
         min: f32,
         max: f32,
     },
-    /// The string isn't a colour.
+    /// The string isn't a colour, a reference or an `alpha()` of either.
     BadColor { name: &'static str, value: String },
+    /// A colour refers to `@target`, which isn't a colour token.
+    Reference { name: &'static str, target: String },
     /// `light` or `dark` somewhere other than a table at the top of the file.
     Scope(String),
 }
@@ -106,6 +108,12 @@ impl fmt::Display for Problem {
             }
             Problem::BadColor { name, value } => {
                 write!(f, "`{name}` takes a colour, and {value:?} isn't one")
+            }
+            Problem::Reference { name, target } => {
+                write!(
+                    f,
+                    "`{name}` refers to `@{target}`, which isn't a colour token"
+                )
             }
             Problem::Scope(key) => write!(
                 f,

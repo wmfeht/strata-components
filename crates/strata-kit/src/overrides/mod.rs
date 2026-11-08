@@ -32,10 +32,17 @@
 //!   its tokens' names.
 //! - **Values**, by the token's kind:
 //!   - a colour is a string in any form a theme file takes ([`Rgba8::parse`](crate::theme::Rgba8::parse):
-//!     hex, `rgb()`, `rgba()`, `hsl()`, `hsla()`, CSS names, `transparent`);
+//!     hex, `rgb()`, `rgba()`, `hsl()`, `hsla()`, CSS names, `transparent`), or one taken
+//!     from another colour token so it follows the theme, as a stylesheet's `@strata_*`
+//!     colours did: `"@color.text_base"`, or `"alpha(@color.text_base, 0.06)"` for it at a
+//!     share of its opacity (a factor from 0 to 1; `alpha()` takes a literal colour too);
 //!   - a length or a number is a TOML integer or float, in points for a length, inside the
 //!     token's range ([`Token::range`](crate::tokens::Token::range));
 //!   - a flag is `true` or `false`.
+//! - **References** (ruling Q2) read the look after the theme, the settings and every
+//!   literal override, so `"@color.border_focus"` follows an override of `color.border_focus`.
+//!   They never read another reference's result: references don't chain, so the file's order
+//!   never matters.
 //! - **Errors.** Each unknown token, wrong kind, value out of range, bad colour and TOML
 //!   syntax error is reported with its line and column ([`Overrides::errors`]). A row with an
 //!   error doesn't apply, so its token keeps the theme's value; every other row applies, as
@@ -93,6 +100,8 @@
 //! - **Scripts.** K4 has no input behaviour, so it has no headless scripts, as K1 (its Q8):
 //!   the unit tests name the feature-map bullets they check.
 //! - **Q5, syntax errors.** The rows that survive one still apply.
+//! - **Q2, references.** Colours may name another colour token and `alpha()` it, resolved
+//!   against the look after the literal overrides, without chains.
 //! - **Q6, glow.** An override of `glow.on` beats the Element glow setting.
 
 mod css;
@@ -106,6 +115,7 @@ mod tests;
 use crate::look::Look;
 use crate::theme::Location;
 use crate::tokens::{Token, Value};
+use value::Setting;
 
 pub use css::{Migration, Reason, Unconverted, migrate_css};
 pub use error::{OverrideError, Problem};
@@ -142,7 +152,7 @@ impl Scope {
 struct Row {
     scope: Scope,
     token: &'static Token,
-    value: Value,
+    value: Setting,
     at: Location,
 }
 
@@ -193,14 +203,34 @@ impl Overrides {
     }
 
     /// Sets every row's token on `look`: the unscoped rows, then the rows scoped to `look`'s
-    /// appearance.
+    /// appearance. Literal values first; then colours taken from other tokens, all read from
+    /// the look as the literals left it, so references don't chain.
     pub fn apply(&self, look: &mut Look) {
         let scoped = Scope::of(look.kit.dark);
-        for scope in [Scope::All, scoped] {
-            for row in self.rows.iter().filter(|r| r.scope == scope) {
-                let set = row.token.set(look, row.value);
-                debug_assert!(set.is_ok(), "parse checks every value: {set:?}");
+        let in_order = || {
+            [Scope::All, scoped]
+                .into_iter()
+                .flat_map(|scope| self.rows.iter().filter(move |r| r.scope == scope))
+        };
+        let set = |look: &mut Look, token: &Token, value| {
+            let set = token.set(look, value);
+            debug_assert!(set.is_ok(), "parse checks every value: {set:?}");
+        };
+        for row in in_order() {
+            if let Setting::Value(v) = row.value {
+                set(look, row.token, v);
             }
+        }
+        let derived: Vec<(&Token, Value)> = in_order()
+            .filter_map(|row| match row.value {
+                Setting::Derived { from, alpha } => {
+                    Some((row.token, Value::Color(Setting::resolve(from, alpha, look))))
+                }
+                Setting::Value(_) => None,
+            })
+            .collect();
+        for (token, v) in derived {
+            set(look, token, v);
         }
     }
 

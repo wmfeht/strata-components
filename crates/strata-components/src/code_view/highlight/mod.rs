@@ -312,8 +312,25 @@ impl Highlighter {
 #[derive(Clone, Debug)]
 struct Cached {
     tokens: LineTokens,
-    /// Computed from a state past an edit's frontier: may change once the pass gets here.
-    provisional: bool,
+    /// `Some(g)` while the colours may still change: since edit generation `g` marked them
+    /// provisional, or they came from a state past that generation's frontier.
+    provisional: Option<u64>,
+}
+
+/// The most edits a [`CodeDoc`] remembers for mapping an older generation's `Settled` onto
+/// today's lines. Past it, such a `Settled` drops every line it could concern.
+const EDIT_HISTORY: usize = 256;
+
+/// Where line boundary `at` of the text before `edit` is in the text after it. A boundary
+/// inside the replaced lines maps to the start of the edit.
+fn map_boundary(at: usize, edit: &LineEdit) -> usize {
+    if at < edit.first {
+        at
+    } else if at >= edit.first + edit.removed {
+        at - edit.removed + edit.inserted
+    } else {
+        edit.first
+    }
 }
 
 /// One text's highlighting, on the UI side: the colours that have landed, by line.
@@ -329,6 +346,7 @@ pub struct CodeDoc {
     lines: Lines,
     mode: Mode,
     overscan: usize,
+    long_line: usize,
     cache: Vec<Option<Cached>>,
     cached: usize,
     palette: Vec<Option<Color>>,
@@ -346,6 +364,9 @@ pub struct CodeDoc {
     last_show: Option<Range<usize>>,
     last_show_seq: u64,
     provisional_from: Option<usize>,
+    /// The edits since the last `Settled` of the current generation, by generation, to map
+    /// an older `Settled` onto today's lines.
+    history: Vec<(u64, LineEdit)>,
     failed: bool,
 }
 
@@ -361,6 +382,7 @@ impl CodeDoc {
             lines,
             mode: src.mode,
             overscan: opts.overscan,
+            long_line: opts.long_line,
             cache: vec![None; n],
             cached: 0,
             palette: Vec::new(),
@@ -374,6 +396,7 @@ impl CodeDoc {
             last_show: None,
             last_show_seq: 0,
             provisional_from: None,
+            history: Vec::new(),
             failed: false,
         };
         doc.send_open();
@@ -431,7 +454,7 @@ impl CodeDoc {
             return;
         }
         self.view = Some(range.clone());
-        let missing = |c: &Option<Cached>| c.as_ref().is_none_or(|c| c.provisional);
+        let missing = |c: &Option<Cached>| c.as_ref().is_none_or(|c| c.provisional.is_some());
         let first = range.clone().find(|&i| missing(&self.cache[i]));
         let Some(first) = first else { return };
         let last = range
@@ -497,32 +520,32 @@ impl CodeDoc {
                         }
                         *slot = Some(Cached {
                             tokens,
-                            provisional: !exact,
+                            provisional: (!exact).then_some(generation),
                         });
                     }
                 }
                 true
             }
-            Reply::Settled { generation, from } => {
-                if generation != self.generation {
-                    return false;
-                }
+            Reply::Settled { generation, from } if generation == self.generation => {
+                // The pass ended: provisional lines from `from` on are exact, and those
+                // before it that weren't sent again are stale.
                 for (i, slot) in self.cache.iter_mut().enumerate() {
-                    if slot.as_ref().is_some_and(|c| c.provisional) {
-                        if i >= from {
-                            if let Some(c) = slot {
-                                c.provisional = false;
-                            }
-                        } else {
-                            *slot = None;
-                            self.cached -= 1;
-                        }
+                    let Some(c) = slot.as_mut().filter(|c| c.provisional.is_some()) else {
+                        continue;
+                    };
+                    if i >= from {
+                        c.provisional = None;
+                    } else {
+                        *slot = None;
+                        self.cached -= 1;
                     }
                 }
                 self.provisional_from = None;
                 self.last_show = None;
+                self.history.clear();
                 true
             }
+            Reply::Settled { generation, from } => self.settled_before(generation, from),
             Reply::Idle { seq } => {
                 self.idle_seq = self.idle_seq.max(seq);
                 false
@@ -533,9 +556,53 @@ impl CodeDoc {
                 self.cache.iter_mut().for_each(|c| *c = None);
                 self.cached = 0;
                 self.provisional_from = None;
+                self.history.clear();
                 true
             }
         }
+    }
+
+    /// A pass of an older generation ended, but the host only sees it after a newer edit.
+    /// It still drops the lines that pass left stale, which no later reply would drop. It
+    /// marks nothing exact: a newer edit's pass is running, and its own `Settled` decides.
+    ///
+    /// Only lines provisional since `generation` or before are its business: a line made
+    /// provisional by a later edit, or by a later pass's provisional colours, was exact or
+    /// sent again by then. `from` is in that generation's line numbers, so it is carried
+    /// through the edits since. Lines at or past it were exact for that generation, so they
+    /// stay, provisional as of the next edit, as if they had been marked exact and then
+    /// provisional again. This keeps the lines in view after a quick edit, where dropping
+    /// every provisional line would draw them plain for a frame.
+    fn settled_before(&mut self, generation: u64, from: usize) -> bool {
+        let first_kept = self.history.first().map(|(g, _)| *g);
+        let from = if first_kept.is_some_and(|g| g <= generation + 1) {
+            self.history
+                .iter()
+                .filter(|(g, _)| *g > generation)
+                .fold(from, |at, (_, edit)| map_boundary(at, edit))
+        } else {
+            // The edits since have been forgotten: treat every line as stale.
+            usize::MAX
+        };
+        let mut changed = false;
+        for (i, slot) in self.cache.iter_mut().enumerate() {
+            let Some(c) = slot.as_mut() else { continue };
+            if !c.provisional.is_some_and(|g| g <= generation) {
+                continue;
+            }
+            changed = true;
+            if i < from {
+                *slot = None;
+                self.cached -= 1;
+            } else {
+                c.provisional = Some(generation + 1);
+            }
+        }
+        self.history.retain(|(g, _)| *g > generation);
+        if changed {
+            self.last_show = None;
+        }
+        changed
     }
 
     /// Keeps a preview's cache near the viewport.
@@ -547,10 +614,16 @@ impl CodeDoc {
             return;
         };
         let keep = view.start.saturating_sub(CACHED_LINES / 4)..view.end + CACHED_LINES / 4;
+        let mut asked_dropped = false;
         for (i, slot) in self.cache.iter_mut().enumerate() {
             if !keep.contains(&i) && slot.take().is_some() {
                 self.cached -= 1;
+                asked_dropped |= self.last_show.as_ref().is_some_and(|r| r.contains(&i));
             }
+        }
+        if asked_dropped {
+            // Lines of the last request are gone: asking for it again must not be skipped.
+            self.last_show = None;
         }
     }
 
@@ -568,7 +641,7 @@ impl CodeDoc {
         self.cache
             .get(line)
             .and_then(Option::as_ref)
-            .is_some_and(|c| c.provisional)
+            .is_some_and(|c| c.provisional.is_some())
     }
 
     /// Colour-only spans for the lines in `lines`, with byte offsets into the whole text, for
@@ -577,7 +650,7 @@ impl CodeDoc {
         let mut runs = Vec::new();
         for i in lines.start..lines.end.min(self.lines.len()) {
             // Rune's span offsets are `u32`: a text past 4 GiB draws plain from there.
-            if self.lines.start(i) + LONG_LINE > u32::MAX as usize {
+            if self.lines.start(i) + self.long_line > u32::MAX as usize {
                 break;
             }
             if let Some(Some(c)) = self.cache.get(i) {
@@ -609,6 +682,7 @@ impl CodeDoc {
             self.view = None;
             self.last_show = None;
             self.provisional_from = None;
+            self.history.clear();
             self.failed = false;
             // Replies to the failed open arrive on the old channel, which `send_open`
             // replaces; the new open starts counting idleness afresh.
@@ -627,6 +701,7 @@ impl CodeDoc {
             self.cache = vec![None; new_n];
             self.cached = 0;
             self.provisional_from = None;
+            self.history.clear();
         } else {
             let removed = self
                 .cache
@@ -641,8 +716,12 @@ impl CodeDoc {
                 .iter_mut()
                 .flatten()
             {
-                c.provisional = true;
+                c.provisional.get_or_insert(self.generation);
             }
+            if self.history.len() == EDIT_HISTORY {
+                self.history.remove(0);
+            }
+            self.history.push((self.generation, edit));
             self.provisional_from = Some(
                 self.provisional_from
                     .map_or(edit.first, |p| p.min(edit.first)),

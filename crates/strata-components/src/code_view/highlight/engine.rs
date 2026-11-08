@@ -304,7 +304,10 @@ impl Doc {
         } else if next < self.states.len() {
             if next >= self.dirty_until && self.states[next] == state {
                 // The rest of the cache is exact again: what follows is unchanged text
-                // parsed from this same state.
+                // parsed from this same state. With onig, a state holding captures (inside a
+                // heredoc or a fence) never equals another, since `Region` compares raw
+                // pointers (S4, B2): the pass runs on to the end of that context, the safe
+                // direction.
                 self.exact = self.states.len() - 1;
                 self.settle(next);
             } else {

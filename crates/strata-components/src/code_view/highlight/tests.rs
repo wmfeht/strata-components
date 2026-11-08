@@ -1089,23 +1089,70 @@ fn a_waker_set_after_the_thread_starts_is_used() {
     assert!(woke.lock().is_ok_and(|b| *b));
 }
 
-/// Seeds the committed random-edit test runs. 11, 17 and 207 gave wrong lines before
-/// provisional colours stopped the pass converging under them (review round 1); sweep more
-/// locally by running `random_edit_run` over a range.
-const RANDOM_SEEDS: &[u64] = &[1, 2, 3, 11, 17, 207];
+/// A grammar the random-edit test runs on, with lines and line prefixes that open and close
+/// capture contexts (heredocs, fences, strings, comments).
+struct Lang {
+    name: &'static str,
+    fixture: &'static str,
+    lines: &'static [&'static str],
+    prefixes: &'static [&'static str],
+}
 
-/// One seed of random edits: up to three queued before any work, viewports in between, and
-/// a random amount of work after. Every few rounds the pass runs out and every line must
-/// match a full parse. Returns the first wrong (round, line).
-fn random_edit_run(seed: u64) -> Option<(usize, usize)> {
-    let name = "shell-5k.sh";
-    let mut text = head(name, 300);
+const LANGS: [Lang; 3] = [
+    Lang {
+        name: "r.sh",
+        fixture: "shell-5k.sh",
+        lines: &[
+            "cat <<EOF\n",
+            "EOF\n",
+            "x='\n",
+            "'\n",
+            "echo \"hi\" # x\r\n",
+        ],
+        prefixes: &["\"", "'", "#", "$(", "`"],
+    },
+    Lang {
+        name: "r.md",
+        fixture: "markdown-50k.md",
+        lines: &["```rust\n", "```\n", "<!--\n", "-->\n", "    code\n"],
+        prefixes: &["`", "<!--", "**", "# "],
+    },
+    Lang {
+        name: "r.rs",
+        fixture: "rust-50k.rs",
+        lines: &["/*\n", "*/\n", "let s = r#\"\n", "\"#;\n", "fn x() {\r\n"],
+        prefixes: &["\"", "/*", "*/", "//", "r#\""],
+    },
+];
+
+/// Seeds the committed random-edit test runs, per grammar and mode. Some gave wrong lines
+/// before the fixes they now guard (review rounds 1 and 2); sweep more locally by running
+/// `random_edit_run` over a range.
+const RANDOM_RUNS: &[(usize, Mode, u64)] = &[
+    (0, Mode::Editable, 1),
+    (0, Mode::Editable, 2),
+    (1, Mode::Editable, 1),
+    (2, Mode::Editable, 1),
+    (0, Mode::Preview, 1),
+    (2, Mode::Preview, 1),
+];
+
+/// The first cached line that isn't provisional and doesn't match a full parse.
+fn wrong_exact_line(doc: &CodeDoc, text: &str, name: &str) -> Option<usize> {
+    let want = reference(text, syntax_for(name, text), &light(), LONG_LINE);
+    (0..want.len()).find(|&i| {
+        !doc.is_provisional(i) && doc.line_spans(i).is_some_and(|s| runs_of(&s) != want[i])
+    })
+}
+
+/// One seed of random edits on `lang` in `mode`: up to three queued before any work,
+/// viewports in between, then a random amount of work, sometimes the whole pass with the host
+/// not polling before the next edit. After every poll, no line marked exact may be wrong;
+/// every few rounds the pass runs out and every line must match a full parse.
+fn random_edit_run(seed: u64, lang: &Lang, mode: Mode) -> Result<(), String> {
+    let mut text = head(lang.fixture, 250);
     let mut pump = Pump::new(light());
-    let mut doc = pump.open(
-        Source::new(text.as_str())
-            .file_name(name)
-            .mode(Mode::Editable),
-    );
+    let mut doc = pump.open(Source::new(text.as_str()).file_name(lang.name).mode(mode));
     all_lines(&mut pump, &mut doc);
     let mut state = seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1;
     let mut rand = |n: usize| {
@@ -1115,18 +1162,24 @@ fn random_edit_run(seed: u64) -> Option<(usize, usize)> {
         (state % n.max(1) as u64) as usize
     };
     for round in 0..30 {
+        let at_round =
+            |what: &str, line: usize| format!("round {round}, {what}: line {line} wrong");
         for _ in 0..1 + rand(3) {
             let mut lines: Vec<String> = text.split_inclusive('\n').map(str::to_owned).collect();
             let at = rand(lines.len());
-            match rand(7) {
-                0 | 1 => lines[at].insert(0, '"'),
-                2 => lines[at] = lines[at].replacen('"', "", 1),
-                3 => lines.insert(at, "cat <<EOF\n".into()),
-                4 => lines.insert(at, "EOF\n".into()),
-                5 if lines.len() > 10 => {
-                    lines.remove(at);
+            match rand(8) {
+                0 | 1 => lines[at].insert_str(0, lang.prefixes[rand(lang.prefixes.len())]),
+                2 => {
+                    let p = lang.prefixes[rand(lang.prefixes.len())];
+                    lines[at] = lines[at].replacen(p, "", 1);
                 }
-                _ => lines[at] = lines[at].replace("EOF", "EOT"),
+                3 | 4 => lines.insert(at, lang.lines[rand(lang.lines.len())].into()),
+                5 if lines.len() > 10 => {
+                    let end = (at + 1 + rand(3)).min(lines.len());
+                    lines.drain(at..end);
+                }
+                6 => lines[at] = format!("\"{}\n", "x".repeat(LONG_LINE + rand(64) - 20)),
+                _ => lines[at] = lines[at].replacen(' ', "\"", 1),
             }
             let new: String = lines.concat();
             let line = at.min(lines.len().saturating_sub(1));
@@ -1143,42 +1196,57 @@ fn random_edit_run(seed: u64) -> Option<(usize, usize)> {
                 doc.show(v..v + 60);
             }
         }
-        pump.requests();
-        for _ in 0..rand(4) {
-            pump.step();
-        }
-        doc.poll();
-        if rand(3) == 0 {
-            let v = rand(doc.line_count());
-            doc.show(v..v + 60);
-            pump.requests();
-            pump.step();
-            doc.poll();
+        match rand(4) {
+            // The pass runs to its end and the host doesn't poll before the next edit.
+            0 => pump.run(),
+            _ => {
+                pump.requests();
+                for _ in 0..rand(4) {
+                    pump.step();
+                    if rand(2) == 0 {
+                        doc.poll();
+                        if let Some(i) = wrong_exact_line(&doc, &text, lang.name) {
+                            return Err(at_round("mid-pass", i));
+                        }
+                    }
+                }
+                doc.poll();
+                if let Some(i) = wrong_exact_line(&doc, &text, lang.name) {
+                    return Err(at_round("after a poll", i));
+                }
+            }
         }
         if round % 5 == 4 {
             pump.run();
             doc.poll();
-            assert_eq!(doc.provisional_from(), None);
+            if let Some(i) = wrong_exact_line(&doc, &text, lang.name) {
+                return Err(at_round("after the pass", i));
+            }
+            if doc.provisional_from().is_some() {
+                return Err(format!("round {round}: provisional after the pass"));
+            }
             let got = all_lines(&mut pump, &mut doc);
-            let want = reference(&text, syntax_for(name, &text), &light(), LONG_LINE);
-            if let Some(line) = (0..want.len()).find(|&i| got[i] != want[i]) {
-                return Some((round, line));
+            let want = reference(&text, syntax_for(lang.name, &text), &light(), LONG_LINE);
+            if let Some(i) = (0..want.len()).find(|&i| got[i] != want[i]) {
+                return Err(at_round("all lines", i));
             }
         }
     }
-    None
+    Ok(())
 }
 
 #[test]
 fn random_queued_edits_and_viewports_end_exact() {
-    let wrong: Vec<_> = RANDOM_SEEDS
+    let wrong: Vec<String> = RANDOM_RUNS
         .iter()
-        .filter_map(|&seed| random_edit_run(seed).map(|at| (seed, at)))
+        .filter_map(|&(lang, mode, seed)| {
+            let lang = &LANGS[lang];
+            random_edit_run(seed, lang, mode)
+                .err()
+                .map(|e| format!("{} {mode:?} seed {seed}: {e}", lang.name))
+        })
         .collect();
-    assert!(
-        wrong.is_empty(),
-        "seeds with wrong lines (seed, (round, line)): {wrong:?}"
-    );
+    assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
 /// Lines that open a string, one after another: each edit flips everything below it.
@@ -1203,6 +1271,36 @@ fn queued_edits_before_any_work_settle_exact() {
     // The second quote closes the first's string: line 101 on is code again.
     let two = replace_line(&one, 100, |l| format!("\"{l}"));
     edit_and_check(&mut pump, &mut doc, "p.sh", &two, 100..140, "queued quotes");
+}
+
+#[test]
+fn an_edit_before_the_host_saw_a_pass_end_still_drops_that_pass_stale_lines() {
+    let text = quote_script(300);
+    let mut pump = Pump::new(light());
+    let mut doc = pump.open(
+        Source::new(text.as_str())
+            .file_name("p.sh")
+            .mode(Mode::Editable),
+    );
+    all_lines(&mut pump, &mut doc);
+    // Edit 1 opens a string at line 10: every line below changes. Its pass ends and sends
+    // `Settled`, but the host doesn't poll before the next edit.
+    let one = replace_line(&text, 10, |l| format!("\"{l}"));
+    doc.edit(one.as_str().into(), LineEdit::diff(&text, &one), 0..60);
+    pump.run();
+    // Edit 2, a keystroke that changes no state, converges at once.
+    let two = replace_line(&one, 200, |l| l.replace("--flag", "--flab"));
+    doc.edit(two.as_str().into(), LineEdit::diff(&one, &two), 190..250);
+    pump.run();
+    doc.poll();
+    assert_eq!(doc.provisional_from(), None);
+    assert_eq!(wrong_exact_line(&doc, &two, "p.sh"), None);
+    let got = all_lines(&mut pump, &mut doc);
+    assert_lines_eq(
+        &got,
+        &reference(&two, syntax_for("p.sh", &two), &light(), LONG_LINE),
+        "two",
+    );
 }
 
 #[test]
@@ -1286,6 +1384,34 @@ fn lines_in_view_are_never_evicted() {
 }
 
 #[test]
+fn a_viewport_evicted_while_on_its_way_is_asked_for_again() {
+    let name = "rust-50k.rs";
+    let text = head(name, 12000);
+    let mut pump = Pump::new(light());
+    let mut doc = pump.open(Source::new(text.as_str()).file_name(name));
+    pump.run();
+    // 4,000 lines cached around B.
+    doc.show(6000..9960);
+    pump.run();
+    doc.poll();
+    // Ask for A, then scroll back to B before A lands: B is cached, so nothing is asked.
+    doc.show(100..180);
+    pump.requests();
+    doc.show(8000..8080);
+    pump.run();
+    doc.poll();
+    assert!(
+        doc.line_spans(100).is_none(),
+        "A landed, then went with the lines far from B"
+    );
+    // Back to A: the request that brought it is the last one, but its lines are gone.
+    doc.show(100..180);
+    pump.run();
+    doc.poll();
+    assert!(doc.line_spans(100).is_some(), "A was never asked for again");
+}
+
+#[test]
 fn show_does_not_ask_again_for_lines_on_their_way() {
     let name = "rust-50k.rs";
     let text = head(name, 3000);
@@ -1338,6 +1464,54 @@ fn a_page_of_blocks_over_the_cache_size_is_asked_for_once() {
         codes
             .iter()
             .all(|c| blocks.highlight(Some("rust"), c).is_some())
+    );
+}
+
+/// A block of about 17 KiB, over the long-line cap so the thread skips it quickly.
+fn big_block(i: usize) -> String {
+    format!("// block {i}\n{}\n", "x".repeat(17_000))
+}
+
+#[test]
+fn the_block_cache_stays_bounded_when_the_host_never_polls() {
+    // Asked one by one, a build each (`markdown()`), with no poll in between.
+    let mut pump = Pump::new(light());
+    let blocks = pump.blocks();
+    for i in 0..400 {
+        blocks.markdown().highlight(Some("rust"), &big_block(i));
+        pump.run();
+    }
+    assert!(
+        blocks.cached_bytes() <= 4 << 20,
+        "{} bytes",
+        blocks.cached_bytes()
+    );
+    // A host that only asks, never builds or polls, still stops at the ceiling.
+    let mut pump = Pump::new(light());
+    let blocks = pump.blocks();
+    for i in 0..1200 {
+        blocks.highlight(Some("rust"), &big_block(i));
+        pump.run();
+    }
+    assert!(
+        blocks.cached_bytes() <= 16 << 20,
+        "{} bytes",
+        blocks.cached_bytes()
+    );
+}
+
+#[test]
+fn the_block_cache_stays_bounded_when_misses_wait() {
+    let h = Highlighter::new(light());
+    let mut blocks = h.blocks();
+    blocks.wait_on_miss(Some(WAIT));
+    for i in 0..400 {
+        assert!(blocks.highlight(Some("rust"), &big_block(i)).is_some());
+    }
+    assert!(
+        blocks.cached_bytes() <= 4 << 20,
+        "{} bytes",
+        blocks.cached_bytes()
     );
 }
 

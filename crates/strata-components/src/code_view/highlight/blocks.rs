@@ -24,9 +24,15 @@ use super::spans;
 use super::worker::Request;
 
 /// Highlighted blocks kept, in bytes of code, before the least recently asked go. Blocks asked
-/// for since the last poll (the current build's) are never evicted: the cap stretches to fit
-/// one build, so a large document can't evict what it is drawing and ask again.
+/// for in the current build (since the last poll, `markdown()` or wait) are spared: the cap
+/// stretches to fit one build, so a large document can't evict what it is drawing and ask
+/// again.
 const CACHE_BYTES: usize = 4 << 20;
+
+/// The cap never stretches past this, for a host that asks without ever polling or building
+/// (its blocks then never land anyway). Only a single build of more code than this (512
+/// blocks at rune-kit's 32 KiB cut) would evict its own blocks and ask for them again.
+const CACHE_CEILING: usize = 4 * CACHE_BYTES;
 
 /// A pool of code blocks on the highlighter thread, from [`Highlighter::blocks`]. Clones
 /// share the pool; it lives on the UI thread.
@@ -94,7 +100,9 @@ impl CodeBlocks {
     /// builds: its cache key changes when colours land or the theme changes.
     pub fn markdown(&self) -> rune_kit::syntax::Highlighter {
         let (id, epoch) = {
-            let s = self.state.borrow();
+            let mut s = self.state.borrow_mut();
+            // A new build: blocks asked before it may go.
+            s.polled = s.tick;
             (s.id, s.epoch)
         };
         let state = self.state.clone();
@@ -109,6 +117,11 @@ impl CodeBlocks {
     /// grammar knows, is plain: `Some` of nothing.
     pub fn highlight(&self, lang: Option<&str>, code: &str) -> Option<Vec<Highlight>> {
         self.state.borrow_mut().highlight(lang, code)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn cached_bytes(&self) -> usize {
+        self.state.borrow().bytes()
     }
 
     /// Takes the blocks that have landed. True when colours changed, so the host rebuilds.
@@ -137,6 +150,7 @@ impl CodeBlocks {
     pub fn settle(&mut self, timeout: Duration) -> bool {
         let deadline = Instant::now() + timeout;
         let mut s = self.state.borrow_mut();
+        s.polled = s.tick;
         let mut changed = false;
         while s.pending() {
             let left = deadline.saturating_duration_since(Instant::now());
@@ -235,13 +249,14 @@ impl Blocks {
     }
 
     /// Drops the least recently asked blocks until the cache fits, sparing the current
-    /// build's.
+    /// build's up to [`CACHE_CEILING`].
     fn evict(&mut self) {
         while self.bytes > CACHE_BYTES {
+            let spare = self.bytes <= CACHE_CEILING;
             let oldest = self
                 .entries
                 .iter()
-                .filter(|(_, e)| e.used <= self.polled)
+                .filter(|(_, e)| !spare || e.used <= self.polled)
                 .min_by_key(|(_, e)| e.used)
                 .map(|(&k, _)| k);
             let Some(key) = oldest else { break };
@@ -262,6 +277,14 @@ impl Blocks {
                 Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected) => break,
             }
         }
+        // A host that waits on misses (headless, goldens) never polls: its waits mark the
+        // builds. rune-kit keeps its own copy of what this build was given.
+        self.polled = self.tick;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn bytes(&self) -> usize {
+        self.bytes
     }
 }
 

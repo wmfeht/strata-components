@@ -21,8 +21,11 @@
 //! [`filter_fonts`] build the picker's list from them, and the picker's Default row is
 //! filtered by its label like any other ([`font_label_matches`]), as Strata's is. A chosen family goes in front of the
 //! app's own sans families; the mono slot stays the app's, since previews keep their
-//! monospace font. The host hands [`Look::font`](crate::look::Look::font) to
-//! `Tx::set_font_families` when it changes.
+//! monospace font. The app's own are the bundled JetBrains Mono for both slots
+//! ([`fonts::FAMILIES`](crate::fonts::FAMILIES), K6), as Strata's are, so Default (no
+//! chosen family) puts the bundled font back. The host hands
+//! [`Look::font`](crate::look::Look::font) to `Tx::set_font_families` when it changes, and the
+//! app's own families when it becomes `None`.
 //!
 //! Rune parses a family list as CSS does but without escapes: a quoted name ends at the next
 //! matching quote. So a name with `"` is quoted with `'`, and a name with both quote kinds

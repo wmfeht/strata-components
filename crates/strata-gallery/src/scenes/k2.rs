@@ -12,8 +12,9 @@
 //! The page also plays the host for the interface font: its `poll` hands `look.font` to
 //! `Tx::set_font_families` when it changes, and Escape puts the app's families back before
 //! the gallery returns to the index. The installed families are a fake list, since the host
-//! passes them in as data; only Inter is bundled, so a chosen family draws in Inter unless
-//! it is installed, and no golden scene picks one.
+//! passes them in as data. The app's own families are the bundled JetBrains Mono
+//! (`strata_kit::fonts`, K6), the only face registered, so a chosen family draws in it unless
+//! Rune finds the family on the machine, and no golden scene picks one.
 
 use rune::{Cx, El, Key, KeyEvent, ScrollSpec, TextEdit, TextStyle, Tx, col, el, icon, row, text};
 use rune_kit::{Button, Checkbox, Switch, TextInput};
@@ -26,8 +27,9 @@ use strata_kit::{slots, typography::filter_fonts};
 
 use crate::{Gallery, Scene};
 
-/// The gallery's own families (Rune's defaults, as `AppSpec::new` sets them).
-pub const APP_FAMILIES: (&str, &str) = ("Inter", "Inter");
+/// The gallery's own families, as `strata_gallery::spec` passes them to `AppSpec::families`:
+/// the bundled JetBrains Mono, which `LookParams::default` takes as the app's.
+pub const APP_FAMILIES: (&str, &str) = strata_kit::fonts::FAMILIES;
 
 /// The fake installed families: duplicates by case, a quoted name, a name Rune's family
 /// parser can't take, and a CJK family.
@@ -67,10 +69,7 @@ pub struct Demo {
 impl Default for Demo {
     fn default() -> Demo {
         Demo {
-            params: LookParams {
-                app_families: Families::new(APP_FAMILIES.0, APP_FAMILIES.1),
-                ..LookParams::default()
-            },
+            params: LookParams::default(),
             picker: false,
             query: TextEdit::default(),
             sent: None,
@@ -162,10 +161,7 @@ fn change(g: &mut Gallery, f: impl FnOnce(&mut LookParams)) {
 fn open(g: &mut Gallery, dark: bool, params: LookParams) {
     g.open("k2", dark);
     g.k2 = Demo {
-        params: LookParams {
-            app_families: Families::new(APP_FAMILIES.0, APP_FAMILIES.1),
-            ..params
-        },
+        params,
         ..Demo::default()
     };
     rebuild(g);

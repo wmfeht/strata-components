@@ -82,6 +82,14 @@ W2's token sheet goldens (`w2-tokens-*`) show the core tokens only. Slot tokens 
 the `w2-slots-light` and `w2-slots-dark` review scenes, which have no goldens, so adding a slot
 token never moves a golden outside the component's own page.
 
+The gallery draws in the bundled JetBrains Mono (`strata_kit::fonts`, K6), in both font slots,
+as Strata does. `strata_gallery::spec` passes it to `AppSpec::fonts` and `families`, and
+`strata_gallery::runtime` builds its text system from the same fonts, so in-process mounts (the
+accessibility goldens, page tests) shape text as `--snap` and `--script` runs do. A page test
+that builds a runtime of its own with `Runtime::new` shapes in Rune's built-in Inter instead;
+use `strata_gallery::runtime`. strata-components' own unit tests use `Runtime::new` and stay
+in Inter.
+
 Open the gallery with `mise run gallery`. A button on the index opens its page (click, Space
 or Return), and Escape returns to the index. `mise run gallery -- --scene c1-ten-rows-dark`
 opens one scene, and `-- --list-scenes` lists them all.

@@ -174,7 +174,8 @@ pub enum Event {
 type Notify = Arc<dyn Fn() + Send + Sync>;
 
 /// The substrate's side of a subscription: the inbox weakly, so a dropped [`Subscription`]
-/// is forgotten at the next event and its notify never runs again.
+/// is forgotten at the next event and hears no more. A notify an emit on another thread had
+/// already taken when the subscription dropped may still run once.
 struct Subscriber {
     inbox: Weak<Mutex<VecDeque<Event>>>,
     notify: Notify,

@@ -375,6 +375,12 @@ impl Actor {
     }
 
     fn fail(&mut self, message: String) {
+        // Nothing is held or heard any more: owns() turns false for every source.
+        {
+            let mut shared = lock(&self.shared);
+            shared.owned.clear();
+            shared.offers.clear();
+        }
         self.events.push(Event::Failed { message });
         self.subs.emit(std::mem::take(&mut self.events));
         self.abort_reads();

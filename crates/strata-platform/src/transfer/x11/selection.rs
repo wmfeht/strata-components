@@ -106,6 +106,12 @@ impl Incoming {
     }
 }
 
+/// Whether server time `t` comes before `than`. Server times are 32-bit milliseconds that
+/// wrap (about every 49.7 days), so they compare as a signed difference.
+pub(super) fn earlier(t: u32, than: u32) -> bool {
+    (t.wrapping_sub(than) as i32) < 0
+}
+
 impl Actor {
     pub(super) fn command(&mut self, cmd: Cmd) {
         match cmd {
@@ -491,7 +497,7 @@ impl Actor {
             return self.notify(&req, NONE);
         };
         // ICCCM 2.2: refuse a request made before we took the selection.
-        if r.time != CURRENT_TIME && r.time < owned.time {
+        if r.time != CURRENT_TIME && earlier(r.time, owned.time) {
             return self.notify(&req, NONE);
         }
         if r.target == self.atoms.TARGETS {

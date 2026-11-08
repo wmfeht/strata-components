@@ -60,3 +60,14 @@ fn a_reply_answers_once() {
         "no second answer"
     );
 }
+
+#[test]
+fn server_times_compare_across_the_wrap() {
+    use super::selection::earlier;
+    assert!(earlier(5, 10));
+    assert!(!earlier(10, 5));
+    assert!(!earlier(7, 7));
+    // Just after the wrap is later than just before it.
+    assert!(!earlier(3, u32::MAX - 3));
+    assert!(earlier(u32::MAX - 3, 3));
+}

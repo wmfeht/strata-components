@@ -391,6 +391,37 @@ impl CollectionState {
         tx.scroll_into_view_in(scope.to_owned(), map.line_key(source, map.line_of(index)));
     }
 
+    /// [`CollectionState::reveal`] as one instant scroll worked out from the geometry, to the
+    /// same place (going up, the line above at the top, under any stuck header; going down,
+    /// the entry at the bottom; nowhere when it shows): for a view a glide is moving, which a
+    /// reveal request would keep moving (C1d's S-B, a key during a band's edge scroll).
+    pub(super) fn reveal_instant(
+        &self,
+        scope: &str,
+        source: &dyn EntrySource,
+        index: usize,
+        tx: &mut Tx,
+    ) {
+        let h = self.row_height;
+        if index >= source.len() || h <= 0.0 || self.viewport.w <= 0.0 {
+            return self.reveal(scope, source, index, tx);
+        }
+        let map = self.line_map(source.len());
+        let line = map.line_of(index);
+        let top = line as f32 * h;
+        let offset = self.scroll.get();
+        let covered = if map.groups().is_some() { h } else { 0.0 };
+        let above = if line > 0 { h } else { 0.0 };
+        let target = if top < offset + covered {
+            (top - above - covered).max(0.0)
+        } else if top + h > offset + self.viewport.h {
+            top + h - self.viewport.h
+        } else {
+            offset
+        };
+        tx.scroll_to_instant(viewport_path(scope), 0.0, target);
+    }
+
     // Position restore.
 
     /// The position to remember for this folder as it is left: the selection's, with the

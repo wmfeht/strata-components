@@ -2929,3 +2929,69 @@ fn a_held_back_header_press_keeps_the_selection_on_a_click_and_bands_on_a_drag()
     let s = &rt.state;
     assert_eq!(s.coll.selection.selected_ids(&s.src), [id(0), id(1), id(2)]);
 }
+
+// A key during a band's edge scroll (C1d's open item S-B; C2's E6).
+
+fn tick_poll(s: &mut Host, _: f64, tx: &mut rune::Tx) -> bool {
+    let c = collection(s);
+    c.tick(s, tx)
+}
+
+/// E6 (S-B): a key that moves the cursor while a band auto-scrolls at the viewport's edge keeps
+/// its reveal: the band's glide stops, and the stop doesn't jump the view back to where it was.
+#[test]
+fn a_key_that_moves_the_cursor_during_a_bands_edge_scroll_keeps_its_reveal() {
+    let mut host = Host::new(2_000);
+    host.coll.controllers.pointer =
+        Some(Box::new(crate::collection::pointer::PointerIntent::new()));
+    host.coll.controllers.marquee = Some(Box::new(crate::collection::marquee::Marquee::new()));
+    host.coll.controllers.keyboard = Some(Box::new(crate::collection::keyboard::Keyboard::new(
+        crate::collection::keyboard::KeyHandle::default(),
+    )));
+    let mut rt = runtime(host);
+    rt.poll = Some(tick_poll);
+    let [_, y, _, h] = element(&rt, "row-3").unwrap().visible;
+    // Blank space beside row 3: a drag from there bands.
+    let x = W - 20.0;
+    rt.pointer_down(x, y + h / 2.0);
+    rt.frame(1.0 / 60.0);
+    for k in 1..=4 {
+        rt.pointer_move(x, y + (H - 2.0 - y) * k as f32 / 4.0);
+        rt.frame(1.0 / 60.0);
+    }
+    for _ in 0..40 {
+        rt.frame(1.0 / 60.0);
+    }
+    let row_h = rt.state.look.row.list;
+    assert!(
+        rt.state.coll.scroll_offset() > 20.0 * row_h,
+        "the band's edge scroll ran: {}",
+        rt.state.coll.scroll_offset()
+    );
+    let cursor = rt.state.coll.selection.cursor_index(&rt.state.src).unwrap();
+    rt.key(KeyEvent {
+        key: Key::Down,
+        mods: Mods::default(),
+    });
+    for f in 0..60 {
+        rt.frame(1.0 / 60.0);
+        if std::env::var("SB_DEBUG").is_ok() {
+            let band = rt.state.coll.controllers.marquee.as_ref().unwrap().active();
+            eprintln!(
+                "frame {f}: offset {} band {band}",
+                rt.state.coll.scroll_offset()
+            );
+        }
+    }
+    let s = &rt.state;
+    let moved = s.coll.selection.cursor_index(&s.src).unwrap();
+    assert_eq!(moved, cursor + 1);
+    let top = moved as f32 * row_h;
+    let offset = s.coll.scroll_offset();
+    assert!(
+        top >= offset && top + row_h <= offset + H,
+        "the cursor's row ({top}) shows in the view at {offset}"
+    );
+    rt.pointer_up(x, H - 2.0);
+    rt.frame(1.0 / 60.0);
+}

@@ -587,6 +587,15 @@ pub trait MarqueeController {
     /// Drops an open band without touching the selection, which the new folder replaces
     /// (`CollectionState::enter`).
     fn reset(&mut self) {}
+
+    /// A key moved the cursor, and the element is scrolling it into view: stop any edge
+    /// auto-scroll without a scroll request of its own, and glide again only once the pointer
+    /// next moves. The band, if one is open, stays open. True when the auto-scroll was moving
+    /// the view: the element then stops it dead before the key's reveal, which would otherwise
+    /// keep the glide's speed (Rune keeps a glide's speed across requests).
+    fn yield_scroll(&mut self) -> bool {
+        false
+    }
 }
 
 /// The controllers a collection routes to. Each slot is empty until its work package's

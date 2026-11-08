@@ -138,14 +138,33 @@ fn after<S: 'static>(
     moved: bool,
     effects: Vec<Effect>,
 ) {
+    // A key that moves the cursor takes the view from a band's edge scroll, whose next tick
+    // would otherwise glide on, or stop dead where it was, over the key's reveal (C1d's S-B).
+    // A glide in flight would keep its speed through a reveal request, and an instant stop
+    // would land after it (Rune applies offsets after reveals), so the reveal is one instant
+    // scroll then.
+    let instant = from == Source::Key && moved && {
+        let st = (cfg.get_mut)(s).1;
+        st.controllers
+            .marquee
+            .as_mut()
+            .is_some_and(|m| m.yield_scroll())
+    };
+    let reveal = |s: &mut S, index: usize, tx: &mut Tx| {
+        let (src, st) = (cfg.get_mut)(s);
+        if instant {
+            st.reveal_instant(&cfg.key, src, index, tx);
+        } else {
+            st.reveal(&cfg.key, src, index, tx);
+        }
+    };
     let mut intents = Vec::new();
     let mut revealed = false;
     let mut mode_set = false;
     for effect in effects {
         match effect {
             Effect::Reveal(index) => {
-                let (src, st) = (cfg.get_mut)(s);
-                st.reveal(&cfg.key, src, index, tx);
+                reveal(s, index, tx);
                 revealed = true;
             }
             Effect::BeginMarquee { at, mods } => {
@@ -187,9 +206,12 @@ fn after<S: 'static>(
     // A key or a tick that moves the cursor keeps it in view; a pointer moves it only to what
     // it shows.
     if moved && !matches!(from, Source::Pointer(_)) && !revealed {
-        let (src, st) = (cfg.get_mut)(s);
-        if let Some(index) = st.selection.cursor_index(src) {
-            st.reveal(&cfg.key, src, index, tx);
+        let index = {
+            let (src, st) = (cfg.get)(s);
+            st.selection.cursor_index(src)
+        };
+        if let Some(index) = index {
+            reveal(s, index, tx);
         }
     }
     // The status line reads a band's count once its gesture ends, not at every step.

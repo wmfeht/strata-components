@@ -95,9 +95,9 @@ impl<S> Clone for Hooks<S> {
 
 impl<S> Copy for Hooks<S> {}
 
-/// The window: the header, wrapped by `wrap_header` (the host's drag region and window menu),
-/// over an empty body with the readout, in the window's frame, with the volumes dialog on the
-/// overlay layer. Sets Rune's reduced motion from the look's animations switch for this
+/// The window: the header, wrapped by `wrap_header` (the host's window menu), over an empty
+/// body with the readout, in the window's frame, wrapped by `wrap_window` (the host's resize
+/// edges, under the overlay layer), with the volumes dialog on the overlay layer. Sets Rune's reduced motion from the look's animations switch for this
 /// commit, and follows the window's focus into `chrome.active` when it is the view's root.
 pub fn view<S: 'static>(
     w: &ShellWindow,
@@ -105,6 +105,7 @@ pub fn view<S: 'static>(
     cx: &mut Cx<S>,
     hooks: Hooks<S>,
     wrap_header: impl FnOnce(El) -> El,
+    wrap_window: impl FnOnce(El) -> El,
 ) -> El {
     let reduced = !look.animations || cx.system_reduced_motion();
     cx.reduced_motion(reduced);
@@ -118,11 +119,11 @@ pub fn view<S: 'static>(
         .padding(look.space.xl)
         .justify_end()
         .child(readout(w, look));
-    let window = header::frame(
+    let window = wrap_window(header::frame(
         col().w_full().h_full().child(bar).child(body),
         look,
         &w.chrome,
-    );
+    ));
     let mut layer = Vec::new();
     volumes_dialog(w, look, reduced, hooks, &mut layer);
     let at = hooks.at;

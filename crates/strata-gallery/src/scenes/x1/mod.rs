@@ -231,7 +231,14 @@ const HOOKS: Hooks<Gallery> = Hooks {
 
 pub fn view(g: &Gallery, cx: &mut Cx<Gallery>) -> El {
     match g.x1.mode {
-        Mode::Shell => shell::view(&g.x1.window, g.look(), cx, HOOKS, |bar| bar),
+        Mode::Shell => shell::view(
+            &g.x1.window,
+            g.look(),
+            cx,
+            HOOKS,
+            |bar| bar,
+            |window| window,
+        ),
         Mode::HeaderStates => header_states(g, cx),
     }
 }

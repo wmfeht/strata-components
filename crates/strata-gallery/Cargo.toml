@@ -23,7 +23,9 @@ serde_json.workspace = true
 
 # Shared by two or more demos.
 
-# X1 shell demo: examples/shell.rs
+# X1 shell demo: examples/shell/
+gio.workspace = true
+strata-platform = { workspace = true, features = ["csd", "glib-bridge", "settings", "single-instance"] }
 
 # X2 drag-and-drop demo: examples/dnd.rs
 

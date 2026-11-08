@@ -117,7 +117,7 @@ mod x1 {
             on_action: |_, _, _| {},
             on_volumes: |_| {},
         };
-        shell::view(&h.window, &h.look, cx, hooks, |bar| bar)
+        shell::view(&h.window, &h.look, cx, hooks, |bar| bar, |window| window)
     }
 
     #[test]

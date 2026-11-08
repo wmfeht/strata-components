@@ -87,3 +87,33 @@ fn a_theme_with_every_syntax_colour_uses_them_as_written() {
     let written = [keyword, string, constant, type_, preprocessor].map(|c| c.expect("set").color());
     assert_eq!(kinds(&t.look()), written);
 }
+
+/// A user's `syntax.*` override, applied after the theme, reaches the scope roles; the
+/// syntect theme built from them (K1b) then colours code with it.
+#[test]
+fn scope_roles_follow_the_finished_look() {
+    use crate::theme::syntax::{Role, SCOPES};
+    use crate::tokens::{self, Value};
+
+    let mut look = bundled_theme("nord").expect("bundled").look();
+    let pink = Rgba8::rgb(0xff, 0x00, 0x80).color();
+    for (name, role) in [
+        ("syntax.keyword", Role::Keyword),
+        ("syntax.comment", Role::Comment),
+        ("syntax.preprocessor", Role::Preprocessor),
+        ("color.text_accent", Role::Heading),
+        ("color.danger.fg", Role::Error),
+    ] {
+        assert_ne!(role.color(&look), pink);
+        tokens::set(&mut look, name, Value::Color(pink)).expect("a token");
+        assert_eq!(role.color(&look), pink, "{name}");
+    }
+    // Every role but plain text has a scope, and no selector is listed twice.
+    for role in Role::ALL.into_iter().filter(|&r| r != Role::Text) {
+        assert!(SCOPES.iter().any(|&(_, r)| r == role), "{role:?}");
+    }
+    let mut selectors: Vec<&str> = SCOPES.iter().map(|&(s, _)| s).collect();
+    selectors.sort_unstable();
+    selectors.dedup();
+    assert_eq!(selectors.len(), SCOPES.len());
+}

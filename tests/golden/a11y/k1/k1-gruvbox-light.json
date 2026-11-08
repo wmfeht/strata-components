@@ -1,0 +1,492 @@
+{
+  "children": [
+    {
+      "children": [
+        {
+          "children": [
+            {
+              "actions": [
+                "scroll-up",
+                "scroll-down",
+                "set-scroll-offset"
+              ],
+              "children": [
+                {
+                  "actions": [
+                    "scroll-into-view"
+                  ],
+                  "key": "k1-theme-name",
+                  "name": "Gruvbox Light",
+                  "role": "label"
+                },
+                {
+                  "actions": [
+                    "scroll-into-view"
+                  ],
+                  "name": "Bundled · light",
+                  "role": "label"
+                },
+                {
+                  "actions": [
+                    "scroll-into-view"
+                  ],
+                  "name": "background #f9f5d7",
+                  "role": "label"
+                },
+                {
+                  "actions": [
+                    "scroll-into-view"
+                  ],
+                  "name": "surface #ebdbb2",
+                  "role": "label"
+                },
+                {
+                  "actions": [
+                    "scroll-into-view"
+                  ],
+                  "name": "text #504945",
+                  "role": "label"
+                },
+                {
+                  "actions": [
+                    "scroll-into-view"
+                  ],
+                  "name": "accent #076678",
+                  "role": "label"
+                },
+                {
+                  "actions": [
+                    "scroll-into-view"
+                  ],
+                  "name": "danger #9d0006",
+                  "role": "label"
+                },
+                {
+                  "actions": [
+                    "scroll-into-view"
+                  ],
+                  "name": "muted #d5c4a1",
+                  "role": "label"
+                },
+                {
+                  "actions": [
+                    "scroll-into-view"
+                  ],
+                  "name": "highlight #d5c4a1",
+                  "role": "label"
+                },
+                {
+                  "actions": [
+                    "scroll-into-view"
+                  ],
+                  "name": "border #bdae93",
+                  "role": "label"
+                },
+                {
+                  "actions": [
+                    "scroll-into-view"
+                  ],
+                  "name": "dim_text #665c54",
+                  "role": "label"
+                },
+                {
+                  "actions": [
+                    "scroll-into-view"
+                  ],
+                  "name": "syntax_keyword #8f3f71",
+                  "role": "label"
+                },
+                {
+                  "actions": [
+                    "scroll-into-view"
+                  ],
+                  "name": "syntax_string #79740e",
+                  "role": "label"
+                },
+                {
+                  "actions": [
+                    "scroll-into-view"
+                  ],
+                  "name": "syntax_constant #af3a03",
+                  "role": "label"
+                },
+                {
+                  "actions": [
+                    "scroll-into-view"
+                  ],
+                  "name": "syntax_type #b57614",
+                  "role": "label"
+                },
+                {
+                  "actions": [
+                    "scroll-into-view"
+                  ],
+                  "name": "syntax_preprocessor #427b58",
+                  "role": "label"
+                }
+              ],
+              "key": "k1-roles",
+              "role": "scroll-view",
+              "states": [
+                "clips"
+              ]
+            },
+            {
+              "actions": [
+                "scroll-up",
+                "scroll-down",
+                "set-scroll-offset"
+              ],
+              "children": [
+                {
+                  "actions": [
+                    "scroll-into-view"
+                  ],
+                  "children": [
+                    {
+                      "actions": [
+                        "scroll-into-view"
+                      ],
+                      "name": "Projects",
+                      "role": "label"
+                    },
+                    {
+                      "actions": [
+                        "scroll-into-view"
+                      ],
+                      "name": "Projects",
+                      "role": "label"
+                    },
+                    {
+                      "actions": [
+                        "scroll-into-view"
+                      ],
+                      "name": "Downloads",
+                      "role": "label"
+                    },
+                    {
+                      "actions": [
+                        "scroll-into-view"
+                      ],
+                      "children": [
+                        {
+                          "actions": [
+                            "scroll-into-view"
+                          ],
+                          "name": "PINNED",
+                          "role": "label"
+                        },
+                        {
+                          "actions": [
+                            "scroll-into-view"
+                          ],
+                          "name": "Home",
+                          "role": "label"
+                        },
+                        {
+                          "actions": [
+                            "scroll-into-view"
+                          ],
+                          "name": "Documents (hover)",
+                          "role": "label"
+                        },
+                        {
+                          "actions": [
+                            "scroll-into-view"
+                          ],
+                          "name": "Trash",
+                          "role": "label"
+                        }
+                      ],
+                      "key": "k1-sidebar",
+                      "role": "group"
+                    },
+                    {
+                      "actions": [
+                        "scroll-into-view"
+                      ],
+                      "children": [
+                        {
+                          "actions": [
+                            "scroll-into-view"
+                          ],
+                          "name": "notes.md (selected)",
+                          "role": "label"
+                        },
+                        {
+                          "actions": [
+                            "scroll-into-view"
+                          ],
+                          "name": "2 KB",
+                          "role": "label"
+                        },
+                        {
+                          "actions": [
+                            "scroll-into-view"
+                          ],
+                          "name": "budget.ods (hover)",
+                          "role": "label"
+                        },
+                        {
+                          "actions": [
+                            "scroll-into-view"
+                          ],
+                          "name": "14 KB",
+                          "role": "label"
+                        },
+                        {
+                          "actions": [
+                            "scroll-into-view"
+                          ],
+                          "name": "photos (drop target)",
+                          "role": "label"
+                        },
+                        {
+                          "actions": [
+                            "scroll-into-view"
+                          ],
+                          "name": "—",
+                          "role": "label"
+                        },
+                        {
+                          "actions": [
+                            "scroll-into-view"
+                          ],
+                          "name": "todo.txt",
+                          "role": "label"
+                        },
+                        {
+                          "actions": [
+                            "scroll-into-view"
+                          ],
+                          "name": "1 KB",
+                          "role": "label"
+                        }
+                      ],
+                      "key": "k1-files",
+                      "role": "group"
+                    }
+                  ],
+                  "key": "k1-window",
+                  "role": "group"
+                },
+                {
+                  "actions": [
+                    "scroll-into-view"
+                  ],
+                  "children": [
+                    {
+                      "actions": [
+                        "scroll-into-view"
+                      ],
+                      "name": "Open",
+                      "role": "label"
+                    },
+                    {
+                      "actions": [
+                        "scroll-into-view"
+                      ],
+                      "name": "Open With… (hover)",
+                      "role": "label"
+                    },
+                    {
+                      "actions": [
+                        "scroll-into-view"
+                      ],
+                      "name": "Rename",
+                      "role": "label"
+                    },
+                    {
+                      "actions": [
+                        "scroll-into-view"
+                      ],
+                      "name": "Move to Trash",
+                      "role": "label"
+                    }
+                  ],
+                  "key": "k1-menu",
+                  "role": "group"
+                },
+                {
+                  "actions": [
+                    "scroll-into-view"
+                  ],
+                  "children": [
+                    {
+                      "actions": [
+                        "scroll-into-view"
+                      ],
+                      "name": "Replace “notes.md”?",
+                      "role": "label"
+                    },
+                    {
+                      "actions": [
+                        "scroll-into-view"
+                      ],
+                      "name": "A file with this name already exists in Projects.",
+                      "role": "label"
+                    },
+                    {
+                      "actions": [
+                        "focus",
+                        "scroll-into-view"
+                      ],
+                      "key": "k1-cancel",
+                      "name": "Cancel",
+                      "role": "button"
+                    },
+                    {
+                      "actions": [
+                        "focus",
+                        "scroll-into-view"
+                      ],
+                      "key": "k1-submit",
+                      "name": "Keep both",
+                      "role": "button"
+                    },
+                    {
+                      "actions": [
+                        "focus",
+                        "scroll-into-view"
+                      ],
+                      "key": "k1-danger",
+                      "name": "Replace",
+                      "role": "button"
+                    }
+                  ],
+                  "key": "k1-glow",
+                  "role": "group"
+                },
+                {
+                  "actions": [
+                    "scroll-into-view"
+                  ],
+                  "children": [
+                    {
+                      "actions": [
+                        "scroll-into-view"
+                      ],
+                      "children": [
+                        {
+                          "actions": [
+                            "click",
+                            "scroll-into-view"
+                          ],
+                          "key": "input",
+                          "name": "Location",
+                          "role": "text-input",
+                          "states": [
+                            "read-only"
+                          ],
+                          "value": "~/Projects"
+                        }
+                      ],
+                      "key": "value",
+                      "role": "group"
+                    }
+                  ],
+                  "key": "k1-field",
+                  "role": "group"
+                },
+                {
+                  "actions": [
+                    "focus",
+                    "scroll-into-view"
+                  ],
+                  "key": "k1-switch-on",
+                  "name": "Glow",
+                  "role": "switch",
+                  "states": [
+                    "checked"
+                  ]
+                },
+                {
+                  "actions": [
+                    "focus",
+                    "scroll-into-view"
+                  ],
+                  "key": "k1-switch-off",
+                  "name": "Thumbnails",
+                  "role": "switch",
+                  "states": [
+                    "unchecked"
+                  ]
+                },
+                {
+                  "actions": [
+                    "focus",
+                    "scroll-into-view"
+                  ],
+                  "key": "k1-check",
+                  "name": "Hidden files",
+                  "role": "check-box",
+                  "states": [
+                    "checked"
+                  ]
+                },
+                {
+                  "actions": [
+                    "scroll-into-view"
+                  ],
+                  "children": [
+                    {
+                      "actions": [
+                        "scroll-into-view"
+                      ],
+                      "name": "Couldn't move 2 items",
+                      "role": "label"
+                    }
+                  ],
+                  "key": "k1-danger-role",
+                  "role": "group"
+                },
+                {
+                  "actions": [
+                    "scroll-into-view"
+                  ],
+                  "children": [
+                    {
+                      "actions": [
+                        "scroll-into-view"
+                      ],
+                      "name": "Showing 120 of 4,812 items",
+                      "role": "label"
+                    }
+                  ],
+                  "key": "k1-info-role",
+                  "role": "group"
+                },
+                {
+                  "actions": [
+                    "scroll-into-view"
+                  ],
+                  "children": [
+                    {
+                      "actions": [
+                        "scroll-into-view"
+                      ],
+                      "name": "// Count the entries under a folder.\n#[derive(Debug)]\nstruct Tally { files: u64, bytes: u64 }\nfn tally(dir: &Path) -> io::Result<Tally> {\n    let t = Tally { files: 0, bytes: 0x400 };\n    println!(\"{t:?}\"); // a string, then a comment\n    Ok(t)\n}",
+                      "role": "label"
+                    }
+                  ],
+                  "key": "k1-code",
+                  "role": "group"
+                }
+              ],
+              "key": "k1-specimen",
+              "role": "scroll-view",
+              "states": [
+                "clips"
+              ]
+            }
+          ],
+          "key": "k1",
+          "role": "group"
+        }
+      ],
+      "key": "gallery",
+      "role": "group"
+    }
+  ],
+  "role": "window"
+}

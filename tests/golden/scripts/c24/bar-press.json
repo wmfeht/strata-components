@@ -1127,10 +1127,7 @@
               ],
               "key": "c24-files",
               "name": "Files",
-              "role": "list-box",
-              "states": [
-                "focused"
-              ]
+              "role": "list-box"
             }
           ],
           "key": "c24-page",

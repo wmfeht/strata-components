@@ -29,7 +29,7 @@ use rune::{
     Cx, Drag, El, Key, KeyEvent, PointerButton, ScrollPos, TextEdit, Tx, col, row, text, text_input,
 };
 use strata_components::collection::element::{
-    Collection, CollectionState, Controllers, Intent, viewport_path,
+    Collection, CollectionState, Controllers, Intent, Slot, viewport_path,
 };
 use strata_components::collection::marquee::MarqueeSettings;
 use strata_components::contract::{EntryId, EntryKind, ListEntry, ListSource, Point, Rect};
@@ -102,6 +102,10 @@ pub struct Demo {
     pub stopped: String,
     pub chord: bool,
     pub filter: TextEdit,
+    /// The entry whose name an inline rename field edits (the `c24-rename` scene): a text
+    /// field inside the listing.
+    pub renaming: Option<EntryId>,
+    pub rename_edit: TextEdit,
     pub clock: f64,
     pub hidden: bool,
     /// Which folder the list shows: 0 the first, 1 after Alt+Left.
@@ -189,6 +193,8 @@ impl Default for Demo {
             stopped: String::new(),
             chord: false,
             filter: TextEdit::new(""),
+            renaming: None,
+            rename_edit: TextEdit::new(""),
             clock: 0.0,
             hidden: false,
             folder: 0,
@@ -307,6 +313,14 @@ fn bars(g: &mut Gallery, dark: bool) {
     }
 }
 
+/// An inline rename field open on the third entry: a text field inside the listing, where
+/// Strata's `is_text_target` keeps a middle click from starting autoscroll.
+fn rename(g: &mut Gallery, dark: bool) {
+    scene(g, dark, Pane::List);
+    g.c24.renaming = Some(EntryId::new(3));
+    g.c24.rename_edit = TextEdit::new("item file 00002.txt");
+}
+
 /// The list with animations off: autoscroll steps, the bar shows and hides at once.
 fn reduced(g: &mut Gallery, dark: bool) {
     scene(g, dark, Pane::List);
@@ -334,6 +348,8 @@ pub const SCENES: &[Scene] = &[
 pub const REVIEW: &[Scene] = &[
     ("c24-reduced-light", |g| reduced(g, false)),
     ("c24-reduced-dark", |g| reduced(g, true)),
+    ("c24-rename-light", |g| rename(g, false)),
+    ("c24-rename-dark", |g| rename(g, true)),
 ];
 
 /// The controllers' settings, from the look: the page passes them each time it builds or ticks
@@ -361,6 +377,29 @@ pub fn collection((marquee, auto): Settings) -> Collection<Gallery> {
     .settings(marquee)
     .settings(auto)
     .on_intent(|g: &mut Gallery, intent, _| g.c24.heard(intent))
+    .rename(
+        |g: &Gallery| g.c24.renaming,
+        // A stand-in for C5's editor: a plain field over the label.
+        Slot::pure(|g: &Gallery, rcx| {
+            let kit = g.kit();
+            row()
+                .grow(1.0)
+                .h_full()
+                .px(rcx.look.space.xs)
+                .center_y()
+                .radius(kit.radius.sm)
+                .fill(kit.c.bg_base)
+                .outline(1.0, -1.0, kit.c.border_focus)
+                .child(
+                    text_input(&g.c24.rename_edit, kit.ty.ui_compact)
+                        .color(kit.c.text_base)
+                        .key("c24-rename")
+                        .label("Rename")
+                        .on_edit(|g: &mut Gallery| &mut g.c24.rename_edit)
+                        .grow(1.0),
+                )
+        }),
+    )
 }
 
 /// Nested column `i`'s collection.
@@ -407,7 +446,7 @@ fn list_view(g: &Gallery) -> El {
             Some(
                 g.c24
                     .bar
-                    .build(BAR, &viewport_path(SCOPE), BarLook::list(g.look())),
+                    .build::<Gallery>(BAR, &viewport_path(SCOPE), BarLook::list(g.look())),
             )
         })
         .build(g);
@@ -423,7 +462,7 @@ fn nested_view(g: &Gallery) -> El {
             .name(format!("Column {}", i + 1))
             .on_scroll(follow(&c.feed, &c.bar))
             .edge(move |g: &Gallery| {
-                Some(g.c24.columns[i].bar.build(
+                Some(g.c24.columns[i].bar.build::<Gallery>(
                     &format!("{}-bar", column_key(i)),
                     &viewport_path(&column_key(i)),
                     BarLook::column(g.look()),
@@ -441,7 +480,7 @@ fn nested_view(g: &Gallery) -> El {
         .child(strip);
     let bar = d
         .strip_bar
-        .build("c24-strip-bar", STRIP, BarLook::strip(g.look()));
+        .build::<Gallery>("c24-strip-bar", STRIP, BarLook::strip(g.look()));
     d.strip_bar.area(overlay(viewport, [bar]))
 }
 
@@ -498,8 +537,8 @@ fn grid_view(g: &Gallery) -> El {
         .child(content);
     let app = BarLook::app(g.look());
     let bars = [
-        d.grid_bars[0].build("c24-grid-vbar", GRID, app),
-        d.grid_bars[1].build("c24-grid-hbar", GRID, app.horizontal()),
+        d.grid_bars[0].build::<Gallery>("c24-grid-vbar", GRID, app),
+        d.grid_bars[1].build::<Gallery>("c24-grid-hbar", GRID, app.horizontal()),
     ];
     let wrapped = overlay(viewport, bars);
     // One area, revealing both.

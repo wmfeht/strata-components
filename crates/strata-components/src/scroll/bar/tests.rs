@@ -2,7 +2,16 @@
 //! (its widths, gaps and least thumb length) is the gallery's PNG goldens'; how it fades and
 //! drags is `strata-gallery/tests/c24.rs`'s.
 
-use super::{Bar, BarMode, offset_at, thumb};
+use strata_kit::look::Look;
+
+use super::{Bar, BarLook, BarMode, offset_at, thumb};
+
+/// A bar built once, as a view builds it.
+fn built() -> Bar {
+    let bar = Bar::new();
+    let _ = bar.build::<()>("bar", "viewport", BarLook::list(&Look::fallback(false)));
+    bar
+}
 use rune::ScrollPos;
 
 fn pos(offset: f32, max: f32, h: f32) -> ScrollPos {
@@ -37,7 +46,7 @@ fn a_thumb_position_maps_back_to_its_offset() {
 #[test]
 fn content_that_fits_shows_no_bar() {
     // browser/scrolling: Scrollbars fade in on hover or scrolling and stay hidden at rest; the trough strengthens on hover and while dragging.
-    let bar = Bar::new();
+    let bar = built();
     bar.set_mode(BarMode::Always);
     bar.follow(pos(0.0, 0.0, 600.0));
     assert!(!bar.overflows());
@@ -46,7 +55,7 @@ fn content_that_fits_shows_no_bar() {
 
 #[test]
 fn an_always_bar_shows_while_the_content_overflows() {
-    let bar = Bar::new();
+    let bar = built();
     bar.set_mode(BarMode::Always);
     bar.follow(pos(0.0, 5000.0, 600.0));
     assert!(bar.overflows());
@@ -54,9 +63,20 @@ fn an_always_bar_shows_while_the_content_overflows() {
 }
 
 #[test]
+fn a_bar_never_built_shows_nothing() {
+    // Review round 1: no default look reaches the screen before the view builds the bar.
+    let bar = Bar::new();
+    bar.set_mode(BarMode::Always);
+    bar.follow(pos(0.0, 5000.0, 600.0));
+    assert!(!bar.overflows());
+    assert_eq!(bar.0.opacity.get(), 0.0);
+    assert_eq!(bar.0.thumb.get(), [0.0; 4]);
+}
+
+#[test]
 fn an_overlay_bar_is_hidden_at_rest() {
     // browser/scrolling: Scrollbars fade in on hover or scrolling and stay hidden at rest; the trough strengthens on hover and while dragging.
-    let bar = Bar::new();
+    let bar = built();
     bar.follow(pos(0.0, 5000.0, 600.0));
     bar.follow(pos(0.0, 5000.0, 601.0));
     assert_eq!(bar.0.opacity.get(), 0.0);

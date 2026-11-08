@@ -15,7 +15,7 @@
 //! | `autoscroll-click` | a click outside the list stops it (the click half of the stop bullet) |
 //! | `autoscroll-click-row` | the click on a row that stops it opens and selects nothing |
 //! | `autoscroll-fits` | a list that fits starts none |
-//! | `autoscroll-filter` | a middle click on the filter field starts none (not the paste half) |
+//! | `autoscroll-rename` | a middle click on a text field inside the listing (an inline rename) starts none (not the paste half) |
 //! | `history-back`, `history-forward` | buttons 8 and 9 reach the host |
 //! | `autoscroll-navigate` | another folder stops it (the navigating half; hiding is in process) |
 //! | `bar-drag` | a thumb drag scrolls and starts no band (Alt held: in process) |
@@ -200,11 +200,15 @@ mod c24 {
     }
 
     #[test]
-    fn a_middle_click_on_the_filter_field_starts_no_autoscroll() {
+    fn a_middle_click_on_a_text_field_inside_the_list_starts_no_autoscroll() {
         // browser/scrolling: Middle-clicking a text field, such as the filter field, pastes as usual and starts no autoscroll.
-        // (Half: no autoscroll. The paste is Rune's text field's, not checked here.)
-        let mut rt = mount("c24-ten-k-light");
-        let [x, y, w, h] = element(&rt, "c24-filter").expect("the field").visible;
+        // (Half: no autoscroll, for a field inside the listing, an inline rename, which is
+        // where Strata's `is_text_target` matters. The paste is Rune's text field's, not checked
+        // here.)
+        let mut rt = mount("c24-rename-light");
+        let [x, y, w, h] = element(&rt, "c24-rename")
+            .expect("the rename field")
+            .visible;
         press(&mut rt, x + w / 2.0, y + h / 2.0, PointerButton::Middle);
         assert!(!running(&rt));
     }
@@ -317,6 +321,7 @@ mod c24 {
             PointerButton::Middle,
             PointerButton::Back,
             PointerButton::Forward,
+            PointerButton::Other(0),
         ] {
             let mut rt = mount("c24-ten-k-light");
             let (x, y) = start(&mut rt);
@@ -524,6 +529,86 @@ mod c24 {
         assert_eq!(rt.state.c24.intent, "Nothing yet");
     }
 
+    fn focused(rt: &Runtime<Gallery>) -> Option<String> {
+        rt.elements()
+            .into_iter()
+            .find(|e| e.focused)
+            .and_then(|e| e.key)
+    }
+
+    #[test]
+    fn a_press_or_drag_on_the_bar_leaves_the_keyboard_focus_where_it_was() {
+        // browser/selection/marquee: A press on a button, text entry, label, image, slider, scrollbar, or sidebar place keeps that control's own behavior and starts no marquee.
+        // (Review round 1: the scroll bar's own behaviour takes no focus, as GTK's scrollbar doesn't.)
+        let mut rt = mount("c24-ten-k-bar-light");
+        let [fx, fy, _, fh] = element(&rt, "c24-filter").expect("the field").visible;
+        press(&mut rt, fx + 5.0, fy + fh / 2.0, PointerButton::Primary);
+        assert_eq!(focused(&rt).as_deref(), Some("c24-filter"));
+        let [x, y, w, h] = element(&rt, BAR).expect("the bar").visible;
+        press(&mut rt, x + w / 2.0, y + h - 10.0, PointerButton::Primary);
+        assert_eq!(
+            focused(&rt).as_deref(),
+            Some("c24-filter"),
+            "after a trough press"
+        );
+        let thumb = under(&rt, BAR, "thumb").expect("the thumb").visible;
+        let (tx, ty) = (thumb[0] + thumb[2] / 2.0, thumb[1] + thumb[3] / 2.0);
+        rt.pointer_move(tx, ty);
+        rt.frame(FRAME);
+        rt.pointer_down(tx, ty);
+        rt.frame(FRAME);
+        rt.pointer_move(tx, ty - 100.0);
+        rt.frame(FRAME);
+        rt.pointer_up(tx, ty - 100.0);
+        rt.frame(FRAME);
+        assert_eq!(
+            focused(&rt).as_deref(),
+            Some("c24-filter"),
+            "after a thumb drag"
+        );
+    }
+
+    #[test]
+    fn a_secondary_press_on_the_bar_does_nothing() {
+        // browser/selection/marquee: A press on a button, text entry, label, image, slider, scrollbar, or sidebar place keeps that control's own behavior and starts no marquee.
+        // (Review round 1: a secondary press on the bar reaches no row: no menu, no selection.)
+        let mut rt = mount("c24-ten-k-bar-light");
+        let [x, y, w, h] = element(&rt, BAR).expect("the bar").visible;
+        press(&mut rt, x + w / 2.0, y + h / 2.0, PointerButton::Secondary);
+        assert_eq!(rt.state.c24.intent, "Nothing yet");
+        assert!(selected(&rt).is_empty());
+    }
+
+    #[test]
+    fn an_escape_in_the_dead_zone_is_over_at_once_and_the_next_click_reaches_the_row() {
+        // browser/scrolling: Escape, or another click with any button anywhere in the window, stops autoscroll.
+        // (Review round 1: an Escape with nothing moving stops at once, so the next click isn't taken as a stop.)
+        let mut rt = mount("c24-ten-k-light");
+        start(&mut rt);
+        rt.key(KeyEvent {
+            key: Key::Escape,
+            mods: Mods::default(),
+        });
+        // One frame: the shield goes, and with nothing moving the autoscroll is over in the
+        // same frame, with no further frame needed (a resting window may run none): what the
+        // view drew then says so. (A click in the same frame as the Escape still lands on the
+        // shield: a known gap, in the module docs.)
+        rt.frame(FRAME);
+        assert!(element(&rt, ANCHOR).is_none());
+        assert!(!running(&rt), "idle, not stopping");
+        assert_eq!(
+            element(&rt, "c24-status").and_then(|e| e.text).as_deref(),
+            Some("Stopped by Escape")
+        );
+        let [x, y, _, h] = element(&rt, "row-4").expect("row 4").visible;
+        rt.pointer_down(x + 120.0, y + h / 2.0);
+        rt.frame(FRAME);
+        rt.pointer_up(x + 120.0, y + h / 2.0);
+        rt.frame(FRAME);
+        assert!(!running(&rt));
+        assert_eq!(selected(&rt), vec![4]);
+    }
+
     #[test]
     fn a_press_on_the_trough_jumps_there_and_starts_no_marquee() {
         // browser/selection/marquee: A press on a button, text entry, label, image, slider, scrollbar, or sidebar place keeps that control's own behavior and starts no marquee.
@@ -703,11 +788,11 @@ mod c24 {
         }
     }
 
-    /// A thumb dragged over 10,000 rows mounts new rows on every frame, and Rune counts each
-    /// of those virtual-only commits (no view runs) against the instant scroll the drag asks
-    /// for: its "stepping its own glide" warning fires, as it does for rune-kit's own
-    /// `ScrollBar` (Rune draft U-C24-8). That one warning, on the list's viewport, is the only
-    /// one allowed.
+    /// A thumb dragged over 10,000 rows moves the list past its mounted rows on every frame,
+    /// and Rune then commits about 4 times and runs the view about 3 times a frame (a wheel
+    /// moving as far runs it none), so its "stepping its own glide" warning fires, as it does
+    /// for rune-kit's own `ScrollBar` (Rune draft U-C24-8). That one warning, on the list's
+    /// viewport, is the only one allowed.
     #[test]
     #[cfg_attr(not(debug_assertions), ignore = "Rune's perf warnings are debug-only")]
     fn a_thumb_drag_trips_only_runes_instant_scroll_warning() {

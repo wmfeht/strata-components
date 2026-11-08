@@ -26,7 +26,7 @@
 //! let list = Collection::new(SCOPE, ..)
 //!     .settings(autoscroll_settings) // AutoscrollSettings, margin from slots::collection::row_inset
 //!     .on_scroll(move |p| { feed.set(p); bar.follow(p); })
-//!     .edge(|s: &S| Some(s.bar.build("files-bar", &viewport_path(SCOPE), BarLook::list(s.look()))))
+//!     .edge(|s: &S| Some(s.bar.build::<S>("files-bar", &viewport_path(SCOPE), BarLook::list(s.look()))))
 //!     .build(s);
 //! let list = s.bar.area(list);
 //! // poll:  s.auto.drive(now, look.animations, tx) | collection(..).tick(s, tx)
@@ -51,7 +51,8 @@
 //!
 //! - **Autoscroll glides.** Each frame retargets a `Tx::scroll_to_with` glide a lead ahead of
 //!   the offset (`collection::marquee::glide_lead`, C1d's probe-checked lead), rather than
-//!   stepping instant scrolls; the frames commit nothing, so Rune's perf warnings stay silent.
+//!   stepping instant scrolls; at its speeds (up to 33 pt a frame) a frame stays within the
+//!   mounted rows and asks for no commit, so Rune's perf warnings stay silent.
 //!   With animations off (`Look::animations`, which hosts also pass to
 //!   `Cx::reduced_motion`), Rune lands a glide at once, so each frame jumps one frame's travel
 //!   instead. It asks for frames only while a viewport moves: in the dead zone, or at an end, it
@@ -90,6 +91,16 @@
 //!   behind it); Strata's autoscroll leaves its tree alone.
 //! - **The scroll cursor is `Cursor::Move`**: Rune has no all-scroll cursor (U-C24-5).
 //! - **The bar's fade hold is 1 s**, not GTK's own indicator timing, which isn't confirmed.
+//!
+//! # Known gaps
+//!
+//! - **An Escape and a click in the same frame**: the click hit-tests against the frame's tree,
+//!   where the shield still is, so it lands on the shield (and does nothing) rather than on the
+//!   row. A frame later it reaches the row.
+//! - **A listing that grows at the end autoscroll waits at**: at an end the machine sleeps until
+//!   the pointer moves, so rows added below don't resume the scroll by themselves.
+//! - **A window resized while autoscroll runs**: the shield keeps the viewport rect it started
+//!   with, so the scroll cursor's region and the anchor's clip are stale until it stops.
 //!
 //! # Left to others
 //!
@@ -137,7 +148,9 @@
 //!   (P6): an element with `pointer_buttons([Middle])` whose `on_drag` mounts a full-window
 //!   `.modal(..)` on a middle Down; move 120 pt with the button held and release: the element's
 //!   `on_drag` hears the Down and nothing more, not even a cancelled Up. Ask: end the capture
-//!   with a cancelled `Up` (as Escape does mid-drag).
+//!   with a cancelled `Up` (as Escape does mid-drag). The same holds for a bar's thumb: a
+//!   modal (any dialog) mounted mid-drag leaves the bar's drag held, so it stays shown, its
+//!   trough strengthened, until the next press on it.
 //! - **U-C24-5: no all-scroll cursor.** `Cursor` has `Move` but not CSS `all-scroll` (GTK's
 //!   `all-scroll`, the autoscroll cursor on Linux and Windows). Repro: none needed; the enum has
 //!   no variant. Ask: `Cursor::AllScroll`.
@@ -152,15 +165,27 @@
 //!   headless. Repro (P1g): `wheel_event(WheelEvent::new(0, -120).mods(shift).precise(false))`
 //!   over a column: the column scrolls, the strip doesn't. Ask: apply the turn in
 //!   `wheel_event`, where scripts reach it.
-//! - **U-C24-8: a scroll bar's thumb drag over virtual rows trips the "stepping its own glide"
-//!   warning.** A thumb drag asks for an instant scroll on each move (with `live_only`), and
-//!   over a long virtual list every frame mounts new rows, a virtual-only commit (no view
-//!   runs); the warning counts those commits and fires after 8 frames. rune-kit's own
-//!   `ScrollBar` trips it the same way. Repro (probe K1): 1,000 virtual rows with
-//!   `.scroll_bar_styled(..)`; press the thumb and move it 25 pt a frame for 12 frames: "an
-//!   instant scroll … moved "viewport-scroll-area/viewport" on 8 frames in a row, each with a
-//!   commit". Ask: don't count virtual-only remounts, or a scroll the pointer drives
-//!   directly, as a stepped glide.
+//! - **U-C24-8: a scroll request that moves past the mounted rows runs the app's view about
+//!   3 times a frame, where the wheel moving as far runs it 0 times.** A request (instant or
+//!   glide) that takes a virtual list past the rows it has mounted commits about 4 times and
+//!   runs the view about 3 times that frame; a wheel delta moving it as far commits once and
+//!   runs no view. A thumb drag asks for such a request on every move, so over a long list the
+//!   commits trip the "stepping its own glide" warning ("an instant scroll … on 8 frames in a
+//!   row, each with a commit"), which rune-kit's own `ScrollBar` trips the same way (probe K1).
+//!   Measured at the pinned rev (review round 1's probes, per frame):
+//!
+//!   | What moves the list | Commits | View runs |
+//!   | --- | --- | --- |
+//!   | C24's thumb drag | +4 | 3 |
+//!   | plain Rune with rune-kit's `ScrollBar`, thumb drag | +4 | 3 |
+//!   | wheel jumps of up to 6,000 pt | +1 | 0 |
+//!   | `scroll_to_instant` of 400 pt or more | 2–3 | 2–3 |
+//!   | `scroll_to_with` past the mounted rows | +4 | 3 |
+//!
+//!   Repro: 1,000 virtual rows with `.scroll_bar_styled(..)`; press the thumb and move it
+//!   25 pt a frame for 12 frames, counting `Runtime::stats.commits` and the view's runs; then
+//!   wheel the same distances. Ask: let a scroll request remount virtual rows as the wheel
+//!   does, without running the view. C24's tests allow this one warning on a thumb drag.
 
 pub mod autoscroll;
 pub mod bar;

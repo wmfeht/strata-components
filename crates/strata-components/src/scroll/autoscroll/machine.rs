@@ -188,10 +188,13 @@ impl Machine {
         !run.moving && run.speeds().iter().any(|v| v.0 != 0.0 || v.1 != 0.0)
     }
 
-    /// Stops at the next [`Self::step`], which has the transaction to stop the viewports with.
+    /// Stops. With nothing moving it is idle at once; else it stops at the next
+    /// [`Self::step`], which has the transaction to stop the glide with.
     pub(crate) fn request_stop(&mut self) {
-        if let State::Running(run) = std::mem::take(&mut self.state) {
-            self.state = State::Stopping(run);
+        match std::mem::take(&mut self.state) {
+            State::Running(run) if run.moving => self.state = State::Stopping(run),
+            State::Stopping(run) => self.state = State::Stopping(run),
+            _ => {}
         }
     }
 

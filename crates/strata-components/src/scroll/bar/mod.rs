@@ -61,8 +61,10 @@ pub struct BarLook {
     pub base: Option<Color>,
     /// A ring inside the trough, if any.
     pub ring: Option<Color>,
-    /// A fully rounded thumb, rather than Strata's 2 pt corners.
-    pub round: bool,
+    /// The thumb's and the trough's corner radii (`scroll.thumb.radius`,
+    /// `scroll.trough.radius`; a listing's thumb is fully rounded).
+    pub thumb_radius: f32,
+    pub trough_radius: f32,
     /// Whether the bar fades (`Look::animations`); off, it shows and hides at once.
     pub animations: bool,
 }
@@ -86,7 +88,8 @@ impl BarLook {
             trough_hover: tokens::trough_at(look, tokens::trough_hover_opacity(look)),
             base: None,
             ring: None,
-            round: false,
+            thumb_radius: tokens::thumb_radius(look),
+            trough_radius: tokens::trough_radius(look),
             animations: look.animations,
         }
     }
@@ -94,13 +97,14 @@ impl BarLook {
     /// The Icons listing's vertical bar: a 9 pt trough, fainter, with a fully rounded 7 pt
     /// thumb 4 pt in from its ends (`scroll.listing.*`).
     pub fn listing(look: &Look) -> Self {
+        let thumb_width = tokens::listing_thumb_width(look);
         Self {
             thickness: tokens::listing_width(look),
-            thumb_width: tokens::listing_thumb_width(look),
+            thumb_width,
+            thumb_radius: thumb_width / 2.0,
             ends: tokens::listing_end_inset(look),
             trough: tokens::trough_at(look, tokens::listing_trough_opacity(look)),
             trough_hover: tokens::trough_at(look, tokens::listing_hover_opacity(look)),
-            round: true,
             ..Self::app(look)
         }
     }
@@ -200,8 +204,8 @@ struct Inner {
 /// `Collection::on_scroll`), drawn over the viewport ([`Bar::build`]: through
 /// `Collection::edge`, or [`overlay`] for a plain viewport), and revealed by the pointer over
 /// the listing ([`Bar::area`] around it). Its thumb drags the viewport and a press on its
-/// trough jumps there; neither changes a selection, Alt or not, and a middle press on it
-/// starts no autoscroll. It is hidden from assistive technology: the viewport itself scrolls
+/// trough jumps there; neither changes a selection, Alt or not, nor moves the keyboard focus,
+/// a middle press on it starts no autoscroll, and a secondary press on it does nothing. It is hidden from assistive technology: the viewport itself scrolls
 /// for it.
 ///
 /// Used by: C2, C3, C4, hosts.
@@ -280,31 +284,25 @@ impl Bar {
     /// The bar, keyed `key`, scrolling the viewport keyed `target` (a key path such as
     /// `viewport_path(scope)`), drawn as `look`, in the viewport's coordinates: put it over
     /// the viewport with `Collection::edge` or [`overlay`]. Its trough is keyed `trough` and
-    /// its thumb `thumb`, under `key`.
-    pub fn build(&self, key: &str, target: &str, look: BarLook) -> El {
+    /// its thumb `thumb`, under `key`. `S` is the app's state type: the bar takes secondary
+    /// presses (doing nothing with them), and Rune types that handler by the state.
+    pub fn build<S: 'static>(&self, key: &str, target: &str, look: BarLook) -> El {
         let inner = &self.0;
         *inner.target.borrow_mut() = target.to_owned();
         inner.restyle(look);
         let fade = if look.animations { FADE } else { Spring::NONE };
         let tint = if look.animations { TINT } else { Spring::NONE };
-        let radius = |w: f32| {
-            if look.round {
-                w / 2.0
-            } else {
-                w.min(4.0) / 2.0
-            }
-        };
         let thumb = col()
             .key("thumb")
             .absolute(0.0, 0.0)
             .live_rect(&inner.thumb)
-            .radius(radius(look.thumb_width))
+            .radius(look.thumb_radius)
             .fill(look.thumb);
         let mut trough = col()
             .key("trough")
             .absolute(0.0, 0.0)
             .live_rect(&inner.trough)
-            .radius(look.thickness.min(4.0) / 2.0)
+            .radius(look.trough_radius)
             .live_fill(inner.fill.smooth(tint))
             .child(thumb);
         if let Some(ring) = look.ring {
@@ -316,7 +314,14 @@ impl Bar {
             .live_rect(&inner.band)
             .live_opacity(inner.opacity.smooth(fade).rest(fade))
             .a11y_hidden()
-            .pointer_buttons([PointerButton::Middle]);
+            // A press on the bar leaves the keyboard focus (and any text selection) where it
+            // was, as GTK's scrollbar does: without it Rune focuses the nearest ancestor with
+            // `on_key`, the collection. (`preserve_focus_on_press` keeps only a blur from
+            // happening, not that.)
+            .keeps_text_selection()
+            .pointer_buttons([PointerButton::Middle])
+            // A secondary press on the bar is the bar's: no row's menu, no selection.
+            .on_secondary_press(|_: &mut S, _, tx: &mut rune::Tx| tx.live_only());
         if let Some(base) = look.base {
             band = band.fill(base);
         }
@@ -370,15 +375,17 @@ pub fn overlay(viewport: El, bars: impl IntoIterator<Item = El>) -> El {
 }
 
 impl Inner {
-    fn look(&self) -> BarLook {
-        self.look
-            .get()
-            .unwrap_or_else(|| BarLook::app(&Look::fallback(false)))
+    /// The look the last view built the bar with. Before the first build there is none, and
+    /// the bar lays out and shows nothing: no default look reaches the screen.
+    fn look(&self) -> Option<BarLook> {
+        self.look.get()
     }
 
     /// The trough's length and whether a bar shows at all, for the viewport as it stands.
     fn track(&self) -> (f32, f32, bool) {
-        let look = self.look();
+        let Some(look) = self.look() else {
+            return (0.0, 0.0, false);
+        };
         let p = self.pos.get();
         let a = look.along();
         let trough = (p.viewport[a] - look.start).max(0.0);
@@ -396,7 +403,9 @@ impl Inner {
 
     /// Lays the band, trough and thumb out for the viewport as it stands.
     fn layout(&self) {
-        let look = self.look();
+        let Some(look) = self.look() else {
+            return;
+        };
         let p = self.pos.get();
         let a = look.along();
         let (trough, track, shows) = self.track();
@@ -440,7 +449,7 @@ impl Inner {
         p.viewport = p.drawn;
         let prev = self.pos.replace(p);
         self.layout();
-        let a = self.look().along();
+        let a = self.look().map_or(1, |l| l.along());
         if !self.shows() || self.mode.get() == BarMode::Always {
             self.settle();
         } else if (prev.offset[a] - p.offset[a]).abs() >= 0.5 {
@@ -470,7 +479,9 @@ impl Inner {
     }
 
     fn tint(&self) {
-        let look = self.look();
+        let Some(look) = self.look() else {
+            return;
+        };
         self.fill.set(if self.held() {
             look.trough_hover
         } else {
@@ -479,7 +490,9 @@ impl Inner {
     }
 
     fn drag(&self, d: &mut rune::Drag, tx: &mut rune::Tx) {
-        let look = self.look();
+        let Some(look) = self.look() else {
+            return;
+        };
         let p = self.pos.get();
         let a = look.along();
         let (_, track, shows) = self.track();

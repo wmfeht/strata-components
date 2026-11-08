@@ -87,6 +87,8 @@ impl<S: 'static> Shield<S> {
             PointerButton::Middle,
             PointerButton::Back,
             PointerButton::Forward,
+            // Rune gives every other button one bit: this takes them all.
+            PointerButton::Other(0),
         ])
         .on_drag(move |s: &mut S, d: &mut rune::Drag, tx: &mut Tx| {
             if d.phase == rune::Phase::Down {
@@ -116,8 +118,15 @@ impl<S: 'static> Shield<S> {
             .size(size, size)
             .radius(size / 2.0)
             .fill(tokens::anchor_fill(look))
-            .border(1.0, tokens::anchor_border(look))
-            .shadow(1.0, 4.0, tokens::anchor_shadow(look));
+            .border(
+                tokens::anchor_border_width(look),
+                tokens::anchor_border(look),
+            )
+            .shadow(
+                tokens::anchor_shadow_offset(look),
+                tokens::anchor_shadow_blur(look),
+                tokens::anchor_shadow(look),
+            );
         // Over the listing: the scroll cursor, and the anchor clipped to it. Rune takes the
         // cursor from the element a press would go to, so this region takes presses too.
         let listing = self

@@ -118,8 +118,8 @@ fn a_listing_that_fits_starts_no_autoscroll() {
 
 #[test]
 fn only_one_autoscroll_runs_at_a_time() {
-    // browser/scrolling: Escape, or another click with any button anywhere in the window, stops autoscroll.
-    // (Strata holds one autoscroll a window, so any press can end it.)
+    // No bullet of its own: Strata's design holds one autoscroll a window
+    // (`browser/scrolling`, Design), which is what lets any press end it.
     let (mut m, f) = running(0.0);
     assert!(!start(&mut m, vec![Target::vertical("other/viewport", f)]));
     assert_eq!(m.owner(), Some("list"));
@@ -267,6 +267,18 @@ fn an_escape_stops_on_the_next_frame() {
     );
     assert!(matches!(out.0[..], [Req::Jump(..)]));
     assert!(!m.active());
+}
+
+#[test]
+fn an_escape_in_the_dead_zone_stops_at_once() {
+    // browser/scrolling: Escape, or another click with any button anywhere in the window, stops autoscroll.
+    // (Review round 1: with nothing moving there is no glide to stop, so no frame need pass.)
+    let (mut m, _) = running(1000.0);
+    m.request_stop();
+    assert!(!m.active(), "idle, not stopping");
+    let mut out = Rec::default();
+    assert!(!m.step(0.0, true, &mut out));
+    assert!(out.0.is_empty());
 }
 
 #[test]

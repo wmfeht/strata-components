@@ -38,6 +38,11 @@ pub struct Scroll {
     pub strip_margin: Option<f32>,
     pub strip_ring_opacity: Option<f32>,
     pub anchor_size: Option<f32>,
+    pub trough_radius: Option<f32>,
+    pub thumb_radius: Option<f32>,
+    pub anchor_border_width: Option<f32>,
+    pub anchor_shadow_offset: Option<f32>,
+    pub anchor_shadow_blur: Option<f32>,
     pub anchor_fill: Option<Color>,
     pub anchor_border: Option<Color>,
 }
@@ -137,6 +142,33 @@ pub fn anchor_size(look: &Look) -> f32 {
     look.slots.scroll.anchor_size.unwrap_or(22.0)
 }
 
+/// The trough's corner radius: `scroll.trough.radius`, else 2 (Strata's `border-radius: 2px`).
+pub fn trough_radius(look: &Look) -> f32 {
+    look.slots.scroll.trough_radius.unwrap_or(2.0)
+}
+
+/// The app-wide thumb's corner radius: `scroll.thumb.radius`, else 2. The Icons and List thumb
+/// is fully rounded (Strata's `999px`) whatever this says.
+pub fn thumb_radius(look: &Look) -> f32 {
+    look.slots.scroll.thumb_radius.unwrap_or(2.0)
+}
+
+/// The autoscroll anchor's border width: `scroll.anchor.border_width`, else 1.
+pub fn anchor_border_width(look: &Look) -> f32 {
+    look.slots.scroll.anchor_border_width.unwrap_or(1.0)
+}
+
+/// How far down the autoscroll anchor's shadow falls: `scroll.anchor.shadow_offset`, else 1
+/// (Strata's `box-shadow: 0 1px 4px`).
+pub fn anchor_shadow_offset(look: &Look) -> f32 {
+    look.slots.scroll.anchor_shadow_offset.unwrap_or(1.0)
+}
+
+/// The autoscroll anchor's shadow blur: `scroll.anchor.shadow_blur`, else 4.
+pub fn anchor_shadow_blur(look: &Look) -> f32 {
+    look.slots.scroll.anchor_shadow_blur.unwrap_or(4.0)
+}
+
 /// The autoscroll anchor's fill: `scroll.anchor.fill`, else the surface at 92 %.
 pub fn anchor_fill(look: &Look) -> Color {
     look.slots
@@ -227,6 +259,23 @@ pub const TOKENS: &[Token] = &[
     ),
     Token::length("scroll.anchor.size", anchor_size, |l, v| {
         l.slots.scroll.anchor_size = Some(v)
+    }),
+    Token::length("scroll.trough.radius", trough_radius, |l, v| {
+        l.slots.scroll.trough_radius = Some(v)
+    }),
+    Token::length("scroll.thumb.radius", thumb_radius, |l, v| {
+        l.slots.scroll.thumb_radius = Some(v)
+    }),
+    Token::length("scroll.anchor.border_width", anchor_border_width, |l, v| {
+        l.slots.scroll.anchor_border_width = Some(v)
+    }),
+    Token::length(
+        "scroll.anchor.shadow_offset",
+        anchor_shadow_offset,
+        |l, v| l.slots.scroll.anchor_shadow_offset = Some(v),
+    ),
+    Token::length("scroll.anchor.shadow_blur", anchor_shadow_blur, |l, v| {
+        l.slots.scroll.anchor_shadow_blur = Some(v)
     }),
     Token::color("scroll.anchor.fill", anchor_fill, |l, v| {
         l.slots.scroll.anchor_fill = Some(v)

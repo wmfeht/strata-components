@@ -19,8 +19,8 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | S3 | merged | sway Wayland/X11 measured; Hyprland/GNOME/KDE/Firefox hand test pending (QEMU Tier B not run); 3 owner decisions | f5682e4 |
 | S4 | merged | owner: onig + dedicated highlighter thread, N=64, RUSTSEC ignore, WTFPL ok; 3 review rounds + 1 owner-allowed fix round; plan §4 C10/C10a doc edits are owner items | 183f7e2 |
 | S5 | merged | 2 review rounds; 16 Rune issue drafts (U1-U17, U4 withdrawn) await owner filing; crate name taken -> owner; release.yml verified locally only (GitHub run pending) | 85ca12b |
-| C10a | planning | | |
-| C14a | review 1 | image zoom/pan is new vs Strata (plan asks for it): deliberate change for owner; pixels set without view commits (probed) | |
+| C10a | planned (approval pending resume) | | |
+| C14a | review 1 done (fixes pending resume) | B1 Ctrl+wheel zoom direction inverted off macOS (attach on_magnify only on macOS); S1 +/- wrong way at extreme fits; S2 set_content sends no report; S3-S6 | image zoom/pan is new vs Strata (plan asks for it): deliberate change for owner; pixels set without view commits (probed) | |
 | C15 | merged | built on Rune primitives (deviation from WP doc); 6 bullets Strata policy, O6/F13/K6 partial gaps (Rune drafts); PNG goldens on NVIDIA | b38d879 |
 | C1a | merged | 2 review rounds; select_all 149 us / Shift range 148 us at 100k (release, local only); hosts call before_removal + sync | b8c3b8c |
 | C20a | ready | | |
@@ -56,9 +56,9 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | C18 | ready | | |
 | C19 | ready | | |
 | C1b | coding (state machine done; adapter waits on C1e merge) | 37 unit tests; PointerHandle shared settings (deviation); no rename timeout (Strata) | |
-| C1c | coding (machine done, 50 tests; adapter waits on C1e, Space-in-range on W1d) | default + 10xer maps; layout-aware chord workaround (U-C1c-1) | |
-| C1d | coding (machine first; adapter waits on C1e + C1b adapter) | ~10 Hz apply while auto-scrolling keeps perf meter silent (deviation) | |
-| C1e | review 2 | all controller seam requests in; scroll p95 0.59 ms vs Table 0.88; S14 sticky group lines deferred to contract WP C1f before C4 | |
+| C1c | coding (machine done, 51 tests incl. Space-in-range; adapter waits on C1e) | default + 10xer maps; layout-aware chord workaround (U-C1c-1) | |
+| C1d | coding (machine done, 17 tests; adapter waits on C1e + C1b adapter) | ~10 Hz apply while auto-scrolling keeps perf meter silent (deviation) | |
+| C1e | review 2 done (round 3 = last; fixes pending resume) | all controller seam requests in; scroll p95 0.59 ms vs Table 0.88; S14 sticky group lines deferred to contract WP C1f before C4 | |
 | C26 | waiting | | |
 | P1 | waiting | | |
 | P2 | waiting | | |

@@ -14,7 +14,8 @@
 //!
 //! Flags: `--title T`, `--own-data-control` (data control on a connection of its own),
 //! `--data-control ext|wlr` (which protocol first), `--no-shared` (don't bind on winit's
-//! display).
+//! display), `--as-if-libwayland-1-22` (behave as on libwayland < 1.23, which has no route to
+//! winit's display: a test switch).
 
 #[cfg(feature = "_transfer")]
 fn main() {
@@ -150,7 +151,7 @@ mod probe {
                     let sub = t.subscribe(move || notify.update_if(|_, _| events()));
                     let _ = ATTACHED.set(sub);
                     // Events heard while binding wait for a dispatch.
-                    t.dispatch();
+                    let _ = t.dispatch();
                     events();
                 }
             }
@@ -297,7 +298,7 @@ mod probe {
                 let offers: Vec<Offer> =
                     serde_json::from_value(field("offers")).unwrap_or_default();
                 // The click or key that asked for the copy must be in before its serial is read.
-                t.dispatch();
+                let _ = t.dispatch();
                 match t.set_selection(sel, via, spec(offers)) {
                     Ok(id) => log(
                         "owned",
@@ -389,6 +390,7 @@ mod probe {
                 Some("wlr") => Prefer::Wlr,
                 _ => Prefer::Ext,
             },
+            as_if_libwayland_below_1_23: flag("--as-if-libwayland-1-22"),
         };
         rune::tooling::set_app_id("strata-transfer-probe");
         let app =

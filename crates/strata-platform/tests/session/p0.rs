@@ -383,6 +383,47 @@ fn wayland_window_offers_three_types_through_the_data_device() {
     });
 }
 
+/// libwayland < 1.23 (Ubuntu 24.04), on any host: the probe's test switch makes the lookup
+/// of `wl_proxy_get_display` find nothing. winit's display is reported Unsupported, the data
+/// device is out of reach, and data control falls back to a connection of its own, both ways.
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn without_winits_display_a_wayland_window_falls_back_to_its_own_data_control() {
+    let s = Session::start();
+    let probe = Probe::start(&s, Display::Wayland, &["--as-if-libwayland-1-22"]);
+    let a = &probe.attached;
+    assert_eq!(
+        (a["shared"].as_bool(), a["own"].as_bool()),
+        (Some(false), Some(true)),
+        "{a}"
+    );
+    let why = a["unsupported"].as_str().unwrap_or_default();
+    assert!(why.contains("libwayland < 1.23"), "{a}");
+    assert!(a["data_control"].is_string(), "{a}");
+    let at = probe.send(json!({
+        "cmd": "own", "via": Via::DataDevice, "selection": Selection::Clipboard, "offers": three(),
+    }));
+    let (_, v) = probe.wait(at, "own", |v| v["ev"] == "own-error");
+    assert!(
+        v["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("data device"),
+        "{v}"
+    );
+    let peer = s.peer(Display::Wayland);
+    window_offers_three(
+        &probe,
+        &peer,
+        Via::DataControl,
+        Via::DataControl,
+        Selection::Clipboard,
+    );
+    let at = probe.app.line_count();
+    peer.set_selection(Selection::Clipboard, Via::DataControl, &three());
+    peer_offers_three(&probe, at, Via::DataControl, Selection::Clipboard);
+}
+
 // ---- Wayland: the peer offers ----
 
 #[test]

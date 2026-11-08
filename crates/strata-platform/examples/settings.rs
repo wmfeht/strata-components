@@ -1,18 +1,27 @@
 //! Prints the desktop's settings and every change to them, as JSON lines on stdout (the
-//! `settings` feature, P5).
+//! `settings` feature).
+//!
+//! `--no-window` runs a [`Watcher`] alone, prints what its sink hears, and exits when stdin
+//! closes:
 //!
 //! - `{"ev":"snapshot","settings":{…}}` once, first;
 //! - `{"ev":"changed","key":"text-scaling-factor","settings":{…}}` for each change;
-//! - `{"ev":"fallback","kind":"no-portal","detail":"…"}` the first time each fallback happens.
+//! - `{"ev":"fallback","kind":"no-portal","key":null,"detail":"…"}` the first time each
+//!   fallback happens.
 //!
-//! Those come from the watcher's own thread. By default the example also opens a window that
-//! shows the values, and logs `{"ev":"update","settings":{…}}` from inside the
-//! `AppHandle::update` that brought each new value onto Rune's loop, plus `ready` and `frame`.
-//! `--no-window` skips the window and Rune's loop, and exits when stdin closes.
-//! `--first-answer-ms N` sets how long the start waits for the portal (default 100).
+//! By default it opens a window that shows the values, fed by `settings::follow`. It logs
+//! `{"ev":"landed"}` each time an update `follow` posts runs on Rune's loop (just before it
+//! stores the value), `{"ev":"view","settings":{…}}` each time the view runs, and `ready` and
+//! `frame`.
+//!
+//! `--first-answer-ms N` and `--timeout-ms N` set the watcher's [`Options`] (defaults 100 and
+//! 10000); the window ignores them, since `follow` takes the defaults.
 //!
 //! `cargo run -p strata-platform --example settings --features settings` reads the desktop's
 //! portal. The session tests run it on a private bus only (`tests/session/p5.rs`).
+//!
+//! [`Watcher`]: strata_platform::settings::Watcher
+//! [`Options`]: strata_platform::settings::Options
 
 #[cfg(feature = "settings")]
 mod demo {
@@ -22,7 +31,9 @@ mod demo {
 
     use rune::{App, AppSpec, Cx, El, WindowHandle, col, text};
     use serde_json::{Value, json};
-    use strata_platform::settings::{DesktopSettings, Event, Fallback, Key, Options, Watcher};
+    use strata_platform::settings::{
+        self, DesktopSettings, Event, Fallback, Key, Options, Watcher,
+    };
 
     fn log(event: &str, fields: Value) {
         let mut line = json!({ "ev": event });
@@ -82,14 +93,22 @@ mod demo {
         }
     }
 
-    fn options(args: &[String]) -> Options {
-        let first = args
-            .iter()
-            .position(|a| a == "--first-answer-ms")
+    fn number(args: &[String], flag: &str) -> Option<u64> {
+        args.iter()
+            .position(|a| a == flag)
             .and_then(|i| args.get(i + 1))
-            .and_then(|ms| ms.parse().ok())
-            .unwrap_or(100);
-        Options::default().first_answer(Duration::from_millis(first))
+            .and_then(|n| n.parse().ok())
+    }
+
+    fn options(args: &[String]) -> Options {
+        let mut options = Options::default();
+        if let Some(ms) = number(args, "--first-answer-ms") {
+            options = options.first_answer(Duration::from_millis(ms));
+        }
+        if let Some(ms) = number(args, "--timeout-ms") {
+            options = options.timeout(Duration::from_millis(ms));
+        }
+        options
     }
 
     fn no_window(options: Options) {
@@ -118,8 +137,15 @@ mod demo {
         desktop: DesktopSettings,
     }
 
+    /// `follow`'s accessor: it runs inside each update `follow` posts, on Rune's loop.
+    fn desktop(s: &mut State) -> &mut DesktopSettings {
+        log("landed", json!({}));
+        &mut s.desktop
+    }
+
     fn view(s: &State, _: &mut Cx<State>) -> El {
         let d = &s.desktop;
+        log("view", json!({ "settings": settings_json(d) }));
         col()
             .w_full()
             .h_full()
@@ -148,7 +174,7 @@ mod demo {
             )))
     }
 
-    fn window(options: Options) {
+    fn window() {
         rune::tooling::set_app_id("strata-settings-example");
         let app = App::new(AppSpec::new(
             "settings",
@@ -156,27 +182,14 @@ mod demo {
             State::default,
             view,
         ));
-        let handle = app.handle();
-        let watcher = Watcher::start(options, move |event| {
-            print(&event);
-            let settings = match event {
-                Event::Snapshot(settings) | Event::Changed { settings, .. } => settings,
-                _ => return,
-            };
-            handle.update_if(move |s: &mut State, _| {
-                log("update", json!({ "settings": settings_json(&settings) }));
-                let changed = s.desktop != settings;
-                s.desktop = settings;
-                changed
-            });
-        });
-        let watcher = match watcher {
+        let watcher = match settings::follow(&app.handle(), desktop) {
             Ok(watcher) => watcher,
             Err(error) => {
                 log("exit-error", json!({ "error": error.to_string() }));
                 std::process::exit(1);
             }
         };
+        // Seeded with what the watcher has, so a snapshot that matches it re-runs nothing.
         let first = watcher.snapshot();
         static DRAWN: AtomicBool = AtomicBool::new(false);
         let result = app
@@ -197,11 +210,10 @@ mod demo {
 
     pub fn main() {
         let args = rune::tooling::extra_args();
-        let options = options(args);
         if args.iter().any(|a| a == "--no-window") {
-            no_window(options);
+            no_window(options(args));
         } else {
-            window(options);
+            window();
         }
     }
 }

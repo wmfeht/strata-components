@@ -1,12 +1,14 @@
 //! A fake `org.freedesktop.portal.Settings`, served from the test process on the session's
 //! private bus only: it connects to the address it is given (`Session::bus().address()`), never
 //! to a bus from the environment. It answers `ReadAll`, `Read` and `ReadOne` from the values
-//! it holds, emits `SettingChanged` when a test changes one, logs every call, and can give up
-//! its name and take it back, as a restarted portal does.
+//! it holds, emits `SettingChanged` when a test changes one, logs every call, and can delay
+//! or hold back its `ReadAll` answers, as a slow portal does. A restarted portal is a second `FakePortal`:
+//! another connection, under a new unique name.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::JoinHandle;
+use std::time::Duration;
 
 use tokio::runtime::Handle;
 use tokio::sync::oneshot;
@@ -28,10 +30,14 @@ pub struct Call {
 struct State {
     values: BTreeMap<(String, String), OwnedVariant>,
     calls: Vec<Call>,
+    /// How long `ReadAll` waits before it answers (with the values as they are then).
+    delay: Duration,
 }
 
 struct Settings {
     state: Arc<Mutex<State>>,
+    /// Open (true) unless a test holds `ReadAll` answers back.
+    gate: tokio::sync::watch::Receiver<bool>,
 }
 
 fn owned(value: &Variant<'_>) -> OwnedVariant {
@@ -70,6 +76,15 @@ impl Settings {
         #[zbus(header)] header: Header<'_>,
     ) -> HashMap<String, HashMap<String, OwnedVariant>> {
         self.record("ReadAll", &header);
+        let delay = self
+            .state
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .delay;
+        if !delay.is_zero() {
+            tokio::time::sleep(delay).await;
+        }
+        let _ = self.gate.clone().wait_for(|open| *open).await;
         let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         let mut reply: HashMap<String, HashMap<String, OwnedVariant>> = HashMap::new();
         for ((namespace, key), value) in &state.values {
@@ -116,6 +131,7 @@ pub struct FakePortal {
     /// Dropped on the runtime's watch, before the runtime stops.
     connection: Option<Connection>,
     state: Arc<Mutex<State>>,
+    gate: tokio::sync::watch::Sender<bool>,
     stop: Option<oneshot::Sender<()>>,
     thread: Option<JoinHandle<()>>,
 }
@@ -145,8 +161,10 @@ impl FakePortal {
                 let _ = runtime.block_on(stopped);
             })
             .expect("the fake portal's thread");
+        let (gate, open) = tokio::sync::watch::channel(true);
         let settings = Settings {
             state: Arc::clone(&state),
+            gate: open,
         };
         let connection = handle.block_on(async {
             zbus::connection::Builder::address(address)
@@ -159,6 +177,7 @@ impl FakePortal {
             runtime: handle,
             connection: Some(connection),
             state,
+            gate,
             stop: Some(stop),
             thread: Some(thread),
         };
@@ -169,17 +188,10 @@ impl FakePortal {
     }
 
     /// Takes the portal's name.
-    pub fn acquire(&self) {
+    fn acquire(&self) {
         self.runtime
             .block_on(self.connection().request_name(NAME))
             .expect("owning the portal's name");
-    }
-
-    /// Gives up the portal's name, as a portal that exits does.
-    pub fn release(&self) {
-        self.runtime
-            .block_on(self.connection().release_name(NAME))
-            .expect("releasing the portal's name");
     }
 
     /// Sets a value and announces it with `SettingChanged`.
@@ -188,8 +200,8 @@ impl FakePortal {
         self.emit(namespace, key, value);
     }
 
-    /// Sets a value without a signal, as a portal that changed while it was gone.
-    pub fn set_quietly(&self, namespace: &str, key: &str, value: Variant<'static>) {
+    /// Sets a value without a signal.
+    fn set_quietly(&self, namespace: &str, key: &str, value: Variant<'static>) {
         self.state
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -216,7 +228,26 @@ impl FakePortal {
             .expect("the fake portal's connection")
     }
 
-    /// Every call answered so far.
+    /// Makes each later `ReadAll` wait `delay` before it answers. Signals still go out
+    /// meanwhile.
+    pub fn set_delay(&self, delay: Duration) {
+        self.state
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .delay = delay;
+    }
+
+    /// Holds every `ReadAll` answer back until [`FakePortal::answer`].
+    pub fn hold(&self) {
+        self.gate.send_replace(false);
+    }
+
+    /// Lets held and later `ReadAll` calls answer.
+    pub fn answer(&self) {
+        self.gate.send_replace(true);
+    }
+
+    /// Every call received so far.
     pub fn calls(&self) -> Vec<Call> {
         self.state
             .lock()

@@ -329,6 +329,25 @@ fn cpu_ticks(pid: u32) -> u64 {
     fields[11].parse::<u64>().unwrap_or(0) + fields[12].parse::<u64>().unwrap_or(0)
 }
 
+/// The voluntary context switches of `pid`'s thread named `name` (as `/proc` shows it, at most
+/// 15 bytes): how often it went to sleep and was woken.
+fn thread_wakeups(pid: u32, name: &str) -> u64 {
+    let tasks = std::fs::read_dir(format!("/proc/{pid}/task")).expect("the example's threads");
+    for task in tasks.flatten() {
+        let comm = std::fs::read_to_string(task.path().join("comm")).unwrap_or_default();
+        if comm.trim_end() != name {
+            continue;
+        }
+        let status = std::fs::read_to_string(task.path().join("status")).unwrap_or_default();
+        return status
+            .lines()
+            .find_map(|l| l.strip_prefix("voluntary_ctxt_switches:"))
+            .and_then(|n| n.trim().parse().ok())
+            .expect("voluntary_ctxt_switches");
+    }
+    panic!("no thread named {name} in {pid}");
+}
+
 #[test]
 #[ignore = "needs a private session: mise run test-platform"]
 fn waits_without_polling() {
@@ -336,7 +355,10 @@ fn waits_without_polling() {
     let portal = FakePortal::start(s.bus().address(), &desktop(), true);
     let app = watch(&s);
     snapshot(&app);
-    let before = cpu_ticks(app.pid());
+    // Past the first read's own wakeups.
+    std::thread::sleep(Duration::from_millis(300));
+    let ticks = cpu_ticks(app.pid());
+    let wakeups = thread_wakeups(app.pid(), strata_platform::settings::THREAD_NAME);
 
     std::thread::sleep(timeout() / 5);
 
@@ -344,9 +366,82 @@ fn waits_without_polling() {
     assert_eq!(reads.len(), 1, "one ReadAll, then nothing: {reads:?}");
     assert_eq!(reads[0].method, "ReadAll");
     assert!(reads[0].sender.starts_with(':'), "{reads:?}");
-    let spent = cpu_ticks(app.pid()) - before;
+    let spent = cpu_ticks(app.pid()) - ticks;
     // A busy loop would spend about every tick of the wait (100 a second).
     assert!(spent < 10, "{spent} ticks idle");
+    // A timer or a poll would wake the watcher's thread; nothing on the bus does.
+    let woken = thread_wakeups(app.pid(), strata_platform::settings::THREAD_NAME) - wakeups;
+    assert_eq!(woken, 0, "the watcher woke {woken} times while idle");
+}
+
+/// The example without a window, started while `portal` delays its answers, once the read is
+/// in flight.
+fn watch_slow(s: &Session, portal: &FakePortal, args: &[&str]) -> Proc {
+    portal.set_delay(Duration::from_millis(1500));
+    let mut cmd = s.command(example("settings"), Display::None);
+    cmd.args(["--no-window", "--first-answer-ms", "0"])
+        .args(args);
+    let app = s.spawn("settings", cmd);
+    app.wait_json("the watcher started", |v| v["ev"] == "started");
+    let deadline = Instant::now() + timeout();
+    while portal.calls().is_empty() {
+        assert!(
+            Instant::now() < deadline,
+            "the watcher never read the portal"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    app
+}
+
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn a_burst_of_changes_during_a_slow_read_still_lands() {
+    let s = bus_only();
+    let portal = FakePortal::start(s.bus().address(), &desktop(), true);
+    let app = watch_slow(&s, &portal, &[]);
+    let started = Instant::now();
+
+    // More than zbus queues per match rule (64) while the reply is outstanding, then one real
+    // change the reply won't hold.
+    for i in 0..100 {
+        portal.emit(INTERFACE, "font-name", Variant::from(format!("Sans {i}")));
+    }
+    portal.emit(INTERFACE, "text-scaling-factor", Variant::F64(1.75));
+
+    assert_desktop(&snapshot(&app));
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "the reply waited for the read's timeout: {:?}",
+        started.elapsed()
+    );
+    // The change that arrived during the read applies after the reply, in order.
+    let (_, settings) = wait_changed(&app, 0, "text-scaling-factor");
+    assert_eq!(settings["text_scale"], 1.75, "{settings}");
+    assert!(events(&app, 0, "fallback").is_empty(), "{:?}", app.lines());
+}
+
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn a_portal_slower_than_the_timeout_still_lands() {
+    let s = bus_only();
+    let portal = FakePortal::start(s.bus().address(), &desktop(), true);
+    let app = watch_slow(&s, &portal, &["--timeout-ms", "300"]);
+
+    // The timeout gives the defaults and says why...
+    assert_defaults(&snapshot(&app));
+    let (_, fallback) = app.wait_json_from(0, "the timeout", |v| v["ev"] == "fallback");
+    assert_eq!(fallback["kind"], "no-portal", "{fallback}");
+    // ...and the reply, when it lands, arrives as changes.
+    let (_, settings) = wait_changed(&app, 0, "remember-recent-files");
+    assert_desktop(&settings);
+    assert_eq!(events(&app, 0, "changed").len(), ALL_KEYS.len());
+    assert_eq!(
+        portal.calls().len(),
+        1,
+        "waited for the one read: {:?}",
+        portal.calls()
+    );
 }
 
 #[test]
@@ -361,38 +456,81 @@ fn follows_a_portal_that_starts_late_and_restarts() {
 
     // A portal takes the name: it is read, and every key arrives as a change.
     let late = app.line_count();
-    let portal = FakePortal::start(s.bus().address(), &desktop(), true);
+    let first = FakePortal::start(s.bus().address(), &desktop(), true);
     // The last key in the module's order.
     let (at, settings) = wait_changed(&app, late, "remember-recent-files");
     assert_desktop(&settings);
     assert_eq!(events(&app, late, "changed").len(), ALL_KEYS.len());
 
-    // It leaves: the values stay.
-    portal.release();
-    let (at, _) = app.wait_json_from(at, "the portal-lost fallback", |v| {
+    // It exits: the values stay.
+    drop(first);
+    let (lost, _) = app.wait_json_from(at, "the portal-lost fallback", |v| {
         v["ev"] == "fallback" && v["kind"] == "portal-lost"
     });
 
-    // It comes back with one value changed while it was gone: that one change arrives.
-    portal.set_quietly(INTERFACE, "text-scaling-factor", Variant::F64(2.0));
-    portal.acquire();
-    let (end, settings) = wait_changed(&app, at, "text-scaling-factor");
+    // Another portal process, under a new unique name, with one value changed: that one
+    // change arrives.
+    let mut values = desktop();
+    values[0] = (INTERFACE, "text-scaling-factor", Variant::F64(2.0));
+    let second = FakePortal::start(s.bus().address(), &values, true);
+    let (end, settings) = wait_changed(&app, lost, "text-scaling-factor");
     assert_eq!(settings["text_scale"], 2.0, "{settings}");
     assert_eq!(settings["double_click_ms"], 1200, "{settings}");
-    portal.set(MOUSE, "double-click", Variant::I32(300));
+    second.set(MOUSE, "double-click", Variant::I32(300));
     let (_, last) = wait_changed(&app, end, "double-click");
     assert_eq!(last["double_click_ms"], 300);
     assert_eq!(events(&app, at, "changed").len(), 2, "{:?}", app.lines());
 }
 
-/// The example's window under sway, with the fake portal; returns once its first frame is
-/// drawn and its first update ran on Rune's loop.
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn a_restarted_portal_without_a_key_resets_it() {
+    let s = bus_only();
+    let first = FakePortal::start(s.bus().address(), &desktop(), true);
+    let app = watch(&s);
+    assert_desktop(&snapshot(&app));
+    let at = app.line_count();
+
+    drop(first);
+    let mut values = desktop();
+    values.retain(|(_, key, _)| *key != "drag-threshold");
+    let _second = FakePortal::start(s.bus().address(), &values, true);
+
+    let (_, settings) = wait_changed(&app, at, "drag-threshold");
+    assert_eq!(
+        settings["drag_threshold"], 8,
+        "back to the default: {settings}"
+    );
+    assert!(
+        !known(&settings).iter().any(|k| k == "drag-threshold"),
+        "{settings}"
+    );
+    assert_eq!(
+        settings["double_click_ms"], 1200,
+        "the rest stay: {settings}"
+    );
+    app.wait_json_from(at, "the unset report", |v| {
+        v["ev"] == "fallback" && v["kind"] == "unset" && v["key"] == "drag-threshold"
+    });
+    assert_eq!(events(&app, at, "changed").len(), 1, "{:?}", app.lines());
+}
+
+/// The example's window under sway, fed by `settings::follow`; returns once its first frame is
+/// drawn, its view ran with the portal's values, and the snapshot's update ran on Rune's loop.
 fn window(s: &Session) -> Proc {
     let app = s.spawn("settings", s.command(example("settings"), Display::Wayland));
     app.wait_json("ready", |v| v["ev"] == "ready");
     app.wait_json("the first frame", |v| v["ev"] == "frame");
-    let update = app.wait_json("the first update", |v| v["ev"] == "update");
-    assert_desktop(&update["settings"]);
+    // The first view has them when the portal answered within the first-answer wait;
+    // otherwise a later one does, once the snapshot's update lands.
+    let view = app.wait_json("a view with the portal's values", |v| {
+        v["ev"] == "view"
+            && v["settings"]["known"]
+                .as_array()
+                .is_some_and(|k| !k.is_empty())
+    });
+    assert_desktop(&view["settings"]);
+    app.wait_json("the snapshot's update", |v| v["ev"] == "landed");
     s.wait_window(app.pid());
     app
 }
@@ -407,10 +545,76 @@ fn changes_reach_runes_loop() {
 
     portal.set(INTERFACE, "text-scaling-factor", Variant::F64(2.0));
 
-    let (_, update) = app.wait_json_from(at, "the update on Rune's loop", |v| {
-        v["ev"] == "update" && v["settings"]["text_scale"] == 2.0
+    let (landed, _) = app.wait_json_from(at, "the update on Rune's loop", |v| v["ev"] == "landed");
+    let (_, view) = app.wait_json_from(landed, "the view with the new value", |v| {
+        v["ev"] == "view" && v["settings"]["text_scale"] == 2.0
     });
-    assert_eq!(update["settings"]["double_click_ms"], 1200);
+    assert_eq!(view["settings"]["double_click_ms"], 1200);
+}
+
+/// Waits until `app` has logged nothing new for `quiet`.
+fn settle(app: &Proc, quiet: Duration) {
+    let deadline = Instant::now() + timeout();
+    let mut count = app.line_count();
+    loop {
+        std::thread::sleep(quiet);
+        let now = app.line_count();
+        if now == count {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the example never settled: {:?}",
+            app.lines()
+        );
+        count = now;
+    }
+}
+
+/// The window, with the portal's answer held back until the window has drawn and gone quiet:
+/// `follow`'s snapshot then lands on a settled window. Returns the line after that update.
+fn window_with_late_answer(
+    s: &Session,
+    values: &[(&'static str, &'static str, Variant<'static>)],
+) -> (Proc, usize) {
+    let portal = FakePortal::start(s.bus().address(), values, true);
+    portal.hold();
+    let app = s.spawn("settings", s.command(example("settings"), Display::Wayland));
+    app.wait_json("the first frame", |v| v["ev"] == "frame");
+    s.wait_window(app.pid());
+    settle(&app, Duration::from_millis(500));
+    assert!(events(&app, 0, "landed").is_empty(), "{:?}", app.lines());
+    let at = app.line_count();
+
+    portal.answer();
+
+    let (landed, _) = app.wait_json_from(at, "the late snapshot's update", |v| v["ev"] == "landed");
+    // Long enough for a re-run the update asked for to show.
+    std::thread::sleep(Duration::from_millis(700));
+    (app, landed + 1)
+}
+
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn a_snapshot_with_new_values_runs_the_view() {
+    let s = Session::start();
+    let (app, after) = window_with_late_answer(&s, &desktop());
+
+    let views = events(&app, after, "view");
+    assert!(!views.is_empty(), "{:?}", app.lines());
+    assert_desktop(&views[0]["settings"]);
+}
+
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn a_snapshot_that_changes_nothing_runs_no_view() {
+    let s = Session::start();
+    // A portal with none of the keys: its snapshot is the defaults the window started with,
+    // so `follow`'s update returns false.
+    let (app, after) = window_with_late_answer(&s, &[]);
+
+    let views = events(&app, after, "view");
+    assert!(views.is_empty(), "the view re-ran: {views:?}");
 }
 
 #[test]
@@ -441,7 +645,14 @@ fn changes_reach_a_covered_window() {
 
     portal.set(INTERFACE, "text-scaling-factor", Variant::F64(1.75));
 
-    app.wait_json_from(at, "the update while covered", |v| {
-        v["ev"] == "update" && v["settings"]["text_scale"] == 1.75
+    // The update runs on Rune's loop while the window is covered.
+    let (landed, _) = app.wait_json_from(at, "the update while covered", |v| v["ev"] == "landed");
+    std::thread::sleep(Duration::from_millis(500));
+    let covered_views = events(&app, landed, "view").len();
+    // Uncovered, the view shows the value.
+    s.sway_command(&format!("[con_id={}] fullscreen disable", covering.id));
+    app.wait_json_from(landed, "the view with the new value", |v| {
+        v["ev"] == "view" && v["settings"]["text_scale"] == 1.75
     });
+    eprintln!("views while covered after the update: {covered_views}");
 }

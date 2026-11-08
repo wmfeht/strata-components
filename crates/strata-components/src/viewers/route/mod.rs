@@ -33,12 +33,14 @@
 //! # No commit per frame
 //!
 //! The markers ride `Live` offsets that [`RouteState::tick`] and the hover set, so playback and
-//! hover draw without re-running the view; they commit only when the text shown changes (the
-//! distance, to a tenth; the height, to a metre; the play button). Strata resets both images'
-//! description on every frame (its known gap); here it changes with the distance text. On a
-//! long route the distance's tenth changes about every frame anyway, so playback commits once a
-//! frame there. A `LiveText` label would avoid that, but one anywhere in the window turns off
-//! Rune's virtual-window fast path for the listing beside the drawer (Rune draft U-C1f-6).
+//! hover draw without re-running the view. They commit only when the text shown changes (the
+//! distance, to a tenth; the height, to a metre; the play button), and during playback at most
+//! every [`state::TEXT_INTERVAL`] (about 10 Hz): on a long route the tenths change faster than
+//! frames. Whatever stops playback commits the exact text at once. Strata resets both images'
+//! description on every frame (its known gap); here it changes with the committed text. A
+//! `LiveText` label would follow every frame with no commit, but one anywhere in the window
+//! turns off Rune's virtual-window fast path for the listing beside the drawer (Rune draft
+//! U-C1f-6). A hover follows the pointer, not a clock, and commits each change of text.
 //!
 //! # Two accessors
 //!
@@ -63,7 +65,8 @@ use crate::viewers::viewport::{Interaction, Viewport, ViewportState};
 
 pub use plot::PROFILE_HEIGHT;
 pub use state::{
-    PLAYBACK_SECONDS, Plot, RouteCommand, RouteData, RouteLabels, RouteState, Seek, Units,
+    PLAYBACK_SECONDS, Plot, RouteCommand, RouteData, RouteLabels, RouteState, Seek, TEXT_INTERVAL,
+    Units,
 };
 pub use trace::RouteSample;
 
@@ -127,6 +130,7 @@ impl<'a, S: 'static> RouteView<'a, S> {
         let labels = st.labels();
         let data = st.data();
         let distance = st.distance_text();
+        st.note_built();
 
         let mut picture = Viewport::new(&st.viewport, viewport)
             .key(format!("{key}-picture"))

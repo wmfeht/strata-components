@@ -360,6 +360,17 @@ fn route_point(g: &mut Gallery, dark: bool) {
     });
 }
 
+/// The ridge stretched to 1,000 km, so the distance's tenths change faster than frames: what
+/// playback's 10 Hz text commits are for (`viewers::route`).
+fn route_long(g: &mut Gallery, dark: bool) {
+    let d = open(g, dark);
+    let mut data = ridge();
+    data.name = "traverse.gpx".into();
+    data.distance_m = 1_000_000.0;
+    data.samples = loop_samples(240, 1_000_000.0, Some((10.0, 30.0)));
+    d.open_route(data);
+}
+
 /// An untimed KML along an estuary, from 5 m below the sea to 20 m above.
 fn route_low(g: &mut Gallery, dark: bool) {
     let d = open(g, dark);
@@ -443,6 +454,8 @@ pub const REVIEW: &[Scene] = &[
     ("c14b-gcode-load-dark", |g| embedded(g, true, 3, Some(2.5))),
     ("c14b-route-start-light", |g| route_scene(g, false, true)),
     ("c14b-route-start-dark", |g| route_scene(g, true, true)),
+    ("c14b-route-long-light", |g| route_long(g, false)),
+    ("c14b-route-long-dark", |g| route_long(g, true)),
     ("c14b-route-low-light", |g| route_low(g, false)),
     ("c14b-route-low-dark", |g| route_low(g, true)),
     ("c14b-archive-passive-light", |g| archive(g, false, false)),

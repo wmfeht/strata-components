@@ -196,3 +196,128 @@ fn a_route_of_zero_length_takes_no_play() {
     st.toggle();
     assert!(!st.playing());
 }
+
+// The element, in a runtime.
+
+mod element {
+    use std::cell::Cell;
+
+    use rune::{Cx, El, Env, Runtime, Tx};
+    use strata_kit::look::Look;
+
+    use super::super::{RouteCommand, RouteData, RouteLabels, RouteState, RouteView, Seek};
+    use super::sample;
+
+    const DT: f64 = 1.0 / 60.0;
+
+    thread_local! {
+        static VIEWS: Cell<u32> = const { Cell::new(0) };
+    }
+
+    struct App {
+        route: RouteState,
+        look: Look,
+    }
+
+    fn view(s: &App, cx: &mut Cx<App>) -> El {
+        VIEWS.with(|v| v.set(v.get() + 1));
+        RouteView::new(
+            &s.route,
+            |s: &mut App| &mut s.route,
+            |s: &mut App| &mut s.route.viewport,
+        )
+        .build(&s.look, cx)
+    }
+
+    fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
+        s.route.tick(t, tx)
+    }
+
+    /// A straight route `total` metres long, with heights.
+    fn runtime(total: f64) -> Runtime<App> {
+        let samples = (0..=100)
+            .map(|i| {
+                let t = i as f32 / 100.0;
+                sample(
+                    40.0 + 720.0 * t,
+                    300.0,
+                    total * f64::from(t),
+                    Some(60.0 - 50.0 * t),
+                    i == 0,
+                )
+            })
+            .collect();
+        let data = RouteData {
+            name: "traverse.gpx".into(),
+            format: "GPX".into(),
+            distance_m: total,
+            elevation: Some([10.0, 30.0]),
+            samples,
+            image_px: [800.0, 600.0],
+            profile_px: [800.0, 70.0],
+            ..RouteData::default()
+        };
+        let app = App {
+            route: RouteState::new(data, RouteLabels::default()),
+            look: Look::fallback(false),
+        };
+        let mut rt = Runtime::new(app, view, (420.0, 640.0), Env::new(false, 1.0));
+        rt.poll = Some(poll);
+        frames(&mut rt, 30);
+        rt
+    }
+
+    fn frames(rt: &mut Runtime<App>, n: usize) {
+        for _ in 0..n {
+            rt.frame(DT);
+        }
+    }
+
+    fn views() -> u32 {
+        VIEWS.with(Cell::get)
+    }
+
+    /// The text the element keyed `key` shows.
+    fn shown(rt: &Runtime<App>, key: &str) -> String {
+        rt.elements()
+            .into_iter()
+            .find(|e| e.key.as_deref() == Some(key))
+            .and_then(|e| e.text)
+            .unwrap_or_else(|| panic!("no text keyed {key}"))
+    }
+
+    /// A 1,000 km route's tenths change faster than frames: playback commits the text about ten
+    /// times a second while the markers move every frame, and a pause shows the exact place.
+    #[test]
+    fn long_playback_commits_its_text_at_most_ten_times_a_second() {
+        let mut rt = runtime(1_000_000.0);
+        rt.update(|s, _| s.route.toggle());
+        frames(&mut rt, 2);
+        let before = views();
+        frames(&mut rt, 180);
+        let built = views() - before;
+        assert!(built <= 33, "{built} view builds in 3 s of playback");
+        assert!(built >= 20, "the text still follows: {built} builds in 3 s");
+        rt.update(|s, _| {
+            s.route.command(RouteCommand::PlayPause);
+        });
+        frames(&mut rt, 2);
+        assert!(!rt.state.route.playing());
+        assert_eq!(shown(&rt, "route-elapsed"), rt.state.route.distance_text());
+        rt.update(|s, _| {
+            s.route.command(RouteCommand::Seek(Seek::By(1.0)));
+        });
+        frames(&mut rt, 2);
+        assert_eq!(shown(&rt, "route-elapsed"), rt.state.route.distance_text());
+    }
+
+    /// The end of the route shows exactly, whenever the last text commit was.
+    #[test]
+    fn playback_that_reaches_the_end_shows_the_total() {
+        let mut rt = runtime(1_000_000.0);
+        rt.update(|s, _| s.route.toggle());
+        frames(&mut rt, 16 * 60);
+        assert!(!rt.state.route.playing());
+        assert_eq!(shown(&rt, "route-elapsed"), "1000.0 km");
+    }
+}

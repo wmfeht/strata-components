@@ -3,8 +3,13 @@
 //! Playback runs on the host's clock: Rune's `Tx` has no clock (Rune draft U-C1e-6), so the
 //! host calls [`RouteState::tick`] from its poll on every frame, as it does
 //! `Collection::tick`. A tick moves the markers through `Live` values, which draw with no view
-//! commit; it reports a change, and so a commit, only when the text the view shows changes (the
-//! distance to a tenth, the height to a metre, the play button).
+//! commit. It reports a change, and so a commit, only when the text the view shows changes (the
+//! distance to a tenth, the height to a metre), and then at most every [`TEXT_INTERVAL`]: on a
+//! long route the tenths change faster than frames, and a commit a frame would rebuild the whole
+//! window for a label (C1d's auto-scroll applies at about 10 Hz the same way). Whatever stops
+//! playback (its end, a pause, a seek, a hover) commits the exact text at once.
+
+use std::cell::RefCell;
 
 use rune::{Live, Tx};
 
@@ -15,6 +20,9 @@ use crate::viewers::viewport::{Mode, ViewportState};
 /// How long playback takes from start to end, whatever the route's length (Strata's
 /// `PLAYBACK_SECONDS`): the marker moves at a steady ground-distance pace.
 pub const PLAYBACK_SECONDS: f64 = 15.0;
+
+/// The shortest time between two text commits during playback, in seconds: about 10 Hz.
+pub const TEXT_INTERVAL: f64 = 0.1;
 
 /// A route as Strata's helper returns it (Strata's `RoutePreview`, less its PNG images: the route
 /// picture arrives as the host's `Pixels`, and the profile is drawn here from the samples).
@@ -150,6 +158,10 @@ pub struct RouteState {
     route_marker: Live<[f32; 2]>,
     profile_marker: Live<[f32; 2]>,
     profile_cursor: Live<[f32; 2]>,
+    /// What the view last built shows ([`RouteState::note_built`]).
+    built: RefCell<Option<Shown>>,
+    /// When playback last asked to commit its text, on the host's clock.
+    text_at: f64,
 }
 
 impl std::fmt::Debug for RouteState {
@@ -188,6 +200,8 @@ impl RouteState {
             route_marker: Live::new([0.0, 0.0]),
             profile_marker: Live::new([0.0, 0.0]),
             profile_cursor: Live::new([0.0, 0.0]),
+            built: RefCell::new(None),
+            text_at: f64::NEG_INFINITY,
         }
     }
 
@@ -261,6 +275,16 @@ impl RouteState {
         }
     }
 
+    /// The view built what the state shows now: [`RouteView`](super::RouteView) calls it.
+    pub(super) fn note_built(&self) {
+        *self.built.borrow_mut() = Some(self.shown());
+    }
+
+    /// What the view shows is behind the state.
+    fn stale(&self) -> bool {
+        self.built.borrow().as_ref() != Some(&self.shown())
+    }
+
     /// Play or pause. Play at the route's end starts again from the start.
     pub fn toggle(&mut self) {
         if self.playing {
@@ -310,34 +334,38 @@ impl RouteState {
         true
     }
 
-    /// The command, from a handler: commits only if what the view shows changed.
+    /// The command, from a handler: commits only if what the view shows is behind.
     pub fn command_tx(&mut self, command: RouteCommand, tx: &mut Tx) -> bool {
-        let before = self.shown();
         let taken = self.command(command);
-        if taken && self.shown() == before {
+        if taken && !self.stale() {
             tx.live_only();
         }
         taken
     }
 
-    /// One frame of playback at `now` seconds on the host's clock. True when what the view shows
-    /// changed (the host's poll returns it); the markers move either way. While playing it asks
-    /// for the next frame.
+    /// One frame of playback at `now` seconds on the host's clock. True when the view should
+    /// commit (the host's poll returns it): the text it shows is behind, and [`TEXT_INTERVAL`]
+    /// has passed since playback last asked, or playback just reached the end. The markers move
+    /// either way. While playing it asks for the next frame.
     pub fn tick(&mut self, now: f64, tx: &mut Tx) -> bool {
         if !self.playing {
             return false;
         }
         tx.wake_after(std::time::Duration::from_millis(16));
-        let before = self.shown();
         if let Some(last) = self.last_tick.replace(now) {
             let total = self.data.distance_m;
             let to = self.distance() + (now - last).max(0.0) / PLAYBACK_SECONDS * total;
             self.move_to(to.min(total));
             if to >= total {
                 self.pause();
+                return self.stale();
             }
         }
-        self.shown() != before
+        if self.stale() && now - self.text_at >= TEXT_INTERVAL {
+            self.text_at = now;
+            return true;
+        }
+        false
     }
 
     fn move_to(&mut self, distance: f64) {
@@ -346,12 +374,12 @@ impl RouteState {
     }
 
     /// The pointer moved over a picture, at `point` in that picture's own points: playback
-    /// pauses and both markers go to the point it picks. True when what the view shows changed.
+    /// pauses and both markers go to the point it picks. True when what the view shows is
+    /// behind, so the handler commits.
     pub fn hover(&mut self, plot: Plot, point: [f32; 2]) -> bool {
         if self.last_pointer.replace((plot, point)) == Some((plot, point)) {
             return false;
         }
-        let before = self.shown();
         self.pause();
         let picked = match plot {
             Plot::Route => self.viewport.content_at(point).and_then(|[x, y]| {
@@ -383,7 +411,7 @@ impl RouteState {
             self.position = Some(p);
         }
         self.place_markers();
-        self.shown() != before
+        self.stale()
     }
 
     /// The pointer left the pictures: the next move over one counts again.

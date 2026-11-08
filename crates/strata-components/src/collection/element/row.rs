@@ -481,15 +481,24 @@ pub(super) type DropFn<S> = Rc<dyn Fn(&mut S, Option<EntryId>, crate::contract::
 /// row's drop highlight, and moves near the viewport's edges scroll it.
 ///
 /// The stuck group header takes no input, so a drag over it is over the row it covers: there
-/// the drop goes to the folder shown, as on a header line.
+/// the drop goes to the folder shown, as on a header line, judged by the drop's point (or the
+/// last move's, when the platform gives the drop none). The row's drop highlight follows the
+/// moves, and is hidden under the stuck header anyway.
 fn row_zone<S: 'static>(cfg: &Rc<Config<S>>, on_drop: DropFn<S>, id: EntryId) -> DropZone<S> {
     let get_mut = cfg.get_mut.clone();
     let hover_mut = cfg.get_mut.clone();
     let edge = cfg.clone();
-    DropZone::new(move |s: &mut S, dropped, tx| {
+    let drop_cfg = cfg.clone();
+    DropZone::new(move |s: &mut S, dropped: crate::contract::Dropped, tx| {
+        // Where it landed when the platform says, else where the last move was (a drop with
+        // no position and no move over the stuck header goes to the row it covers).
+        let under_stuck = dropped
+            .point
+            .map(|p| super::route::under_stuck_header(&drop_cfg, s, p));
         let st = (get_mut)(s).1;
-        let target = match st.drop.take() {
-            Some(DropOver::Background) => None,
+        let last = st.drop.take();
+        let target = match (under_stuck, last) {
+            (Some(true), _) | (None, Some(DropOver::Background)) => None,
             _ => Some(id),
         };
         on_drop(s, target, dropped, tx);

@@ -53,8 +53,6 @@ struct Host {
     /// Takes drops, recording where each went.
     drops: bool,
     dropped: Vec<Option<EntryId>>,
-    /// The groups the collection draws in (none by default).
-    groups: Groups,
     /// What `on_press` and a recording controller heard, in order.
     order: Rc<RefCell<Vec<String>>>,
 }
@@ -81,7 +79,6 @@ impl Host {
             roles: None,
             drops: false,
             dropped: Vec::new(),
-            groups: Groups::default(),
             order: Rc::default(),
         }
     }
@@ -161,7 +158,6 @@ fn collection(s: &Host) -> Collection<Host> {
     }))
     .on_cursor(|s: &mut Host, id, _| s.cursors.push(id))
     .on_selection(|s: &mut Host, _| s.selections += 1)
-    .groups(|s: &Host| &s.groups)
     .on_press(|s: &mut Host, input, _| {
         s.order
             .borrow_mut()
@@ -2128,7 +2124,7 @@ fn each_controller_reads_its_own_settings_from_the_builder() {
 /// `n` entries in groups of `size`, keyed by their number and labelled "Group {g}".
 fn grouped(n: usize, size: usize) -> Host {
     let mut host = Host::new(n);
-    host.groups = groups_of(n, size, "Group");
+    host.coll.set_groups(groups_of(n, size, "Group"));
     host
 }
 
@@ -2355,9 +2351,9 @@ fn a_regroup_rekeys_the_lines() {
     let mut rt = runtime(grouped(100, 10));
     assert!(element(&rt, &header_key(1)).is_some());
     rt.update(|s, _| {
-        s.groups = Groups::new(
-            (0..10).map(|g| Group::new(g, format!("Big {g}"), if g % 2 == 0 { 5 } else { 15 })),
-        );
+        s.coll.set_groups(Groups::new((0..10).map(|g| {
+            Group::new(g, format!("Big {g}"), if g % 2 == 0 { 5 } else { 15 })
+        })));
     });
     settle(&mut rt);
     let head = a11y_node(&rt, &header_key(0)).unwrap();
@@ -2374,7 +2370,7 @@ fn a_regroup_rekeys_the_lines() {
 #[test]
 fn groups_that_dont_cover_the_listing_draw_it_ungrouped() {
     let mut host = Host::new(100);
-    host.groups = groups_of(50, 10, "Group");
+    host.coll.set_groups(groups_of(50, 10, "Group"));
     let rt = runtime(host);
     assert!(element(&rt, &header_key(0)).is_none());
     assert!(element(&rt, STUCK).is_none());
@@ -2466,6 +2462,81 @@ fn every_press_reaches_on_press_before_the_controllers() {
 
 // C1f review round 1.
 
+/// B1: entering a folder with new groups, from another layout's position, reveals the cursor
+/// among the new folder's header lines: clear of the stuck header.
+#[test]
+fn a_regrouped_enter_reveals_the_cursor_clear_of_the_stuck_header() {
+    let position = {
+        let mut rt = runtime(grouped(990, 10));
+        rt.update(|s, _| {
+            s.coll.selection.select_only(&s.src, 300);
+        });
+        rt.state.coll.position(&rt.state.src)
+    };
+    let mut rt = runtime(grouped(1_000, 10));
+    settle(&mut rt);
+    let h = row_h(&rt);
+    scroll_to(&mut rt, 900.0 * h);
+    rt.update(move |s, tx| {
+        s.coll.set_layout_key(5);
+        s.src = FastSource::new(990);
+        s.version += 1;
+        s.coll.set_groups(groups_of(990, 10, "New"));
+        s.coll
+            .enter(SCOPE, &s.src, Some(&position), Listing::Complete, tx);
+    });
+    settle(&mut rt);
+    let vp = rt.state.coll.viewport();
+    let shown = element(&rt, "row-300")
+        .expect("the cursor's row is mounted")
+        .visible;
+    assert!(
+        shown[1] >= vp.y + h - 0.5 && shown[3] > h - 0.5,
+        "whole, below the stuck header: {shown:?}"
+    );
+}
+
+/// B1: a restore that waits for a loading listing drawn ungrouped decides whether the cursor
+/// shows by the complete listing's header lines, which push it below the view here.
+#[test]
+fn a_restore_completing_into_groups_places_the_cursor_among_their_headers() {
+    let position = {
+        let mut host = Host::new(30);
+        host.coll.set_layout_key(7);
+        let mut rt = runtime(host);
+        rt.update(|s, _| {
+            s.coll.selection.select_only(&s.src, 12);
+        });
+        rt.state.coll.position(&rt.state.src)
+    };
+    let mut rt = runtime(Host::new(0));
+    rt.update(move |s, tx| {
+        s.src = FastSource::new(13);
+        s.coll
+            .enter(SCOPE, &s.src, Some(&position), Listing::Loading, tx);
+    });
+    settle(&mut rt);
+    assert!(rt.state.coll.restore_pending());
+    // Ungrouped, entry 12 would sit on line 12, inside the 400 pt view; in groups of 2 it is
+    // on line 19, below it.
+    rt.update(|s, tx| {
+        s.src = FastSource::new(30);
+        s.coll.set_groups(groups_of(30, 2, "Pair"));
+        s.coll
+            .sync(SCOPE, &s.src, SyncRule::complete(CursorGone::Neighbor), tx);
+    });
+    settle(&mut rt);
+    assert_eq!(rt.state.coll.selection.cursor(), Some(id(12)));
+    let vp = rt.state.coll.viewport();
+    let shown = element(&rt, "row-12")
+        .expect("the cursor's row is mounted")
+        .visible;
+    assert!(
+        shown[3] > row_h(&rt) - 0.5 && shown[1] + shown[3] <= vp.y + vp.h + 0.5,
+        "whole, in the view: {shown:?}"
+    );
+}
+
 /// S1: a grid collapsed to no width and back at another width reflows, and reveals its cursor.
 #[test]
 fn a_grid_collapsed_and_back_at_another_width_reveals_its_cursor() {
@@ -2493,4 +2564,19 @@ fn a_grid_collapsed_and_back_at_another_width_reveals_its_cursor() {
         .expect("the cursor's cell is mounted")
         .visible;
     assert!(shown[3] > 20.0, "and shows whole: {shown:?}");
+}
+
+/// In the frame after a far jump into another group, before the build that relabels the stuck
+/// header, it is hidden: a press on the top line drawn there is on that line's entry.
+#[test]
+fn a_press_while_the_stuck_header_hides_is_on_the_row_drawn_there() {
+    let mut rt = runtime(grouped(1_000, 10));
+    let h = row_h(&rt);
+    // Entry 503 (line 554) at the top of the view, in group 50.
+    rt.update(move |_, tx| tx.scroll_to_instant(keys::viewport_path(SCOPE), 0.0, 554.0 * h));
+    rt.frame(1.0 / 60.0);
+    assert!(stuck(&rt).1[3] < 0.5, "hidden until the relabelling build");
+    let vp = rt.state.coll.viewport();
+    click_at(&mut rt, vp.x + 40.0, vp.y + h / 2.0);
+    assert_eq!(rt.state.coll.selection.cursor(), Some(id(503)));
 }

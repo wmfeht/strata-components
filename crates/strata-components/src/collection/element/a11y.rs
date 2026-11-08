@@ -7,10 +7,13 @@
 //! lines would otherwise count. A row's selected state comes from `focus_selected`.
 //!
 //! A group's header line is a heading named by its label, a sibling of the rows (Rune can't
-//! make rows of a virtual list members of a header: Rune draft U-C1f-3). It carries Rune's
+//! make rows of a virtual list members of a header: Rune draft [U-C1f-3]). It carries Rune's
 //! virtual-list index as its position, which Rune gives every virtual row (Rune draft
-//! U-C1f-2). The stuck copy over the viewport is hidden from assistive technology: the header
-//! line itself is in the tree while it is mounted.
+//! [U-C1f-2]). The stuck copy over the viewport is hidden from assistive technology: the
+//! header line itself is in the tree while it is mounted.
+//!
+//! [U-C1f-2]: crate::collection::element#rune-drafts-not-filed
+//! [U-C1f-3]: crate::collection::element#rune-drafts-not-filed
 
 use rune::{El, LiveRegion, el, text};
 
@@ -19,7 +22,10 @@ use super::keys::STATUS;
 /// The roles a collection and its rows take.
 ///
 /// Used by: C1e (the list and columns), C3 ([`Roles::GRID_CELLS`]), C4 ([`Roles::GRID_ROWS`]).
+///
+/// Fields may be added: start from a constant or [`Roles::new`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub struct Roles {
     /// The container's role.
     pub container: &'static str,
@@ -27,11 +33,26 @@ pub struct Roles {
     pub line: Option<&'static str>,
     /// Each entry's role.
     pub item: &'static str,
-    /// A group's header line's role (`Collection::groups`).
+    /// A group's header line's role (`CollectionState::set_groups`).
     pub header: &'static str,
 }
 
 impl Roles {
+    /// A container of `item`s, `line` grouping a line of several, `header` heading a group.
+    pub const fn new(
+        container: &'static str,
+        line: Option<&'static str>,
+        item: &'static str,
+        header: &'static str,
+    ) -> Self {
+        Self {
+            container,
+            line,
+            item,
+            header,
+        }
+    }
+
     /// A listbox of options: the list and each Columns column.
     pub const LISTBOX: Roles = Roles {
         container: "listbox",

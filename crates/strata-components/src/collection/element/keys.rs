@@ -25,7 +25,8 @@ pub const LABEL: &str = "label";
 pub const STATUS: &str = "status";
 
 /// The stuck group header's key, under the collection's key: the header of the group at the
-/// top of the viewport, drawn over it (`Collection::groups`). Its label is keyed [`LABEL`].
+/// top of the viewport, drawn over it (`CollectionState::set_groups`). Its label is keyed
+/// [`LABEL`].
 pub const STUCK: &str = "stuck";
 
 /// The key of the row (or grid cell) that shows entry `id`.

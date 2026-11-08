@@ -779,10 +779,10 @@ const GROUPS: [(&str, &str, &str, usize); 6] = [
     ("Other", "file", "data-", 216),
 ];
 
-/// The grouped folder (`c1-groups-*`): its listing, its groups and its own collection state.
+/// The grouped folder (`c1-groups-*`): its listing and its own collection state, which holds
+/// its groups.
 pub struct Grouped {
     pub listing: ListSource,
-    pub groups: Groups,
     pub coll: CollectionState,
     /// Where to scroll once the viewport is laid out, in content points.
     pub scroll_to: Option<f32>,
@@ -810,9 +810,9 @@ impl Grouped {
         }
         let mut coll = CollectionState::new();
         install(&mut coll.controllers);
+        coll.set_groups(Groups::new(groups));
         Self {
             listing: ListSource::new(entries),
-            groups: Groups::new(groups),
             coll,
             scroll_to: None,
             clock: 0.0,
@@ -860,7 +860,6 @@ fn grouped_collection() -> Collection<Gallery> {
     )
     .name("Grouped")
     .clock(|g: &Gallery| d(g).clock)
-    .groups(|g: &Gallery| &d(g).groups)
 }
 
 fn grouped_view(g: &Gallery, _cx: &mut Cx<Gallery>) -> El {

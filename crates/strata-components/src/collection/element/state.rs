@@ -1,6 +1,6 @@
 //! [`CollectionState`]: what the host keeps for one collection, behind the element's accessor.
 
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::ops::Range;
 
 use rune::{Live, Tx};
@@ -61,13 +61,14 @@ pub struct CollectionState {
     pub(super) announced: (u64, usize, usize),
     /// A reveal asked for before the viewport had a width, done at its first layout.
     pub(super) reveal_after_layout: Cell<Option<EntryId>>,
-    /// The groups the last build drew (`Collection::groups`), so reveals and restores made
-    /// outside the element's handlers place entries clear of the stuck header.
-    pub(super) groups: RefCell<Option<Groups>>,
-    /// The stuck header's offset, `[0, dy]`: up by as much as the next header pushes it.
-    pub(super) stuck_offset: Live<[f32; 2]>,
+    /// The groups the host draws the entries in ([`CollectionState::set_groups`]).
+    pub(super) groups: Groups,
+    /// The group whose header the last build stuck at the top, if any.
+    pub(super) stuck_shown: Cell<Option<usize>>,
     /// The viewport has had a width: a later width that changes the count is a reflow.
     pub(super) laid_out: bool,
+    /// The stuck header's offset, `[0, dy]`: up by as much as the next header pushes it.
+    pub(super) stuck_offset: Live<[f32; 2]>,
     /// The first line Rune last reported visible: the one whose group's header sticks. Rune
     /// reports it from the layout it is drawing, which the recorded scroll offset can trail.
     pub(super) top_line: Cell<Option<usize>>,
@@ -94,9 +95,10 @@ impl Default for CollectionState {
             gesture: None,
             announced: (0, 0, 0),
             reveal_after_layout: Cell::new(None),
-            groups: RefCell::new(None),
-            stuck_offset: Live::new([0.0, 0.0]),
+            groups: Groups::default(),
+            stuck_shown: Cell::new(None),
             laid_out: false,
+            stuck_offset: Live::new([0.0, 0.0]),
             top_line: Cell::new(None),
         }
     }
@@ -146,7 +148,9 @@ impl CollectionState {
     ///
     /// Rune reports the rows a commit laid out on the frame after it, so for one frame after
     /// a reflow (a grid's width) or a regroup this is the range before it (Rune draft
-    /// U-C1f-5). It is a priority hint, and catches up on its own.
+    /// [U-C1f-5]). It is a priority hint, and catches up on its own.
+    ///
+    /// [U-C1f-5]: crate::collection::element#rune-drafts-not-filed
     pub fn visible_range(&self) -> Range<usize> {
         self.visible.clone()
     }
@@ -221,6 +225,23 @@ impl CollectionState {
     /// system shim). Rune's binder sets it through the rows' drop zones.
     pub fn set_drop_over(&mut self, drop: Option<DropOver>) {
         self.drop = drop;
+    }
+
+    /// Sets the groups the entries draw in, each under a header line, the top group's header
+    /// stuck at the top of the viewport (C4's file-type groups; see [`Groups`]). Empty groups
+    /// (the default) draw the entries ungrouped.
+    ///
+    /// The groups belong to the listing: set them whenever it changes, before
+    /// [`CollectionState::enter`] or [`CollectionState::sync`] with it, so the restore and the
+    /// reveal those make place the cursor among the new header lines. Groups that don't cover
+    /// the listing (their lengths don't add up to its length) draw it ungrouped.
+    pub fn set_groups(&mut self, groups: Groups) {
+        self.groups = groups;
+    }
+
+    /// The groups the entries draw in: see [`CollectionState::set_groups`].
+    pub fn groups(&self) -> &Groups {
+        &self.groups
     }
 
     /// Shows the cursor or not: in Columns, only the column holding the keyboard cursor
@@ -302,7 +323,7 @@ impl CollectionState {
 
     /// How the last build laid out `len` entries.
     pub(super) fn line_map(&self, len: usize) -> LineMap {
-        LineMap::new(self.per_line.get(), self.groups.borrow().as_ref(), len)
+        LineMap::new(self.per_line.get(), Some(&self.groups), len)
     }
 
     /// Whether the line holding entry `index` shows whole in the viewport, as last laid out,

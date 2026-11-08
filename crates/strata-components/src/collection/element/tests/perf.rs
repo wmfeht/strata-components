@@ -23,10 +23,10 @@
 //!   rows on average;
 //! - a refresh commits within 8 ms (`RUNE_COMMIT_BUDGET_MS=8`).
 //!
-//! Grouped (C1f) runs the same in 40 groups of 2,500 and in 2,000 groups of 50, held to the same
-//! bars except that scrolling builds the view once per group crossed (the stuck header's label,
-//! see the element's Decisions) and never otherwise. A regroup (new groups, the same entries) is
-//! reported against the re-sort's guard.
+//! Grouped (C1f) runs the same in 100 groups of 1,000 and in 2,000 groups of 50, held to the
+//! same bars except that scrolling builds the view once per group crossed (the stuck header's
+//! label, see the element's Decisions) and never otherwise; each crosses at least one. A
+//! regroup (new groups, the same entries) is reported against the re-sort's guard.
 
 use std::borrow::Cow;
 use std::cell::Cell;
@@ -134,7 +134,7 @@ fn element_run(group: Option<usize>) -> Run {
     let mut run = Run::default();
     let mut host = Host::new(N);
     if let Some(size) = group {
-        host.groups = super::groups_of(N, size, "Group");
+        host.coll.set_groups(super::groups_of(N, size, "Group"));
     }
     let t = Instant::now();
     let mut rt = Runtime::new(host, element_view, (SIDE, SIDE), Env::new(true, 2.0));
@@ -199,7 +199,8 @@ fn element_run(group: Option<usize>) -> Run {
     rt.update(move |s, tx| {
         s.src.insert_top(10);
         if let Some(size) = group {
-            s.groups = super::groups_of(s.src.len(), size, "Group");
+            s.coll
+                .set_groups(super::groups_of(s.src.len(), size, "Group"));
         }
         s.coll
             .sync(SCOPE, &s.src, SyncRule::complete(CursorGone::Neighbor), tx);
@@ -210,7 +211,9 @@ fn element_run(group: Option<usize>) -> Run {
     if let Some(size) = group {
         let n = rt.state.src.len();
         let t = Instant::now();
-        rt.update(move |s, _| s.groups = super::groups_of(n, size + 1, "Regroup"));
+        rt.update(move |s, _| {
+            s.coll.set_groups(super::groups_of(n, size + 1, "Regroup"));
+        });
         rt.frame(1.0 / 120.0);
         run.regroup = ms(t);
     }
@@ -304,17 +307,17 @@ fn table_run() -> Run {
 #[test]
 #[ignore = "perf"]
 fn perf_hundred_thousand_entries_against_rune_kit_table() {
-    let (mut plain, mut forty, mut dense, mut table) = (vec![], vec![], vec![], vec![]);
+    let (mut plain, mut hundred, mut dense, mut table) = (vec![], vec![], vec![], vec![]);
     for _ in 0..RUNS {
         table.push(table_run());
         plain.push(element_run(None));
-        forty.push(element_run(Some(N / 40)));
+        hundred.push(element_run(Some(N / 100)));
         dense.push(element_run(Some(50)));
     }
     let t = Run::best(&table);
     let runs = [
         ("C1e", Run::best(&plain)),
-        ("40 groups", Run::best(&forty)),
+        ("100 groups", Run::best(&hundred)),
         ("2,000 groups", Run::best(&dense)),
     ];
     println!("100k entries, 900 pt at scale 2, best of {RUNS}:");
@@ -397,5 +400,6 @@ fn perf_hundred_thousand_entries_against_rune_kit_table() {
         );
     }
     assert_eq!(runs[0].1.crossed, 0);
+    assert!(runs[1].1.crossed >= 1, "the 100-group run crossed a group");
     assert!(runs[2].1.crossed > 5, "the dense run crossed groups");
 }

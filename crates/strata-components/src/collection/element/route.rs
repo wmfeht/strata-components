@@ -36,11 +36,7 @@ enum Source {
 /// when they cover the source.
 pub(super) fn line_map<S: 'static>(cfg: &Config<S>, s: &S) -> LineMap {
     let (src, st) = (cfg.get)(s);
-    LineMap::new(
-        st.per_line.get(),
-        cfg.groups.as_ref().map(|g| g(s)),
-        src.len(),
-    )
+    LineMap::new(st.per_line.get(), Some(&st.groups), src.len())
 }
 
 /// Where `s`'s entries sit, mounted or not: the grouped rows, or the lines' own geometry.
@@ -60,10 +56,19 @@ pub(super) fn geometry<S: 'static>(cfg: &Config<S>, s: &S) -> Box<dyn Collection
 
 /// Whether content point `p` is under the stuck group header, which covers the top of the
 /// viewport: a press there is on no entry, as on a header line.
+///
+/// Only while the stuck header shows: in the frame between a scroll into another group and the
+/// build that relabels it, it is hidden, and the top line is the one drawn there.
 fn in_stuck_header<S: 'static>(cfg: &Config<S>, s: &S, p: Point) -> bool {
     let st = (cfg.get)(s).1;
     let offset = st.scroll.get();
-    let extent = line_map(cfg, s).stuck_extent(offset, cfg.row_height_of(s));
+    let h = cfg.row_height_of(s);
+    let map = line_map(cfg, s);
+    let shown = st.stuck_shown.get();
+    if shown.is_none() || map.top_group(offset, h) != shown {
+        return false;
+    }
+    let extent = map.stuck_extent(offset, h);
     p.y >= offset && p.y < offset + extent
 }
 

@@ -6,22 +6,25 @@
 //! # Group header lines
 //!
 //! ListTable's grouped mode (C4's file-type groups) puts a header line above each group's
-//! entries ([`Groups`], `Collection::groups`). Groups are listing data, so the element reads
-//! them by accessor from the host's state on every build and input, rather than from the
-//! [`Lines`] rule. The element maps lines to entries through prefix sums over the groups:
+//! entries ([`Groups`], `CollectionState::set_groups`). Groups are listing data, so they live
+//! in the collection's state beside the selection, set with each listing, rather than in the
+//! [`Lines`] rule: the element's builds and handlers and the state's own restores and reveals
+//! all read the same value. The element maps lines to entries through prefix sums over the groups:
 //! O(log groups) a lookup and nothing per entry. Header lines are keyed `head-{key}`
 //! (`keys::header_key`), hold no entry, and the geometry ([`GroupedRows`]) gives presses, the
 //! marquee and Page Up and Down the same lines.
 //!
 //! Every line, header lines included, is the row height tall: Rune's virtual list has one
 //! height estimate, and rows it hasn't laid out take it, so a header of any other height would
-//! put rows where the index geometry doesn't (Rune draft U-C1f-1).
+//! put rows where the index geometry doesn't (Rune draft [U-C1f-1]).
 //!
 //! The header of the group at the top of the viewport sticks there while its group scrolls,
 //! and the next group's header pushes it out. Rune keeps a sticky element only inside its own
 //! virtual row, which would put a whole group in one row, so the stuck header is the element's
 //! own overlay: a live value moves it as the view scrolls, and the view builds again to
 //! relabel it when the top group changes (see the element's Decisions).
+//!
+//! [U-C1f-1]: crate::collection::element#rune-drafts-not-filed
 
 use std::hash::{Hash, Hasher};
 use std::ops::Range;
@@ -116,11 +119,10 @@ impl Group {
 /// The groups a collection draws its entries in, in display order: each a header line, then
 /// its entries.
 ///
-/// Build it once per regroup (O(groups)), and keep it beside the listing; the element reads it
-/// by accessor (`Collection::groups`) at O(log groups) a lookup and nothing per entry. Empty
-/// groups are dropped. Groups that don't cover the source exactly (their lengths don't add up
-/// to its length) draw it ungrouped, so update them with the listing, before
-/// `CollectionState::sync`.
+/// Build it once per regroup (O(groups)) and give it to the collection's state with the
+/// listing (`CollectionState::set_groups`, before `enter` or `sync`); the element reads it at
+/// O(log groups) a lookup and nothing per entry. Empty groups are dropped. Groups that don't
+/// cover the source exactly (their lengths don't add up to its length) draw it ungrouped.
 ///
 /// Used by: C4, hosts.
 #[derive(Clone, Debug, Default)]

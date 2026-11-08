@@ -1,16 +1,15 @@
-//! What the marquee machine reads on every step, shared live with the host through a
-//! [`MarqueeHandle`].
+//! What the marquee machine reads on every step: the host gives it to the collection
+//! (`Collection::settings`), and the machine reads it through its surface
+//! (`Ctx::settings::<MarqueeSettings>()`) on each input.
 
-use std::cell::Cell;
-use std::rc::Rc;
 use std::time::Duration;
 
 use rune::Spring;
 
 use super::speed::EdgeScroll;
 
-/// The marquee machine's settings: plain data the host keeps current through its
-/// [`MarqueeHandle`].
+/// The marquee machine's settings: plain data the host keeps current on the collection
+/// (`Collection::settings(MarqueeSettings { .. })`). Without one, the defaults.
 ///
 /// Fields may be added: start from [`MarqueeSettings::default`].
 ///
@@ -45,39 +44,5 @@ impl Default for MarqueeSettings {
             apply_every: Duration::from_millis(100),
             animations: true,
         }
-    }
-}
-
-/// The settings one marquee machine reads, shared with the host that keeps them current.
-///
-/// Clones share one value: the host keeps a clone and changes it with [`MarqueeHandle::set`] or
-/// [`MarqueeHandle::update`], and the machine's next step reads the change. A handle rather
-/// than an accessor, as C1b's `PointerHandle` (D6 in the module docs).
-///
-/// Used by: C2, C3, C4, and hosts.
-#[derive(Clone, Debug, Default)]
-pub struct MarqueeHandle(Rc<Cell<MarqueeSettings>>);
-
-impl MarqueeHandle {
-    /// A handle holding `settings`.
-    pub fn new(settings: MarqueeSettings) -> Self {
-        Self(Rc::new(Cell::new(settings)))
-    }
-
-    /// The settings now.
-    pub fn get(&self) -> MarqueeSettings {
-        self.0.get()
-    }
-
-    /// Replaces the settings.
-    pub fn set(&self, settings: MarqueeSettings) {
-        self.0.set(settings);
-    }
-
-    /// Changes the settings in place: `handle.update(|s| s.animations = look.animations)`.
-    pub fn update(&self, f: impl FnOnce(&mut MarqueeSettings)) {
-        let mut settings = self.get();
-        f(&mut settings);
-        self.set(settings);
     }
 }

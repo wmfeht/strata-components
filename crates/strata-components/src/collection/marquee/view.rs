@@ -37,14 +37,18 @@ impl BandLook {
     }
 }
 
-/// The band, out of flow at the top-left of its parent and placed by `rect` (`[x, y, w, h]` in
+/// The band's key, so tests and scripts can find it while it shows.
+pub const KEY: &str = "marquee-band";
+
+/// The band, keyed [`KEY`], out of flow at the top-left of its parent and placed by `rect` (`[x, y, w, h]` in
 /// the parent's points). The parent is the layer the collection draws its marquee in, which
 /// follows the scroll, so `rect` is in content coordinates: fill it from
 /// `MarqueeMachine::drawn`. It has no handlers and no role, so it takes no input and
 /// assistive technology doesn't hear it.
 pub fn band_view(look: &Look, rect: &Live<[f32; 4]>) -> El {
     let style = BandLook::from_look(look);
-    el().absolute(0.0, 0.0)
+    el().key(KEY)
+        .absolute(0.0, 0.0)
         .fill(style.fill)
         .border(style.border_width, style.border)
         .radius(style.radius)

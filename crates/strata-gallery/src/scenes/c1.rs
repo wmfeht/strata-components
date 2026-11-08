@@ -211,7 +211,9 @@ fn install(controllers: &mut Controllers) {
     controllers.keyboard =
         Some(Box::<strata_components::collection::keyboard::Keyboard>::default());
 
-    // C1d: controllers.marquee = Some(Box::new(…));
+    controllers.marquee = Some(Box::new(
+        strata_components::collection::marquee::Marquee::new(),
+    ));
 }
 
 impl Demo {

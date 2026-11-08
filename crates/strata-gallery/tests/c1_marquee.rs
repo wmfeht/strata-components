@@ -1,0 +1,213 @@
+//! C1d's marquee on the c1 page, in process: what scripts can't do (Ctrl and Shift held through
+//! a drag) and what no golden shows (an open band's moves and auto-scroll run no view). A test
+//! stand-in for C1b's pointer intent starts the band past the drag threshold, as C1b hands it
+//! over, so these tests don't depend on C1b. Each test names the bullets it checks; the scripts
+//! in `tests/scripts/c1/marquee-*.json` check the rest.
+
+mod c1 {
+    mod marquee {
+        use rune::{ElementInfo, Env, Mods, PhysicalInput, Runtime};
+        use strata_components::collection::element::{
+            Ctx, Effect, Flow, PointerController, PointerInput, PointerPhase,
+        };
+        use strata_components::collection::marquee::view::KEY as BAND;
+        use strata_components::contract::{EntryId, EntrySource, Point};
+        use strata_gallery::{Gallery, scenes};
+
+        const FRAME: f64 = 1.0 / 60.0;
+
+        /// Stands in for C1b: a primary press starts a marquee once it travels more than 8 pt
+        /// on either axis, at the press with the modifiers held at the press. It changes no
+        /// selection itself, as C1b's Ctrl and Shift presses beside an entry don't.
+        #[derive(Default)]
+        struct Press {
+            at: Option<(Point, Mods)>,
+        }
+
+        impl PointerController for Press {
+            fn pointer(&mut self, input: &PointerInput, cx: &mut Ctx<'_>) -> Flow {
+                match input.phase {
+                    PointerPhase::Down => self.at = Some((input.point, input.mods)),
+                    PointerPhase::Move => {
+                        let past = input.travel.x.abs() > 8.0 || input.travel.y.abs() > 8.0;
+                        if past && let Some((at, mods)) = self.at.take() {
+                            cx.emit(Effect::BeginMarquee { at, mods });
+                        }
+                    }
+                    PointerPhase::Up => self.at = None,
+                }
+                Flow::Handled
+            }
+        }
+
+        fn mount(name: &str) -> Runtime<Gallery> {
+            let scene = scenes::all_scenes()
+                .into_iter()
+                .find(|(n, _)| *n == name)
+                .map(|(_, f)| f)
+                .unwrap_or_else(|| panic!("no scene {name}"));
+            let mut g = Gallery::default();
+            scene(&mut g);
+            g.c1.coll.controllers.pointer = Some(Box::new(Press::default()));
+            let env = Env::new(g.dark, 1.0);
+            let mut rt = strata_gallery::runtime(g, env);
+            rt.frame(0.0);
+            run(&mut rt, 0.5);
+            rt
+        }
+
+        fn run(rt: &mut Runtime<Gallery>, seconds: f64) {
+            for _ in 0..(seconds / FRAME).round() as usize {
+                rt.frame(FRAME);
+            }
+        }
+
+        fn element(rt: &Runtime<Gallery>, key: &str) -> Option<ElementInfo> {
+            rt.elements()
+                .into_iter()
+                .find(|e| !e.exiting && e.key.as_deref() == Some(key))
+        }
+
+        /// A point in the blank space at the right of row `id`'s row.
+        fn beside(rt: &Runtime<Gallery>, id: u64) -> (f32, f32) {
+            let [x, y, w, h] = element(rt, &format!("row-{id}"))
+                .unwrap_or_else(|| panic!("row-{id} isn't mounted"))
+                .visible;
+            (x + w - 24.0, y + h / 2.0)
+        }
+
+        fn selected(rt: &Runtime<Gallery>) -> Vec<u64> {
+            let d = &rt.state.c1;
+            d.coll
+                .selection
+                .selected_ids(&d.listing)
+                .into_iter()
+                .map(EntryId::get)
+                .collect()
+        }
+
+        fn select(rt: &mut Runtime<Gallery>, ids: &[u64]) {
+            let d = &mut rt.state.c1;
+            for (n, id) in ids.iter().enumerate() {
+                let i = d.listing.index_of(EntryId::new(*id)).expect("listed");
+                if n == 0 {
+                    d.coll.selection.select_only(&d.listing, i);
+                } else {
+                    d.coll.selection.toggle(&d.listing, i);
+                }
+            }
+            run(rt, 0.1);
+        }
+
+        /// Presses beside row `from` with `mods` held, lets the modifiers go, and drags to row
+        /// `to` in steps, then releases.
+        fn band(rt: &mut Runtime<Gallery>, mods: Mods, from: u64, to: u64) {
+            let (x, y0) = beside(rt, from);
+            let (_, y1) = beside(rt, to);
+            rt.physical_input(PhysicalInput::Modifiers(mods));
+            rt.pointer_down(x, y0);
+            rt.frame(FRAME);
+            rt.physical_input(PhysicalInput::Modifiers(Mods::default()));
+            for k in 1..=8 {
+                rt.pointer_move(x, y0 + (y1 - y0) * k as f32 / 8.0);
+                rt.frame(FRAME);
+            }
+            assert!(element(rt, BAND).is_some(), "the band shows while held");
+            rt.pointer_up(x, y1);
+            run(rt, 0.1);
+            assert!(element(rt, BAND).is_none(), "and goes on release");
+        }
+
+        #[test]
+        fn a_ctrl_band_toggles_and_a_shift_band_adds_against_the_selection_at_press() {
+            // browser/selection/marquee: A Ctrl-marquee toggles each crossed entry relative to the selection at press.
+            // browser/selection/marquee: A Shift-marquee adds the crossed entries to the selection at press.
+            let ctrl = Mods {
+                ctrl: true,
+                ..Mods::default()
+            };
+            let shift = Mods {
+                shift: true,
+                ..Mods::default()
+            };
+            let mut rt = mount("c1-ten-rows-light");
+            select(&mut rt, &[3, 4, 9]);
+            band(&mut rt, ctrl, 2, 5);
+            assert_eq!(
+                selected(&rt),
+                [2, 5, 9],
+                "Ctrl flips 2 to 5 against the press"
+            );
+
+            band(&mut rt, shift, 6, 7);
+            assert_eq!(selected(&rt), [2, 5, 6, 7, 9], "Shift adds 6 and 7");
+
+            let ctrl_shift = Mods {
+                shift: true,
+                ..ctrl
+            };
+            band(&mut rt, ctrl_shift, 5, 6);
+            assert_eq!(selected(&rt), [2, 7, 9], "Ctrl+Shift toggles (D5)");
+        }
+
+        /// What C1e asks of a marquee: an open band's moves, and auto-scroll frames that cross
+        /// no new entry, run no view; showing and hiding the band, and selection changes, do.
+        /// Twice: with Rune's debug check of `live_only` (it commits once a quarter second after
+        /// a commit to compare what the view builds; no warnings), then without it, counting.
+        #[test]
+        fn an_open_band_runs_no_view_while_it_moves_and_scrolls_at_ten_hertz() {
+            // browser/selection/marquee: Holding the pointer near a viewport edge scrolls the listing and extends the selection each frame.
+            for check in [true, false] {
+                let mut rt = mount("c1-photos-light");
+                rt.check_live_only(check);
+                let (x, y) = beside(&rt, 10_002);
+                rt.pointer_down(x, y);
+                rt.frame(FRAME);
+                rt.pointer_move(x, y + 9.0);
+                rt.frame(FRAME);
+                assert!(element(&rt, BAND).is_some());
+                assert_eq!(selected(&rt), [10_002]);
+
+                // Moves inside one row (the press was mid-row, rows are taller than 22 pt)
+                // cross nothing new.
+                let before = rt.stats.commits;
+                for k in 1..=10 {
+                    rt.pointer_move(x - k as f32, y + 9.0 + k as f32 * 0.2);
+                    rt.frame(FRAME);
+                }
+                let after_moves = rt.stats.commits;
+
+                // Held at the bottom edge for a second: the view glides down and the band grows.
+                let [_, vy, _, vh] = element(&rt, "viewport").expect("the viewport").visible;
+                rt.pointer_move(x, vy + vh - 2.0);
+                rt.frame(FRAME);
+                let from = rt.state.c1.coll.scroll_offset();
+                let commits_from = rt.stats.commits;
+                run(&mut rt, 1.0);
+                let scrolled = rt.state.c1.coll.scroll_offset() - from;
+                let commits = rt.stats.commits - commits_from;
+                assert!(scrolled > 500.0, "it glided {scrolled} pt in a second");
+                assert!(selected(&rt).len() > 30, "and the band grew with it");
+                assert!(
+                    rt.live_only_warnings().is_empty(),
+                    "{:?}",
+                    rt.live_only_warnings()
+                );
+                if !check {
+                    assert_eq!(after_moves, before, "moves within a row ran the view");
+                    // D1: the band applies at most every 100 ms while the view scrolls.
+                    assert!(
+                        (1..=11).contains(&commits),
+                        "{commits} commits in a second of auto-scroll"
+                    );
+                }
+                rt.pointer_up(x, vy + vh - 2.0);
+                rt.frame(FRAME);
+                assert!(element(&rt, BAND).is_none());
+                let n = selected(&rt).len();
+                let last = rt.state.c1.listing.len();
+                assert!(n > 30 && n < last);
+            }
+        }
+    }
+}

@@ -3,8 +3,10 @@
 //! [`MarqueeMachine`] turns a held drag into a band over a collection's entries, mounted or
 //! not, and applies it to the collection's [`Selection`] through C1a's band operations. It
 //! also scrolls the view when the pointer is held near a viewport edge. It is plain data with
-//! no Rune elements, driven through a [`Surface`]; the collection element (C1e) feeds it
-//! through its marquee seam, once the pointer controller (C1b) has emitted "begin marquee".
+//! no Rune elements, driven through a [`Surface`]. [`Marquee`] puts it on the collection
+//! element's marquee seam (C1e), which hands it the gesture once the pointer controller (C1b)
+//! emits "begin marquee" past the drag threshold:
+//! `state.controllers.marquee = Some(Box::new(Marquee::new()))`.
 //! It follows Strata at `upstream/main` 35ee677ab: `src/ui/marquee.rs`,
 //! `src/ui/marquee/state.rs` and `src/ui/marquee/geometry.rs`.
 //!
@@ -59,18 +61,24 @@
 //! - **D4: vertical auto-scroll only.** The collection scrolls vertically; Columns' horizontal
 //!   strip is C2's. Strata scrolls both axes.
 //! - **D5: Ctrl+Shift toggles**, as Strata's `band_selection` lets Ctrl win.
-//! - **D6: the settings come from a shared [`MarqueeHandle`]**, as C1b's do from its
-//!   `PointerHandle`: the element keeps its controllers boxed, where no accessor reaches.
+//! - **D6: the settings come from the collection's settings** (`Collection::settings`, read
+//!   with `Ctx::settings::<MarqueeSettings>()`), C1e's one settings path for every controller,
+//!   rather than by accessor: the element keeps its controllers boxed, where no accessor
+//!   reaches. The band's live rect is state, not settings, and the adapter keeps it.
 //!
 //! # Drawing
 //!
 //! [`view::band_view`] draws the band from a live rect, in the selection colour, with Look and
-//! Kit tokens only; [`MarqueeMachine::drawn`] is the rect to give it.
+//! Kit tokens only; [`MarqueeMachine::drawn`] is the rect to give it. [`Marquee`] hands the
+//! element that view for its marquee layer, which sits over the viewport, clipped to it, and
+//! rides the scroll offset; it moves the live rect after every input, so a move commits no
+//! view. Only showing and hiding the band, and selection changes, do.
 //!
 //! Work package: C1d, `docs/work/phase-2-composites/C1d-marquee.md`.
 
 #![warn(missing_docs)]
 
+mod adapter;
 mod machine;
 mod settings;
 mod speed;
@@ -79,8 +87,9 @@ pub mod view;
 #[cfg(test)]
 mod tests;
 
+pub use adapter::Marquee;
 pub use machine::{MarqueeMachine, Outcome, Surface, mode_for};
-pub use settings::{MarqueeHandle, MarqueeSettings};
+pub use settings::MarqueeSettings;
 pub use speed::{EdgeScroll, edge_speed, glide_lead, stop_lead};
 
 #[cfg(doc)]

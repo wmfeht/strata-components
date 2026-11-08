@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use rune::{Mods, Spring};
 
-use super::settings::{MarqueeHandle, MarqueeSettings};
+use super::settings::MarqueeSettings;
 use super::speed::{edge_speed, glide_lead, stop_lead};
 use crate::collection::selection::{BandMode, Changed, Selection};
 use crate::contract::{CollectionGeometry, EntryId, EntrySource, IndexRanges, Point, Rect};
@@ -66,6 +66,9 @@ pub trait Surface {
     /// The host's clock, in seconds.
     fn now(&self) -> f64;
 
+    /// The settings the host gave (C1e: `Collection::settings`), else the defaults.
+    fn settings(&self) -> MarqueeSettings;
+
     /// The selection, to read.
     fn selection(&self) -> &Selection;
 
@@ -100,9 +103,8 @@ pub fn mode_for(mods: Mods) -> BandMode {
 /// release or [`cancel`](Self::cancel) on Escape or a cancelled gesture.
 ///
 /// Used by: the C1e adapter.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct MarqueeMachine {
-    settings: MarqueeHandle,
     band: Option<Band>,
 }
 
@@ -182,17 +184,9 @@ enum Step {
 }
 
 impl MarqueeMachine {
-    /// A machine reading `settings`, with no band open.
-    pub fn new(settings: MarqueeHandle) -> Self {
-        Self {
-            settings,
-            band: None,
-        }
-    }
-
-    /// The handle the machine reads its settings from.
-    pub fn settings(&self) -> &MarqueeHandle {
-        &self.settings
+    /// A machine with no band open.
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Whether a band is open.
@@ -262,7 +256,7 @@ impl MarqueeMachine {
         let Some(mut band) = self.band.take() else {
             return;
         };
-        let settings = self.settings.get();
+        let settings = s.settings();
         if s.selection().is_banding() {
             band.visible = s.visible();
             let crossed = s.geometry().range_in(band.rect());
@@ -289,7 +283,7 @@ impl MarqueeMachine {
         if open {
             s.apply(&mut |sel, _| sel.cancel_band());
         }
-        stop(&band, &self.settings.get(), s.visible(), s);
+        stop(&band, &s.settings(), s.visible(), s);
         s.emit(Outcome::Repaint);
         open
     }
@@ -300,7 +294,7 @@ impl MarqueeMachine {
     }
 
     fn step(&mut self, s: &mut dyn Surface, step: Step) -> bool {
-        let settings = self.settings.get();
+        let settings = s.settings();
         let visible = s.visible();
         // Another selecting operation (Ctrl+A, a click) ended the band in the selection.
         if !s.selection().is_banding() {

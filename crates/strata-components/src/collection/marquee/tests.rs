@@ -27,6 +27,7 @@ struct Fake {
     out: Vec<Outcome>,
     /// Every selection change, as (clock, changed).
     applied: Vec<(f64, Changed)>,
+    settings: MarqueeSettings,
 }
 
 impl Surface for Fake {
@@ -44,6 +45,10 @@ impl Surface for Fake {
 
     fn now(&self) -> f64 {
         self.now
+    }
+
+    fn settings(&self) -> MarqueeSettings {
+        self.settings
     }
 
     fn selection(&self) -> &Selection {
@@ -80,11 +85,12 @@ fn fake(n: u64) -> Fake {
         sel: Selection::new(),
         out: Vec::new(),
         applied: Vec::new(),
+        settings: MarqueeSettings::default(),
     }
 }
 
 fn machine() -> MarqueeMachine {
-    MarqueeMachine::new(MarqueeHandle::default())
+    MarqueeMachine::new()
 }
 
 /// The content point in the middle of row `row`'s height, in its blank space.
@@ -174,7 +180,7 @@ impl Glide {
 fn frame(f: &mut Fake, m: &mut MarqueeMachine, glide: &mut Glide) -> bool {
     f.now += FRAME;
     let changed = m.tick(f);
-    let spring = m.settings().get().glide;
+    let spring = f.settings.glide;
     for o in std::mem::take(&mut f.out) {
         if let Outcome::Glide { y, .. } | Outcome::StopGlide { y, .. } = o {
             glide.aim(spring, f.visible.y, y);
@@ -543,4 +549,91 @@ fn rows_scrolled_out_stay_selected_and_rows_above_the_anchor_stay_unselected() {
     f.now += 1.0;
     m.tick(&mut f);
     assert_eq!(selected(&f), (4..=10).collect::<Vec<_>>());
+}
+
+// The adapter on C1e's seam, through a `Ctx` with no runtime.
+
+mod adapter {
+    use std::rc::Rc;
+
+    use rune::Mods;
+    use strata_kit::look::Look;
+
+    use super::{ROW, VIEW, WIDTH, at_row, entry};
+    use crate::collection::element::{Ctx, Effect, MarqueeController, Settings};
+    use crate::collection::marquee::{EdgeScroll, Marquee, MarqueeSettings};
+    use crate::collection::selection::Selection;
+    use crate::contract::{ListSource, Point, Rect, UniformRows};
+
+    /// Runs `f` with a context over 1,000 rows at the top, with the host's `settings`.
+    fn with_cx<R>(
+        sel: &mut Selection,
+        settings: Option<MarqueeSettings>,
+        now: f64,
+        f: impl FnOnce(&mut Ctx<'_>) -> R,
+    ) -> (R, Vec<Effect>) {
+        let source = ListSource::new((0..1_000).map(entry).collect());
+        let geometry = UniformRows::new(1_000, ROW, WIDTH).viewport_height(VIEW);
+        let mut values = Settings::default();
+        if let Some(s) = settings {
+            values.insert(s);
+        }
+        let visible = Rect::new(0.0, 0.0, WIDTH, VIEW);
+        let mut cx = Ctx::new(&source, &geometry, visible, now, sel).with_settings(Rc::new(values));
+        let r = f(&mut cx);
+        let effects = cx.effects().to_vec();
+        (r, effects)
+    }
+
+    fn glides(effects: &[Effect]) -> usize {
+        effects
+            .iter()
+            .filter(|e| matches!(e, Effect::Glide { .. }))
+            .count()
+    }
+
+    #[test]
+    fn the_adapter_reads_the_collections_settings() {
+        // D6: the host's MarqueeSettings, through `Collection::settings`, reach the machine. A
+        // pointer 160 pt above the bottom glides only with a 200 pt edge band.
+        let wide = MarqueeSettings {
+            edge: EdgeScroll {
+                edge: 200.0,
+                max_speed: 1000.0,
+            },
+            ..MarqueeSettings::default()
+        };
+        for (settings, glide) in [(None, false), (Some(wide), true)] {
+            let mut sel = Selection::new();
+            let mut m = Marquee::new();
+            with_cx(&mut sel, settings, 0.0, |cx| {
+                m.begin(at_row(1), Mods::default(), cx);
+                m.moved(Point::new(300.0, VIEW - 160.0), cx);
+            });
+            let (_, effects) = with_cx(&mut sel, settings, 1.0 / 60.0, |cx| m.tick(cx));
+            assert_eq!(glides(&effects) > 0, glide, "{settings:?}");
+        }
+    }
+
+    #[test]
+    fn the_band_draws_while_open_and_escape_hides_it_and_stops_the_glide() {
+        // D2 through the seam: Escape restores the selection at press and stops the glide.
+        let look = Look::fallback(false);
+        let mut sel = Selection::new();
+        let mut m = Marquee::new();
+        assert!(m.overlay(&look).is_none());
+        with_cx(&mut sel, None, 0.0, |cx| {
+            m.begin(at_row(2), Mods::default(), cx);
+            m.moved(Point::new(300.0, VIEW - 1.0), cx);
+        });
+        assert!(m.active() && m.overlay(&look).is_some());
+        let (_, effects) = with_cx(&mut sel, None, 1.0 / 60.0, |cx| m.tick(cx));
+        assert_eq!(glides(&effects), 1, "it glides at the edge");
+        assert!(!sel.is_empty());
+        let (taken, effects) = with_cx(&mut sel, None, 2.0 / 60.0, |cx| m.cancel(cx));
+        assert!(taken);
+        assert_eq!(glides(&effects), 1, "a glide to rest");
+        assert!(sel.is_empty(), "the plain band's press had cleared it");
+        assert!(!m.active() && m.overlay(&look).is_none());
+    }
 }

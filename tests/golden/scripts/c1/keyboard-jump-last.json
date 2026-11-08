@@ -11,7 +11,7 @@
             },
             {
               "key": "c1-preview",
-              "name": "Preview: IMG_2000.jpg",
+              "name": "Preview: IMG_1999.jpg",
               "role": "label"
             },
             {
@@ -38,7 +38,7 @@
                 "focus",
                 "context-menu"
               ],
-              "activeDescendant": "row-11999",
+              "activeDescendant": "row-11998",
               "children": [
                 {
                   "actions": [
@@ -662,7 +662,10 @@
                           "key": "row-11998",
                           "name": "IMG_1999.jpg",
                           "position": 1999,
-                          "role": "list-box-option"
+                          "role": "list-box-option",
+                          "states": [
+                            "selected"
+                          ]
                         },
                         {
                           "actions": [
@@ -690,7 +693,7 @@
                 },
                 {
                   "key": "status",
-                  "name": "",
+                  "name": "2 items selected",
                   "role": "label",
                   "states": [
                     "live-polite"

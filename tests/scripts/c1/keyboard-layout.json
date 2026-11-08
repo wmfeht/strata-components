@@ -1,6 +1,6 @@
 {
   "bullets": [
-    "app/keyboard-shortcuts: With only a Russian layout configured, Ctrl with the keys that type с, л and ф acts as Ctrl+C, Ctrl+K and Ctrl+A."
+    "app/keyboard-shortcuts: With only a Russian layout configured, Ctrl with the keys that type"
   ],
   "scene": "c1-ten-rows-light",
   "events": [

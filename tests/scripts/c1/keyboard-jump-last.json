@@ -21,17 +21,30 @@
       "type": "key",
       "name": "Up",
       "ctrl": true,
-      "shift": true
+      "alt": true
     },
     {
       "t": 0.8,
       "type": "key",
       "name": "Up",
       "ctrl": true,
-      "alt": true
+      "logo": true
+    },
+    {
+      "t": 0.9,
+      "type": "key",
+      "name": "Up",
+      "ctrl": true,
+      "shift": true
     }
   ],
   "expect": [
+    {
+      "key": "row-11998",
+      "states": [
+        "selected"
+      ]
+    },
     {
       "key": "row-11999",
       "states": [
@@ -40,7 +53,7 @@
     },
     {
       "key": "c1-preview",
-      "name": "Preview: IMG_2000.jpg"
+      "name": "Preview: IMG_1999.jpg"
     }
   ]
 }

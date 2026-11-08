@@ -32,8 +32,8 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | C21 | ready | | |
 | C22 | ready | | |
 | C23 | ready | | |
-| C24 | fix round 1 queued (review 1: no blockers; taking 6 should-fixes because C2 builds on it: bar press takes focus, secondary press reaches the row, Other buttons don't stop autoscroll, U-C24-8 draft facts, autoscroll-filter script proves nothing, stale stopping after Escape) | own overlay scrollbar instead of rune-kit ScrollBar (it collides across collections and can't sit outside C4's scroll_x: deviation from plan §4, owner edit); small C1e edit (edge part + on_scroll); modal autoscroll shield (wheel/keys blocked while running); follow-ups: row-margin middle press (C1b/C1e), retrofit bars + popover wheel bullets (X1) | |
-| C25 | coding (plan approved: keyed by ThumbKey; visible rows win over the budget; 4 deviations from Strata recorded; API review list for C3) | |
+| C24 | fixing round 1 (review 1: no blockers; taking 6 should-fixes because C2 builds on it: bar press takes focus, secondary press reaches the row, Other buttons don't stop autoscroll, U-C24-8 draft facts, autoscroll-filter script proves nothing, stale stopping after Escape) | own overlay scrollbar instead of rune-kit ScrollBar (it collides across collections and can't sit outside C4's scroll_x: deviation from plan §4, owner edit); small C1e edit (edge part + on_scroll); modal autoscroll shield (wheel/keys blocked while running); follow-ups: row-margin middle press (C1b/C1e), retrofit bars + popover wheel bullets (X1) | |
+| C25 | review 1 queued (coded: 10 scripts, 6 PNG goldens; store sync p95 23 us; budget held; 3 Rune drafts; API list for C3; plan rulings: keyed by ThumbKey, visible rows win over the budget, 4 deviations from Strata) | |
 | C5 | ready | | |
 | C6 | ready | | |
 | C7 | ready | | |

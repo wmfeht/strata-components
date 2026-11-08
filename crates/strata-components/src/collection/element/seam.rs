@@ -19,10 +19,11 @@ use std::any::Any;
 use std::rc::Rc;
 use std::time::Duration;
 
-use rune::{KeyEvent, Mods, PhysicalKeyCode, PointerButton};
+use rune::{Chord, El, KeyEvent, KeyPlatform, Keybind, Mods, PhysicalKeyCode, PointerButton, Tx};
+use strata_kit::look::Look;
 
 use crate::collection::selection::{Changed, Selection};
-use crate::contract::{CollectionGeometry, EntryId, EntrySource, Point, Rect};
+use crate::contract::{CollectionGeometry, Direction, EntryId, EntrySource, Point, Rect};
 
 /// Which part of a pointer gesture an input is.
 ///
@@ -91,7 +92,9 @@ pub struct PointerInput {
     pub window: Point,
     /// The pointer's travel since the press, in points.
     pub travel: Point,
-    /// What the pointer is over.
+    /// What the pointer is over. The region is measured on a press and a release only: on a
+    /// move, `hit.region` repeats the press's region while the pointer is over the pressed
+    /// entry, and is [`Region::Gutter`] elsewhere.
     pub hit: Hit,
     /// The modifiers held.
     pub mods: Mods,
@@ -140,20 +143,47 @@ pub struct KeyInput<'a> {
     pub base: Option<char>,
     /// Whether the key is repeating.
     pub repeat: bool,
+    /// The platform whose conventions chords resolve with: this build's.
+    pub platform: KeyPlatform,
     /// The host's clock, in seconds.
     pub now: f64,
+    /// The key's transaction, as the element heard it: what Rune's layout-aware chord
+    /// matching reads. `None` in a controller's unit test.
+    pub(super) tx: Option<&'a Tx>,
 }
 
 impl<'a> KeyInput<'a> {
-    /// `event` with no physical key or base, not repeating, at time 0, as a controller's unit
-    /// test builds one. Set the other fields after.
+    /// `event` with no physical key or base, not repeating, on this build's platform, at time
+    /// 0, as a controller's unit test builds one. Set the other fields after.
     pub fn new(event: &'a KeyEvent) -> Self {
         Self {
             event,
             physical: None,
             base: None,
             repeat: false,
+            platform: KeyPlatform::current(),
             now: 0.0,
+            tx: None,
+        }
+    }
+
+    /// Whether the key is `chord`, matched as `Chord::matches_tx` matches it: by the
+    /// character typed, else the key's unmodified character under the layout, else the US
+    /// key in its place, so `hjkl` and Ctrl+A follow the layout. In a unit test (no
+    /// transaction) it falls back to `Chord::matches_on`, which reads the event alone.
+    pub fn matches(&self, chord: &Chord) -> bool {
+        match self.tx {
+            Some(tx) => chord.matches_tx_on(self.event, tx, self.platform),
+            None => chord.matches_on(self.event, self.platform),
+        }
+    }
+
+    /// Whether the key is any of `keybind`'s chords on this platform, as
+    /// [`KeyInput::matches`] matches one.
+    pub fn matches_keybind(&self, keybind: &Keybind) -> bool {
+        match self.tx {
+            Some(tx) => keybind.matches_tx_on(self.event, tx, self.platform),
+            None => keybind.matches_on(self.event, self.platform),
         }
     }
 }
@@ -230,6 +260,10 @@ pub enum Intent {
         /// Where to open it, in window points.
         anchor: Rect,
     },
+    /// The cursor can't move this way: it is at the collection's edge. The host decides what
+    /// that means: Columns moves to the next column, a host moves focus to the sidebar or
+    /// the header.
+    Edge(Direction),
     /// Anything else a controller and its host agree on.
     Other(Rc<dyn Any>),
 }
@@ -250,12 +284,24 @@ pub enum Effect {
         /// The modifiers held at the press.
         mods: Mods,
     },
-    /// Scroll the viewport so its top shows content y `y`: a glide when `glide`, else a jump.
+    /// Scroll the viewport so its top shows content y `y`: a glide on Rune's default spring
+    /// when `glide`, else a jump. A jump also stops a glide in progress: Rune can't stop one
+    /// in place (Rune draft U-C1e-7), so a controller that stops its own glide jumps to the
+    /// stop target it computed, or glides there on a stiff spring ([`Effect::Glide`]), which
+    /// keeps the glide's speed and so never jerks.
     ScrollTo {
         /// The content offset to show at the top.
         y: f32,
         /// Glide on Rune's spring rather than jump.
         glide: bool,
+    },
+    /// Glide the viewport so its top shows content y `y`, on `spring` (C1d's edge
+    /// auto-scroll). A glide asked for mid-glide keeps its speed.
+    Glide {
+        /// The content offset to show at the top.
+        y: f32,
+        /// The spring to glide on.
+        spring: rune::Spring,
     },
     /// Keyboard mode on (the cursor outline shows, row hover waits for the pointer to move)
     /// or off.
@@ -281,6 +327,10 @@ pub struct Ctx<'a> {
     selection: &'a mut Selection,
     changed: Changed,
     effects: Vec<Effect>,
+    read_only: bool,
+    origin: Point,
+    settings: Option<Rc<dyn Any>>,
+    repaint: bool,
 }
 
 impl<'a> Ctx<'a> {
@@ -302,6 +352,69 @@ impl<'a> Ctx<'a> {
             selection,
             changed: Changed::NONE,
             effects: Vec::new(),
+            read_only: false,
+            origin: Point::default(),
+            settings: None,
+            repaint: false,
+        }
+    }
+
+    /// The same context for a read-only collection (C14b's archive preview): no rename, no
+    /// drag. The element sets it from `Collection::read_only`.
+    pub fn read_only_mode(mut self, read_only: bool) -> Self {
+        self.read_only = read_only;
+        self
+    }
+
+    /// The same context, with the viewport's top-left at `origin` in window points.
+    pub fn window_origin(mut self, origin: Point) -> Self {
+        self.origin = origin;
+        self
+    }
+
+    /// The same context, with the host's settings for its controllers (see
+    /// [`Ctx::settings`]).
+    pub fn with_settings(mut self, settings: Option<Rc<dyn Any>>) -> Self {
+        self.settings = settings;
+        self
+    }
+
+    /// Whether the collection is read-only: a controller asks for no rename and no drag.
+    pub fn read_only(&self) -> bool {
+        self.read_only
+    }
+
+    /// `rect`, in content coordinates, in window points: where a popup anchored to an entry
+    /// opens (the keyboard menu at the cursor, C21 and C1c).
+    pub fn content_to_window(&self, rect: Rect) -> Rect {
+        rect.offset(
+            self.origin.x - self.visible.x,
+            self.origin.y - self.visible.y,
+        )
+    }
+
+    /// The host's settings for its controllers, if it gave a `T` (`Collection::settings`):
+    /// the double-click interval, the click mode, the auto-scroll speed. This is the one
+    /// settings path for every controller (C1b, C1c, C1d): the host gives one settings value
+    /// (a struct of its own) and each controller reads the type it knows, rather than holding
+    /// a handle to the host's state.
+    pub fn settings<T: 'static>(&self) -> Option<&T> {
+        self.settings.as_deref().and_then(|s| s.downcast_ref::<T>())
+    }
+
+    /// Says something the view reads changed, though no selection operation or effect shows
+    /// it (a band's rect, a hover a controller draws): the element commits. Without it, a move
+    /// that changes nothing commits no view.
+    pub fn repaint(&mut self) {
+        self.repaint = true;
+    }
+
+    /// How tall the content is: the bottom of the last entry, in content coordinates, so an
+    /// auto-scroll knows where the content ends. 0 with no entries.
+    pub fn content_extent(&self) -> f32 {
+        match self.source.len() {
+            0 => 0.0,
+            n => self.geometry.rect_of(n - 1).bottom(),
         }
     }
 
@@ -337,8 +450,8 @@ impl<'a> Ctx<'a> {
         &self.effects
     }
 
-    pub(super) fn finish(self) -> (Changed, Vec<Effect>) {
-        (self.changed, self.effects)
+    pub(super) fn finish(self) -> (Changed, Vec<Effect>, bool) {
+        (self.changed, self.effects, self.repaint)
     }
 }
 
@@ -356,6 +469,10 @@ pub trait PointerController {
     /// Hears every key the collection hears, before the keyboard controller and whether or
     /// not anything takes it: a pending slow-click rename is cancelled by a key.
     fn key_seen(&mut self, _input: &KeyInput<'_>) {}
+
+    /// Drops any gesture in progress: the collection shows another folder
+    /// (`CollectionState::enter`).
+    fn reset(&mut self) {}
 }
 
 /// Keyboard navigation (C1c): keys while the collection has focus.
@@ -363,10 +480,22 @@ pub trait KeyController {
     /// Handles one key. [`Flow::Pass`] lets the page and Rune hear it.
     fn key(&mut self, input: &KeyInput<'_>, cx: &mut Ctx<'_>) -> Flow;
 
-    /// As [`PointerController::tick`] (a type-ahead timeout).
+    /// As [`PointerController::tick`] (a type-ahead timeout), and the way a host runs a
+    /// keyboard command that starts outside the collection (a menu item, a 10xer verb from
+    /// the footer prompt): the controller queues it in a handle the host shares, and the host
+    /// calls `Collection::tick`, which runs it here with a [`Ctx`]. A command that moves the
+    /// cursor emits [`Effect::KeyboardMode`] if it should show the cursor outline; the
+    /// element scrolls the moved cursor into view.
     fn tick(&mut self, _cx: &mut Ctx<'_>) -> Flow {
         Flow::Pass
     }
+
+    /// Hears every pointer input the collection routes, before the pointer controller and the
+    /// marquee: a click ends a 10xer range.
+    fn pointer_seen(&mut self, _input: &PointerInput) {}
+
+    /// As [`PointerController::reset`] (a type-ahead buffer).
+    fn reset(&mut self) {}
 }
 
 /// Marquee selection (C1d). Started by [`Effect::BeginMarquee`]; while it is
@@ -387,13 +516,26 @@ pub trait MarqueeController {
     /// Whether a band is open.
     fn active(&self) -> bool;
 
-    /// The band, in content coordinates, for the overlay to draw.
+    /// The band, in content coordinates.
     fn band(&self) -> Option<Rect>;
+
+    /// What the band draws, in content coordinates: place it with `El::absolute(x, y)` at the
+    /// band's content position. The element draws it in a layer clipped to the viewport,
+    /// below any header, that follows the scroll offset in the same frame with no view
+    /// commit, and that takes no input. A controller that changes it says
+    /// [`Ctx::repaint`] (or changes the selection), so the view builds it again.
+    fn overlay(&self, _look: &Look) -> Option<El> {
+        None
+    }
 
     /// As [`PointerController::tick`] (edge auto-scroll).
     fn tick(&mut self, _cx: &mut Ctx<'_>) -> Flow {
         Flow::Pass
     }
+
+    /// Drops an open band without touching the selection, which the new folder replaces
+    /// (`CollectionState::enter`).
+    fn reset(&mut self) {}
 }
 
 /// The controllers a collection routes to. Each slot is empty until its work package's
@@ -409,6 +551,21 @@ pub struct Controllers {
     pub keyboard: Option<Box<dyn KeyController>>,
     /// Marquee (C1d).
     pub marquee: Option<Box<dyn MarqueeController>>,
+}
+
+impl Controllers {
+    /// Drops every controller's gesture in progress.
+    pub fn reset(&mut self) {
+        if let Some(p) = self.pointer.as_mut() {
+            p.reset();
+        }
+        if let Some(k) = self.keyboard.as_mut() {
+            k.reset();
+        }
+        if let Some(m) = self.marquee.as_mut() {
+            m.reset();
+        }
+    }
 }
 
 impl std::fmt::Debug for Controllers {

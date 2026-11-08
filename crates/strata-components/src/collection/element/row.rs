@@ -86,9 +86,17 @@ type VersionFn<S> = Rc<dyn Fn(&S, &RowCx<'_>) -> u64>;
 /// text), or a rename editor (C5).
 ///
 /// Rows are memoized: a row is built again only when its entry, its [`RowState`], the look or
-/// a slot's [`version`](Slot::version) changes. A slot that reads anything else from the state
-/// (a thumbnail's readiness, an editor's text) must give a version that changes with it, or
-/// its row keeps showing the old part. Rows with a rename open are never memoized.
+/// a slot's version changes. So a slot that reads anything from the state beyond its
+/// [`RowCx`] (a thumbnail's readiness, a filter's matched ranges) is made with
+/// [`Slot::new`] and a version that changes with what it reads; one that reads only its
+/// `RowCx` is [`Slot::pure`]. Rows with a rename open are never memoized.
+///
+/// [`RowCx::index`] isn't part of the version: a row kept by its memo while entries are
+/// inserted above it keeps the part it built at its old index. Draw nothing from the index
+/// (zebra stripes, a position) without versioning it.
+///
+/// Parts a motion effect flies (C23) key themselves [`ICON`] and [`LABEL`], as the default
+/// parts do.
 ///
 /// Used by: C3, C4, C5, C25, hosts.
 pub struct Slot<S> {
@@ -106,18 +114,24 @@ impl<S> Clone for Slot<S> {
 }
 
 impl<S: 'static> Slot<S> {
-    /// A slot built by `build`.
-    pub fn new(build: impl Fn(&S, &RowCx<'_>) -> El + 'static) -> Self {
+    /// A slot built by `build`, built again whenever `version` changes: the slot reads the
+    /// state beyond its [`RowCx`], and `version` hashes what it reads.
+    pub fn new(
+        version: impl Fn(&S, &RowCx<'_>) -> u64 + 'static,
+        build: impl Fn(&S, &RowCx<'_>) -> El + 'static,
+    ) -> Self {
+        Self {
+            build: Rc::new(build),
+            version: Some(Rc::new(version)),
+        }
+    }
+
+    /// A slot built by `build` from its [`RowCx`] alone, so the row's own version covers it.
+    pub fn pure(build: impl Fn(&S, &RowCx<'_>) -> El + 'static) -> Self {
         Self {
             build: Rc::new(build),
             version: None,
         }
-    }
-
-    /// The same slot, rebuilt whenever `version` changes.
-    pub fn version(mut self, version: impl Fn(&S, &RowCx<'_>) -> u64 + 'static) -> Self {
-        self.version = Some(Rc::new(version));
-        self
     }
 }
 
@@ -139,20 +153,30 @@ impl<S> Clone for ContentSlot<S> {
 }
 
 impl<S: 'static> ContentSlot<S> {
-    /// Content laid out by `build`, from the row's icon and label.
-    pub fn new(build: impl Fn(&S, &RowCx<'_>, El, El) -> El + 'static) -> Self {
+    /// Content laid out by `build` from the row's icon and label, built again whenever
+    /// `version` changes (see [`Slot`] on versions).
+    pub fn new(
+        version: impl Fn(&S, &RowCx<'_>) -> u64 + 'static,
+        build: impl Fn(&S, &RowCx<'_>, El, El) -> El + 'static,
+    ) -> Self {
+        Self {
+            build: Rc::new(build),
+            version: Some(Rc::new(version)),
+        }
+    }
+
+    /// Content laid out from its [`RowCx`], icon and label alone.
+    pub fn pure(build: impl Fn(&S, &RowCx<'_>, El, El) -> El + 'static) -> Self {
         Self {
             build: Rc::new(build),
             version: None,
         }
     }
-
-    /// The same content, rebuilt whenever `version` changes.
-    pub fn version(mut self, version: impl Fn(&S, &RowCx<'_>) -> u64 + 'static) -> Self {
-        self.version = Some(Rc::new(version));
-        self
-    }
 }
+
+/// The width of a row's outline (the cursor, a drop target, the Enter target): a hairline,
+/// as Strata draws them (`outline: 1px`, `src/style.css`). No look token sizes outlines.
+const OUTLINE: f32 = 1.0;
 
 /// What the view decided once for every row it builds.
 #[derive(Clone, Copy, Debug)]
@@ -229,7 +253,7 @@ fn build_item<S: 'static>(cfg: &Rc<Config<S>>, frame: &Frame, s: &S, index: usiz
         cursor,
         cursor_shown: cursor && frame.cursor_shown,
         drop_target: frame.drop == Some(DropOver::Row(id)),
-        renaming: cfg.rename.is_some() && frame.renaming == Some(id),
+        renaming: cfg.rename.is_some() && !cfg.read_only && frame.renaming == Some(id),
         marks: cfg
             .marks
             .as_ref()
@@ -313,9 +337,9 @@ fn item<S: 'static>(cfg: &Rc<Config<S>>, frame: &Frame, s: &S, rcx: &RowCx<'_>) 
         inner = inner.hover(kit.c.hover);
     }
     if state.cursor_shown {
-        inner = inner.outline(1.0, -1.0, kit.c.border_focus);
+        inner = inner.outline(OUTLINE, -OUTLINE, kit.c.border_focus);
     } else if state.drop_target || state.marks.enter_target {
-        inner = inner.outline(1.0, -1.0, kit.c.text_accent);
+        inner = inner.outline(OUTLINE, -OUTLINE, kit.c.text_accent);
     }
     let mut opacity: f32 = 1.0;
     if state.marks.cut {
@@ -391,14 +415,15 @@ pub(super) type DropFn<S> = Rc<dyn Fn(&mut S, Option<EntryId>, crate::contract::
 /// A folder row's drop zone: drops go to `on_drop` with the folder's id, the hover draws the
 /// row's drop highlight, and moves near the viewport's edges scroll it.
 fn row_zone<S: 'static>(cfg: &Rc<Config<S>>, on_drop: DropFn<S>, id: EntryId) -> DropZone<S> {
-    let get_mut = cfg.get_mut;
+    let get_mut = cfg.get_mut.clone();
+    let hover_mut = cfg.get_mut.clone();
     let edge = cfg.clone();
     DropZone::new(move |s: &mut S, dropped, tx| {
         (get_mut)(s).1.drop = None;
         on_drop(s, Some(id), dropped, tx);
     })
     .on_hover(move |s: &mut S, hover, _offer, _tx| {
-        let st = (get_mut)(s).1;
+        let st = (hover_mut)(s).1;
         match hover {
             DropHover::Accepting | DropHover::Rejecting => st.drop = Some(DropOver::Row(id)),
             DropHover::Left => {

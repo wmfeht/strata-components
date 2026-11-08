@@ -4,8 +4,8 @@ use std::ops::Range;
 
 use rune::{Live, Tx};
 
-use super::keys::{line_key, row_path, viewport_path};
-use super::seam::Controllers;
+use super::keys::{line_key, line_path, viewport_path};
+use super::seam::{Controllers, Hit};
 use crate::collection::selection::{Changed, Listing, Position, ScrollMemo, Selection, SyncRule};
 use crate::contract::{EntryId, EntrySource, Point, Rect};
 
@@ -34,6 +34,8 @@ pub struct CollectionState {
     pub controllers: Controllers,
     pub(super) viewport: Rect,
     pub(super) scroll: Live<f32>,
+    /// The scroll offset as a layer offset, `[0, -offset]`: what the marquee's layer rides.
+    pub(super) scroll_layer: Live<[f32; 2]>,
     pub(super) visible: Range<usize>,
     pub(super) drop: Option<DropOver>,
     pub(super) hover_live: bool,
@@ -41,7 +43,17 @@ pub struct CollectionState {
     pub(super) active: bool,
     pub(super) layout: u64,
     pub(super) pending: Option<Position>,
+    /// The scroll offset `enter` asked for while a restore waits: a scroll away from it is the
+    /// person's, and cancels the restore.
+    pub(super) pending_offset: f32,
     pub(super) per_line: usize,
+    /// The row height, as last laid out.
+    pub(super) row_height: f32,
+    /// The pointer gesture in progress belongs to the collection (its press landed in the
+    /// viewport), with what the press was over.
+    pub(super) gesture: Option<Hit>,
+    /// The selection as last announced: its revision, how many were selected and of how many.
+    pub(super) announced: (u64, usize, usize),
 }
 
 impl Default for CollectionState {
@@ -51,6 +63,7 @@ impl Default for CollectionState {
             controllers: Controllers::default(),
             viewport: Rect::default(),
             scroll: Live::new(0.0),
+            scroll_layer: Live::new([0.0, 0.0]),
             visible: 0..0,
             drop: None,
             hover_live: true,
@@ -58,7 +71,11 @@ impl Default for CollectionState {
             active: true,
             layout: 0,
             pending: None,
+            pending_offset: 0.0,
             per_line: 1,
+            row_height: 0.0,
+            gesture: None,
+            announced: (0, 0, 0),
         }
     }
 }
@@ -148,6 +165,15 @@ impl CollectionState {
         self.layout
     }
 
+    /// The text the live status line reads now: the last announced selection, worded by
+    /// `wording`.
+    pub(super) fn announcement(&self) -> super::Announcement {
+        super::Announcement {
+            selected: self.announced.1,
+            total: self.announced.2,
+        }
+    }
+
     /// Whether a restore waits for the listing to complete.
     pub fn restore_pending(&self) -> bool {
         self.pending.is_some()
@@ -156,8 +182,12 @@ impl CollectionState {
     // Setting what the host decides.
 
     /// Sets the layout key: the view mode and anything that changes wrapping (an icons grid's
-    /// width). A remembered scroll offset comes back only in the layout it was measured in.
+    /// width). A remembered scroll offset comes back only in the layout it was measured in. A
+    /// new layout (a view switch) cancels a restore that waits for its listing.
     pub fn set_layout_key(&mut self, layout: u64) {
+        if layout != self.layout {
+            self.pending = None;
+        }
         self.layout = layout;
     }
 
@@ -179,6 +209,17 @@ impl CollectionState {
     pub fn keyboard_moved(&mut self) {
         self.keyboard = true;
         self.hover_live = false;
+    }
+
+    /// Takes the selection's current state as the one the live status line reads out, if an
+    /// operation changed it since the last time (its revision moved on). The element does this
+    /// after every input and in [`CollectionState::sync`] and [`CollectionState::enter`]; a
+    /// host that changes the selection itself (a Select All shortcut) calls it after.
+    pub fn note_selection(&mut self, source: &dyn EntrySource) {
+        let revision = self.selection.revision();
+        if revision != self.announced.0 {
+            self.announced = (revision, self.selection.len(), source.len());
+        }
     }
 
     // Keeping in step with the source.
@@ -203,15 +244,30 @@ impl CollectionState {
         if rule.listing == Listing::Complete
             && let Some(position) = self.pending.take()
         {
-            return self.apply_position(scope, source, &position, rule, tx);
+            let changed = self.apply_position(scope, source, &position, rule, tx);
+            self.note_selection(source);
+            return changed;
         }
         let changed = self.selection.sync(source, rule);
-        if let Some(id) = self.selection.cursor()
-            && source.index_of(id).is_some()
-        {
-            tx.keep_on_screen(row_path(scope, id));
+        if let Some(index) = self.selection.cursor_index(source) {
+            // Rune holds a virtual row by its key: in a grid, the line the cursor's cell sits
+            // in now. When the change moved the cell to another line, that line's key is new,
+            // Rune finds no drawn rect to hold, and lets it go.
+            tx.keep_on_screen(line_path(scope, source, index, self.per_line));
         }
+        self.note_selection(source);
         changed
+    }
+
+    /// Whether the line holding entry `index` shows whole in the viewport, as last laid out.
+    fn shows_line(&self, index: usize) -> bool {
+        let h = self.row_height;
+        if h <= 0.0 {
+            return false;
+        }
+        let top = (index / self.per_line.max(1)) as f32 * h;
+        let offset = self.scroll.get();
+        top >= offset && top + h <= offset + self.viewport.h
     }
 
     /// Scrolls the entry at `index` into view, mounted or not, just far enough.
@@ -240,7 +296,15 @@ impl CollectionState {
     /// With a position, the selection, cursor and anchor come back. The scroll offset comes
     /// back if it was measured in the current layout; otherwise the cursor scrolls into view.
     /// While the listing loads, the restore waits for [`CollectionState::sync`] with a
-    /// complete listing; a press or a key in the collection before then cancels it.
+    /// complete listing; a press, a key or a scroll in the collection before then cancels it,
+    /// and so does a new layout key.
+    ///
+    /// Either way, the controllers' gestures (an open marquee) and keyboard mode end, and the
+    /// view moves only by instant scrolls (an offset, an instant reveal, or the top), each of
+    /// which stops a glide in progress: a controller's `reset`, which has no [`Ctx`], never
+    /// leaves an auto-scroll glide running.
+    ///
+    /// [`Ctx`]: super::Ctx
     ///
     /// With none, the selection clears and the view starts at the top. Picking an entry
     /// (the folder you came from, the first entry) is the host's policy.
@@ -254,9 +318,15 @@ impl CollectionState {
     ) -> Changed {
         self.pending = None;
         self.drop = None;
-        match position {
+        // The folder left takes its gestures and keyboard mode with it.
+        self.controllers.reset();
+        self.gesture = None;
+        self.keyboard = false;
+        self.hover_live = true;
+        let changed = match position {
             Some(position) if listing == Listing::Loading => {
                 self.pending = Some(position.clone());
+                self.pending_offset = 0.0;
                 let changed = self.selection.restore(&Position::default());
                 tx.scroll_to_instant(viewport_path(scope), 0.0, 0.0);
                 changed | self.selection.sync(source, SyncRule::loading())
@@ -271,7 +341,9 @@ impl CollectionState {
                 };
                 changed | self.selection.sync(source, rule)
             }
-        }
+        };
+        self.note_selection(source);
+        changed
     }
 
     /// Drops a restore that waits for its listing.
@@ -291,6 +363,12 @@ impl CollectionState {
         match position.scroll.and_then(|m| m.offset_for(self.layout)) {
             Some(offset) => tx.scroll_to_instant(viewport_path(scope), 0.0, offset),
             None => match self.selection.cursor_index(source) {
+                // Instant either way, and either way a scroll request, which stops a glide in
+                // progress: the reveal when the row is out of view, else a scroll to where the
+                // view is (a reveal that has nowhere to go might leave a glide running).
+                Some(index) if self.shows_line(index) => {
+                    tx.scroll_to_instant(viewport_path(scope), 0.0, self.scroll.get());
+                }
                 Some(index) => self.reveal(scope, source, index, tx),
                 None => tx.scroll_to_instant(viewport_path(scope), 0.0, 0.0),
             },

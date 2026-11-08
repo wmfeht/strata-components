@@ -6,7 +6,7 @@
 //! folder (two panes) tell their rows apart by path: [`row_path`] starts at the collection's
 //! own key.
 
-use crate::contract::EntryId;
+use crate::contract::{EntryId, EntrySource};
 
 /// The scroll viewport's key, under the collection's key.
 pub const VIEWPORT: &str = "viewport";
@@ -14,10 +14,11 @@ pub const VIEWPORT: &str = "viewport";
 /// The virtual rows stack's key, under the viewport.
 pub const ROWS: &str = "rows";
 
-/// The row icon's key, under its row.
+/// The row icon's key, under its row. A custom icon slot keys its part this too, so a motion
+/// effect (C23) finds it by [`part_path`].
 pub const ICON: &str = "icon";
 
-/// The row label's key, under its row.
+/// The row label's key, under its row. A custom label slot keys its part this too.
 pub const LABEL: &str = "label";
 
 /// The live status line's key, under the collection's key.
@@ -55,4 +56,38 @@ pub fn row_path(scope: &str, id: EntryId) -> String {
 /// `scope`: what a motion effect flies from (C23).
 pub fn part_path(scope: &str, id: EntryId, part: &str) -> String {
     format!("{}/{part}", row_path(scope, id))
+}
+
+/// The full key path of the entry at `index` in the collection keyed `scope`, whose lines
+/// hold `per_line` entries each: `row_path` for one per line, else the cell under its line
+/// (`{scope}/viewport/rows/line-{first}/row-{id}`).
+pub(super) fn entry_path(
+    scope: &str,
+    source: &dyn EntrySource,
+    index: usize,
+    per_line: usize,
+) -> String {
+    let id = source.id_at(index);
+    if per_line <= 1 {
+        return row_path(scope, id);
+    }
+    let first = source.id_at(index / per_line * per_line);
+    format!(
+        "{scope}/{VIEWPORT}/{ROWS}/{}/{}",
+        line_key(first, per_line),
+        row_key(id)
+    )
+}
+
+/// The full key path of the virtual line holding the entry at `index`: the row itself for one
+/// entry per line. Rune holds and reveals virtual rows by these keys.
+pub(super) fn line_path(
+    scope: &str,
+    source: &dyn EntrySource,
+    index: usize,
+    per_line: usize,
+) -> String {
+    let per = per_line.max(1);
+    let first = source.id_at(index / per * per);
+    format!("{scope}/{VIEWPORT}/{ROWS}/{}", line_key(first, per))
 }

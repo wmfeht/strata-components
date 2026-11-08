@@ -16,8 +16,9 @@
 //!
 //! The bar (plan §4 C1, "no view commit per frame"; work package C1e):
 //! - no view run while scrolling;
+//! - no view run for the moves of a drag that changes nothing;
 //! - scroll frames at p50 within max(1.5 × Table's, 0.5 ms) and p95 within max(1.5 × Table's,
-//!   4 ms), and none over a 60 Hz frame (16.7 ms);
+//!   1.5 ms), and none over a 60 Hz frame (16.7 ms);
 //! - a click that changes the selection commits within 4 ms at p95, and rebuilds at most 4
 //!   rows on average;
 //! - a refresh commits within 8 ms (`RUNE_COMMIT_BUDGET_MS=8`).
@@ -55,6 +56,7 @@ struct Run {
     scroll_p95: f64,
     scroll_max: f64,
     scroll_views: usize,
+    drag_views: usize,
     click_p50: f64,
     click_p95: f64,
     rebuilt_per_click: f64,
@@ -72,6 +74,7 @@ impl Run {
             scroll_p95: min(|r| r.scroll_p95),
             scroll_max: min(|r| r.scroll_max),
             scroll_views: runs.iter().map(|r| r.scroll_views).max().unwrap_or(0),
+            drag_views: runs.iter().map(|r| r.drag_views).max().unwrap_or(0),
             click_p50: min(|r| r.click_p50),
             click_p95: min(|r| r.click_p95),
             rebuilt_per_click: min(|r| r.rebuilt_per_click),
@@ -148,6 +151,18 @@ fn element_run() -> Run {
     run.click_p50 = percentile(&mut times, 0.5);
     run.click_p95 = percentile(&mut times, 0.95);
     assert!(!rt.state.coll.selection.is_empty(), "the clicks selected");
+
+    // A press dragged across rows: with no controller taking it, its moves change nothing.
+    rt.pointer_down(300.0, 300.0);
+    rt.frame(1.0 / 120.0);
+    let views = VIEWS.with(Cell::get);
+    for k in 1..=60 {
+        rt.pointer_move(300.0, 300.0 + k as f32 * 5.0);
+        rt.frame(1.0 / 120.0);
+    }
+    run.drag_views = VIEWS.with(Cell::get) - views;
+    rt.pointer_up(300.0, 600.0);
+    rt.frame(1.0 / 120.0);
 
     let t = Instant::now();
     rt.update(|s, tx| {
@@ -289,6 +304,7 @@ fn perf_hundred_thousand_entries_against_rune_kit_table() {
         c.scroll_max, t.scroll_max
     );
     println!("  view runs scrolling C1e {:7}", c.scroll_views);
+    println!("  view runs, 60 drag moves C1e {:2}", c.drag_views);
     println!(
         "  click commit p50    C1e {:7.3} ms   Table {:7.3} ms",
         c.click_p50, t.click_p50
@@ -309,6 +325,7 @@ fn perf_hundred_thousand_entries_against_rune_kit_table() {
     );
 
     assert_eq!(c.scroll_views, 0, "scrolling ran the view");
+    assert_eq!(c.drag_views, 0, "drag moves ran the view");
     assert!(
         c.scroll_p50 <= (1.5 * t.scroll_p50).max(0.5),
         "scroll p50 {:.3} ms over the bar (Table {:.3} ms)",
@@ -316,7 +333,7 @@ fn perf_hundred_thousand_entries_against_rune_kit_table() {
         t.scroll_p50
     );
     assert!(
-        c.scroll_p95 <= (1.5 * t.scroll_p95).max(4.0),
+        c.scroll_p95 <= (1.5 * t.scroll_p95).max(1.5),
         "scroll p95 {:.3} ms over the bar (Table {:.3} ms)",
         c.scroll_p95,
         t.scroll_p95

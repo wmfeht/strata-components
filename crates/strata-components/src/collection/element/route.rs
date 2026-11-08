@@ -6,10 +6,14 @@
 //! rebased to the mounted rows (Rune draft U-C1e-1). Content coordinates come from the window
 //! point, the viewport's window origin (recorded from `on_layout`) and the scroll offset
 //! (followed by `on_scroll_offset`), as `contract::geometry` defines them.
+//!
+//! An input that changes nothing the view reads commits no view: a pointer move with no
+//! selection change, no effect and no [`Ctx::repaint`] says `Tx::live_only`, as do the
+//! moves and the release of a gesture the collection didn't take.
 
 use std::rc::Rc;
 
-use rune::{Drag, KeyEvent, Mods, Phase, PointerButton, PointerEvent, Tx};
+use rune::{Drag, KeyEvent, KeyPlatform, Mods, Phase, PointerButton, PointerEvent, Tx};
 
 use super::seam::{
     Ctx, Effect, Flow, Hit, KeyInput, PointerInput, PointerPhase, Region, default_pointer,
@@ -28,32 +32,38 @@ enum Source {
 }
 
 /// Runs `f` with the controllers and a [`Ctx`], then applies what it changed and asked for.
+/// Returns the controller's flow, and whether anything the view reads changed.
 fn dispatch<S: 'static>(
     cfg: &Rc<Config<S>>,
     s: &mut S,
     tx: &mut Tx,
     from: Source,
     f: impl FnOnce(&mut super::Controllers, &mut Ctx<'_>) -> Flow,
-) -> Flow {
-    let now = cfg.clock.map_or(0.0, |c| c(s));
-    let row_height = (cfg.row_height)((cfg.look)(s));
+) -> (Flow, bool) {
+    let now = cfg.now(s);
+    let row_height = cfg.row_height_of(s);
     let (src, st) = (cfg.get_mut)(s);
     let geometry = cfg
         .lines
         .geometry(src.len(), row_height, st.viewport.w, st.viewport.h);
     let visible = st.visible_content();
+    let origin = Point::new(st.viewport.x, st.viewport.y);
     let before = st.selection.cursor();
     let super::CollectionState {
         selection,
         controllers,
         ..
     } = &mut *st;
-    let mut cx = Ctx::new(src, &*geometry, visible, now, selection);
+    let mut cx = Ctx::new(src, &*geometry, visible, now, selection)
+        .read_only_mode(cfg.read_only)
+        .window_origin(origin)
+        .with_settings(cfg.settings.clone());
     let flow = f(controllers, &mut cx);
-    let (changed, effects) = cx.finish();
+    let (changed, effects, repaint) = cx.finish();
     let moved = before != st.selection.cursor();
+    let shows = changed.any() || repaint || !effects.is_empty();
     after(cfg, s, tx, from, changed, moved, effects);
-    flow
+    (flow, shows)
 }
 
 /// What the element does once a controller handled an input.
@@ -68,6 +78,7 @@ fn after<S: 'static>(
 ) {
     let mut intents = Vec::new();
     let mut revealed = false;
+    let mut mode_set = false;
     for effect in effects {
         match effect {
             Effect::Reveal(index) => {
@@ -91,21 +102,37 @@ fn after<S: 'static>(
                     tx.scroll_to_instant(key, 0.0, y);
                 }
             }
+            Effect::Glide { y, spring } => {
+                tx.scroll_to_with(keys::viewport_path(&cfg.key), 0.0, y, spring);
+            }
             Effect::KeyboardMode(on) => {
                 let st = (cfg.get_mut)(s).1;
                 st.keyboard = on;
                 st.hover_live = !on;
+                mode_set = true;
             }
             Effect::WakeAfter(d) => tx.wake_after(d),
             Effect::Intent(intent) => intents.push(intent),
         }
     }
-    // A key that moves the cursor keeps it in view; a pointer moves it only to what it shows.
+    // A key that moves the cursor turns keyboard mode on, unless the controller said
+    // otherwise; a key that changes nothing leaves it as it was.
+    if from == Source::Key && moved && !mode_set {
+        let st = (cfg.get_mut)(s).1;
+        st.keyboard = true;
+        st.hover_live = false;
+    }
+    // A key or a tick that moves the cursor keeps it in view; a pointer moves it only to what
+    // it shows.
     if moved && !matches!(from, Source::Pointer(_)) && !revealed {
         let (src, st) = (cfg.get_mut)(s);
         if let Some(index) = st.selection.cursor_index(src) {
             st.reveal(&cfg.key, src, index, tx);
         }
+    }
+    if changed.selection {
+        let (src, st) = (cfg.get_mut)(s);
+        st.note_selection(src);
     }
     if changed.cursor
         && let Some(f) = &cfg.on_cursor
@@ -148,10 +175,10 @@ fn begin_marquee<S: 'static>(
     });
 }
 
-/// The entry and region under content point `p`.
-fn hit<S: 'static>(cfg: &Rc<Config<S>>, s: &S, p: Point) -> Hit {
-    let look = (cfg.look)(s);
-    let row_height = (cfg.row_height)(look);
+/// The entry under content point `p`, and the region it's in when `regions` (presses and
+/// releases); a move reuses the press's region over the pressed entry.
+fn hit<S: 'static>(cfg: &Rc<Config<S>>, s: &S, p: Point, press: Option<Hit>) -> Hit {
+    let row_height = cfg.row_height_of(s);
     let (src, st) = (cfg.get)(s);
     let geometry = cfg
         .lines
@@ -162,11 +189,17 @@ fn hit<S: 'static>(cfg: &Rc<Config<S>>, s: &S, p: Point) -> Hit {
             region: Region::Gutter,
         };
     };
-    let rect = geometry.rect_of(index);
-    let local = Point::new(p.x - rect.x, p.y - rect.y);
-    let region = match &cfg.regions {
-        Some(f) => f(s, index, local),
-        None => default_region(cfg, s, src, index, local),
+    let region = match press {
+        Some(press) if press.index == Some(index) => press.region,
+        Some(_) => Region::Gutter,
+        None => {
+            let rect = geometry.rect_of(index);
+            let local = Point::new(p.x - rect.x, p.y - rect.y);
+            match &cfg.regions {
+                Some(f) => f(s, index, local),
+                None => default_region(cfg, s, src, index, local),
+            }
+        }
     };
     Hit {
         index: Some(index),
@@ -202,23 +235,45 @@ fn default_region<S: 'static>(
 pub(super) fn on_drag<S: 'static>(cfg: &Rc<Config<S>>, s: &mut S, d: &mut Drag, tx: &mut Tx) {
     let [wx, wy] = d.window_point();
     let window = Point::new(wx, wy);
-    let st = (cfg.get)(s).1;
     let phase = match d.phase {
         Phase::Down => PointerPhase::Down,
         Phase::Move => PointerPhase::Move,
         Phase::Up => PointerPhase::Up,
     };
-    // A press outside the viewport (on a header) isn't the collection's.
-    if phase == PointerPhase::Down && !st.viewport.contains(window) {
-        tx.live_only();
-        return;
+    let st = (cfg.get)(s).1;
+    let press = st.gesture;
+    match phase {
+        // A press outside the viewport (on a header) isn't the collection's, and neither are
+        // the moves and the release that follow it.
+        PointerPhase::Down if !st.viewport.contains(window) => {
+            (cfg.get_mut)(s).1.gesture = None;
+            tx.live_only();
+            return;
+        }
+        PointerPhase::Move | PointerPhase::Up if press.is_none() => {
+            tx.live_only();
+            return;
+        }
+        _ => {}
     }
     let point = st.content_point(window);
+    let hover_was_live = st.hover_live;
+    let hit = hit(
+        cfg,
+        s,
+        point,
+        (phase == PointerPhase::Move).then_some(press).flatten(),
+    );
     {
         let st = (cfg.get_mut)(s).1;
-        if phase == PointerPhase::Down {
-            st.pending = None;
-            st.keyboard = false;
+        match phase {
+            PointerPhase::Down => {
+                st.pending = None;
+                st.keyboard = false;
+                st.gesture = Some(hit);
+            }
+            PointerPhase::Up => st.gesture = None,
+            PointerPhase::Move => {}
         }
         st.hover_live = true;
     }
@@ -228,13 +283,22 @@ pub(super) fn on_drag<S: 'static>(cfg: &Rc<Config<S>>, s: &mut S, d: &mut Drag, 
         point,
         window,
         travel: Point::new(d.dx, d.dy),
-        hit: hit(cfg, s, point),
+        hit,
         mods: tx.mods(),
         clicks: d.clicks,
         cancelled: d.cancelled(),
-        now: cfg.clock.map_or(0.0, |c| c(s)),
+        now: cfg.now(s),
     };
-    route_pointer(cfg, s, tx, &input);
+    let marquee = (cfg.get)(s)
+        .1
+        .controllers
+        .marquee
+        .as_ref()
+        .is_some_and(|m| m.active());
+    let shows = route_pointer(cfg, s, tx, &input);
+    if phase == PointerPhase::Move && !shows && !marquee && hover_was_live {
+        tx.live_only();
+    }
 }
 
 /// `on_secondary_press_local` on the container.
@@ -257,19 +321,30 @@ pub(super) fn on_secondary<S: 'static>(
         point,
         window,
         travel: Point::default(),
-        hit: hit(cfg, s, point),
+        hit: hit(cfg, s, point, None),
         mods: tx.mods(),
         clicks: 1,
         cancelled: false,
-        now: cfg.clock.map_or(0.0, |c| c(s)),
+        now: cfg.now(s),
     };
     route_pointer(cfg, s, tx, &input);
 }
 
-fn route_pointer<S: 'static>(cfg: &Rc<Config<S>>, s: &mut S, tx: &mut Tx, input: &PointerInput) {
+/// Routes a pointer input: the keyboard controller sees it, then an open marquee takes the
+/// gesture's moves and release, else the pointer controller (or the default) has it. True when
+/// anything the view reads changed.
+fn route_pointer<S: 'static>(
+    cfg: &Rc<Config<S>>,
+    s: &mut S,
+    tx: &mut Tx,
+    input: &PointerInput,
+) -> bool {
     let input = *input;
     let moved_to = (input.phase == PointerPhase::Move).then_some(input.point);
-    dispatch(cfg, s, tx, Source::Pointer(moved_to), move |c, cx| {
+    let (_, shows) = dispatch(cfg, s, tx, Source::Pointer(moved_to), move |c, cx| {
+        if let Some(k) = c.keyboard.as_mut() {
+            k.pointer_seen(&input);
+        }
         if let Some(m) = c.marquee.as_mut()
             && m.active()
         {
@@ -290,6 +365,7 @@ fn route_pointer<S: 'static>(cfg: &Rc<Config<S>>, s: &mut S, tx: &mut Tx, input:
             None => default_pointer(&input, cx),
         }
     });
+    shows
 }
 
 /// `on_key` on the container. True when a controller took the key.
@@ -299,14 +375,19 @@ pub(super) fn on_key<S: 'static>(
     event: &KeyEvent,
     tx: &mut Tx,
 ) -> bool {
+    // A copy of the key's transaction, so controllers can match layout-aware chords
+    // (`KeyInput::matches`) while the element keeps the real one for its effects.
+    let keys = tx.clone();
     let input = KeyInput {
         event,
         physical: tx.physical_key(),
         base: tx.key_base(),
         repeat: tx.key_repeat(),
-        now: cfg.clock.map_or(0.0, |c| c(s)),
+        platform: KeyPlatform::current(),
+        now: cfg.now(s),
+        tx: Some(&keys),
     };
-    let flow = dispatch(cfg, s, tx, Source::Key, |c, cx| {
+    let (flow, _) = dispatch(cfg, s, tx, Source::Key, |c, cx| {
         if let Some(p) = c.pointer.as_mut() {
             p.key_seen(&input);
         }
@@ -321,11 +402,8 @@ pub(super) fn on_key<S: 'static>(
             None => Flow::Pass,
         }
     });
-    let st = (cfg.get_mut)(s).1;
     if flow == Flow::Handled {
-        st.pending = None;
-        st.keyboard = true;
-        st.hover_live = false;
+        (cfg.get_mut)(s).1.pending = None;
         true
     } else {
         false
@@ -342,37 +420,46 @@ pub(super) fn on_pointer_move<S: 'static>(cfg: &Rc<Config<S>>, s: &mut S, tx: &m
     }
 }
 
-/// `on_layout_tx` on the viewport: where it shows, as bookkeeping (the view doesn't read it).
+/// `on_layout_tx` on the viewport: where it shows, as bookkeeping, except that a width that
+/// changes how many entries a line holds (a grid's reflow) builds the view again.
 pub(super) fn on_layout<S: 'static>(cfg: &Rc<Config<S>>, s: &mut S, r: [f32; 4], tx: &mut Tx) {
-    let per = cfg.lines.per_line().max(1);
+    let per = cfg.lines.per_line(r[2]).max(1);
+    let row_height = cfg.row_height_of(s);
     let st = (cfg.get_mut)(s).1;
     st.viewport = Rect::from(r);
-    st.per_line = per;
-    tx.live_only();
+    st.row_height = row_height;
+    if per == st.per_line {
+        tx.live_only();
+    } else {
+        st.per_line = per;
+    }
 }
 
-/// `on_visible_rows` on the rows stack, with lines turned into entries.
+/// `on_visible_rows` on the rows stack, with lines turned into entries. A scroll away from
+/// where a waiting restore put the view is the person's, and cancels it.
 pub(super) fn on_visible<S: 'static>(
     cfg: &Rc<Config<S>>,
     s: &mut S,
     lines: std::ops::Range<usize>,
 ) -> bool {
-    let per = cfg.lines.per_line().max(1);
     let (src, st) = (cfg.get_mut)(s);
+    let per = st.per_line.max(1);
     let len = src.len();
     let range = (lines.start * per).min(len)..(lines.end * per).min(len);
     st.visible = range.clone();
-    st.per_line = per;
+    if st.pending.is_some() && (st.scroll.get() - st.pending_offset).abs() > 0.5 {
+        st.pending = None;
+    }
     match &cfg.on_visible {
         Some(f) => f(s, range),
         None => false,
     }
 }
 
-/// The controllers' timeouts, from the host's poll.
+/// The controllers' timeouts and queued commands, from the host's poll.
 pub(super) fn tick<S: 'static>(cfg: &Rc<Config<S>>, s: &mut S, tx: &mut Tx) -> bool {
     let mut handled = false;
-    dispatch(cfg, s, tx, Source::Tick, |c, cx| {
+    let (_, shows) = dispatch(cfg, s, tx, Source::Tick, |c, cx| {
         for flow in [
             c.pointer.as_mut().map(|p| p.tick(cx)),
             c.keyboard.as_mut().map(|k| k.tick(cx)),
@@ -385,7 +472,7 @@ pub(super) fn tick<S: 'static>(cfg: &Rc<Config<S>>, s: &mut S, tx: &mut Tx) -> b
         }
         Flow::Pass
     });
-    handled
+    handled || shows
 }
 
 /// A drag over the collection near the viewport's top or bottom edge glides it that way, a
@@ -396,7 +483,7 @@ pub(super) fn drop_edge_scroll<S: 'static>(
     point: PointerEvent,
     tx: &mut Tx,
 ) {
-    let row_height = (cfg.row_height)((cfg.look)(s));
+    let row_height = cfg.row_height_of(s);
     let st = (cfg.get)(s).1;
     let y = point.window_y - st.viewport.y;
     let offset = st.scroll_offset();

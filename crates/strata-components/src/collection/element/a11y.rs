@@ -66,10 +66,11 @@ pub struct Announcement {
 }
 
 /// The default wording: a count once more than one entry is selected (one selected entry
-/// says so itself, through its row's selected state), else nothing.
+/// says so itself, through its row's selected state), else nothing. It leaves out the total,
+/// which changes with the listing and would re-announce an unchanged selection.
 pub fn default_announcement(a: &Announcement) -> String {
     if a.selected > 1 {
-        format!("{} of {} items selected", a.selected, a.total)
+        format!("{} items selected", a.selected)
     } else {
         String::new()
     }

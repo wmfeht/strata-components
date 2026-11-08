@@ -2,6 +2,30 @@
 //!
 //! Rune virtualizes vertical rows only, so a grid (C3) packs several entries into each virtual
 //! line. The list and each Columns column put one entry on each line ([`OnePerLine`]).
+//!
+//! # Lines that aren't entries (planned)
+//!
+//! ListTable's grouped mode (C4) needs lines that hold no entry: a group's header. That is a
+//! planned, additive extension of this trait, so that C4 never edits the element:
+//!
+//! ```ignore
+//! /// A run of lines: a header, or entries.
+//! #[non_exhaustive]
+//! pub enum Span { Header { key: u64, height: f32 }, Entries { range: Range<usize> } }
+//!
+//! trait Lines {
+//!     // …as now, plus, with a default of `None` (no headers):
+//!     fn spans(&self, len: usize) -> Option<Rc<[Span]>> { None }
+//! }
+//! // and on the builder: `.header_line(Slot-like Fn(&S, key) -> El)`.
+//! ```
+//!
+//! With spans, the element keys a header line `head-{key}`, maps lines to entries through
+//! prefix sums over the spans (O(log spans) a lookup, nothing per entry), and gives the
+//! geometry the same spans so presses, the marquee and Page Up and Down skip headers. Rune
+//! keeps a sticky header only inside its own virtual row, so the header that stays at the top
+//! is an overlay (`Collection::overlay`) the host fills from the group of the first visible
+//! entry (`on_visible`).
 
 use crate::contract::{CollectionGeometry, UniformRows};
 
@@ -13,8 +37,10 @@ use crate::contract::{CollectionGeometry, UniformRows};
 ///
 /// Used by: C1e ([`OnePerLine`]), C3 (a grid of N per line).
 pub trait Lines {
-    /// How many entries each line holds: at least 1, the same for every line.
-    fn per_line(&self) -> usize;
+    /// How many entries each line holds in a viewport `width` points wide: at least 1, the
+    /// same for every line. The first build has no width yet (0): return 1 or a guess; the
+    /// element builds again once the viewport's width gives another count.
+    fn per_line(&self, width: f32) -> usize;
 
     /// The geometry of `len` entries in lines `row_height` tall, in a viewport `width` by
     /// `viewport_height` points, in content coordinates.
@@ -32,7 +58,7 @@ pub trait Lines {
 pub struct OnePerLine;
 
 impl Lines for OnePerLine {
-    fn per_line(&self) -> usize {
+    fn per_line(&self, _width: f32) -> usize {
         1
     }
 

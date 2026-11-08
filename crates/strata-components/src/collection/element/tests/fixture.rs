@@ -1,5 +1,6 @@
 //! A source for the element's tests: entries with dense ids, so `index_of` is a lookup in a
-//! vector, not `ListSource`'s SipHash map (which would dominate a 100,000-entry perf path).
+//! vector. (Review round 1 measured the perf test with `ListSource` too: its map made no
+//! difference to the figures, since a frame resolves only the mounted rows.)
 
 use crate::contract::{Entry, EntryId, EntryKind, EntrySource};
 
@@ -30,6 +31,12 @@ impl FastSource {
             self.names.push(format!("new {id}.txt"));
             self.ids.insert(0, EntryId::new(id));
         }
+        self.reindex();
+    }
+
+    /// Removes the entries at `range`, as a delete does.
+    pub(crate) fn remove(&mut self, range: std::ops::Range<usize>) {
+        self.ids.drain(range);
         self.reindex();
     }
 

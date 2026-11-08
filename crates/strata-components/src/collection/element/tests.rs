@@ -39,6 +39,9 @@ struct Host {
     built: Rc<Cell<usize>>,
     per_line: usize,
     app_keys: usize,
+    /// A header above the viewport, and an overlay over it.
+    parts: bool,
+    read_only: bool,
 }
 
 impl Host {
@@ -55,6 +58,8 @@ impl Host {
             built: Rc::new(Cell::new(0)),
             per_line: 1,
             app_keys: 0,
+            parts: false,
+            read_only: false,
         }
     }
 }
@@ -63,12 +68,55 @@ impl Host {
 struct PerLine(usize);
 
 impl Lines for PerLine {
-    fn per_line(&self) -> usize {
+    fn per_line(&self, _width: f32) -> usize {
         self.0
     }
 
     fn geometry(&self, len: usize, h: f32, w: f32, vh: f32) -> Box<dyn CollectionGeometry> {
-        OnePerLine.geometry(len.div_ceil(self.0), h, w, vh)
+        Box::new(Grid {
+            len,
+            per: self.0,
+            h,
+            w,
+            vh,
+        })
+    }
+}
+
+/// `per` equal cells to a line, as the element draws a grid's lines.
+struct Grid {
+    len: usize,
+    per: usize,
+    h: f32,
+    w: f32,
+    vh: f32,
+}
+
+impl CollectionGeometry for Grid {
+    fn rect_of(&self, i: usize) -> crate::contract::Rect {
+        let cw = self.w / self.per as f32;
+        crate::contract::Rect::new(
+            (i % self.per) as f32 * cw,
+            (i / self.per) as f32 * self.h,
+            cw,
+            self.h,
+        )
+    }
+    fn index_at(&self, p: Point) -> Option<usize> {
+        if p.x < 0.0 || p.y < 0.0 || p.x >= self.w {
+            return None;
+        }
+        let i = (p.y / self.h) as usize * self.per + (p.x / (self.w / self.per as f32)) as usize;
+        (i < self.len).then_some(i)
+    }
+    fn range_in(&self, _: crate::contract::Rect) -> crate::contract::IndexRanges {
+        crate::contract::IndexRanges::new()
+    }
+    fn neighbor(&self, _: usize, _: crate::contract::Direction) -> Option<usize> {
+        None
+    }
+    fn page_step(&self) -> usize {
+        ((self.vh / self.h) as usize).max(1) * self.per
     }
 }
 
@@ -84,7 +132,7 @@ fn collection(s: &Host) -> Collection<Host> {
         |s: &Host| s.version,
     )
     .name("Files")
-    .label(Slot::new(move |_: &Host, rcx| {
+    .label(Slot::pure(move |_: &Host, rcx| {
         built.set(built.get() + 1);
         rune::text(rcx.entry.name.to_owned())
     }))
@@ -97,7 +145,18 @@ fn collection(s: &Host) -> Collection<Host> {
     if s.per_line > 1 {
         c = c.lines(PerLine(s.per_line)).roles(Roles::GRID_CELLS);
     }
-    c
+    if s.parts {
+        c = c
+            .header(|_: &Host| Some(rune::el().key("head").w_full().h(40.0)))
+            .overlay(|_: &Host| Some(rune::el().key("band").w_full().h_full()));
+    }
+    if s.read_only {
+        c = c.read_only().rename(
+            |_: &Host| Some(EntryId::new(2)),
+            Slot::pure(|_: &Host, _| rune::el().key("editor")),
+        );
+    }
+    c.settings(7u32)
 }
 
 fn view(s: &Host, _: &mut Cx<Host>) -> El {
@@ -284,6 +343,18 @@ impl MarqueeController for Band {
     }
     fn band(&self) -> Option<crate::contract::Rect> {
         None
+    }
+    fn reset(&mut self) {
+        self.1 = false;
+    }
+    fn overlay(&self, _look: &Look) -> Option<El> {
+        self.1.then(|| {
+            rune::el()
+                .key("drawn-band")
+                .absolute(0.0, 100.0)
+                .w(60.0)
+                .h(60.0)
+        })
     }
 }
 
@@ -472,13 +543,11 @@ fn a_selection_change_rebuilds_only_the_rows_whose_state_changed() {
 
 #[test]
 fn scrolling_runs_no_view() {
-    let views = Rc::new(Cell::new(0usize));
     thread_local! { static VIEWS: Cell<usize> = const { Cell::new(0) }; }
     fn counted(s: &Host, cx: &mut Cx<Host>) -> El {
         VIEWS.with(|v| v.set(v.get() + 1));
         view(s, cx)
     }
-    let _ = views;
     let mut rt = Runtime::new(Host::new(20_000), counted, (W, H), Env::new(false, 1.0));
     rt.frame(0.0);
     rt.frame(1.0 / 60.0);
@@ -643,27 +712,12 @@ fn the_cursor_row_is_the_active_descendant_and_rows_say_they_are_selected() {
 fn a_grid_packs_entries_into_lines_of_cells() {
     let mut host = Host::new(10);
     host.per_line = 4;
-    let rt = runtime(host);
+    let mut rt = runtime(host);
+    settle(&mut rt);
     let all = rt.elements();
     assert_eq!(all.iter().filter(|e| e.role == "gridcell").count(), 10);
     assert_eq!(all.iter().filter(|e| e.role == "row").count(), 3);
     assert!(all.iter().any(|e| e.role == "grid"));
-}
-
-#[test]
-fn part_keys_are_full_paths_under_the_collection() {
-    assert_eq!(row_key(id(42)), "row-42");
-    assert_eq!(row_path("list", id(42)), "list/viewport/rows/row-42");
-    assert_eq!(
-        part_path("list", id(42), ICON),
-        "list/viewport/rows/row-42/icon"
-    );
-    let rt = runtime(Host::new(3));
-    assert!(
-        rt.elements()
-            .iter()
-            .any(|e| e.path.ends_with("row-2") && e.role == "option")
-    );
 }
 
 // The seam requests from C1b's plan (N1–N7).
@@ -833,10 +887,6 @@ fn a_controller_runs_against_a_ctx_without_a_runtime() {
     assert!(
         matches!(cx.effects(), [Effect::Intent(Intent::Clicked { id })] if *id == EntryId::new(3))
     );
-    let _ = KeyInput::new(&KeyEvent {
-        key: Key::Escape,
-        mods: Mods::default(),
-    });
     drop(cx);
     assert_eq!(sel.cursor(), Some(EntryId::new(3)));
 }
@@ -887,5 +937,624 @@ fn a_drag_intent_carries_the_window_point() {
             assert_eq!(*window, Point::new(x + 12.0, y + 3.0));
         }
         other => panic!("no drag intent: {other:?}"),
+    }
+}
+
+// Review round 1.
+
+/// Two panes over one folder, each with its own state in one `Vec`, reached through indices
+/// the accessors capture (as C2's columns are).
+struct Panes {
+    src: FastSource,
+    colls: Vec<CollectionState>,
+    look: Look,
+}
+
+fn pane(i: usize) -> Collection<Panes> {
+    Collection::new(
+        ["a", "b"][i],
+        move |s: &Panes| (&s.src, &s.colls[i]),
+        move |s: &mut Panes| (&s.src, &mut s.colls[i]),
+        |s: &Panes| &s.look,
+        |_: &Panes| 1,
+    )
+}
+
+fn panes_view(s: &Panes, _: &mut Cx<Panes>) -> El {
+    rune::row()
+        .size(W, H)
+        .child(col().w(W / 2.0).h_full().child(pane(0).build(s)))
+        .child(col().w(W / 2.0).h_full().child(pane(1).build(s)))
+}
+
+fn panes(n: usize) -> Runtime<Panes> {
+    let state = Panes {
+        src: FastSource::new(n),
+        colls: vec![CollectionState::new(), CollectionState::new()],
+        look: Look::fallback(false),
+    };
+    let mut rt = Runtime::new(state, panes_view, (W, H), Env::new(false, 1.0));
+    rt.frame(0.0);
+    for _ in 0..40 {
+        rt.frame(1.0 / 60.0);
+    }
+    rt
+}
+
+/// `key`'s element under the collection keyed `scope`.
+fn element_in<S: 'static>(rt: &Runtime<S>, scope: &str, key: &str) -> Option<ElementInfo> {
+    rt.elements().into_iter().find(|e| {
+        !e.exiting && e.key.as_deref() == Some(key) && e.path.contains(&format!("/{scope}/"))
+    })
+}
+
+/// The accessibility node keyed `key`, as JSON text without its children.
+fn a11y_node<S: 'static>(rt: &Runtime<S>, key: &str) -> Option<String> {
+    let mut stack = vec![rt.accessibility_json()];
+    while let Some(mut v) = stack.pop() {
+        if let Some(c) = v["children"].as_array() {
+            stack.extend(c.iter().cloned());
+        }
+        if v["key"] == key {
+            v["children"].take();
+            return Some(v.to_string());
+        }
+    }
+    None
+}
+
+/// B1: one host builds two collections over its own states, picked by captured indices.
+#[test]
+fn collections_with_captured_accessors_keep_their_own_state() {
+    let mut rt = panes(30);
+    let [x, y, w, h] = element_in(&rt, "b", "row-3").unwrap().visible;
+    rt.pointer_down(x + w / 2.0, y + h / 2.0);
+    rt.pointer_up(x + w / 2.0, y + h / 2.0);
+    rt.frame(1.0 / 60.0);
+    assert_eq!(rt.state.colls[1].selection.cursor(), Some(id(3)));
+    assert_eq!(rt.state.colls[0].selection.cursor(), None);
+}
+
+/// S8: the active descendant names the row under its own collection: a second pane on the
+/// same folder that shows the cursor's row doesn't answer for the first.
+#[test]
+fn the_active_descendant_is_the_row_under_its_own_collection() {
+    let mut rt = panes(3_000);
+    rt.update(|s, tx| {
+        for (i, scope) in ["a", "b"].iter().enumerate() {
+            s.colls[i].selection.select_only(&s.src, 2_000);
+            if i == 1 {
+                s.colls[i].reveal(scope, &s.src, 2_000, tx);
+            }
+        }
+    });
+    for _ in 0..40 {
+        rt.frame(1.0 / 60.0);
+    }
+    assert!(element_in(&rt, "b", "row-2000").is_some());
+    assert!(element_in(&rt, "a", "row-2000").is_none());
+    let a = a11y_node(&rt, "a").unwrap();
+    let b = a11y_node(&rt, "b").unwrap();
+    assert!(
+        !a.contains("activeDescendant"),
+        "a's cursor row isn't mounted: {a}"
+    );
+    assert!(b.contains(r#""activeDescendant":"row-2000""#), "{b}");
+}
+
+/// A keyboard controller for the round-1 checks: F3 is taken and moves nothing, F4 moves the
+/// cursor but turns keyboard mode off, `mod+a` (a layout-aware chord) selects all, Up at the
+/// top is an edge, and its tick runs a queued command.
+#[derive(Default)]
+struct Nav {
+    pointers: Rc<Cell<usize>>,
+    queued: Rc<Cell<Option<usize>>>,
+    settings: Rc<Cell<Option<u32>>>,
+}
+
+impl KeyController for Nav {
+    fn key(&mut self, input: &KeyInput<'_>, cx: &mut Ctx<'_>) -> Flow {
+        self.settings.set(cx.settings::<u32>().copied());
+        let all = rune::Chord::parse("mod+a").unwrap();
+        if input.matches(&all) {
+            cx.apply(|sel, src| sel.select_all(src));
+            return Flow::Handled;
+        }
+        match input.event.key {
+            Key::Function(3) => Flow::Handled,
+            Key::Function(4) => {
+                cx.apply(|sel, src| sel.select_only(src, 0));
+                cx.emit(Effect::KeyboardMode(false));
+                Flow::Handled
+            }
+            Key::Up if cx.selection().cursor_index(cx.source) == Some(0) => {
+                cx.emit(Effect::Intent(Intent::Edge(crate::contract::Direction::Up)));
+                Flow::Handled
+            }
+            _ => Flow::Pass,
+        }
+    }
+
+    fn tick(&mut self, cx: &mut Ctx<'_>) -> Flow {
+        match self.queued.take() {
+            Some(i) => {
+                cx.apply(|sel, src| sel.select_only(src, i));
+                cx.emit(Effect::KeyboardMode(true));
+                Flow::Handled
+            }
+            None => Flow::Pass,
+        }
+    }
+
+    fn pointer_seen(&mut self, _input: &PointerInput) {
+        self.pointers.set(self.pointers.get() + 1);
+    }
+}
+
+/// What a test reads back from [`Nav`]: the pointer inputs it saw, its command queue and the
+/// settings it read.
+struct NavProbe {
+    pointers: Rc<Cell<usize>>,
+    queued: Rc<Cell<Option<usize>>>,
+    settings: Rc<Cell<Option<u32>>>,
+}
+
+fn with_nav(n: usize) -> (Runtime<Host>, NavProbe) {
+    let nav = Nav::default();
+    let probe = NavProbe {
+        pointers: nav.pointers.clone(),
+        queued: nav.queued.clone(),
+        settings: nav.settings.clone(),
+    };
+    let mut host = Host::new(n);
+    host.coll.controllers.keyboard = Some(Box::new(nav));
+    (runtime(host), probe)
+}
+
+/// S1: keyboard mode follows a key only when the cursor moved and the controller didn't say.
+#[test]
+fn keyboard_mode_turns_on_only_for_a_key_that_moves_the_cursor() {
+    let (mut rt, ..) = with_nav(20);
+    click(&mut rt, "row-5");
+    press(&mut rt, Key::Function(3));
+    assert!(!rt.state.coll.keyboard_mode(), "a key that moves nothing");
+    press(&mut rt, Key::Function(4));
+    assert_eq!(rt.state.coll.selection.cursor(), Some(id(0)));
+    assert!(!rt.state.coll.keyboard_mode(), "the controller said off");
+}
+
+/// C1c: an edge intent, the pointer seen by the keyboard controller, a layout-aware chord,
+/// the host's settings, and a queued command run by the host's tick.
+#[test]
+fn the_keyboard_controller_hears_pointers_chords_settings_and_ticks() {
+    let (mut rt, probe) = with_nav(500);
+    let NavProbe {
+        pointers,
+        queued,
+        settings,
+    } = probe;
+    click(&mut rt, "row-0");
+    assert_eq!(pointers.get(), 2, "the press and the release");
+    press(&mut rt, Key::Up);
+    assert!(matches!(
+        rt.state.last_intent,
+        Some(Intent::Edge(crate::contract::Direction::Up))
+    ));
+    assert_eq!(settings.get(), Some(7));
+    rt.key(KeyEvent {
+        key: Key::Command('a'),
+        mods: Mods {
+            cmd: true,
+            ctrl: true,
+            ..Mods::default()
+        },
+    });
+    rt.frame(1.0 / 60.0);
+    assert_eq!(rt.state.coll.selection.len(), 500, "mod+a matched");
+
+    queued.set(Some(450));
+    rt.update(|s, tx| {
+        let c = collection(s);
+        c.tick(s, tx);
+    });
+    settle(&mut rt);
+    assert_eq!(rt.state.coll.selection.cursor(), Some(id(450)));
+    assert!(rt.state.coll.keyboard_mode());
+    let row = element(&rt, "row-450").expect("the command's cursor is mounted");
+    assert!(row.visible[3] > 20.0, "and shows");
+}
+
+/// S2 and S6: a press on the header isn't the collection's, nor are its moves and release;
+/// the overlay sits over the viewport and takes no input.
+#[test]
+fn a_header_press_is_not_the_collections_and_the_overlay_passes_presses_through() {
+    let log = Rc::new(RefCell::new(Log::default()));
+    let mut host = Host::new(20);
+    host.parts = true;
+    host.coll.controllers.pointer = Some(Box::new(Pointer(log.clone())));
+    let mut rt = runtime(host);
+    let [hx, hy, hw, hh] = element(&rt, "head").unwrap().visible;
+    rt.pointer_down(hx + hw / 2.0, hy + hh / 2.0);
+    rt.frame(1.0 / 60.0);
+    rt.pointer_move(hx + hw / 2.0, hy + hh + 80.0);
+    rt.frame(1.0 / 60.0);
+    rt.pointer_up(hx + hw / 2.0, hy + hh + 80.0);
+    rt.frame(1.0 / 60.0);
+    assert!(
+        log.borrow().pointer.is_empty(),
+        "{:?}",
+        log.borrow().pointer.len()
+    );
+
+    let band = element(&rt, "band").unwrap();
+    let viewport = element(&rt, VIEWPORT).unwrap();
+    assert_eq!(
+        band.rect, viewport.rect,
+        "the overlay covers the viewport, below the header"
+    );
+    click_label(&mut rt, "row-2");
+    assert_eq!(
+        rt.state.coll.selection.cursor(),
+        Some(id(2)),
+        "through the overlay"
+    );
+}
+
+/// S3: moves of a drag that changes nothing run no view.
+#[test]
+fn drag_moves_that_change_nothing_run_no_view() {
+    thread_local! { static VIEWS: Cell<usize> = const { Cell::new(0) }; }
+    fn counted(s: &Host, cx: &mut Cx<Host>) -> El {
+        VIEWS.with(|v| v.set(v.get() + 1));
+        view(s, cx)
+    }
+    // Twice: with Rune's debug check of `live_only` (which commits one event a quarter second
+    // after a commit to compare what it builds), then without it, counting views.
+    for check in [true, false] {
+        let mut rt = Runtime::new(Host::new(50), counted, (W, H), Env::new(false, 1.0));
+        rt.check_live_only(check);
+        rt.frame(0.0);
+        settle(&mut rt);
+        let [x, y, w, h] = element(&rt, "row-3").unwrap().visible;
+        let (x, y) = (x + w / 2.0, y + h / 2.0);
+        rt.pointer_down(x, y);
+        rt.frame(1.0 / 60.0);
+        let before = VIEWS.with(Cell::get);
+        for k in 1..=20 {
+            rt.pointer_move(x, y + k as f32 * 3.0);
+            rt.frame(1.0 / 60.0);
+        }
+        let after_moves = VIEWS.with(Cell::get);
+        rt.pointer_up(x, y + 60.0);
+        rt.frame(1.0 / 60.0);
+        assert!(
+            rt.live_only_warnings().is_empty(),
+            "{:?}",
+            rt.live_only_warnings()
+        );
+        if !check {
+            assert_eq!(after_moves, before, "moves ran the view");
+        }
+    }
+}
+
+/// S5: in a grid, a sync keeps the cursor's cell where it shows, by its path under its line.
+#[test]
+fn a_sync_keeps_the_cursor_cell_where_it_shows_in_a_grid() {
+    let mut host = Host::new(4_000);
+    host.per_line = 4;
+    let mut rt = runtime(host);
+    settle(&mut rt);
+    for _ in 0..20 {
+        rt.wheel(W / 2.0, H / 2.0, -200.0);
+        rt.frame(1.0 / 60.0);
+    }
+    settle(&mut rt);
+    let cells: Vec<_> = rt
+        .elements()
+        .into_iter()
+        .filter(|e| {
+            !e.exiting && e.role == "gridcell" && e.visible[1] > 200.0 && e.visible[3] > 20.0
+        })
+        .collect();
+    let target = cells[0].key.clone().unwrap();
+    click_label(&mut rt, &target);
+    assert_eq!(
+        rt.state.coll.selection.cursor().map(row_key),
+        Some(target.clone())
+    );
+    let shown = element(&rt, &target).unwrap().visible;
+    // Remove a whole line between the top of the view and the cursor: the lines below keep
+    // their keys, and the cursor's cell holds its place while the rows above it close up.
+    rt.update(|s, tx| {
+        let first = s.coll.visible_range().start + 4;
+        s.src.remove(first..first + 4);
+        s.coll
+            .sync(SCOPE, &s.src, SyncRule::complete(CursorGone::Neighbor), tx);
+    });
+    settle(&mut rt);
+    assert_eq!(element(&rt, &target).unwrap().visible, shown);
+}
+
+/// S7: the status line reads the selection only when an operation changed it.
+#[test]
+fn the_status_line_changes_with_the_selection_not_the_listing() {
+    let (mut rt, ..) = with_nav(20);
+    let status = |rt: &Runtime<Host>| element(rt, STATUS).and_then(|e| e.text).unwrap_or_default();
+    click(&mut rt, "row-1");
+    assert_eq!(status(&rt), "");
+    rt.key(KeyEvent {
+        key: Key::Command('a'),
+        mods: Mods {
+            cmd: true,
+            ctrl: true,
+            ..Mods::default()
+        },
+    });
+    rt.frame(1.0 / 60.0);
+    assert_eq!(status(&rt), "20 items selected");
+    rt.update(|s, tx| {
+        s.src.insert_top(5);
+        s.coll
+            .sync(SCOPE, &s.src, SyncRule::complete(CursorGone::Neighbor), tx);
+    });
+    rt.frame(1.0 / 60.0);
+    assert_eq!(
+        status(&rt),
+        "20 items selected",
+        "a listing change announces nothing"
+    );
+}
+
+/// S10: a user scroll, or a new layout, cancels a restore that waits for its listing.
+#[test]
+fn a_scroll_or_a_layout_switch_cancels_a_waiting_restore() {
+    for by_scroll in [true, false] {
+        let mut rt = runtime(Host::new(3_000));
+        let position = {
+            let s = &mut rt.state;
+            s.coll.selection.select_only(&s.src, 7);
+            s.coll.position(&s.src)
+        };
+        rt.update(move |s, tx| {
+            s.coll
+                .enter(SCOPE, &s.src, Some(&position), Listing::Loading, tx);
+        });
+        rt.frame(1.0 / 60.0);
+        assert!(rt.state.coll.restore_pending());
+        if by_scroll {
+            for _ in 0..5 {
+                rt.wheel(W / 2.0, H / 2.0, -200.0);
+                rt.frame(1.0 / 60.0);
+            }
+        } else {
+            rt.state.coll.set_layout_key(9);
+        }
+        assert!(!rt.state.coll.restore_pending());
+    }
+}
+
+/// S11: a read-only collection draws no rename editor and tells controllers so.
+#[test]
+fn a_read_only_collection_draws_no_rename_and_says_so() {
+    struct Probe(Rc<Cell<Option<bool>>>);
+    impl PointerController for Probe {
+        fn pointer(&mut self, _: &PointerInput, cx: &mut Ctx<'_>) -> Flow {
+            self.0.set(Some(cx.read_only()));
+            Flow::Handled
+        }
+    }
+    let seen = Rc::new(Cell::new(None));
+    let mut host = Host::new(10);
+    host.read_only = true;
+    host.coll.controllers.pointer = Some(Box::new(Probe(seen.clone())));
+    let mut rt = runtime(host);
+    assert!(element(&rt, "editor").is_none());
+    click(&mut rt, "row-4");
+    assert_eq!(seen.get(), Some(true));
+}
+
+/// S12: an entry's window rect, for a keyboard menu at the cursor, is where its row shows.
+#[test]
+fn an_entry_window_rect_is_where_its_row_shows() {
+    let mut rt = runtime(Host::new(500));
+    for _ in 0..10 {
+        rt.wheel(W / 2.0, H / 2.0, -200.0);
+        rt.frame(1.0 / 60.0);
+    }
+    settle(&mut rt);
+    let row = rows(&rt)
+        .into_iter()
+        .find(|e| e.visible[1] > 100.0 && e.visible[3] > 20.0)
+        .unwrap();
+    let index = rt
+        .state
+        .src
+        .index_of(EntryId::new(
+            row.key.as_ref().unwrap()[4..].parse().unwrap(),
+        ))
+        .unwrap();
+    let rect = collection(&rt.state).window_rect_of(&rt.state, index);
+    assert_eq!([rect.x, rect.y, rect.w, rect.h], row.rect);
+}
+
+/// S13: a grid's count per line follows the viewport's width, once the first layout gives it.
+#[test]
+fn a_grid_reflows_to_the_viewport_width() {
+    struct ByWidth;
+    impl Lines for ByWidth {
+        fn per_line(&self, width: f32) -> usize {
+            ((width / 100.0) as usize).max(1)
+        }
+        fn geometry(&self, len: usize, h: f32, w: f32, vh: f32) -> Box<dyn CollectionGeometry> {
+            OnePerLine.geometry(len.div_ceil(self.per_line(w)), h, w, vh)
+        }
+    }
+    fn grid(s: &Host, _: &mut Cx<Host>) -> El {
+        col().size(W, H).child(
+            collection(s)
+                .lines(ByWidth)
+                .roles(Roles::GRID_CELLS)
+                .build(s),
+        )
+    }
+    let mut rt = Runtime::new(Host::new(23), grid, (W, H), Env::new(false, 1.0));
+    rt.frame(0.0);
+    settle(&mut rt);
+    let lines = rt.elements().iter().filter(|e| e.role == "row").count();
+    assert_eq!(lines, 5, "23 entries, 5 a line at {W} pt");
+}
+
+/// N4: showing another folder ends an open band and keyboard mode.
+#[test]
+fn entering_a_folder_ends_gestures_and_keyboard_mode() {
+    let (mut rt, log) = with_controllers(40);
+    rt.update(|s, _| {
+        s.coll.keyboard_moved();
+    });
+    let [x, y, _, h] = element(&rt, "row-2").unwrap().visible;
+    rt.physical_input(rune::PhysicalInput::Modifiers(Mods {
+        shift: true,
+        ..Mods::default()
+    }));
+    rt.pointer_down(x + 30.0, y + h / 2.0);
+    rt.frame(1.0 / 60.0);
+    rt.physical_input(rune::PhysicalInput::Modifiers(Mods::default()));
+    assert_eq!(log.borrow().marquee, ["begin"]);
+    rt.update(|s, tx| {
+        s.coll.enter(SCOPE, &s.src, None, Listing::Complete, tx);
+    });
+    rt.frame(1.0 / 60.0);
+    assert!(!rt.state.coll.controllers.marquee.as_ref().unwrap().active());
+    assert!(!rt.state.coll.keyboard_mode());
+    rt.pointer_up(x + 30.0, y + h / 2.0);
+    rt.frame(1.0 / 60.0);
+}
+
+/// C1d G1: a glide effect scrolls on its spring.
+#[test]
+fn a_glide_effect_scrolls_the_viewport() {
+    struct Glider;
+    impl PointerController for Glider {
+        fn pointer(&mut self, input: &PointerInput, cx: &mut Ctx<'_>) -> Flow {
+            if input.phase == PointerPhase::Down {
+                cx.emit(Effect::Glide {
+                    y: 2_000.0,
+                    spring: rune::Spring::new(0.2, 0.0),
+                });
+            }
+            Flow::Handled
+        }
+    }
+    let mut host = Host::new(500);
+    host.coll.controllers.pointer = Some(Box::new(Glider));
+    let mut rt = runtime(host);
+    click(&mut rt, "row-2");
+    rt.frame(1.0 / 60.0);
+    let early = rt.state.coll.scroll_offset();
+    settle(&mut rt);
+    assert!(early < 2_000.0, "it glides: {early}");
+    assert_eq!(rt.state.coll.scroll_offset(), 2_000.0);
+}
+
+/// C1d G2: the marquee's own overlay draws in content coordinates, rides the scroll and takes
+/// no input. G4: the content's extent.
+#[test]
+fn the_marquees_overlay_rides_the_scroll_and_passes_presses_through() {
+    let (mut rt, _log) = with_controllers(200);
+    let [x, y, _, h] = element(&rt, "row-2").unwrap().visible;
+    rt.physical_input(rune::PhysicalInput::Modifiers(Mods {
+        shift: true,
+        ..Mods::default()
+    }));
+    rt.pointer_down(x + 30.0, y + h / 2.0);
+    rt.frame(1.0 / 60.0);
+    rt.physical_input(rune::PhysicalInput::Modifiers(Mods::default()));
+    rt.frame(1.0 / 60.0);
+    let viewport = element(&rt, VIEWPORT).unwrap().rect;
+    let band = element(&rt, "drawn-band").expect("the band draws").rect;
+    assert_eq!(band[1], viewport[1] + 100.0, "at content y 100, unscrolled");
+    rt.pointer_up(x + 30.0, y + h / 2.0);
+    rt.frame(1.0 / 60.0);
+
+    // Open it again, scroll, and it moves with the content.
+    rt.update(|s, tx| {
+        s.coll.controllers.marquee.as_mut().unwrap().reset();
+        tx.scroll_to_instant(viewport_path(SCOPE), 0.0, 40.0);
+    });
+    settle(&mut rt);
+    let [x, y, _, h] = rows(&rt)
+        .into_iter()
+        .find(|e| e.visible[1] > 60.0 && e.visible[3] > 20.0)
+        .unwrap()
+        .visible;
+    rt.physical_input(rune::PhysicalInput::Modifiers(Mods {
+        shift: true,
+        ..Mods::default()
+    }));
+    rt.pointer_down(x + 30.0, y + h / 2.0);
+    rt.frame(1.0 / 60.0);
+    rt.physical_input(rune::PhysicalInput::Modifiers(Mods::default()));
+    rt.frame(1.0 / 60.0);
+    let band = element(&rt, "drawn-band").unwrap().rect;
+    assert_eq!(
+        band[1],
+        viewport[1] + 100.0 - 40.0,
+        "scrolled 40 pt up with the content"
+    );
+    rt.pointer_up(x + 30.0, y + h / 2.0);
+    rt.frame(1.0 / 60.0);
+}
+
+#[test]
+fn the_content_extent_ends_at_the_last_entry() {
+    let src = FastSource::new(10);
+    let geometry = OnePerLine.geometry(10, 26.0, 300.0, 200.0);
+    let mut sel = crate::collection::selection::Selection::new();
+    let cx = Ctx::new(
+        &src,
+        &*geometry,
+        crate::contract::Rect::new(0.0, 0.0, 300.0, 200.0),
+        0.0,
+        &mut sel,
+    );
+    assert_eq!(cx.content_extent(), 260.0);
+}
+
+/// C1d G3: showing a folder stops an auto-scroll glide, by instant scrolls only.
+#[test]
+fn entering_a_folder_stops_a_glide() {
+    for remembered in [false, true] {
+        let mut rt = runtime(Host::new(3_000));
+        let position = {
+            let s = &mut rt.state;
+            s.coll.selection.select_only(&s.src, 3);
+            s.coll.set_layout_key(1);
+            s.coll.position(&s.src)
+        };
+        rt.update(|_, tx| {
+            tx.scroll_to_with(
+                viewport_path(SCOPE),
+                0.0,
+                30_000.0,
+                rune::Spring::new(1.0, 0.0),
+            )
+        });
+        for _ in 0..5 {
+            rt.frame(1.0 / 60.0);
+        }
+        assert!(rt.state.coll.scroll_offset() > 0.0, "gliding");
+        rt.update(move |s, tx| {
+            // In another layout, so the cursor (in view at the top) is revealed, not an offset.
+            s.coll.set_layout_key(2);
+            let p = remembered.then_some(&position);
+            s.coll.enter(SCOPE, &s.src, p, Listing::Complete, tx);
+        });
+        settle(&mut rt);
+        let at = rt.state.coll.scroll_offset();
+        assert!(
+            at < 400.0,
+            "the glide stopped (remembered {remembered}): {at}"
+        );
     }
 }

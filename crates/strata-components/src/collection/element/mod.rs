@@ -72,6 +72,12 @@
 //!   no `drag_out`, and the element takes no `DragSource`. A drag starts when the pointer
 //!   controller (C1b) emits [`Intent::BeginDrag`] past its threshold, with the window point;
 //!   the host binds that to the system drag (X2, through the platform shim).
+//! - **Selecting from assistive technology.** Options have no press handler of their own
+//!   (all input goes to the container, above), so an assistive client's default action on an
+//!   option (AT-SPI's "click") does nothing at the pinned rev. Rune has no way to route an
+//!   option's action to its container with the target's key (Rune draft U-C1e-8). Until it
+//!   does, a screen-reader user selects with the keyboard, through the container's active
+//!   descendant (C1c).
 //! - **No cursor reveal on a pointer press.** A key or a tick that moves the cursor scrolls it
 //!   into view; a press moves it only onto what the viewport already shows.
 //!
@@ -90,6 +96,7 @@ mod state;
 #[cfg(test)]
 mod tests;
 
+use std::any::Any;
 use std::borrow::Cow;
 use std::ops::Range;
 use std::rc::Rc;
@@ -109,13 +116,18 @@ pub use state::{CollectionState, DropOver};
 
 #[cfg(doc)]
 use crate::collection::selection::Selection;
-use crate::contract::{Dnd, DropHover, DropZone, Dropped, EntryId, EntrySource, Point};
+use crate::contract::{
+    CollectionGeometry, Dnd, DropHover, DropZone, Dropped, EntryId, EntrySource, Point, Rect,
+};
 
-type GetFn<S> = fn(&S) -> (&dyn EntrySource, &CollectionState);
-type GetMutFn<S> = fn(&mut S) -> (&dyn EntrySource, &mut CollectionState);
+type GetFn<S> = Rc<dyn Fn(&S) -> (&dyn EntrySource, &CollectionState)>;
+type GetMutFn<S> = Rc<dyn Fn(&mut S) -> (&dyn EntrySource, &mut CollectionState)>;
+type LookFn<S> = Rc<dyn Fn(&S) -> &Look>;
+type ReadFn<S, T> = Rc<dyn Fn(&S) -> T>;
+type RowHeightFn<S> = Rc<dyn Fn(&S, &Look) -> f32>;
 type RegionFn<S> = Rc<dyn Fn(&S, usize, Point) -> Region>;
 type PartFn<S> = Rc<dyn Fn(&S) -> Option<El>>;
-type RenameFn<S> = (fn(&S) -> Option<EntryId>, Slot<S>);
+type RenameFn<S> = (ReadFn<S, Option<EntryId>>, Slot<S>);
 type MarksFn<S> = Rc<dyn Fn(&S, EntryId) -> RowMarks>;
 type IntentFn<S> = Rc<dyn Fn(&mut S, Intent, &mut Tx)>;
 type CursorFn<S> = Rc<dyn Fn(&mut S, Option<EntryId>, &mut Tx)>;
@@ -128,12 +140,13 @@ pub(crate) struct Config<S> {
     key: Rc<str>,
     get: GetFn<S>,
     get_mut: GetMutFn<S>,
-    look: fn(&S) -> &Look,
-    version: fn(&S) -> u64,
-    clock: Option<fn(&S) -> f64>,
+    look: LookFn<S>,
+    version: ReadFn<S, u64>,
+    clock: Option<ReadFn<S, f64>>,
+    settings: Option<Rc<dyn Any>>,
     name: Option<String>,
     roles: Roles,
-    row_height: fn(&Look) -> f32,
+    row_height: RowHeightFn<S>,
     lines: Rc<dyn Lines>,
     dnd: Dnd<S>,
     read_only: bool,
@@ -154,6 +167,18 @@ pub(crate) struct Config<S> {
     announce: Option<AnnounceFn<S>>,
 }
 
+impl<S> Config<S> {
+    /// The row height for `s`.
+    fn row_height_of(&self, s: &S) -> f32 {
+        (self.row_height)(s, (self.look)(s))
+    }
+
+    /// The host's clock, or 0 without one.
+    fn now(&self, s: &S) -> f64 {
+        self.clock.as_ref().map_or(0.0, |c| c(s))
+    }
+}
+
 /// The collection element's builder.
 ///
 /// The host keeps the source and a [`CollectionState`] in its state and gives the element
@@ -170,24 +195,29 @@ impl<S: 'static> Collection<S> {
     /// source and state `get` and `get_mut` return, drawn with the look `look` returns.
     /// `listing_version` changes whenever the source's order or entries change at the same
     /// length (see the [module docs](self#the-listing-version-required)).
+    ///
+    /// The accessors are closures, so one host can build several collections over its own
+    /// collections, each capturing which one (C2's columns):
+    /// `move |s: &App| (&s.columns[i].listing, &s.columns[i].state)`.
     pub fn new(
         key: impl Into<Rc<str>>,
-        get: GetFn<S>,
-        get_mut: GetMutFn<S>,
-        look: fn(&S) -> &Look,
-        listing_version: fn(&S) -> u64,
+        get: impl Fn(&S) -> (&dyn EntrySource, &CollectionState) + 'static,
+        get_mut: impl Fn(&mut S) -> (&dyn EntrySource, &mut CollectionState) + 'static,
+        look: impl Fn(&S) -> &Look + 'static,
+        listing_version: impl Fn(&S) -> u64 + 'static,
     ) -> Self {
         Self {
             cfg: Config {
                 key: key.into(),
-                get,
-                get_mut,
-                look,
-                version: listing_version,
+                get: Rc::new(get),
+                get_mut: Rc::new(get_mut),
+                look: Rc::new(look),
+                version: Rc::new(listing_version),
                 clock: None,
+                settings: None,
                 name: None,
                 roles: Roles::LISTBOX,
-                row_height: |l| l.row.list,
+                row_height: Rc::new(|_, l| l.row.list),
                 lines: Rc::new(OnePerLine),
                 dnd: Dnd::rune(),
                 read_only: false,
@@ -226,8 +256,8 @@ impl<S: 'static> Collection<S> {
     /// The row height, read from the look: `row.list` by default, `row.columns` for a Columns
     /// column, `slots::list::row_height` for ListTable. Every row draws at exactly this
     /// height, so the geometry matches what is drawn.
-    pub fn row_height(mut self, row_height: fn(&Look) -> f32) -> Self {
-        self.cfg.row_height = row_height;
+    pub fn row_height(mut self, row_height: impl Fn(&S, &Look) -> f32 + 'static) -> Self {
+        self.cfg.row_height = Rc::new(row_height);
         self
     }
 
@@ -239,8 +269,16 @@ impl<S: 'static> Collection<S> {
 
     /// The host's clock in seconds (virtual in tests), which controllers time clicks and
     /// timeouts by. Rune's `Tx` has no clock (Rune draft U-C1e-6).
-    pub fn clock(mut self, clock: fn(&S) -> f64) -> Self {
-        self.cfg.clock = Some(clock);
+    pub fn clock(mut self, clock: impl Fn(&S) -> f64 + 'static) -> Self {
+        self.cfg.clock = Some(Rc::new(clock));
+        self
+    }
+
+    /// The host's settings for its controllers (the double-click interval, the click mode),
+    /// which they read with [`Ctx::settings`]. Taken as the view builds, so pass the current
+    /// values each time.
+    pub fn settings(mut self, settings: impl Any) -> Self {
+        self.cfg.settings = Some(Rc::new(settings));
         self
     }
 
@@ -250,7 +288,8 @@ impl<S: 'static> Collection<S> {
         self
     }
 
-    /// Read-only: no drops and no rename, as the archive preview needs (C14b).
+    /// Read-only: no drops and no rename, as the archive preview needs (C14b). Controllers
+    /// see it as [`Ctx::read_only`].
     pub fn read_only(mut self) -> Self {
         self.cfg.read_only = true;
         self
@@ -285,9 +324,14 @@ impl<S: 'static> Collection<S> {
         self
     }
 
-    /// The rename editor (C5): drawn in the label's place on the row `renaming` names.
-    pub fn rename(mut self, renaming: fn(&S) -> Option<EntryId>, editor: Slot<S>) -> Self {
-        self.cfg.rename = Some((renaming, editor));
+    /// The rename editor (C5): drawn in the label's place on the row `renaming` names. A
+    /// read-only collection draws none.
+    pub fn rename(
+        mut self,
+        renaming: impl Fn(&S) -> Option<EntryId> + 'static,
+        editor: Slot<S>,
+    ) -> Self {
+        self.cfg.rename = Some((Rc::new(renaming), editor));
         self
     }
 
@@ -310,14 +354,14 @@ impl<S: 'static> Collection<S> {
         self
     }
 
-    /// A part drawn over the viewport, in its coordinates (C1d's band, C24's marker). It takes
-    /// no input.
+    /// A part drawn over the viewport, pinned to it below any header, in its coordinates
+    /// (C1d's band, C24's marker). It takes no input: presses go through it to the rows.
     pub fn overlay(mut self, f: impl Fn(&S) -> Option<El> + 'static) -> Self {
         self.cfg.overlay = Some(Rc::new(f));
         self
     }
 
-    /// What an empty collection shows.
+    /// What an empty collection shows, pinned over the viewport below any header.
     pub fn empty(mut self, f: impl Fn(&S) -> Option<El> + 'static) -> Self {
         self.cfg.empty = Some(Rc::new(f));
         self
@@ -349,17 +393,41 @@ impl<S: 'static> Collection<S> {
     }
 
     /// The status line's wording for a selection change: [`default_announcement`] by
-    /// default.
+    /// default. The line changes only when an operation changed the selection
+    /// ([`CollectionState::note_selection`]), so a listing change alone announces nothing.
     pub fn announce(mut self, f: impl Fn(&S, &Announcement) -> String + 'static) -> Self {
         self.cfg.announce = Some(Rc::new(f));
         self
     }
 
-    /// Runs the controllers' timeouts. Call it from the host's poll, with the same builder
-    /// the view uses; true when state changed.
+    /// Runs the controllers' timeouts and queued commands. Call it from the host's poll on
+    /// every frame while a controller asks for wake-ups ([`Effect::WakeAfter`], an
+    /// auto-scroll), with the same builder the view uses; true when state changed. A tick
+    /// with nothing to do costs a [`Ctx`] and no commit.
+    ///
+    /// A command that starts outside the collection (a menu item, a verb typed in a footer
+    /// prompt) reaches its controller this way: the controller queues it in a handle the
+    /// host shares, and the next tick runs it with a [`Ctx`] (see [`KeyController::tick`]).
     pub fn tick(self, s: &mut S, tx: &mut Tx) -> bool {
         let cfg = Rc::new(self.cfg);
         route::tick(&cfg, s, tx)
+    }
+
+    /// The geometry of `s`'s entries as the element lays them out now, in content
+    /// coordinates: for an anchor out of the element (C21's keyboard menu at the cursor,
+    /// through [`CollectionState::content_to_window`]).
+    pub fn geometry(&self, s: &S) -> Box<dyn CollectionGeometry> {
+        let row_height = self.cfg.row_height_of(s);
+        let (src, st) = (self.cfg.get)(s);
+        self.cfg
+            .lines
+            .geometry(src.len(), row_height, st.viewport.w, st.viewport.h)
+    }
+
+    /// Entry `index`'s rect in window points, as the element lays it out now.
+    pub fn window_rect_of(&self, s: &S, index: usize) -> Rect {
+        let rect = self.geometry(s).rect_of(index);
+        (self.cfg.get)(s).1.content_to_window(rect)
     }
 
     /// The element, filling the height its parent gives it.
@@ -368,9 +436,9 @@ impl<S: 'static> Collection<S> {
         let (src, st) = (cfg.get)(s);
         let look = (cfg.look)(s);
         let len = src.len();
-        let per = cfg.lines.per_line().max(1);
+        let per = st.per_line.max(1);
         let lines = lines::line_count(len, per);
-        let row_height = (cfg.row_height)(look);
+        let row_height = cfg.row_height_of(s);
         let frame = row::Frame {
             look_key: row::look_key(look),
             row_height,
@@ -379,7 +447,11 @@ impl<S: 'static> Collection<S> {
             hover_live: st.hover_live,
             cursor_shown: st.keyboard && st.active,
             drop: st.drop,
-            renaming: cfg.rename.as_ref().and_then(|(f, _)| f(s)),
+            renaming: cfg
+                .rename
+                .as_ref()
+                .filter(|_| !cfg.read_only)
+                .and_then(|(f, _)| f(s)),
         };
 
         let key_cfg = cfg.clone();
@@ -401,10 +473,11 @@ impl<S: 'static> Collection<S> {
                 },
                 move |s: &S, line| row::build_line(&build_cfg, &frame, s, line),
             )
-            .virtual_rows_version(((cfg.version)(s), per))
+            .virtual_rows_version(((cfg.version)(s), per, len))
             .on_visible_rows(move |s: &mut S, r| route::on_visible(&visible_cfg, s, r));
 
         let live = st.scroll.clone();
+        let layer = st.scroll_layer.clone();
         let layout_cfg = cfg.clone();
         let viewport = col()
             .key(VIEWPORT)
@@ -416,6 +489,7 @@ impl<S: 'static> Collection<S> {
             })
             .on_scroll_offset(move |p: ScrollPos| {
                 live.set(p.offset[1]);
+                layer.set([0.0, -p.offset[1]]);
             })
             .on_layout_tx(move |s: &mut S, r, tx| route::on_layout(&layout_cfg, s, r, tx))
             .child(rows);
@@ -445,24 +519,45 @@ impl<S: 'static> Collection<S> {
             root = root.label(name.clone());
         }
         if let Some(index) = st.selection.cursor_index(src) {
-            root = root.active_descendant(row_key(src.id_at(index)));
+            // A path under this collection, so a second collection showing the same folder
+            // (another pane) can't answer for it.
+            root = root.active_descendant(keys::entry_path(&cfg.key, src, index, per));
         }
         if let Some(header) = cfg.header.as_ref().and_then(|f| f(s)) {
             root = root.child(header);
         }
-        root = root.child(viewport);
+        // The viewport and what sits over it: the empty state and the overlay, pinned to the
+        // viewport alone, below any header.
+        let mut over = col()
+            .w_full()
+            .grow(1.0)
+            .min_h(0.0)
+            .clip_soft(0.0)
+            .child(viewport);
         if len == 0
             && let Some(empty) = cfg.empty.as_ref().and_then(|f| f(s))
         {
-            root = root.child(empty);
+            over = over.child(pinned(empty));
+        }
+        if let Some(band) = st
+            .controllers
+            .marquee
+            .as_ref()
+            .and_then(|m| m.overlay(look))
+        {
+            // In content coordinates: a layer at the content's origin that rides the scroll
+            // offset in the same frame.
+            let content = col()
+                .pin(Some(0.0), Some(0.0), Some(0.0), None)
+                .live_offset(&st.scroll_layer)
+                .child(band);
+            over = over.child(pinned(content).inert());
         }
         if let Some(overlay) = cfg.overlay.as_ref().and_then(|f| f(s)) {
-            root = root.child(overlay);
+            over = over.child(pinned(overlay).inert());
         }
-        let announcement = Announcement {
-            selected: st.selection.len(),
-            total: len,
-        };
+        root = root.child(over);
+        let announcement = st.announcement();
         let line = match &cfg.announce {
             Some(f) => f(s, &announcement),
             None => default_announcement(&announcement),
@@ -479,16 +574,24 @@ impl<S: 'static> Collection<S> {
     }
 }
 
+/// `part` over the whole of its parent.
+fn pinned(part: El) -> El {
+    col()
+        .pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
+        .child(part)
+}
+
 /// The background's drop zone: drops go to the folder shown.
 fn background_zone<S: 'static>(cfg: &Rc<Config<S>>, on_drop: row::DropFn<S>) -> DropZone<S> {
-    let get_mut = cfg.get_mut;
+    let get_mut = cfg.get_mut.clone();
+    let hover_mut = cfg.get_mut.clone();
     let edge = cfg.clone();
     DropZone::new(move |s: &mut S, dropped, tx| {
         (get_mut)(s).1.drop = None;
         on_drop(s, None, dropped, tx);
     })
     .on_hover(move |s: &mut S, hover, _offer, _tx| {
-        let st = (get_mut)(s).1;
+        let st = (hover_mut)(s).1;
         match hover {
             DropHover::Accepting | DropHover::Rejecting => {
                 if st.drop.is_none() {

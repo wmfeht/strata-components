@@ -71,6 +71,8 @@ enum Cmd {
         request: selection::Request,
         bytes: Option<Arc<[u8]>>,
     },
+    /// A test switch: has the server kill our own connection, so it fails.
+    KillSelf,
     Quit,
 }
 
@@ -222,7 +224,8 @@ impl X11 {
 
     /// Takes `selection` with `spec`. The actor completes it (after a round trip for the
     /// server's timestamp) without the caller waiting; a refusal arrives as
-    /// [`Event::SourceCancelled`], and [`X11::owns`] turns true once it holds.
+    /// [`Event::SourceCancelled`], and [`X11::owns`] turns true once it holds. A take still
+    /// queued when the actor fails is dropped: its caller hears only [`Event::Failed`].
     pub(crate) fn set_selection(
         &self,
         selection: Selection,
@@ -239,6 +242,12 @@ impl X11 {
         };
         self.mailbox.post(own).map_err(|_| Error::Shutdown)?;
         Ok(id)
+    }
+
+    /// A test switch: makes the X server end our connection, to check how the actor's
+    /// failure is reported. False if the actor is gone.
+    pub(crate) fn provoke_connection_failure(&self) -> bool {
+        self.mailbox.post(Cmd::KillSelf).is_ok()
     }
 
     pub(crate) fn selection(&self, selection: Selection) -> Option<SelectionOffer> {

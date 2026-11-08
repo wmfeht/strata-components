@@ -258,6 +258,16 @@ impl Transfer {
         }
     }
 
+    /// A test switch for strata-platform's own tests: makes the X server end the X11
+    /// connection, to check how the X11 side's failure is reported. False without one.
+    #[doc(hidden)]
+    pub fn provoke_x11_connection_failure(&self) -> bool {
+        match &self.0.backend {
+            Backend::X11(x) => x.provoke_connection_failure(),
+            Backend::Wayland { .. } => false,
+        }
+    }
+
     /// The newest key or button serial on winit's display.
     pub fn latest_serial(&self) -> Option<u32> {
         self.shared().and_then(|c| c.serials().0)

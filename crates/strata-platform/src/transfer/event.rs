@@ -38,7 +38,10 @@ impl SourceId {
         SourceId(NEXT.fetch_add(1, Ordering::Relaxed))
     }
 
-    pub(crate) fn from_raw(n: u64) -> SourceId {
+    /// The id logged as `n` by [`SourceId::get`]. For strata-platform's own tests, which
+    /// name sources across a process boundary.
+    #[doc(hidden)]
+    pub fn from_raw(n: u64) -> SourceId {
         SourceId(n)
     }
 

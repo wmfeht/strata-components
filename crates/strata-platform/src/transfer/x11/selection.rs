@@ -106,10 +106,11 @@ impl Incoming {
     }
 }
 
-/// Whether server time `t` comes before `than`. Server times are 32-bit milliseconds that
-/// wrap (about every 49.7 days), so they compare as a signed difference.
-pub(super) fn earlier(t: u32, than: u32) -> bool {
-    (t.wrapping_sub(than) as i32) < 0
+/// ICCCM 2.2: whether request `r` was made before we took the selection, and so must be
+/// refused. `CurrentTime` is never early. Server times are 32-bit milliseconds that wrap
+/// (about every 49.7 days), so they compare as a signed difference.
+fn predates(r: &SelectionRequestEvent, owned: &Owned) -> bool {
+    r.time != CURRENT_TIME && (r.time.wrapping_sub(owned.time) as i32) < 0
 }
 
 impl Actor {
@@ -156,6 +157,10 @@ impl Actor {
                 });
             }
             Cmd::Ready { request, bytes } => self.answer(request, bytes),
+            Cmd::KillSelf => {
+                // KillClient on a resource of ours closes our own connection.
+                let _ = self.conn.kill_client(self.win);
+            }
             Cmd::Quit => {}
         }
     }
@@ -496,8 +501,7 @@ impl Actor {
         let Some(owned) = self.owned.get(&r.selection).filter(|_| r.owner == self.win) else {
             return self.notify(&req, NONE);
         };
-        // ICCCM 2.2: refuse a request made before we took the selection.
-        if r.time != CURRENT_TIME && earlier(r.time, owned.time) {
+        if predates(&r, owned) {
             return self.notify(&req, NONE);
         }
         if r.target == self.atoms.TARGETS {
@@ -643,3 +647,6 @@ impl Actor {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

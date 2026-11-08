@@ -1053,9 +1053,10 @@ fn tenxer_ctrl_up_and_down_move_the_cursor_only() {
 }
 
 #[test]
-#[ignore = "waits on W1d toggle_in_run"]
 fn tenxer_space_inside_a_range_flips_the_cursor_and_keeps_the_range() {
-    // integration/10xer-mode: Space toggles the focused item in the selection and moves the cursor down, without previewing and without using the hovered row.
+    // integration/10xer-mode: `v` starts a range from the cursor and `V` starts an unselect range; the footer shows `VISUAL` or `UNSET` while it is active.
+    // The feature map has no bullet for Space inside a range (an owner item); this cites the
+    // closest, as W1d's tests do.
     // Inside a range, Strata's Space flips the cursor's entry against the range and later
     // steps keep the flip (`toggle_visual_cursor`, `VisualRange.toggled`).
     let mut t = Rig::tenxer(10);

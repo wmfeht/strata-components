@@ -231,12 +231,16 @@ impl KeyMachine {
             Command::ToggleAdvance => {
                 if len == 0 {
                     s.emit(Outcome::NothingToSelect);
-                } else if self.handle.range().is_none() {
+                } else if self.handle.range().is_some() {
+                    // Inside a `v`/`V` range, Space flips the cursor's entry against the range
+                    // and stays put; later steps keep the flip (Strata's
+                    // `toggle_visual_cursor`).
+                    let i = cursor_or_first(s);
+                    op(s, |sel, src| sel.toggle_in_run(src, i));
+                    s.emit(Outcome::Reveal(i));
+                } else {
                     toggle_advance(s);
                 }
-                // Space inside a `v`/`V` range flips the cursor's entry and keeps the range
-                // going (Strata's `toggle_visual_cursor`). It waits on W1d's C1a operation;
-                // until then Space does nothing during a range.
                 true
             }
             Command::SelectAll => {

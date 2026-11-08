@@ -72,8 +72,9 @@
 //!   by the selection's revision at its next key. [`KeyHandle::range`] says whether one is
 //!   active, for the `VISUAL`/`UNSET` footer (C18) and Columns' mirroring (C2).
 //! - **Space** adds the cursor's entry (even over a load's automatic pick), or removes it,
-//!   then moves the cursor to the next entry in display order. Inside a range, Space waits on
-//!   W1d's C1a operation and does nothing for now.
+//!   then moves the cursor to the next entry in display order. Inside a range, it flips the
+//!   cursor's entry against the range and doesn't move, and later steps of the range keep the
+//!   flip ([`Selection::toggle_in_run`], Strata's `toggle_visual_cursor`).
 //! - In an empty folder, Space, `v`, `V`, Ctrl+A and Ctrl+R emit [`Outcome::NothingToSelect`].
 //! - Commands from outside the collection (a `g g` chord step from C18, the Escape ladder, a
 //!   window-level Ctrl+A) go through [`KeyHandle::run`] and run at the machine's next

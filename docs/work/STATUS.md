@@ -57,7 +57,7 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | C17 | ready | | |
 | C18 | ready | | |
 | C19 | ready | | |
-| C1b | fixing round 2 (triple-click counting; C1d bullet claims; round 3 review is last) | settings via Ctx::settings (shared handle dropped); no rename timeout (Strata); modifier bullets in-process (Rune draft U-C1b-1) | |
+| C1b | review 3 (final; round 2 fixed: ec1991a) | settings via Ctx::settings (shared handle dropped); no rename timeout (Strata); modifier bullets in-process (Rune draft U-C1b-1) | |
 | C1c | fixing round 2 (2 claim blockers; Nudge/empty sideways pass; tolerant-binding shadowing; round 3 review is last) | default + 10xer maps; layout-aware chord workaround (U-C1c-1) | |
 | C1d | coding adapter (on C1e; scripts on C1b branch tip until C1b merges) | ~10 Hz apply while auto-scrolling keeps perf meter silent (deviation) | |
 | C1e | merged | 3 review rounds; all controller seam requests in; scroll p95 0.59 ms vs Table 0.88; S14 sticky group lines deferred to contract WP C1f before C4; round-3 should-fix SF1 (grid restore before first layout) + nits (KeyboardMode commits unchanged, read_only/roles not in row memo) carried to C1f | 8ea925e |

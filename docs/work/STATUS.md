@@ -43,7 +43,7 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | K3 | ready | | |
 | K4 | ready | | |
 | P0 | coding | owner: S2 Q1 = a (degrade on libwayland 1.22; own-connection data-control route); owner: move Platform CI to libwayland >= 1.23 in P0 (unverified until a push); S2 Q2/Q3 deferred to P1 | |
-| P3 | planned, approved (starts next free slot) | owner: borderless on Wayland now with NO edge resize until Rune U6, no minimise (U7) or window menu (U8); X11 borderless under Auto via shim (mutter/KWin hand test pending); no in-app resize; corners Cursor::Move; header component folded into X1; Done-when narrowed (deliberate parity regressions recorded) | |
+| P3 | coding | owner: borderless on Wayland now with NO edge resize until Rune U6, no minimise (U7) or window menu (U8); X11 borderless under Auto via shim (mutter/KWin hand test pending); no in-app resize; corners Cursor::Move; header component folded into X1; Done-when narrowed (deliberate parity regressions recorded) | |
 | P5 | ready | | |
 | P6 | ready | | |
 | P7 | ready | | |
@@ -58,7 +58,7 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | C18 | ready | | |
 | C19 | ready | | |
 | C1b | coding (adapter on C1e) | 37 unit tests; PointerHandle shared settings (deviation); no rename timeout (Strata) | |
-| C1c | coding (adapter on C1e; machine 51 tests) | default + 10xer maps; layout-aware chord workaround (U-C1c-1) | |
+| C1c | review 1 (adapter done: 57 unit tests, 14 scripts; chord.rs dropped, layout via script) | default + 10xer maps; layout-aware chord workaround (U-C1c-1) | |
 | C1d | coding (machine done, 17 tests; adapter waits on C1e + C1b adapter) | ~10 Hz apply while auto-scrolling keeps perf meter silent (deviation) | |
 | C1e | merged | 3 review rounds; all controller seam requests in; scroll p95 0.59 ms vs Table 0.88; S14 sticky group lines deferred to contract WP C1f before C4; round-3 should-fix SF1 (grid restore before first layout) + nits (KeyboardMode commits unchanged, read_only/roles not in row memo) carried to C1f | 8ea925e |
 | C26 | waiting | | |

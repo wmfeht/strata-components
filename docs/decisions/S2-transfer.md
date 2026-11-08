@@ -357,6 +357,8 @@ No Rune patch. Everything goes behind P0's internal `transfer` module; P1, P2 an
      waits on the condvar with a 100 ms timeout. A join from the UI thread while C waits for a
      turn therefore blocks for up to 100 ms, and would deadlock without the timeout, since the
      joining thread is the one that would give the turn.
+   - Added by P0's review: C never dispatches. It reads with `read_without_dispatch`, so events
+     naming winit's `wl_surface` are parsed only by the UI thread's `dispatch_pending`.
 
    C's turn wait has a timeout (100 ms in the prototype). After `run` returns no turn comes. In
    the teardown runs below, the late stop took about 100 ms in 4 of 5 `late-stop-only` runs

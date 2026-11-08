@@ -11,8 +11,19 @@
 //! - It polls with no timeout, and waits for a turn with none. A reader the app forgot to stop
 //!   stays parked when the event loop ends, rather than calling into a display winit freed.
 //!   That is narrower, not safe: stopping it before `run` returns is required.
+//! - **It never dispatches, nor parses an event.** It reads with `read_without_dispatch`, so
+//!   what it read stays in libwayland's queue: the next `prepare_read` then fails, and
+//!   `on_events` hands dispatching to the UI thread. Parsing an event copies the user data of
+//!   every object it names, and our pointer, keyboard and data-device events name winit's
+//!   `wl_surface`. That copy takes only our backend's lock, while winit's UI thread frees the
+//!   same user data under winit's lock (wayland-backend 0.3.17, `sys/client_impl/mod.rs`
+//!   952–1000 and 536–557): on the reader thread it was a use-after-free race. On the UI
+//!   thread winit can't free anything meanwhile.
 //!
-//! On a connection of our own the same loop runs, and dispatches on the thread itself.
+//! On a connection of our own the same loop runs, and `on_events` dispatches on the thread
+//! itself. That is safe there: winit has no objects on that connection, so every object an
+//! event names is ours, and wayland-backend takes our backend's lock both to parse an event
+//! and to destroy one of our objects.
 
 use std::io;
 use std::os::fd::{AsFd, OwnedFd};
@@ -32,8 +43,8 @@ pub(super) struct Reader {
 }
 
 impl Reader {
-    /// `on_events` runs on the reader thread when our queue has events: after a read that
-    /// queued some, or when a prepare finds some already queued. `on_fail` runs once if the
+    /// `on_events` runs on the reader thread when a prepare finds events queued for us: read by
+    /// this thread or by winit's. It must hand them to whoever may dispatch them. `on_fail` runs once if the
     /// connection fails; the thread then ends.
     pub(super) fn spawn(
         name: &str,
@@ -72,9 +83,10 @@ impl Reader {
                         break None;
                     }
                     if revents[0] & libc::POLLIN != 0 {
-                        match guard.read() {
-                            Ok(0) => {}
-                            Ok(_) => on_events(),
+                        // Never `read()`: it would also parse our events, here (see above).
+                        // Ours stay queued, so the next prepare_read fails and on_events runs.
+                        match guard.read_without_dispatch() {
+                            Ok(()) => {}
                             Err(WaylandError::Io(e)) if e.kind() == io::ErrorKind::WouldBlock => {}
                             Err(e) => break Some(e.to_string()),
                         }

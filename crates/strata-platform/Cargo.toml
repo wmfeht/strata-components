@@ -34,7 +34,16 @@ csd = ["dep:x11rb"]
 foreign-parent = ["_transfer"]
 
 # P5 desktop settings: src/settings/
-settings = []
+settings = [
+    "dep:futures-util",
+    "dep:tokio",
+    "dep:zbus",
+    "tokio/rt",
+    "tokio/sync",
+    "tokio/time",
+    "zbus/proxy",
+    "zbus/tokio",
+]
 
 # P6 icon theme lookup: src/icon_theme/
 icon-theme = []
@@ -43,7 +52,17 @@ icon-theme = []
 media-audio = []
 
 # P8 single instance and activation: src/single_instance/
-single-instance = ["dep:tokio", "dep:zbus"]
+single-instance = [
+    "dep:tokio",
+    "dep:zbus",
+    "tokio/macros",
+    "tokio/rt",
+    "tokio/sync",
+    "tokio/time",
+    "zbus/proxy",
+    "zbus/service",
+    "zbus/tokio",
+]
 
 # P9 GLib bridge: src/glib_bridge/
 glib-bridge = ["dep:futures-channel", "dep:gio", "dep:glib"]
@@ -58,6 +77,9 @@ _transfer = []
 rune.workspace = true
 
 # Shared by two or more shims: optional, enabled with `dep:` from each feature that uses it.
+# settings (P5) and single-instance (P8): each feature enables the tokio and zbus features it uses.
+tokio = { workspace = true, optional = true }
+zbus = { workspace = true, optional = true }
 
 # dnd (P1)
 
@@ -69,14 +91,13 @@ x11rb = { workspace = true, optional = true }
 # foreign-parent (P4)
 
 # settings (P5)
+futures-util = { workspace = true, optional = true, features = ["std"] }
 
 # icon-theme (P6)
 
 # media-audio (P7)
 
 # single-instance (P8)
-tokio = { workspace = true, optional = true, features = ["macros", "rt", "sync", "time"] }
-zbus = { workspace = true, optional = true, features = ["proxy", "service", "tokio"] }
 
 # glib-bridge (P9)
 futures-channel = { workspace = true, optional = true }
@@ -102,7 +123,9 @@ strata-test-peer.workspace = true
 
 # foreign-parent (P4)
 
-# settings (P5)
+# settings (P5): the fake Settings portal the session tests serve on the private bus.
+tokio = { workspace = true, features = ["rt", "sync", "time"] }
+zbus = { workspace = true, features = ["tokio", "service"] }
 
 # icon-theme (P6)
 

@@ -1686,7 +1686,8 @@ fn a_block_is_coloured_up_to_the_32_kib_cut_and_asked_once() {
         h.iter().all(|(r, _)| r.end <= cut),
         "colours stop at the 32 KiB cut"
     );
-    assert!(blocks.cached_bytes() <= cut);
+    // The cut code, plus the entry's own 96 bytes.
+    assert!(blocks.cached_bytes() <= cut + 96);
 }
 
 /// A block of about 30 KB, under rune-kit's 32 KiB cut: a comment line the thread colours,
@@ -2064,5 +2065,30 @@ fn misses_and_trims_cost_n_log_n() {
     assert!(
         trims <= bound,
         "the trims looked at {trims} entries (bound {bound})"
+    );
+}
+
+#[test]
+fn tiny_blocks_count_their_entries_against_the_cap() {
+    // Review 5, SF6: the cap counted code bytes only, so 50,000 blocks of a few bytes stayed
+    // under it whatever their entries, tokens and keys cost. Each entry now counts 96 bytes
+    // more, as rune-kit's hook cache does.
+    let mut pump = Pump::new(light());
+    let mut blocks = pump.blocks();
+    for i in 0..50_000 {
+        blocks.highlight(Some("zzz"), &format!("f({i});\n"));
+    }
+    pump.run();
+    blocks.poll();
+    for k in 0..2 {
+        blocks.highlight(Some("zzz"), &format!("g({k});\n"));
+        pump.run();
+        blocks.poll();
+    }
+    let most = (4 << 20) / 96;
+    assert!(
+        blocks.entry_count() <= most,
+        "{} entries kept, at most {most} fit the cap",
+        blocks.entry_count()
     );
 }

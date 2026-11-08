@@ -37,15 +37,26 @@ use super::worker::Request;
 const CACHE_BYTES: usize = 4 << 20;
 
 /// How far the cap stretches (512 blocks at the 32 KiB cut). A miss past it first evicts
-/// blocks not asked for since the last bump, down to three quarters of it; a block that would still take the cache past it
-/// answers plain and is never asked for, so nothing lands, nothing wakes the host, and memory
-/// stays bounded. A host that never polls (one that waits on misses) never trims, so its
-/// cache grows to here.
+/// blocks not asked for since the last bump, down to three quarters of it; a block that would
+/// still take the cache past it answers plain and is never asked for, so nothing lands,
+/// nothing wakes the host, and memory stays bounded. A host that never polls (one that waits
+/// on misses) never trims, so its cache grows to here.
 ///
-/// Both bounds count code bytes. Each landed block also keeps its runs, 12 bytes each: about
-/// one run per 5 to 8 bytes of typical code, so 2 to 3 times the code, and at worst (a run per
-/// byte) 13 times. rune-kit's hook keeps its own cache besides, within its own budget.
+/// Both bounds count each block as its code's bytes plus [`ENTRY_BYTES`], so a mass of tiny
+/// blocks is bounded by their number too. They don't count a landed block's runs, 12 bytes
+/// each: about one run per 5 to 8 bytes of typical code, so 2 to 3 times the code, and at
+/// worst (a run per byte) 13 times. rune-kit's hook keeps its own cache besides, within its
+/// own budget.
 const CACHE_CEILING: usize = 4 * CACHE_BYTES;
+
+/// What an entry costs besides its code, as rune-kit's hook cache counts each entry: the
+/// entry, its map slot, its language and the code's `Arc` header.
+const ENTRY_BYTES: usize = 96;
+
+/// What the cache counts for a block of `code`.
+fn cost(code: &str) -> usize {
+    code.len() + ENTRY_BYTES
+}
 
 /// A block colours up to its last line end within this many bytes, rune-kit's cut for an
 /// app's highlighter (`rune_kit::syntax`). `Markdown` already hands over no more; C11's own
@@ -175,6 +186,11 @@ impl CodeBlocks {
     #[cfg(test)]
     pub(crate) fn visits(&self) -> u64 {
         self.state.borrow().visits
+    }
+
+    #[cfg(test)]
+    pub(crate) fn entry_count(&self) -> usize {
+        self.state.borrow().entries.len()
     }
 
     #[cfg(test)]
@@ -317,7 +333,7 @@ impl Blocks {
         match self.entries.get_mut(&key) {
             Some(e) if *e.lang == *lang && *e.code == *code => {
                 if e.used <= self.build_start {
-                    self.current += e.code.len();
+                    self.current += cost(&e.code);
                 }
                 e.used = self.tick;
             }
@@ -359,19 +375,19 @@ impl Blocks {
             return false;
         }
         if let Some(old) = self.entries.remove(&key) {
-            self.bytes = self.bytes.saturating_sub(old.code.len());
+            self.bytes = self.bytes.saturating_sub(cost(&old.code));
             if old.tokens.is_none() {
                 self.forget(vec![key]);
             }
         }
-        if self.current + code.len() > CACHE_CEILING {
+        if self.current + cost(code) > CACHE_CEILING {
             return false;
         }
         // Past the ceiling, free a quarter of it at once, as `Budget` does, so a host that
         // never polls doesn't sort the cache again on every miss.
         self.evict(
             CACHE_CEILING,
-            code.len(),
+            cost(code),
             CACHE_CEILING / 4 * 3,
             self.build_start,
         );
@@ -390,8 +406,8 @@ impl Blocks {
             self.tx = None;
             return false;
         }
-        self.bytes += code.len();
-        self.current += code.len();
+        self.bytes += cost(&code);
+        self.current += cost(&code);
         let entry = Entry {
             lang: lang.into(),
             code,
@@ -429,7 +445,7 @@ impl Blocks {
                 break;
             }
             if let Some(e) = self.entries.remove(&key) {
-                self.bytes = self.bytes.saturating_sub(e.code.len());
+                self.bytes = self.bytes.saturating_sub(cost(&e.code));
                 if e.tokens.is_none() {
                     forgotten.push(key);
                 }

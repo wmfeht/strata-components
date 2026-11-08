@@ -35,7 +35,7 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | C24 | merged | 2 review rounds; own overlay bar (plan §4 deviation, owner item); a bar press keeps focus; open should-fixes moved to C24b; C5 must know: the autoscroll shield takes keyboard focus while running, so a rename that commits on blur commits when autoscroll starts; own overlay scrollbar instead of rune-kit ScrollBar (it collides across collections and can't sit outside C4's scroll_x: deviation from plan §4, owner edit); small C1e edit (edge part + on_scroll); modal autoscroll shield (wheel/keys blocked while running); follow-ups: row-margin middle press (C1b/C1e), retrofit bars + popover wheel bullets (C24b) | 0484bb5 |
 | C24b | ready | C24 follow-up (no WP doc; scope here): retrofit C24's bars onto C4 and other listings and the popover wheel bullets; review-2 SF1 the text-field test is vacuous (rows are never background; Rune has no middle-click paste: add a text-target check or record the gap, and make the test meaningful); SF2 the bar can't be placed inside C4's sideways scroll (band anchored to the vertical viewport's drawn width: anchor to the container's trailing edge or take the cross size from the sideways feed); SF3 the shield takes keyboard focus (deviation, or keep focus); nits: shield's context-menu action, per-target moving with two targets, AutoscrollPointer::sideways untested, ring outline width hardcoded, shieldless fallback scrolls its own viewport; review-1 nits and the row-margin middle press (C1b/C1e) | |
 | C25 | review 1 queued (coded: 10 scripts, 6 PNG goldens; store sync p95 23 us; budget held; 3 Rune drafts; API list for C3; plan rulings: keyed by ThumbKey, visible rows win over the budget, 4 deviations from Strata) | | |
-| C5 | ready | | |
+| C5 | ready | from C24: the autoscroll shield takes keyboard focus while running, so a rename that commits on blur commits when autoscroll starts (C24b may change this) | |
 | C6 | ready | | |
 | C7 | ready | | |
 | C8 | merged | 2 review rounds; own list on SidebarRow+Reorder; keyboard pin reorder left out (no bullet); hover-time folder check needs X2 binder; Rune drafts U18-U23; PNG goldens on NVIDIA | 6277a99 |
@@ -52,7 +52,7 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | P8 | merged | 3 review rounds; U-P8-1 text in S5 appendix; 11 unit + 17 session tests incl. GLib interop; open should-fixes: refuse delivery once release starts (launch in the ReleaseName gap), release() wait to cover the drain (2x bus_timeout), held-launch test assert < 2 s; hand tests pending (Hyprland, GNOME, KDE, X11 focus; GTK Strata interop); GApplication-compatible protocol; opt-in FileManager1 Reveal in the shim (deviation from WP doc: policy stays in Strata); zbus 6 + tokio deps (already locked); zbus types exposed (major bump = minor release) | 5c2b38a |
 | P9 | merged | 1 review round + fixes; ci.yml gains libglib2.0-dev (approved exception); example compiled, not run; no desktop hand test | 54786b4 |
 | C10b | ready | | |
-| C11 | ready | | |
+| C11 | planning (must take C10a review-5 SF1 hash-collision loop and SF5 quadratic eviction) | | |
 | C12 | ready | | |
 | C13 | ready | | |
 | C16 | ready | | |
@@ -69,7 +69,7 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | P4 | ready | | |
 | X1 | coding (plan approved: header component in strata_components::header with its own scenes; gallery page x1 in Chrome; demo in examples/shell/; adds Minimize, Maximize and Restore icon names in a k3 commit; unknown maximised state reads Maximize or restore window; no backdrop look change, owner item; demo app id of its own; overrides read only from Strata's path or --overrides; no W3 session test; never tags) | | |
 | C14b | review 1 queued (coded: 5 viewers, 43 scripts, 20 PNG and 20 a11y goldens; rescale-key fix shown failing first; perf not measured; 2 new Rune drafts: no AT busy state, no wait cursor; plan rulings: no orbit drag, canvas elevation profile, ArchivePrompt in, host allocator for archive ids, no 2x upscale cap) | carries C14a round-3 should-fix: key the rescale child by target scale (`{key}-rescale-{scale bits}`) + regression test (2x, one frame, 1x) | |
-| C2 | ready | | |
+| C2 | planning | | |
 | C3 | waiting (C25) | | |
 | C4 | merged | 3 review rounds; scroll p95 1.06-1.10x Table accepted as report line, hard bars hold; c1e edits: header-strip band (primary button only), header rect; splitters hidden from AT; open for X2/C2: hosts must not memoise the table (the held-back sort click clears in ListTable::build), and an AT press in the same frame as a reorder release is swallowed (docs say always sorts); C24's edge bar may sit off-screen inside C4's sideways scroll (check at the C24 merge); merge fix: K4's override test expects list.heading.height; no rune-kit Table fork (built on C1e; Table drafts R-K1..7); heading-strip marquee via a small C1e edit in C4; widths scale with text size; headings not Tab stops and fit double-click at Rune 0.5 s (deviations) | da08248 |
 | X3 | waiting | | |

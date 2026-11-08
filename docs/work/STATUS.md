@@ -47,7 +47,7 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | P5 | ready | | |
 | P6 | ready | | |
 | P7 | ready | | |
-| P8 | ready | | |
+| P8 | planning | | |
 | P9 | merged | 1 review round + fixes; ci.yml gains libglib2.0-dev (approved exception); example compiled, not run; no desktop hand test | 54786b4 |
 | C10b | waiting | | |
 | C11 | waiting | | |

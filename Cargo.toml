@@ -36,6 +36,11 @@ futures-channel = "0.3"
 gio = { version = "0.22", default-features = false }
 glib = { version = "0.22", default-features = false }
 
+# strata-platform settings (P5) and single-instance (P8): the majors Rune's `dbus` feature already
+# builds (zbus 6 on tokio). Each dependent line names its own features.
+tokio = { version = "1", default-features = false }
+zbus = { version = "6", default-features = false }
+
 # PNG goldens: decodes rendered scenes for the tolerance check (gallery dev-dependency only).
 png = "0.18"
 serde_json = "1"

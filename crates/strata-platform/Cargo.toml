@@ -43,7 +43,7 @@ icon-theme = []
 media-audio = []
 
 # P8 single instance and activation: src/single_instance/
-single-instance = []
+single-instance = ["dep:tokio", "dep:zbus"]
 
 # P9 GLib bridge: src/glib_bridge/
 glib-bridge = ["dep:futures-channel", "dep:gio", "dep:glib"]
@@ -75,6 +75,8 @@ x11rb = { workspace = true, optional = true }
 # media-audio (P7)
 
 # single-instance (P8)
+tokio = { workspace = true, optional = true, features = ["macros", "rt", "sync", "time"] }
+zbus = { workspace = true, optional = true, features = ["proxy", "service", "tokio"] }
 
 # glib-bridge (P9)
 futures-channel = { workspace = true, optional = true }

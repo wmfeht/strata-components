@@ -24,15 +24,33 @@ use super::spans;
 use super::worker::Request;
 
 /// Highlighted blocks kept, in bytes of code, before the least recently asked go. Blocks asked
-/// for in the current build (since the last poll, `markdown()` or wait) are spared: the cap
-/// stretches to fit one build, so a large document can't evict what it is drawing and ask
-/// again.
+/// for in the current build (since the last poll, `markdown()` or wait) are never evicted:
+/// the cap stretches to fit one build, so a large document can't evict what it is drawing
+/// and ask again.
 const CACHE_BYTES: usize = 4 << 20;
 
-/// The cap never stretches past this, for a host that asks without ever polling or building
-/// (its blocks then never land anyway). Only a single build of more code than this (512
-/// blocks at rune-kit's 32 KiB cut) would evict its own blocks and ask for them again.
+/// How far the cap stretches for one build (512 blocks at the 32 KiB cut). A block that would
+/// take the current build past it answers plain and is never asked for, so nothing lands,
+/// nothing wakes the host, and memory stays bounded.
 const CACHE_CEILING: usize = 4 * CACHE_BYTES;
+
+/// A block colours up to its last line end within this many bytes, rune-kit's cut for an
+/// app's highlighter (`rune_kit::syntax`). `Markdown` already hands over no more; C11's own
+/// blocks get the same cut, so a block colours alike either way, and one huge block can't
+/// hold the thread or the cache.
+const BLOCK_CUT: usize = 32 * 1024;
+
+/// How much of `code` gets colour: all of it, or up to its last line end within
+/// [`BLOCK_CUT`] (none when the first line runs past it), as rune-kit cuts.
+fn coloured_len(code: &str) -> usize {
+    if code.len() <= BLOCK_CUT {
+        return code.len();
+    }
+    code.as_bytes()[..BLOCK_CUT]
+        .iter()
+        .rposition(|&b| b == b'\n')
+        .unwrap_or(0)
+}
 
 /// A pool of code blocks on the highlighter thread, from [`Highlighter::blocks`]. Clones
 /// share the pool; it lives on the UI thread.
@@ -114,7 +132,9 @@ impl CodeBlocks {
 
     /// `code`'s colours as rune-kit highlights (byte ranges into `code`), or `None` while
     /// the thread works on it: draw it plain meanwhile. A block with no language, or one no
-    /// grammar knows, is plain: `Some` of nothing.
+    /// grammar knows, is plain: `Some` of nothing. Colour stops at the last line end within
+    /// 32 KiB, as rune-kit's `Markdown` cuts, and a block past the cache's ceiling for one
+    /// build is plain.
     pub fn highlight(&self, lang: Option<&str>, code: &str) -> Option<Vec<Highlight>> {
         self.state.borrow_mut().highlight(lang, code)
     }
@@ -198,11 +218,19 @@ impl Blocks {
         if self.tx.is_none() {
             return Some(Vec::new());
         }
+        let code = &code[..coloured_len(code)];
+        if code.is_empty() {
+            return Some(Vec::new());
+        }
         self.tick += 1;
         let key = key_of(lang, code);
         match self.entries.get_mut(&key) {
             Some(e) if *e.lang == *lang && *e.code == *code => e.used = self.tick,
-            _ => self.request(key, lang, code),
+            _ => {
+                if !self.request(key, lang, code) {
+                    return Some(Vec::new());
+                }
+            }
         }
         if self.entries.get(&key).is_some_and(|e| e.tokens.is_none())
             && let Some(wait) = self.wait
@@ -219,9 +247,20 @@ impl Blocks {
         )
     }
 
-    fn request(&mut self, key: u64, lang: &str, code: &str) {
+    /// Asks the thread for a block and keeps a pending entry. False, and nothing asked, when
+    /// the block would take the current build past [`CACHE_CEILING`] or there is no thread:
+    /// it is then plain.
+    fn request(&mut self, key: u64, lang: &str, code: &str) -> bool {
+        // A hash collision replaces the other block: count only the one kept.
+        if let Some(old) = self.entries.remove(&key) {
+            self.bytes = self.bytes.saturating_sub(old.code.len());
+        }
+        self.evict(code.len());
+        if self.bytes + code.len() > CACHE_CEILING {
+            return false;
+        }
         let Some(tx) = &self.tx else {
-            return;
+            return false;
         };
         let sent = tx.send(Request::Block {
             pool: self.id,
@@ -232,7 +271,7 @@ impl Blocks {
         if sent.is_err() {
             // The thread is gone: every block is plain from now on.
             self.tx = None;
-            return;
+            return false;
         }
         let entry = Entry {
             lang: lang.into(),
@@ -240,23 +279,19 @@ impl Blocks {
             tokens: None,
             used: self.tick,
         };
-        // A hash collision replaces the other block: count only the one kept.
-        if let Some(old) = self.entries.insert(key, entry) {
-            self.bytes = self.bytes.saturating_sub(old.code.len());
-        }
+        self.entries.insert(key, entry);
         self.bytes += code.len();
-        self.evict();
+        true
     }
 
-    /// Drops the least recently asked blocks until the cache fits, sparing the current
-    /// build's up to [`CACHE_CEILING`].
-    fn evict(&mut self) {
-        while self.bytes > CACHE_BYTES {
-            let spare = self.bytes <= CACHE_CEILING;
+    /// Drops the least recently asked blocks until `extra` more bytes fit under
+    /// [`CACHE_BYTES`], never one of the current build's.
+    fn evict(&mut self, extra: usize) {
+        while self.bytes + extra > CACHE_BYTES {
             let oldest = self
                 .entries
                 .iter()
-                .filter(|(_, e)| !spare || e.used <= self.polled)
+                .filter(|(_, e)| e.used <= self.polled)
                 .min_by_key(|(_, e)| e.used)
                 .map(|(&k, _)| k);
             let Some(key) = oldest else { break };

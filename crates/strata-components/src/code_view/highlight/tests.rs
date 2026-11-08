@@ -1320,6 +1320,83 @@ fn an_edit_before_the_host_saw_a_pass_end_still_drops_that_pass_stale_lines() {
 }
 
 #[test]
+fn an_insert_above_a_pass_the_host_never_saw_end_drops_its_stale_lines() {
+    // Pass 1 runs to the end (or converges mid-text) unseen; edit 2 inserts lines above it
+    // and converges at once: the lines the insert shifted under the old `from` are stale.
+    let text = quote_script(300);
+    for (k, at, closes) in [
+        (5, 0, false),
+        (5, 0, true),
+        (20, 3, false),
+        (1, 50, false),
+        (40, 200, false),
+    ] {
+        let mut pump = Pump::new(light());
+        let mut doc = pump.open(
+            Source::new(text.as_str())
+                .file_name("p.sh")
+                .mode(Mode::Editable),
+        );
+        all_lines(&mut pump, &mut doc);
+        let mut one = replace_line(&text, 10, |l| format!("\"{l}"));
+        if closes {
+            one = replace_line(&one, 150, |l| format!("\"{l}"));
+        }
+        doc.edit(one.as_str().into(), LineEdit::diff(&text, &one), 0..60);
+        pump.run();
+        let mut lines: Vec<String> = one.split_inclusive('\n').map(str::to_owned).collect();
+        lines.splice(at..at, (0..k).map(|i| format!("y{i}=1\n")));
+        let two = lines.concat();
+        doc.edit(two.as_str().into(), LineEdit::diff(&one, &two), 0..60);
+        pump.run();
+        doc.poll();
+        assert_eq!(
+            wrong_exact_line(&doc, &two, "p.sh"),
+            None,
+            "{k} lines at {at}, closes {closes}"
+        );
+    }
+}
+
+#[test]
+fn an_insert_above_an_unseen_pass_end_then_forgotten_still_drops_its_stale_lines() {
+    // As above, then 300 keystrokes push the shifting edit out of the edit history.
+    let text = quote_script(300);
+    let mut pump = Pump::new(light());
+    let mut doc = pump.open(
+        Source::new(text.as_str())
+            .file_name("p.sh")
+            .mode(Mode::Editable),
+    );
+    all_lines(&mut pump, &mut doc);
+    let one = replace_line(&text, 10, |l| format!("\"{l}"));
+    doc.edit(one.as_str().into(), LineEdit::diff(&text, &one), 0..60);
+    pump.run();
+    let mut now: String = (0..5).map(|i| format!("y{i}=1\n")).collect::<String>() + &one;
+    doc.edit(now.as_str().into(), LineEdit::diff(&one, &now), 0..60);
+    for i in 0..300 {
+        let next = replace_line(&now, 3, |l| {
+            let l = l.trim_end();
+            if i % 2 == 0 {
+                format!("{l}1\n")
+            } else {
+                format!("{}\n", &l[..l.len() - 1])
+            }
+        });
+        doc.edit(next.as_str().into(), LineEdit::diff(&now, &next), 0..60);
+        now = next;
+    }
+    assert_eq!(
+        doc.history.len(),
+        EDIT_HISTORY,
+        "the shifting edit was forgotten"
+    );
+    pump.run();
+    doc.poll();
+    assert_eq!(wrong_exact_line(&doc, &now, "p.sh"), None);
+}
+
+#[test]
 fn an_edit_below_an_unfinished_cascade_settles_exact() {
     let text = quote_script(1500);
     let mut pump = Pump::new(light());
@@ -1529,6 +1606,77 @@ fn the_block_cache_stays_bounded_when_misses_wait() {
         "{} bytes",
         blocks.cached_bytes()
     );
+}
+
+#[test]
+fn a_build_over_the_ceiling_comes_to_rest() {
+    // A host that rebuilds whenever `poll` says colours changed, over one document whose
+    // blocks (each under rune-kit's 32 KiB cut) total more than the 16 MiB ceiling.
+    let mut pump = Pump::new(light());
+    let mut blocks = pump.blocks();
+    let codes: Vec<String> = (0..600)
+        .map(|i| format!("// b {i}\n{}\n", "q".repeat(30_000)))
+        .collect();
+    let mut asked = Vec::new();
+    for _build in 0..12 {
+        let before = pump.blocks_asked;
+        let _ = blocks.markdown();
+        for c in &codes {
+            blocks.highlight(Some("rust"), c);
+        }
+        pump.run();
+        asked.push(pump.blocks_asked - before);
+        if !blocks.poll() {
+            break;
+        }
+    }
+    assert!(
+        asked.len() <= 3,
+        "builds never came to rest: blocks asked per build {asked:?}"
+    );
+    assert!(
+        asked[1..].iter().all(|&n| n == 0),
+        "blocks asked again: {asked:?}"
+    );
+    // Blocks past the ceiling answer plain, not pending.
+    assert!(
+        codes
+            .iter()
+            .all(|c| blocks.highlight(Some("rust"), c).is_some())
+    );
+    assert!(
+        blocks.cached_bytes() <= 16 << 20,
+        "{} bytes",
+        blocks.cached_bytes()
+    );
+}
+
+#[test]
+fn a_block_over_the_ceiling_is_coloured_up_to_the_cut_and_asked_once() {
+    // C11 calls `highlight` directly, with no cut of its own.
+    let mut pump = Pump::new(light());
+    let mut blocks = pump.blocks();
+    let line = "let x = 1; // c\n";
+    let code = line.repeat((17 << 20) / line.len());
+    let mut answers = Vec::new();
+    for _build in 0..3 {
+        let _ = blocks.markdown();
+        answers.push(blocks.highlight(Some("rust"), &code).map(|h| h.len()));
+        pump.run();
+        blocks.poll();
+    }
+    assert_eq!(pump.blocks_asked, 1, "answers {answers:?}");
+    assert!(
+        answers[1].is_some_and(|n| n > 0),
+        "coloured once landed: {answers:?}"
+    );
+    let cut = 32 * 1024;
+    let h = blocks.highlight(Some("rust"), &code).expect("landed");
+    assert!(
+        h.iter().all(|(r, _)| r.end <= cut),
+        "colours stop at the 32 KiB cut"
+    );
+    assert!(blocks.cached_bytes() <= cut);
 }
 
 #[test]

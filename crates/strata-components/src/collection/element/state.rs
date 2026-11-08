@@ -1,5 +1,6 @@
 //! [`CollectionState`]: what the host keeps for one collection, behind the element's accessor.
 
+use std::cell::Cell;
 use std::ops::Range;
 
 use rune::{Live, Tx};
@@ -46,7 +47,10 @@ pub struct CollectionState {
     /// The scroll offset `enter` asked for while a restore waits: a scroll away from it is the
     /// person's, and cancels the restore.
     pub(super) pending_offset: f32,
-    pub(super) per_line: usize,
+    /// How many entries a line holds, as the last build or layout worked it out: a cell so the
+    /// view (which reads the state) can record it, and sync, reveal and the visible range
+    /// agree with what it built.
+    pub(super) per_line: Cell<usize>,
     /// The row height, as last laid out.
     pub(super) row_height: f32,
     /// The pointer gesture in progress belongs to the collection (its press landed in the
@@ -72,7 +76,7 @@ impl Default for CollectionState {
             layout: 0,
             pending: None,
             pending_offset: 0.0,
-            per_line: 1,
+            per_line: Cell::new(1),
             row_height: 0.0,
             gesture: None,
             announced: (0, 0, 0),
@@ -253,7 +257,7 @@ impl CollectionState {
             // Rune holds a virtual row by its key: in a grid, the line the cursor's cell sits
             // in now. When the change moved the cell to another line, that line's key is new,
             // Rune finds no drawn rect to hold, and lets it go.
-            tx.keep_on_screen(line_path(scope, source, index, self.per_line));
+            tx.keep_on_screen(line_path(scope, source, index, self.per_line.get()));
         }
         self.note_selection(source);
         changed
@@ -265,9 +269,30 @@ impl CollectionState {
         if h <= 0.0 {
             return false;
         }
-        let top = (index / self.per_line.max(1)) as f32 * h;
+        let top = (index / self.per_line.get().max(1)) as f32 * h;
         let offset = self.scroll.get();
         top >= offset && top + h <= offset + self.viewport.h
+    }
+
+    /// Takes `per` entries a line from now on. When that differs from before and there is a
+    /// cursor, scrolls the cursor into view on `tx`: a reflow moves every entry to another
+    /// line, and the lines' keys with them. True when the count changed.
+    pub(super) fn reflow_to(
+        &self,
+        scope: &str,
+        source: &dyn EntrySource,
+        per: usize,
+        tx: &mut Tx,
+    ) -> bool {
+        let per = per.max(1);
+        if per == self.per_line.get() {
+            return false;
+        }
+        self.per_line.set(per);
+        if let Some(index) = self.selection.cursor_index(source) {
+            self.reveal(scope, source, index, tx);
+        }
+        true
     }
 
     /// Scrolls the entry at `index` into view, mounted or not, just far enough.
@@ -275,7 +300,7 @@ impl CollectionState {
         if index >= source.len() {
             return;
         }
-        let per = self.per_line.max(1);
+        let per = self.per_line.get().max(1);
         let first = source.id_at(index / per * per);
         tx.scroll_into_view_in(scope.to_owned(), line_key(first, per));
     }

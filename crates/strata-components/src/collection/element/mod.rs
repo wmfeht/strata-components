@@ -110,7 +110,8 @@ pub use lines::{Lines, OnePerLine};
 pub use row::{ContentSlot, RowCx, RowMarks, RowState, Slot};
 pub use seam::{
     Activation, Controllers, Ctx, Effect, Flow, Hit, Intent, KeyController, KeyInput,
-    MarqueeController, PointerController, PointerInput, PointerPhase, Region, default_pointer,
+    MarqueeController, PointerController, PointerInput, PointerPhase, Region, Settings,
+    default_pointer,
 };
 pub use state::{CollectionState, DropOver};
 
@@ -143,7 +144,7 @@ pub(crate) struct Config<S> {
     look: LookFn<S>,
     version: ReadFn<S, u64>,
     clock: Option<ReadFn<S, f64>>,
-    settings: Option<Rc<dyn Any>>,
+    settings: Rc<Settings>,
     name: Option<String>,
     roles: Roles,
     row_height: RowHeightFn<S>,
@@ -214,7 +215,7 @@ impl<S: 'static> Collection<S> {
                 look: Rc::new(look),
                 version: Rc::new(listing_version),
                 clock: None,
-                settings: None,
+                settings: Rc::new(Settings::default()),
                 name: None,
                 roles: Roles::LISTBOX,
                 row_height: Rc::new(|_, l| l.row.list),
@@ -274,11 +275,12 @@ impl<S: 'static> Collection<S> {
         self
     }
 
-    /// The host's settings for its controllers (the double-click interval, the click mode),
-    /// which they read with [`Ctx::settings`]. Taken as the view builds, so pass the current
-    /// values each time.
-    pub fn settings(mut self, settings: impl Any) -> Self {
-        self.cfg.settings = Some(Rc::new(settings));
+    /// Adds a settings value for the controllers (the double-click interval, the click mode,
+    /// the auto-scroll speed), which each reads by its type with [`Ctx::settings`]. Call it
+    /// once per type; a second value of a type replaces the first. Taken as the view builds,
+    /// so pass the current values each time.
+    pub fn settings<T: Any>(mut self, value: T) -> Self {
+        Rc::make_mut(&mut self.cfg.settings).insert(value);
         self
     }
 
@@ -413,6 +415,20 @@ impl<S: 'static> Collection<S> {
         route::tick(&cfg, s, tx)
     }
 
+    /// Works the entries per line out again from the lines' rule as it stands now: call it
+    /// from the handler that changed what the rule reads at the same width (C3's tile size),
+    /// with this builder built from the new state. When the count changed, the cursor scrolls
+    /// into view on `tx`, as a width reflow does. True when it changed. (The build works the
+    /// count out too, so it is right without this; only the reveal needs the handler's `tx`.)
+    pub fn reflow(self, s: &mut S, tx: &mut Tx) -> bool {
+        let (src, st) = (self.cfg.get_mut)(s);
+        if st.viewport.w <= 0.0 {
+            return false;
+        }
+        let per = self.cfg.lines.per_line(st.viewport.w);
+        st.reflow_to(&self.cfg.key, src, per, tx)
+    }
+
     /// The geometry of `s`'s entries as the element lays them out now, in content
     /// coordinates: for an anchor out of the element (C21's keyboard menu at the cursor,
     /// through [`CollectionState::content_to_window`]).
@@ -436,7 +452,15 @@ impl<S: 'static> Collection<S> {
         let (src, st) = (cfg.get)(s);
         let look = (cfg.look)(s);
         let len = src.len();
-        let per = st.per_line.max(1);
+        // Once the viewport has a width, the count follows the lines' rule as it stands now (a
+        // tile size changed at the same width included), and the state records it so sync,
+        // reveal and the visible range agree with what this builds.
+        let per = if st.viewport.w > 0.0 {
+            cfg.lines.per_line(st.viewport.w).max(1)
+        } else {
+            st.per_line.get().max(1)
+        };
+        st.per_line.set(per);
         let lines = lines::line_count(len, per);
         let row_height = cfg.row_height_of(s);
         let frame = row::Frame {

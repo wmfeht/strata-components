@@ -15,7 +15,8 @@
 //!
 //! [`CollectionState`]: super::CollectionState
 
-use std::any::Any;
+use std::any::{Any, TypeId};
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -329,7 +330,7 @@ pub struct Ctx<'a> {
     effects: Vec<Effect>,
     read_only: bool,
     origin: Point,
-    settings: Option<Rc<dyn Any>>,
+    settings: Rc<Settings>,
     repaint: bool,
 }
 
@@ -354,7 +355,7 @@ impl<'a> Ctx<'a> {
             effects: Vec::new(),
             read_only: false,
             origin: Point::default(),
-            settings: None,
+            settings: Rc::new(Settings::default()),
             repaint: false,
         }
     }
@@ -374,7 +375,7 @@ impl<'a> Ctx<'a> {
 
     /// The same context, with the host's settings for its controllers (see
     /// [`Ctx::settings`]).
-    pub fn with_settings(mut self, settings: Option<Rc<dyn Any>>) -> Self {
+    pub fn with_settings(mut self, settings: Rc<Settings>) -> Self {
         self.settings = settings;
         self
     }
@@ -393,18 +394,20 @@ impl<'a> Ctx<'a> {
         )
     }
 
-    /// The host's settings for its controllers, if it gave a `T` (`Collection::settings`):
-    /// the double-click interval, the click mode, the auto-scroll speed. This is the one
-    /// settings path for every controller (C1b, C1c, C1d): the host gives one settings value
-    /// (a struct of its own) and each controller reads the type it knows, rather than holding
-    /// a handle to the host's state.
+    /// The host's settings value of type `T`, if it gave one (`Collection::settings`): the
+    /// double-click interval, the click mode, the auto-scroll speed. This is the one settings
+    /// path for every controller (C1b, C1c, C1d): the host adds one value per controller's
+    /// settings type, and each controller looks up the type it knows, rather than holding a
+    /// handle to the host's state.
     pub fn settings<T: 'static>(&self) -> Option<&T> {
-        self.settings.as_deref().and_then(|s| s.downcast_ref::<T>())
+        self.settings.get::<T>()
     }
 
-    /// Says something the view reads changed, though no selection operation or effect shows
-    /// it (a band's rect, a hover a controller draws): the element commits. Without it, a move
-    /// that changes nothing commits no view.
+    /// Says something the view reads changed, though no selection operation shows it (a band
+    /// shown or hidden, a hover a controller draws): the element commits. Without it, an input
+    /// that changes no selection and asks for nothing the view reads (keyboard mode, a
+    /// marquee, an intent) commits no view; scrolls, reveals and wake-ups take effect anyway.
+    /// A band that rides a live value needs none on its moves.
     pub fn repaint(&mut self) {
         self.repaint = true;
     }
@@ -452,6 +455,36 @@ impl<'a> Ctx<'a> {
 
     pub(super) fn finish(self) -> (Changed, Vec<Effect>, bool) {
         (self.changed, self.effects, self.repaint)
+    }
+}
+
+/// The host's settings for its controllers, one value per type: what [`Ctx::settings`] reads.
+///
+/// Used by: C1b, C1c, C1d (each reads its own type), hosts (through `Collection::settings`).
+#[derive(Clone, Default)]
+pub struct Settings {
+    values: HashMap<TypeId, Rc<dyn Any>>,
+}
+
+impl Settings {
+    /// Adds `value`, replacing any value of its type.
+    pub fn insert<T: Any>(&mut self, value: T) {
+        self.values.insert(TypeId::of::<T>(), Rc::new(value));
+    }
+
+    /// The value of type `T`, if any.
+    pub fn get<T: Any>(&self) -> Option<&T> {
+        self.values
+            .get(&TypeId::of::<T>())
+            .and_then(|v| v.downcast_ref::<T>())
+    }
+}
+
+impl std::fmt::Debug for Settings {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Settings")
+            .field("values", &self.values.len())
+            .finish()
     }
 }
 

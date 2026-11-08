@@ -61,7 +61,17 @@ fn dispatch<S: 'static>(
     let flow = f(controllers, &mut cx);
     let (changed, effects, repaint) = cx.finish();
     let moved = before != st.selection.cursor();
-    let shows = changed.any() || repaint || !effects.is_empty();
+    // Only what the view reads needs a commit. Scrolls, reveals and wake-ups go through the
+    // transaction, which Rune applies whether or not the view runs (a poll's too, even when it
+    // returns false: `runtime/frame.rs`, the poll's `merge`).
+    let shows = changed.any()
+        || repaint
+        || effects.iter().any(|e| {
+            matches!(
+                e,
+                Effect::KeyboardMode(_) | Effect::BeginMarquee { .. } | Effect::Intent(_)
+            )
+        });
     after(cfg, s, tx, from, changed, moved, effects);
     (flow, shows)
 }
@@ -130,9 +140,13 @@ fn after<S: 'static>(
             st.reveal(&cfg.key, src, index, tx);
         }
     }
-    if changed.selection {
+    // The status line reads a band's count once its gesture ends, not at every step.
+    {
         let (src, st) = (cfg.get_mut)(s);
-        st.note_selection(src);
+        let banding = st.controllers.marquee.as_ref().is_some_and(|m| m.active());
+        if !banding {
+            st.note_selection(src);
+        }
     }
     if changed.cursor
         && let Some(f) = &cfg.on_cursor
@@ -289,14 +303,10 @@ pub(super) fn on_drag<S: 'static>(cfg: &Rc<Config<S>>, s: &mut S, d: &mut Drag, 
         cancelled: d.cancelled(),
         now: cfg.now(s),
     };
-    let marquee = (cfg.get)(s)
-        .1
-        .controllers
-        .marquee
-        .as_ref()
-        .is_some_and(|m| m.active());
     let shows = route_pointer(cfg, s, tx, &input);
-    if phase == PointerPhase::Move && !shows && !marquee && hover_was_live {
+    // A move that changed nothing the view reads commits nothing, an open band's included: a
+    // marquee that redraws says so with `Ctx::repaint`.
+    if phase == PointerPhase::Move && !shows && hover_was_live {
         tx.live_only();
     }
 }
@@ -311,6 +321,7 @@ pub(super) fn on_secondary<S: 'static>(
     let window = Point::new(e.window_x, e.window_y);
     let st = (cfg.get)(s).1;
     if !st.viewport.contains(window) {
+        tx.live_only();
         return;
     }
     let point = st.content_point(window);
@@ -425,13 +436,11 @@ pub(super) fn on_pointer_move<S: 'static>(cfg: &Rc<Config<S>>, s: &mut S, tx: &m
 pub(super) fn on_layout<S: 'static>(cfg: &Rc<Config<S>>, s: &mut S, r: [f32; 4], tx: &mut Tx) {
     let per = cfg.lines.per_line(r[2]).max(1);
     let row_height = cfg.row_height_of(s);
-    let st = (cfg.get_mut)(s).1;
+    let (src, st) = (cfg.get_mut)(s);
     st.viewport = Rect::from(r);
     st.row_height = row_height;
-    if per == st.per_line {
+    if !st.reflow_to(&cfg.key, src, per, tx) {
         tx.live_only();
-    } else {
-        st.per_line = per;
     }
 }
 
@@ -443,7 +452,7 @@ pub(super) fn on_visible<S: 'static>(
     lines: std::ops::Range<usize>,
 ) -> bool {
     let (src, st) = (cfg.get_mut)(s);
-    let per = st.per_line.max(1);
+    let per = st.per_line.get().max(1);
     let len = src.len();
     let range = (lines.start * per).min(len)..(lines.end * per).min(len);
     st.visible = range.clone();
@@ -458,21 +467,21 @@ pub(super) fn on_visible<S: 'static>(
 
 /// The controllers' timeouts and queued commands, from the host's poll.
 pub(super) fn tick<S: 'static>(cfg: &Rc<Config<S>>, s: &mut S, tx: &mut Tx) -> bool {
-    let mut handled = false;
     let (_, shows) = dispatch(cfg, s, tx, Source::Tick, |c, cx| {
-        for flow in [
-            c.pointer.as_mut().map(|p| p.tick(cx)),
-            c.keyboard.as_mut().map(|k| k.tick(cx)),
-            c.marquee.as_mut().map(|m| m.tick(cx)),
-        ]
-        .into_iter()
-        .flatten()
-        {
-            handled |= flow == Flow::Handled;
+        for p in c.pointer.iter_mut() {
+            p.tick(cx);
+        }
+        for k in c.keyboard.iter_mut() {
+            k.tick(cx);
+        }
+        for m in c.marquee.iter_mut() {
+            m.tick(cx);
         }
         Flow::Pass
     });
-    handled || shows
+    // An auto-scroll tick that only glides and asks for the next frame changes nothing the
+    // view reads: the poll returns false, and Rune still applies its scroll and wake-up.
+    shows
 }
 
 /// A drag over the collection near the viewport's top or bottom edge glides it that way, a

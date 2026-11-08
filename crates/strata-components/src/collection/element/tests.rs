@@ -42,6 +42,12 @@ struct Host {
     /// A header above the viewport, and an overlay over it.
     parts: bool,
     read_only: bool,
+    /// A row height from the state, when set (else the look's).
+    row_h: Option<f32>,
+    /// A grid whose tiles are this wide, when set.
+    tile: Option<f32>,
+    /// The collection's width.
+    width: f32,
 }
 
 impl Host {
@@ -60,6 +66,9 @@ impl Host {
             app_keys: 0,
             parts: false,
             read_only: false,
+            row_h: None,
+            tile: None,
+            width: W,
         }
     }
 }
@@ -145,6 +154,12 @@ fn collection(s: &Host) -> Collection<Host> {
     if s.per_line > 1 {
         c = c.lines(PerLine(s.per_line)).roles(Roles::GRID_CELLS);
     }
+    if let Some(tile) = s.tile {
+        c = c.lines(Tiles(tile)).roles(Roles::GRID_CELLS);
+    }
+    if s.row_h.is_some() {
+        c = c.row_height(|s: &Host, l: &Look| s.row_h.unwrap_or(l.row.list));
+    }
     if s.parts {
         c = c
             .header(|_: &Host| Some(rune::el().key("head").w_full().h(40.0)))
@@ -159,8 +174,23 @@ fn collection(s: &Host) -> Collection<Host> {
     c.settings(7u32)
 }
 
+/// Tiles `0` points wide, as many to a line as the width takes.
+struct Tiles(f32);
+
+impl Lines for Tiles {
+    fn per_line(&self, width: f32) -> usize {
+        ((width / self.0) as usize).max(1)
+    }
+
+    fn geometry(&self, len: usize, h: f32, w: f32, vh: f32) -> Box<dyn CollectionGeometry> {
+        PerLine(self.per_line(w)).geometry(len, h, w, vh)
+    }
+}
+
 fn view(s: &Host, _: &mut Cx<Host>) -> El {
-    col().size(W, H).child(collection(s).build(s))
+    rune::row()
+        .size(W, H)
+        .child(col().w(s.width).h_full().child(collection(s).build(s)))
 }
 
 fn runtime(host: Host) -> Runtime<Host> {
@@ -1557,4 +1587,294 @@ fn entering_a_folder_stops_a_glide() {
             "the glide stopped (remembered {remembered}): {at}"
         );
     }
+}
+
+// Review round 2.
+
+/// A marquee as C1d builds it: its band rides a live value, so moves change nothing the view
+/// reads; it repaints only to show and hide; each tick glides and asks for the next frame.
+struct AutoBand {
+    on: bool,
+    moves: Rc<Cell<usize>>,
+}
+
+impl MarqueeController for AutoBand {
+    fn begin(&mut self, _at: Point, _mods: Mods, cx: &mut Ctx<'_>) {
+        self.on = true;
+        cx.repaint();
+    }
+    fn moved(&mut self, _at: Point, _cx: &mut Ctx<'_>) {
+        self.moves.set(self.moves.get() + 1);
+    }
+    fn end(&mut self, cx: &mut Ctx<'_>) {
+        self.on = false;
+        cx.repaint();
+    }
+    fn cancel(&mut self, _cx: &mut Ctx<'_>) -> bool {
+        std::mem::replace(&mut self.on, false)
+    }
+    fn active(&self) -> bool {
+        self.on
+    }
+    fn band(&self) -> Option<crate::contract::Rect> {
+        None
+    }
+    fn tick(&mut self, cx: &mut Ctx<'_>) -> Flow {
+        if self.on {
+            cx.emit(Effect::Glide {
+                y: cx.visible.y + 40.0,
+                spring: rune::Spring::new(0.3, 0.0),
+            });
+            cx.emit(Effect::WakeAfter(std::time::Duration::ZERO));
+        }
+        Flow::Pass
+    }
+}
+
+thread_local! { static AUTO_VIEWS: Cell<usize> = const { Cell::new(0) }; }
+
+fn auto_view(s: &Host, cx: &mut Cx<Host>) -> El {
+    AUTO_VIEWS.with(|v| v.set(v.get() + 1));
+    view(s, cx)
+}
+
+fn auto_poll(s: &mut Host, _t: f64, tx: &mut rune::Tx) -> bool {
+    collection(s).tick(s, tx)
+}
+
+/// B1: an open band's moves and its auto-scroll ticks run no view, while the glide still
+/// scrolls. Run with Rune's debug `live_only` check (no warnings), then without it, counting.
+#[test]
+fn a_band_that_rides_live_values_runs_no_view_while_it_moves_and_scrolls() {
+    for check in [true, false] {
+        let moves = Rc::new(Cell::new(0));
+        let log = Rc::new(RefCell::new(Log::default()));
+        let mut host = Host::new(100_000);
+        host.coll.controllers.pointer = Some(Box::new(Pointer(log)));
+        host.coll.controllers.marquee = Some(Box::new(AutoBand {
+            on: false,
+            moves: moves.clone(),
+        }));
+        let mut rt = Runtime::new(host, auto_view, (W, H), Env::new(false, 1.0));
+        rt.check_live_only(check);
+        rt.poll = Some(auto_poll);
+        rt.frame(0.0);
+        settle(&mut rt);
+        let [x, y, _, h] = element(&rt, "row-2").unwrap().visible;
+        rt.physical_input(rune::PhysicalInput::Modifiers(Mods {
+            shift: true,
+            ..Mods::default()
+        }));
+        rt.pointer_down(x + 30.0, y + h / 2.0);
+        rt.frame(1.0 / 60.0);
+        rt.physical_input(rune::PhysicalInput::Modifiers(Mods::default()));
+        assert!(rt.state.coll.controllers.marquee.as_ref().unwrap().active());
+
+        let before = AUTO_VIEWS.with(Cell::get);
+        for k in 1..=30 {
+            rt.pointer_move(x + 30.0, y + h / 2.0 + k as f32 * 2.0);
+            rt.frame(1.0 / 60.0);
+        }
+        let after_moves = AUTO_VIEWS.with(Cell::get);
+        let from = rt.state.coll.scroll_offset();
+        for _ in 0..60 {
+            rt.frame(1.0 / 60.0);
+        }
+        let after_ticks = AUTO_VIEWS.with(Cell::get);
+        assert!(moves.get() >= 30, "the band heard its moves");
+        assert!(
+            rt.state.coll.scroll_offset() > from + 100.0,
+            "and the glide scrolled"
+        );
+        assert!(
+            rt.live_only_warnings().is_empty(),
+            "{:?}",
+            rt.live_only_warnings()
+        );
+        if !check {
+            assert_eq!(after_moves, before, "band moves ran the view");
+            assert_eq!(after_ticks, after_moves, "auto-scroll ticks ran the view");
+        }
+        rt.pointer_up(x + 30.0, y + 200.0);
+        rt.frame(1.0 / 60.0);
+        assert!(
+            AUTO_VIEWS.with(Cell::get) > after_ticks,
+            "hiding the band repaints"
+        );
+    }
+}
+
+/// Nit: an open band's selection is announced when its gesture ends, not at each step.
+#[test]
+fn a_band_announces_its_count_when_it_ends() {
+    struct Selecting(bool);
+    impl MarqueeController for Selecting {
+        fn begin(&mut self, _: Point, _: Mods, cx: &mut Ctx<'_>) {
+            self.0 = true;
+            cx.apply(|sel, _| sel.begin_band(crate::collection::selection::BandMode::Replace));
+        }
+        fn moved(&mut self, at: Point, cx: &mut Ctx<'_>) {
+            let crossed = cx
+                .geometry
+                .range_in(crate::contract::Rect::new(0.0, 0.0, 10.0, at.y));
+            cx.apply(|sel, src| sel.band(src, &crossed));
+        }
+        fn end(&mut self, cx: &mut Ctx<'_>) {
+            self.0 = false;
+            cx.apply(|sel, _| {
+                sel.end_band();
+                crate::collection::selection::Changed::NONE
+            });
+        }
+        fn cancel(&mut self, _: &mut Ctx<'_>) -> bool {
+            std::mem::replace(&mut self.0, false)
+        }
+        fn active(&self) -> bool {
+            self.0
+        }
+        fn band(&self) -> Option<crate::contract::Rect> {
+            None
+        }
+    }
+    let log = Rc::new(RefCell::new(Log::default()));
+    let mut host = Host::new(40);
+    host.coll.controllers.pointer = Some(Box::new(Pointer(log)));
+    host.coll.controllers.marquee = Some(Box::new(Selecting(false)));
+    let mut rt = runtime(host);
+    let status = |rt: &Runtime<Host>| element(rt, STATUS).and_then(|e| e.text).unwrap_or_default();
+    let [x, y, _, h] = element(&rt, "row-1").unwrap().visible;
+    rt.physical_input(rune::PhysicalInput::Modifiers(Mods {
+        shift: true,
+        ..Mods::default()
+    }));
+    rt.pointer_down(x + 30.0, y + h / 2.0);
+    rt.frame(1.0 / 60.0);
+    rt.physical_input(rune::PhysicalInput::Modifiers(Mods::default()));
+    for k in 1..=6 {
+        rt.pointer_move(x + 30.0, y + h / 2.0 + k as f32 * 26.0);
+        rt.frame(1.0 / 60.0);
+        assert_eq!(status(&rt), "", "no count while the band moves");
+    }
+    assert!(rt.state.coll.selection.len() > 3);
+    rt.pointer_up(x + 30.0, y + h / 2.0 + 6.0 * 26.0);
+    rt.frame(1.0 / 60.0);
+    let n = rt.state.coll.selection.len();
+    assert_eq!(status(&rt), format!("{n} items selected"));
+}
+
+/// B2: a row height that changes through the state draws rows at it, and presses hit the
+/// entries drawn there.
+#[test]
+fn a_row_height_from_the_state_redraws_rows_and_routes_presses() {
+    let mut host = Host::new(50);
+    host.row_h = Some(26.0);
+    let mut rt = runtime(host);
+    settle(&mut rt);
+    click(&mut rt, "row-3");
+    rt.update(|s, _| s.row_h = Some(40.0));
+    settle(&mut rt);
+    for key in ["row-5", "row-8"] {
+        click(&mut rt, key);
+        assert_eq!(
+            rt.state.coll.selection.cursor().map(row_key).as_deref(),
+            Some(key)
+        );
+    }
+}
+
+/// B3: a tile size changed at the same width reflows the grid at once: the lines and where
+/// presses land follow it.
+#[test]
+fn a_tile_size_change_at_the_same_width_reflows() {
+    let mut host = Host::new(23);
+    host.tile = Some(100.0);
+    let mut rt = runtime(host);
+    settle(&mut rt);
+    let lines = |rt: &Runtime<Host>| {
+        rt.elements()
+            .iter()
+            .filter(|e| !e.exiting && e.role == "row")
+            .count()
+    };
+    assert_eq!(lines(&rt), 5, "5 tiles a line at 500 pt");
+    rt.update(|s, _| s.tile = Some(250.0));
+    settle(&mut rt);
+    assert_eq!(lines(&rt), 12, "2 tiles a line");
+    for key in ["row-7", "row-14"] {
+        click_label(&mut rt, key);
+        assert_eq!(
+            rt.state.coll.selection.cursor().map(row_key).as_deref(),
+            Some(key)
+        );
+    }
+}
+
+/// S2: a reflow, by a narrower viewport or a new tile size, scrolls the cursor into view.
+#[test]
+fn a_reflow_scrolls_the_cursor_into_view() {
+    for by_width in [true, false] {
+        let mut host = Host::new(4_000);
+        host.tile = Some(100.0);
+        let mut rt = runtime(host);
+        settle(&mut rt);
+        for _ in 0..20 {
+            rt.wheel(W / 4.0, H / 2.0, -200.0);
+            rt.frame(1.0 / 60.0);
+        }
+        settle(&mut rt);
+        let key = rt
+            .elements()
+            .into_iter()
+            .find(|e| {
+                !e.exiting && e.role == "gridcell" && e.visible[1] > 150.0 && e.visible[3] > 20.0
+            })
+            .and_then(|e| e.key)
+            .unwrap();
+        click_label(&mut rt, &key);
+        if by_width {
+            rt.update(|s, _| s.width = 250.0);
+        } else {
+            rt.update(|s, tx| {
+                s.tile = Some(250.0);
+                collection(s).reflow(s, tx);
+            });
+        }
+        settle(&mut rt);
+        let shown = element(&rt, &key)
+            .expect("the cursor's cell is mounted")
+            .visible;
+        assert!(
+            shown[3] > 20.0,
+            "and shows whole (by width {by_width}): {shown:?}"
+        );
+    }
+}
+
+/// S1: settings are one value per type.
+#[test]
+fn settings_hold_one_value_per_type() {
+    struct A(u32);
+    struct B(u32);
+    let mut settings = Settings::default();
+    settings.insert(A(1));
+    settings.insert(B(2));
+    settings.insert(A(3));
+    let src = FastSource::new(3);
+    let g = OnePerLine.geometry(3, 26.0, 300.0, 200.0);
+    let mut sel = crate::collection::selection::Selection::new();
+    let cx = Ctx::new(
+        &src,
+        &*g,
+        crate::contract::Rect::new(0.0, 0.0, 300.0, 200.0),
+        0.0,
+        &mut sel,
+    )
+    .with_settings(Rc::new(settings));
+    assert_eq!(
+        cx.settings::<A>().map(|a| a.0),
+        Some(3),
+        "the later A replaces the first"
+    );
+    assert_eq!(cx.settings::<B>().map(|b| b.0), Some(2));
+    assert!(cx.settings::<u64>().is_none());
 }

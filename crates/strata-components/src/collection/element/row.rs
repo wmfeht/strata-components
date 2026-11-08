@@ -289,6 +289,7 @@ fn build_item<S: 'static>(cfg: &Rc<Config<S>>, frame: &Frame, s: &S, index: usiz
         (entry.name, entry.kind, entry.icon, entry.thumbnail),
         state,
         frame.look_key,
+        frame.row_height.to_bits(),
         frame.hover_live,
         versions,
         place,

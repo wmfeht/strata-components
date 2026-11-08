@@ -22,7 +22,7 @@ license.workspace = true
 default = []
 
 # P1 drag and drop: src/dnd/
-dnd = ["_transfer"]
+dnd = ["_transfer", "x11rb/shape", "x11rb/xinput"]
 
 # P2 clipboard: src/clipboard/
 clipboard = ["_transfer"]

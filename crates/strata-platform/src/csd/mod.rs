@@ -26,8 +26,10 @@
 //!   paired with Rune's fixed 0.5 s, and always maximises (GNOME's
 //!   `action-double-click-titlebar` isn't read). Drafts
 //!   [U13](https://github.com/wmfeht/strata-components/blob/main/docs/decisions/S5-upstream.md#u13)
-//!   and U8, not filed. A desktop interval from a settings shim can't apply to the header
-//!   without giving up `.window_drag()`, the only way to start a move on Wayland.
+//!   and U8, not filed. The desktop's interval from a settings shim (this crate's `settings`
+//!   feature, P5) can't apply to the header either: Rune pairs the presses inside
+//!   `.window_drag()`, and a header with press handlers of its own is no longer a drag region,
+//!   while `.window_drag()` is the only way to start a move on Wayland.
 //!
 //! Work package: P3, `docs/work/phase-1-leaves/P3-client-side-decorations.md`. The findings
 //! behind it are `docs/decisions/S1-linux-window.md` (Q2, Q3).
@@ -74,7 +76,26 @@
 //!   capabilities through `AppHandle::update`.
 //!
 //! Every request answers an [`Outcome`]: sent, and how ([`Route`]), or unsupported, and why
-//! ([`Gap`], which names its Rune draft). [`Csd::observe`] sees each one as it happens.
+//! ([`Gap`], which names its Rune draft). [`Csd::observe`] sees each one as it happens, and
+//! hears a [`Notice::Error`] if the X11 connection fails: the module never prints.
+//!
+//! On X11 a request goes out once the window is linked, unless the window manager says it
+//! can't ([`Gap::WindowManager`]). The window menu also waits until the window manager has said
+//! it has one ([`Gap::NotKnown`]). Without its own X11 connection the module can do nothing on
+//! X11: resize, minimise and the window menu say `Some(false)` and answer
+//! [`Gap::NoConnection`], while Close and Maximise still go through Rune.
+//!
+//! # For the app's header
+//!
+//! - **Buttons:** hide one only when its capability is `Some(false)`. `None` is unknown, and
+//!   the request goes out.
+//! - **Maximise or Restore:** follow [`Csd::state`]. `maximized: None` (Wayland, U6) means the
+//!   app can't know, so show one label that fits both.
+//! - **Gallery and golden scenes:** build `Csd::new(frame, Backend::Headless)` explicitly, never
+//!   [`Backend::from_env`], so a scene renders the same on any machine and under any session.
+//!   A headless `Csd` mounts the bands of a borderless frame and records requests without
+//!   sending them; [`Csd::apply`] with a [`Report`] sets the state and capabilities a scene
+//!   shows.
 //!
 //! # What each backend does
 //!
@@ -86,6 +107,7 @@
 //! | Maximised state | unknown (U6) | `_NET_WM_STATE`, watched | unknown on Wayland (U6), watched on X11 |
 //! | Minimise | **unsupported** (U7) | `WM_CHANGE_STATE` | `Tx::minimize` |
 //! | Window menu | **none** (U8) | `_GTK_SHOW_WINDOW_MENU` where `_NET_SUPPORTED` lists it | the frame's own |
+//! | Without its X11 connection | — | no bands, minimise or menu ([`Gap::NoConnection`]) | — |
 //! | Close | `Tx::close_window` | `Tx::close_window` | `Tx::close_window` |
 //!
 //! On Wayland the bands aren't mounted at all, rather than mounted to answer

@@ -22,6 +22,11 @@
 //! - a click that changes the selection commits within 4 ms at p95, and rebuilds at most 4
 //!   rows on average;
 //! - a refresh commits within 8 ms (`RUNE_COMMIT_BUDGET_MS=8`).
+//!
+//! Grouped (C1f) runs the same in 40 groups of 2,500 and in 2,000 groups of 50, held to the same
+//! bars except that scrolling builds the view once per group crossed (the stuck header's label,
+//! see the element's Decisions) and never otherwise. A regroup (new groups, the same entries) is
+//! reported against the re-sort's guard.
 
 use std::borrow::Cow;
 use std::cell::Cell;
@@ -63,6 +68,9 @@ struct Run {
     refresh: f64,
     resort: f64,
     insert: f64,
+    /// Groups crossed while scrolling.
+    crossed: usize,
+    regroup: f64,
 }
 
 impl Run {
@@ -81,6 +89,8 @@ impl Run {
             refresh: min(|r| r.refresh),
             resort: min(|r| r.resort),
             insert: min(|r| r.insert),
+            crossed: runs.iter().map(|r| r.crossed).max().unwrap_or(0),
+            regroup: min(|r| r.regroup),
         }
     }
 }
@@ -119,21 +129,25 @@ fn element_view(s: &Host, cx: &mut Cx<Host>) -> El {
     col().size(SIDE, SIDE).child(collection(s).build(s))
 }
 
-fn element_run() -> Run {
+/// The element over `N` entries, in groups of `group` when given.
+fn element_run(group: Option<usize>) -> Run {
     let mut run = Run::default();
+    let mut host = Host::new(N);
+    if let Some(size) = group {
+        host.groups = super::groups_of(N, size, "Group");
+    }
     let t = Instant::now();
-    let mut rt = Runtime::new(
-        Host::new(N),
-        element_view,
-        (SIDE, SIDE),
-        Env::new(true, 2.0),
-    );
+    let mut rt = Runtime::new(host, element_view, (SIDE, SIDE), Env::new(true, 2.0));
     rt.frame(0.0);
     run.first = ms(t);
 
+    let h = rt.state.look.row.list;
+    let top_group = |offset: f32| group.map_or(0, |size| (offset / h) as usize / (size + 1));
+    let start = top_group(rt.state.coll.scroll_offset());
     let views = VIEWS.with(Cell::get);
     let mut frames = scroll(&mut rt);
     run.scroll_views = VIEWS.with(Cell::get) - views;
+    run.crossed = top_group(rt.state.coll.scroll_offset()) - start;
     run.scroll_max = frames.iter().copied().fold(0.0, f64::max);
     run.scroll_p50 = percentile(&mut frames, 0.5);
     run.scroll_p95 = percentile(&mut frames, 0.95);
@@ -182,13 +196,24 @@ fn element_run() -> Run {
     run.resort = ms(t);
 
     let t = Instant::now();
-    rt.update(|s, tx| {
+    rt.update(move |s, tx| {
         s.src.insert_top(10);
+        if let Some(size) = group {
+            s.groups = super::groups_of(s.src.len(), size, "Group");
+        }
         s.coll
             .sync(SCOPE, &s.src, SyncRule::complete(CursorGone::Neighbor), tx);
     });
     rt.frame(1.0 / 120.0);
     run.insert = ms(t);
+
+    if let Some(size) = group {
+        let n = rt.state.src.len();
+        let t = Instant::now();
+        rt.update(move |s, _| s.groups = super::groups_of(n, size + 1, "Regroup"));
+        rt.frame(1.0 / 120.0);
+        run.regroup = ms(t);
+    }
     run
 }
 
@@ -279,77 +304,98 @@ fn table_run() -> Run {
 #[test]
 #[ignore = "perf"]
 fn perf_hundred_thousand_entries_against_rune_kit_table() {
-    let mut ours = Vec::new();
-    let mut table = Vec::new();
+    let (mut plain, mut forty, mut dense, mut table) = (vec![], vec![], vec![], vec![]);
     for _ in 0..RUNS {
         table.push(table_run());
-        ours.push(element_run());
+        plain.push(element_run(None));
+        forty.push(element_run(Some(N / 40)));
+        dense.push(element_run(Some(50)));
     }
-    let (c, t) = (Run::best(&ours), Run::best(&table));
+    let t = Run::best(&table);
+    let runs = [
+        ("C1e", Run::best(&plain)),
+        ("40 groups", Run::best(&forty)),
+        ("2,000 groups", Run::best(&dense)),
+    ];
     println!("100k entries, 900 pt at scale 2, best of {RUNS}:");
     println!(
-        "  first frame         C1e {:7.2} ms   Table {:7.2} ms",
-        c.first, t.first
+        "  {:24} {:>12} {:>12} {:>12} {:>10}",
+        "", runs[0].0, runs[1].0, runs[2].0, "Table"
     );
-    println!(
-        "  scroll p50          C1e {:7.3} ms   Table {:7.3} ms",
-        c.scroll_p50, t.scroll_p50
-    );
-    println!(
-        "  scroll p95          C1e {:7.3} ms   Table {:7.3} ms",
-        c.scroll_p95, t.scroll_p95
-    );
-    println!(
-        "  scroll max          C1e {:7.3} ms   Table {:7.3} ms",
-        c.scroll_max, t.scroll_max
-    );
-    println!("  view runs scrolling C1e {:7}", c.scroll_views);
-    println!("  view runs, 60 drag moves C1e {:2}", c.drag_views);
-    println!(
-        "  click commit p50    C1e {:7.3} ms   Table {:7.3} ms",
-        c.click_p50, t.click_p50
-    );
-    println!(
-        "  click commit p95    C1e {:7.3} ms   Table {:7.3} ms",
-        c.click_p95, t.click_p95
-    );
-    println!("  rows rebuilt/click  C1e {:7.2}", c.rebuilt_per_click);
-    println!("  refresh commit      C1e {:7.2} ms", c.refresh);
-    println!(
-        "  re-sort (#203)      C1e {:7.2} ms (reported; guard 60 ms)",
-        c.resort
-    );
-    println!(
-        "  live insert (#203)  C1e {:7.2} ms (reported; guard 60 ms)",
-        c.insert
-    );
+    let row = |name: &str, f: fn(&Run) -> f64, table: Option<f64>| {
+        let t = table.map_or_else(String::new, |v| format!("{v:10.3}"));
+        println!(
+            "  {name:24} {:12.3} {:12.3} {:12.3} {t}",
+            f(&runs[0].1),
+            f(&runs[1].1),
+            f(&runs[2].1)
+        );
+    };
+    row("first frame ms", |r| r.first, Some(t.first));
+    row("scroll p50 ms", |r| r.scroll_p50, Some(t.scroll_p50));
+    row("scroll p95 ms", |r| r.scroll_p95, Some(t.scroll_p95));
+    row("scroll max ms", |r| r.scroll_max, Some(t.scroll_max));
+    row("view runs scrolling", |r| r.scroll_views as f64, None);
+    row("groups crossed", |r| r.crossed as f64, None);
+    row("view runs, 60 drag moves", |r| r.drag_views as f64, None);
+    row("click commit p50 ms", |r| r.click_p50, Some(t.click_p50));
+    row("click commit p95 ms", |r| r.click_p95, Some(t.click_p95));
+    row("rows rebuilt/click", |r| r.rebuilt_per_click, None);
+    row("refresh commit ms", |r| r.refresh, None);
+    row("re-sort (#203) ms", |r| r.resort, None);
+    row("live insert (#203) ms", |r| r.insert, None);
+    row("regroup ms", |r| r.regroup, None);
 
-    assert_eq!(c.scroll_views, 0, "scrolling ran the view");
-    assert_eq!(c.drag_views, 0, "drag moves ran the view");
-    assert!(
-        c.scroll_p50 <= (1.5 * t.scroll_p50).max(0.5),
-        "scroll p50 {:.3} ms over the bar (Table {:.3} ms)",
-        c.scroll_p50,
-        t.scroll_p50
-    );
-    assert!(
-        c.scroll_p95 <= (1.5 * t.scroll_p95).max(1.5),
-        "scroll p95 {:.3} ms over the bar (Table {:.3} ms)",
-        c.scroll_p95,
-        t.scroll_p95
-    );
-    assert!(
-        c.scroll_max < 16.7,
-        "a scroll frame took {:.2} ms",
-        c.scroll_max
-    );
-    assert!(c.click_p95 < 4.0, "click commit p95 {:.3} ms", c.click_p95);
-    assert!(
-        c.rebuilt_per_click <= 4.0,
-        "{:.2} rows rebuilt per click",
-        c.rebuilt_per_click
-    );
-    assert!(c.refresh < 8.0, "refresh commit {:.2} ms", c.refresh);
-    assert!(c.resort < 60.0, "re-sort commit {:.2} ms", c.resort);
-    assert!(c.insert < 60.0, "live insert commit {:.2} ms", c.insert);
+    for (name, c) in &runs {
+        assert_eq!(
+            c.scroll_views, c.crossed,
+            "{name}: scrolling ran the view other than once per group crossed"
+        );
+        assert_eq!(c.drag_views, 0, "{name}: drag moves ran the view");
+        assert!(
+            c.scroll_p50 <= (1.5 * t.scroll_p50).max(0.5),
+            "{name}: scroll p50 {:.3} ms over the bar (Table {:.3} ms)",
+            c.scroll_p50,
+            t.scroll_p50
+        );
+        assert!(
+            c.scroll_p95 <= (1.5 * t.scroll_p95).max(1.5),
+            "{name}: scroll p95 {:.3} ms over the bar (Table {:.3} ms)",
+            c.scroll_p95,
+            t.scroll_p95
+        );
+        assert!(
+            c.scroll_max < 16.7,
+            "{name}: a scroll frame took {:.2} ms",
+            c.scroll_max
+        );
+        assert!(
+            c.click_p95 < 4.0,
+            "{name}: click commit p95 {:.3} ms",
+            c.click_p95
+        );
+        assert!(
+            c.rebuilt_per_click <= 4.0,
+            "{name}: {:.2} rows rebuilt per click",
+            c.rebuilt_per_click
+        );
+        assert!(
+            c.refresh < 8.0,
+            "{name}: refresh commit {:.2} ms",
+            c.refresh
+        );
+        assert!(c.resort < 60.0, "{name}: re-sort commit {:.2} ms", c.resort);
+        assert!(
+            c.insert < 60.0,
+            "{name}: live insert commit {:.2} ms",
+            c.insert
+        );
+        assert!(
+            c.regroup < 60.0,
+            "{name}: regroup commit {:.2} ms",
+            c.regroup
+        );
+    }
+    assert_eq!(runs[0].1.crossed, 0);
+    assert!(runs[2].1.crossed > 5, "the dense run crossed groups");
 }

@@ -58,7 +58,7 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | C18 | ready | | |
 | C19 | ready | | |
 | C1b | coding (adapter on C1e) | 37 unit tests; PointerHandle shared settings (deviation); no rename timeout (Strata) | |
-| C1c | review 1 (adapter done: 57 unit tests, 14 scripts; chord.rs dropped, layout via script) | default + 10xer maps; layout-aware chord workaround (U-C1c-1) | |
+| C1c | fixing round 1 (B1 Ctrl+Left/Right edge intent; B2 vacuous column checks -> C2) | default + 10xer maps; layout-aware chord workaround (U-C1c-1) | |
 | C1d | coding (machine done, 17 tests; adapter waits on C1e + C1b adapter) | ~10 Hz apply while auto-scrolling keeps perf meter silent (deviation) | |
 | C1e | merged | 3 review rounds; all controller seam requests in; scroll p95 0.59 ms vs Table 0.88; S14 sticky group lines deferred to contract WP C1f before C4; round-3 should-fix SF1 (grid restore before first layout) + nits (KeyboardMode commits unchanged, read_only/roles not in row memo) carried to C1f | 8ea925e |
 | C26 | waiting | | |

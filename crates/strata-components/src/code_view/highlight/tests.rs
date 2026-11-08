@@ -1940,3 +1940,44 @@ fn a_reply_for_a_block_that_lost_its_key_is_ignored() {
     let got = blocks.highlight(Some("rust"), b).expect("b landed");
     assert_eq!(highlight_runs(&got), block_reference("rust", b, &light()));
 }
+
+/// Builds `view` each frame, with `polls` landings polled before each build, until a build
+/// lands nothing. The builds, and whether it came to rest within `max`.
+fn build_polling(
+    pump: &mut Pump,
+    blocks: &mut CodeBlocks,
+    view: &[String],
+    polls: usize,
+    max: usize,
+) -> (usize, bool) {
+    for build in 1..=max {
+        build_view(blocks, view);
+        pump.requests();
+        let mut changed = false;
+        for _ in 0..polls {
+            pump.step();
+            pump.step();
+            changed |= blocks.poll();
+        }
+        if !changed {
+            pump.run();
+            if !blocks.poll() {
+                return (build, true);
+            }
+        }
+    }
+    (max, false)
+}
+
+#[test]
+fn three_polls_between_builds_over_the_cap_come_to_rest() {
+    // Review 5, SF2: Rune's resting wake polls, then the frame polls, then the view builds.
+    // Each poll that landed something moved the build marks, so the blocks the last build
+    // asked for fell out of the last two builds and were trimmed while on screen.
+    let mut pump = Pump::new(light());
+    let mut blocks = pump.blocks();
+    let view: Vec<String> = (0..200).map(|i| view_block("a", i)).collect();
+    let (builds, rested) = build_polling(&mut pump, &mut blocks, &view, 3, 300);
+    assert!(rested, "never came to rest in {builds} builds");
+    assert_eq!(pump.blocks_asked, 200, "each block asked for once");
+}

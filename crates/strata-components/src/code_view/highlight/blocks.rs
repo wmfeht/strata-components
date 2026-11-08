@@ -250,12 +250,18 @@ impl Blocks {
 
     /// A new epoch: the next build asks for every block on screen. Trims the cache to
     /// [`CACHE_BYTES`], sparing the blocks asked for in the last two builds.
+    ///
+    /// A bump with nothing asked since the last one (a host polling several times before it
+    /// builds) leaves the build marks where they are: moving them would push the last real
+    /// build out of the last two, and its blocks, still on screen, would be trimmed.
     fn bump(&mut self) {
         self.epoch += 1;
         let spare_after = self.prev_start;
         self.evict(CACHE_BYTES, 0, spare_after);
-        self.prev_start = self.build_start;
-        self.build_start = self.tick;
+        if self.tick > self.build_start {
+            self.prev_start = self.build_start;
+            self.build_start = self.tick;
+        }
     }
 
     fn apply(&mut self, reply: Reply) -> bool {

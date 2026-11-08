@@ -337,7 +337,7 @@ fn each_request_goes_where_it_can_work() {
     );
     assert!(!native_x11.shows_bands() && !native_x11.shows_window_menu());
 
-    // X11 before `attach` links a window, and a window manager that lists no window menu.
+    // X11 before `attach` links a window.
     let mut x11 = borderless(Backend::X11);
     assert_eq!(
         run(&mut x11),
@@ -346,8 +346,128 @@ fn each_request_goes_where_it_can_work() {
             rune(ToggleMaximize),
             gap(Minimize, NoWindow),
             gap(resize, NoWindow),
-            gap(WindowMenu, WindowManager),
+            gap(WindowMenu, NoWindow),
         ]
+    );
+}
+
+/// Once linked, an X11 request goes out unless the window manager says it can't. Only the
+/// window menu waits to be known: `_GTK_SHOW_WINDOW_MENU` means nothing to a window manager
+/// that doesn't list it, while any may honour `WM_CHANGE_STATE` and `_NET_WM_MOVERESIZE`.
+#[test]
+fn an_x11_request_goes_out_only_where_the_link_and_the_window_manager_allow() {
+    use super::state::{Linking, gate};
+    use Gap::*;
+    let menu = Some(NotKnown);
+    let cases = [
+        (Linking::None, Some(true), None, Some(NoWindow)),
+        (Linking::Failed, Some(true), None, Some(NoConnection)),
+        (Linking::Linked, Some(false), None, Some(WindowManager)),
+        (Linking::Linked, Some(false), menu, Some(WindowManager)),
+        (Linking::Linked, None, None, None),
+        (Linking::Linked, None, menu, Some(NotKnown)),
+        (Linking::Linked, Some(true), menu, None),
+    ];
+    for (link, can, unknown, want) in cases {
+        assert_eq!(
+            gate(link, can, unknown),
+            want,
+            "{link:?}, can {can:?}, unknown {unknown:?}"
+        );
+    }
+}
+
+#[test]
+fn a_failed_x11_connection_says_so_and_offers_nothing_that_needs_it() {
+    use std::cell::RefCell;
+    thread_local! {
+        static HEARD: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    }
+    fn hear(_: &Csd, notice: Notice<'_>) {
+        let line = match notice {
+            Notice::Attached => "attached".to_owned(),
+            Notice::Error(e) => format!("error: {e}"),
+            Notice::Report | Notice::Outcome(_) => return,
+        };
+        HEARD.with(|h| h.borrow_mut().push(line));
+    }
+    let mut csd = borderless(Backend::X11).observe(hear);
+    csd.attached(state::Native::X11 {
+        window: 7,
+        link: Err("connection refused".into()),
+    });
+    assert_eq!(
+        HEARD.with(|h| h.borrow().clone()),
+        ["attached", "error: no X11 connection: connection refused"]
+    );
+    assert_eq!(csd.connection_error(), Some("connection refused"));
+    let caps = csd.capabilities();
+    assert_eq!(
+        (caps.resize, caps.minimize, caps.window_menu),
+        (Some(false), Some(false), Some(false)),
+        "so the app hides them"
+    );
+    assert!(!csd.shows_bands() && !csd.shows_window_menu());
+    let mut tx = Tx::default();
+    let no_connection = |request| Outcome::Unsupported {
+        request,
+        gap: Gap::NoConnection,
+    };
+    assert_eq!(csd.minimize(&mut tx), no_connection(Request::Minimize));
+    assert_eq!(
+        csd.begin_resize(Edge::South, None),
+        no_connection(Request::Resize(Edge::South))
+    );
+    assert_eq!(csd.window_menu(), no_connection(Request::WindowMenu));
+    assert_eq!(
+        csd.close(&mut tx),
+        Outcome::Sent {
+            request: Request::Close,
+            route: Route::Rune
+        },
+        "Close needs no X11 connection"
+    );
+    assert_eq!(Gap::NoConnection.rune_draft(), Some("U9"));
+
+    // In a headless view, no band is mounted.
+    let mut rt = runtime(csd);
+    click(&mut rt, inside(Edge::East));
+    assert_eq!(
+        rt.state.csd.last_outcome().map(Outcome::request),
+        Some(Request::Close)
+    );
+}
+
+/// A re-created window replaces the link; a report the old window's watcher had already sent
+/// arrives late, and is dropped.
+#[test]
+fn reports_from_another_window_are_dropped() {
+    let maximized = |window| Report {
+        window,
+        state: WindowState {
+            maximized: Some(true),
+            fullscreen: Some(false),
+        },
+        ..Report::default()
+    };
+    let mut csd = borderless(Backend::X11);
+    csd.attached(state::Native::X11 {
+        window: 8,
+        link: Err("closed".into()),
+    });
+    let revision = csd.revision();
+    csd.apply(maximized(Some(7)));
+    csd.apply(maximized(None));
+    assert_eq!(
+        (csd.revision(), csd.state().maximized),
+        (revision, None),
+        "dropped"
+    );
+    csd.apply(maximized(Some(8)));
+    assert_eq!(
+        csd.state().maximized,
+        Some(true),
+        "its own window's report lands"
     );
 }
 
@@ -362,6 +482,7 @@ fn an_observer_hears_each_outcome_and_report() {
             Notice::Attached => "attached".to_owned(),
             Notice::Report => format!("report {:?}", csd.state().maximized),
             Notice::Outcome(o) => format!("outcome {:?}", o.request()),
+            Notice::Error(e) => format!("error {e}"),
         };
         HEARD.with(|h| h.borrow_mut().push(line));
     }

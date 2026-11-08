@@ -40,7 +40,7 @@ fn without_an_ewmh_window_manager_nothing_is_known_but_the_state() {
 /// wlroots' X11 window manager: `_NET_WM_MOVERESIZE` and the maximised states, no window menu,
 /// no allowed actions.
 #[test]
-fn a_window_manager_without_a_window_menu_keeps_the_header_s_secondary_click() {
+fn a_window_manager_that_lists_no_window_menu_or_allowed_actions_reports_what_it_lists() {
     let a = atoms();
     let supported = [
         a.net_wm_moveresize,

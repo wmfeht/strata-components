@@ -35,8 +35,15 @@ pub enum Gap {
     RuneMinimize,
     /// Rune has no window menu on Wayland. Draft U8, not filed.
     RuneWindowMenu,
-    /// The X11 window manager doesn't list the request in `_NET_SUPPORTED`.
+    /// The X11 window manager says it can't: it doesn't list the request in `_NET_SUPPORTED`,
+    /// or `_NET_WM_ALLOWED_ACTIONS` leaves it out for this window.
     WindowManager,
+    /// The X11 window manager doesn't say whether it has this (no `_NET_SUPPORTED`), and a
+    /// request it doesn't know means nothing to it.
+    NotKnown,
+    /// This module's own X11 connection failed, so nothing reaches the window manager. Draft
+    /// U9 (not filed) would let it use winit's.
+    NoConnection,
     /// The native frame does this itself.
     NativeFrame,
     /// No native window is attached yet ([`attach`](super::attach)).
@@ -51,7 +58,8 @@ impl Gap {
             Gap::RuneResize => Some("U6"),
             Gap::RuneMinimize => Some("U7"),
             Gap::RuneWindowMenu => Some("U8"),
-            Gap::WindowManager | Gap::NativeFrame | Gap::NoWindow => None,
+            Gap::NoConnection => Some("U9"),
+            Gap::WindowManager | Gap::NotKnown | Gap::NativeFrame | Gap::NoWindow => None,
         }
     }
 }

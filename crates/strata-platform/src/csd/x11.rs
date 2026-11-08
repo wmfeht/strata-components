@@ -5,6 +5,12 @@
 //! enough for client messages and property reads, but not to release winit's pointer grab
 //! before `_NET_WM_MOVERESIZE` (module docs, "The X11 grab").
 
+use std::net::Shutdown;
+use std::os::fd::AsFd;
+use std::os::unix::net::UnixStream;
+use std::sync::Arc;
+use std::thread::JoinHandle;
+
 use x11rb::connection::Connection;
 use x11rb::errors::ReplyError;
 use x11rb::protocol::Event;
@@ -59,17 +65,25 @@ fn text(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
 
-/// A connection for one window's requests.
+/// One window's link to the X server: a connection for its requests, and a watcher thread on
+/// a connection of its own. Dropping it stops the watcher and waits for its thread.
 pub(crate) struct Link {
     conn: RustConnection,
     window: Window,
     root: Window,
     atoms: Atoms,
+    /// Held for its `Drop`, which stops the thread.
+    _watcher: Watcher,
 }
 
 impl Link {
-    /// Connects to `$DISPLAY`, the display winit took.
-    pub(crate) fn connect(window: Window) -> Result<Link, String> {
+    /// Connects to `$DISPLAY`, the display winit took, and starts watching `window`: `report`
+    /// hears each change of its state or of the window manager's capabilities, tagged with
+    /// `window`. [`Link::read`] gives the report as it is now.
+    pub(crate) fn connect(
+        window: Window,
+        report: impl Fn(Report) + Send + 'static,
+    ) -> Result<Link, String> {
         let (conn, screen) = x11rb::connect(None).map_err(text)?;
         let root = conn
             .setup()
@@ -78,12 +92,19 @@ impl Link {
             .map(|s| s.root)
             .ok_or("the X server has no such screen")?;
         let atoms = Atoms::intern(&conn)?;
+        let watcher = Watcher::start(window, report)?;
         Ok(Link {
             conn,
             window,
             root,
             atoms,
+            _watcher: watcher,
         })
+    }
+
+    /// The window's report now.
+    pub(crate) fn read(&self) -> Result<Report, String> {
+        read_report(&self.conn, &self.atoms, self.window, self.root).map_err(text)
     }
 
     pub(crate) fn begin_resize(&self, edge: Edge, at: Option<(i32, i32)>) -> Result<(), String> {
@@ -137,71 +158,105 @@ impl Link {
     }
 }
 
-/// Starts a thread that reads `window`'s report, calls `report` with it, and calls it again
-/// each time it changes. The thread ends once the window is destroyed or the connection drops.
-pub(crate) fn watch(
-    window: Window,
-    report: impl Fn(Report) + Send + 'static,
-) -> Result<(), String> {
-    let (conn, screen) = x11rb::connect(None).map_err(text)?;
-    let root = conn
-        .setup()
-        .roots
-        .get(screen)
-        .map(|s| s.root)
-        .ok_or("the X server has no such screen")?;
-    let atoms = Atoms::intern(&conn)?;
-    let mask = |m| ChangeWindowAttributesAux::new().event_mask(m);
-    conn.change_window_attributes(
-        window,
-        &mask(EventMask::PROPERTY_CHANGE | EventMask::STRUCTURE_NOTIFY),
-    )
-    .map_err(text)?
-    .check()
-    .map_err(text)?;
-    // A window manager that starts or restarts sets _NET_SUPPORTED again.
-    conn.change_window_attributes(root, &mask(EventMask::PROPERTY_CHANGE))
+impl std::fmt::Debug for Link {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Link")
+            .field("window", &self.window)
+            .finish_non_exhaustive()
+    }
+}
+
+/// A thread that reports one window's changes, on a connection of its own, as Rune's own
+/// `platform/x11/pointer.rs` (`MouseWatch`) watches the pointer.
+struct Watcher {
+    conn: Arc<RustConnection>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl Watcher {
+    fn start(window: Window, report: impl Fn(Report) + Send + 'static) -> Result<Watcher, String> {
+        let (conn, screen) = x11rb::connect(None).map_err(text)?;
+        let root = conn
+            .setup()
+            .roots
+            .get(screen)
+            .map(|s| s.root)
+            .ok_or("the X server has no such screen")?;
+        let atoms = Atoms::intern(&conn)?;
+        let mask = |m| ChangeWindowAttributesAux::new().event_mask(m);
+        conn.change_window_attributes(
+            window,
+            &mask(EventMask::PROPERTY_CHANGE | EventMask::STRUCTURE_NOTIFY),
+        )
         .map_err(text)?
         .check()
         .map_err(text)?;
-    std::thread::Builder::new()
-        .name("strata-csd-x11".into())
-        .spawn(move || {
-            let read = || read_report(&conn, &atoms, window, root);
-            let mut last = read().ok();
-            if let Some(r) = last {
+        // A window manager that starts or restarts sets _NET_SUPPORTED again.
+        conn.change_window_attributes(root, &mask(EventMask::PROPERTY_CHANGE))
+            .map_err(text)?
+            .check()
+            .map_err(text)?;
+        let conn = Arc::new(conn);
+        let reader = conn.clone();
+        let thread = std::thread::Builder::new()
+            .name("strata-csd-x11".into())
+            .spawn(move || watch(&reader, &atoms, window, root, report))
+            .map_err(text)?;
+        Ok(Watcher {
+            conn,
+            thread: Some(thread),
+        })
+    }
+}
+
+impl Drop for Watcher {
+    fn drop(&mut self) {
+        // Shutting the socket down wakes the thread's wait_for_event, which then fails and
+        // returns, without waiting for another event. Shutdown acts on the socket, so a
+        // duplicate of the descriptor reaches it: no unsafe code.
+        if let Ok(fd) = self.conn.stream().as_fd().try_clone_to_owned() {
+            let _ = UnixStream::from(fd).shutdown(Shutdown::Both);
+        }
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+/// The watcher's loop: reads the report on each relevant property change, and reports it when
+/// it changed. Ends when the window is destroyed or the connection drops.
+fn watch(
+    conn: &RustConnection,
+    atoms: &Atoms,
+    window: Window,
+    root: Window,
+    report: impl Fn(Report),
+) {
+    let read = || read_report(conn, atoms, window, root);
+    let mut last = read().ok();
+    let ours = [atoms.net_wm_state, atoms.net_wm_allowed_actions];
+    while let Ok(event) = conn.wait_for_event() {
+        let relevant = match event {
+            Event::DestroyNotify(e) if e.window == window => return,
+            Event::PropertyNotify(e) => {
+                (e.window == window && ours.contains(&e.atom))
+                    || (e.window == root && e.atom == atoms.net_supported)
+            }
+            _ => false,
+        };
+        if !relevant {
+            continue;
+        }
+        match read() {
+            Ok(r) if last != Some(r) => {
+                last = Some(r);
                 report(r);
             }
-            loop {
-                let Ok(event) = conn.wait_for_event() else {
-                    return;
-                };
-                let relevant = match event {
-                    Event::DestroyNotify(e) if e.window == window => return,
-                    Event::PropertyNotify(e) => [
-                        atoms.net_wm_state,
-                        atoms.net_wm_allowed_actions,
-                        atoms.net_supported,
-                    ]
-                    .contains(&e.atom),
-                    _ => false,
-                };
-                if !relevant {
-                    continue;
-                }
-                match read() {
-                    Ok(r) if last != Some(r) => {
-                        last = Some(r);
-                        report(r);
-                    }
-                    Ok(_) => {}
-                    // The window is gone.
-                    Err(_) => return,
-                }
-            }
-        })
-        .map_err(text)?;
-    Ok(())
+            Ok(_) => {}
+            // The window is gone.
+            Err(_) => return,
+        }
+    }
 }
 
 fn atoms_of(
@@ -210,6 +265,8 @@ fn atoms_of(
     property: Atom,
 ) -> Result<Option<Vec<Atom>>, ReplyError> {
     let reply = conn
+        // Up to 1024 atoms (the length is in 32-bit units). Every list read here is far shorter
+        // (_NET_SUPPORTED runs to about a hundred), so `bytes_after` is never read.
         .get_property(false, window, property, AtomEnum::ATOM, 0, 1024)?
         .reply()?;
     // An unset property comes back with type None.
@@ -230,12 +287,11 @@ fn read_report(
     let state = atoms_of(conn, window, a.net_wm_state)?.unwrap_or_default();
     let supported = atoms_of(conn, root, a.net_supported)?;
     let allowed = atoms_of(conn, window, a.net_wm_allowed_actions)?;
-    Ok(report_from(
-        a,
-        &state,
-        supported.as_deref(),
-        allowed.as_deref(),
-    ))
+    let report = report_from(a, &state, supported.as_deref(), allowed.as_deref());
+    Ok(Report {
+        window: Some(window),
+        ..report
+    })
 }
 
 /// What the properties say. Without `_NET_SUPPORTED` (no EWMH window manager) nothing is
@@ -266,6 +322,7 @@ fn report_from(
         },
     };
     Report {
+        window: None,
         state: WindowState {
             maximized: Some(maximized),
             fullscreen: Some(has(state, a.net_wm_state_fullscreen)),

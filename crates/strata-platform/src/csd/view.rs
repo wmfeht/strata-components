@@ -4,8 +4,9 @@
 use rune::raw_window_handle::RawWindowHandle;
 use rune::{AppHandle, Drag, El, Phase, PointerPress, Tx, WindowHandle, col, el};
 
-use super::x11::{self, Link};
-use super::{Backend, Csd, Edge};
+use super::state::Native;
+use super::x11::Link;
+use super::{Csd, Edge};
 
 /// `content` with the resize bands over its edges, where [`Csd::shows_bands`] says they can
 /// work. `content` should fill the window (`w_full`, `h_full`). Put the result at the root of
@@ -71,44 +72,42 @@ pub fn header<S: 'static>(header: El, csd: &Csd, access: fn(&mut S) -> &mut Csd)
 /// app.on_window(move |w| csd::attach(w, &handle, |s: &mut State| &mut s.csd))
 /// ```
 ///
-/// On X11 it opens this module's own connection and starts a thread that watches the window's
-/// state and the window manager's capabilities. Both land in the state through
-/// `AppHandle::update`. The thread ends when the window is destroyed.
+/// On X11 it opens this module's own connections: one for requests, and one for a thread that
+/// watches the window's state and the window manager's capabilities and reports them through
+/// `AppHandle::update`. The thread stops when the window is destroyed or the link is dropped
+/// (a re-created window replaces it). If the connection fails, the [`Csd`] says so through
+/// [`Notice::Error`](super::Notice::Error) and [`Csd::connection_error`], its capabilities
+/// say resize, minimise and the window menu can't work, and those requests answer
+/// [`Gap::NoConnection`](super::Gap::NoConnection).
 pub fn attach<S: 'static>(
     window: &WindowHandle,
     app: &AppHandle<S>,
     access: fn(&mut S) -> &mut Csd,
 ) {
-    let native = window
+    let found = window
         .with_raw_handle(|h| match h.as_raw() {
-            RawWindowHandle::Wayland(_) => Native::Wayland,
-            RawWindowHandle::Xlib(x) => u32::try_from(x.window).map_or(Native::Other, Native::X11),
-            RawWindowHandle::Xcb(x) => Native::X11(x.window.get()),
-            _ => Native::Other,
+            RawWindowHandle::Wayland(_) => Found::Wayland,
+            RawWindowHandle::Xlib(x) => u32::try_from(x.window).map_or(Found::Other, Found::X11),
+            RawWindowHandle::Xcb(x) => Found::X11(x.window.get()),
+            _ => Found::Other,
         })
-        .unwrap_or(Native::Other);
-    match native {
-        Native::Wayland => app.update(move |s, _| access(s).attached(Backend::Wayland, None)),
-        Native::Other => app.update(move |s, _| access(s).attached(Backend::Headless, None)),
-        Native::X11(id) => {
-            let link = Link::connect(id);
-            if let Err(e) = &link {
-                eprintln!("strata-platform csd: no X11 connection, so no resize: {e}");
-            }
-            let link = link.ok();
-            app.update(move |s, _| access(s).attached(Backend::X11, link));
-            let app = app.clone();
-            let watched = x11::watch(id, move |report| {
-                app.update(move |s, _| access(s).apply(report));
-            });
-            if let Err(e) = watched {
-                eprintln!("strata-platform csd: the X11 state watcher didn't start: {e}");
-            }
+        .unwrap_or(Found::Other);
+    let native = match found {
+        Found::Wayland => Native::Wayland,
+        Found::Other => Native::Other,
+        Found::X11(id) => {
+            let reports = app.clone();
+            let link = Link::connect(id, move |report| {
+                reports.update(move |s, _| access(s).apply(report));
+            })
+            .map(Box::new);
+            Native::X11 { window: id, link }
         }
-    }
+    };
+    app.update(move |s, _| access(s).attached(native));
 }
 
-enum Native {
+enum Found {
     Wayland,
     X11(u32),
     Other,

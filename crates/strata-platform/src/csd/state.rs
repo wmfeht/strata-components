@@ -6,15 +6,16 @@ use super::x11::Link;
 use super::{Backend, Bands, Edge, Frame, Gap, Outcome, Request, Route};
 
 /// The window's state, where it is known. `None` is unknown: Rune reports neither on Wayland
-/// (draft U6, not filed), and X11 knows once the watcher has read the window.
+/// (draft U6, not filed), and X11 knows once the window is linked.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct WindowState {
     pub maximized: Option<bool>,
     pub fullscreen: Option<bool>,
 }
 
-/// Whether the app's own control for each action can work: `Some(false)` hides it, `None` is
-/// unknown (the request goes out, and the window manager may ignore it).
+/// Whether the app's own control for each action can work. Hide a control only on
+/// `Some(false)`; `None` is unknown (the request goes out, and the window manager may ignore
+/// it).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Capabilities {
     /// Resizing from the bands.
@@ -29,6 +30,9 @@ pub struct Capabilities {
 /// `_NET_SUPPORTED` and `_NET_WM_ALLOWED_ACTIONS`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Report {
+    /// The X window it was read from. Once a [`Csd`] is linked to an X11 window, it takes only
+    /// that window's reports, so a late one from a window since destroyed is dropped.
+    pub window: Option<u32>,
     pub state: WindowState,
     pub capabilities: Capabilities,
 }
@@ -42,17 +46,41 @@ pub enum Notice<'a> {
     Report,
     /// A request's outcome.
     Outcome(&'a Outcome),
+    /// Something went wrong outside a request: the X11 connection or its first read failed.
+    Error(&'a str),
+}
+
+/// What [`attach`](super::attach) found.
+pub(super) enum Native {
+    Wayland,
+    X11 {
+        window: u32,
+        link: Result<Box<Link>, String>,
+    },
+    /// No native window this module knows.
+    Other,
+}
+
+/// The X11 connection, for an X11 window.
+#[derive(Debug)]
+enum X11 {
+    /// Not attached yet.
+    None,
+    Linked(Box<Link>),
+    Failed(String),
 }
 
 /// Client-side decorations for one window: its frame, its backend and what is known about it.
-/// The app keeps one in its state per window and passes an accessor to [`decorate`](super::decorate)
-/// and [`header`](super::header).
+/// The app keeps one in its state per window and passes an accessor to
+/// [`decorate`](super::decorate) and [`header`](super::header).
 pub struct Csd {
     frame: Frame,
     backend: Backend,
     bands: Bands,
     report: Report,
-    link: Option<Link>,
+    /// The X window this is linked to, whether or not its connection worked.
+    window: Option<u32>,
+    x11: X11,
     last: Option<Outcome>,
     revision: u64,
     observer: Option<fn(&Csd, Notice<'_>)>,
@@ -64,7 +92,8 @@ impl std::fmt::Debug for Csd {
             .field("frame", &self.frame)
             .field("backend", &self.backend)
             .field("report", &self.report)
-            .field("linked", &self.link.is_some())
+            .field("window", &self.window)
+            .field("x11", &self.x11)
             .field("last", &self.last)
             .finish_non_exhaustive()
     }
@@ -72,17 +101,19 @@ impl std::fmt::Debug for Csd {
 
 impl Csd {
     /// A window that opens with `frame` on `backend` ([`Backend::from_env`] before the window
-    /// exists; [`attach`](super::attach) confirms it).
+    /// exists; [`attach`](super::attach) confirms it). A headless run, a test or a gallery
+    /// scene passes [`Backend::Headless`].
     pub fn new(frame: Frame, backend: Backend) -> Csd {
         Csd {
             frame,
             backend,
             bands: Bands::default(),
             report: Report {
-                state: WindowState::default(),
                 capabilities: defaults(frame, backend),
+                ..Report::default()
             },
-            link: None,
+            window: None,
+            x11: X11::None,
             last: None,
             revision: 0,
             observer: None,
@@ -121,6 +152,14 @@ impl Csd {
         self.report.capabilities
     }
 
+    /// Why the X11 connection failed, if it did.
+    pub fn connection_error(&self) -> Option<&str> {
+        match &self.x11 {
+            X11::Failed(e) => Some(e),
+            X11::None | X11::Linked(_) => None,
+        }
+    }
+
     /// The last request's outcome.
     pub fn last_outcome(&self) -> Option<&Outcome> {
         self.last.as_ref()
@@ -132,7 +171,8 @@ impl Csd {
     }
 
     /// Whether [`decorate`](super::decorate) mounts the resize bands: a borderless window
-    /// whose bands can resize (not on Wayland, U6), that isn't maximised or full screen.
+    /// whose bands can resize (not on Wayland, U6, nor without an X11 connection), that isn't
+    /// maximised or full screen.
     pub fn shows_bands(&self) -> bool {
         let state = self.report.state;
         self.frame == Frame::Borderless
@@ -148,10 +188,14 @@ impl Csd {
     }
 
     /// Takes the X11 watcher's report. Apps that start their own watcher call this; [`attach`]
-    /// wires it for them.
+    /// wires it for them. Once linked to an X11 window, a report from another window (one since
+    /// destroyed, or `window: None`) is dropped.
     ///
     /// [`attach`]: super::attach
     pub fn apply(&mut self, mut report: Report) {
+        if self.window.is_some() && report.window != self.window {
+            return;
+        }
         if self.frame == Frame::Native {
             // The frame resizes and has the window menu; the app's own controls for them don't.
             report.capabilities.resize = Some(false);
@@ -164,16 +208,59 @@ impl Csd {
         }
     }
 
-    /// Links the native window [`attach`](super::attach) found.
-    pub(super) fn attached(&mut self, backend: Backend, link: Option<Link>) {
-        self.backend = backend;
-        self.link = link;
-        self.report = Report {
-            state: WindowState::default(),
-            capabilities: defaults(self.frame, backend),
-        };
+    /// Links the native window [`attach`](super::attach) found, in place of any before it.
+    /// Dropping an old X11 link stops its watcher.
+    pub(super) fn attached(&mut self, native: Native) {
+        self.report = Report::default();
+        let mut error = None;
+        match native {
+            Native::Wayland => self.unlinked(Backend::Wayland),
+            Native::Other => self.unlinked(Backend::Headless),
+            Native::X11 { window, link } => {
+                self.backend = Backend::X11;
+                self.window = Some(window);
+                self.report.capabilities = defaults(self.frame, Backend::X11);
+                match link {
+                    Ok(link) => {
+                        match link.read() {
+                            Ok(report) => self.report = report,
+                            Err(e) => error = Some(format!("the window's first read failed: {e}")),
+                        }
+                        self.x11 = X11::Linked(link);
+                    }
+                    Err(e) => {
+                        if self.frame == Frame::Borderless {
+                            self.report.capabilities = Capabilities {
+                                resize: Some(false),
+                                minimize: Some(false),
+                                maximize: None,
+                                window_menu: Some(false),
+                            };
+                        }
+                        error = Some(format!("no X11 connection: {e}"));
+                        self.x11 = X11::Failed(e);
+                    }
+                }
+                self.report.window = Some(window);
+                if self.frame == Frame::Native {
+                    self.report.capabilities.resize = Some(false);
+                    self.report.capabilities.window_menu = Some(false);
+                }
+            }
+        }
         self.revision += 1;
         self.notify(Notice::Attached);
+        if let Some(e) = error {
+            self.notify(Notice::Error(&e));
+        }
+    }
+
+    /// A window with no X11 link.
+    fn unlinked(&mut self, backend: Backend) {
+        self.backend = backend;
+        self.window = None;
+        self.x11 = X11::None;
+        self.report.capabilities = defaults(self.frame, backend);
     }
 
     /// The Close button.
@@ -192,13 +279,17 @@ impl Csd {
     /// borderless one (U7), so on X11 this module asks the window manager itself.
     pub fn minimize(&mut self, tx: &mut Tx) -> Outcome {
         let request = Request::Minimize;
+        let can = self.report.capabilities.minimize;
         let outcome = match (self.frame, self.backend) {
             (Frame::Native, _) => {
                 tx.minimize();
                 sent(request, Route::Rune)
             }
             (Frame::Borderless, Backend::Wayland) => unsupported(request, Gap::RuneMinimize),
-            (Frame::Borderless, Backend::X11) => self.x11(request, |link| link.minimize()),
+            // Unknown goes out: WM_CHANGE_STATE is ICCCM, which any window manager may honour.
+            (Frame::Borderless, Backend::X11) => {
+                self.x11(request, can, None, |link| link.minimize())
+            }
             (Frame::Borderless, Backend::Headless) => sent(request, Route::Headless),
         };
         self.done(outcome)
@@ -209,11 +300,12 @@ impl Csd {
     /// (`Drag::screen_point`), else the X server is asked.
     pub fn begin_resize(&mut self, edge: Edge, screen: Option<(i32, i32)>) -> Outcome {
         let request = Request::Resize(edge);
+        let can = self.report.capabilities.resize;
         let outcome = match (self.frame, self.backend) {
             (Frame::Native, _) => unsupported(request, Gap::NativeFrame),
             (Frame::Borderless, Backend::Wayland) => unsupported(request, Gap::RuneResize),
             (Frame::Borderless, Backend::X11) => {
-                self.x11(request, |link| link.begin_resize(edge, screen))
+                self.x11(request, can, None, |link| link.begin_resize(edge, screen))
             }
             (Frame::Borderless, Backend::Headless) => sent(request, Route::Headless),
         };
@@ -223,25 +315,41 @@ impl Csd {
     /// Opens the window manager's window menu at the pointer.
     pub fn window_menu(&mut self) -> Outcome {
         let request = Request::WindowMenu;
+        let can = self.report.capabilities.window_menu;
         let outcome = match (self.frame, self.backend) {
             (Frame::Native, _) => unsupported(request, Gap::NativeFrame),
             (Frame::Borderless, Backend::Wayland) => unsupported(request, Gap::RuneWindowMenu),
-            (Frame::Borderless, Backend::X11) if !self.shows_window_menu() => {
-                unsupported(request, Gap::WindowManager)
+            // `_GTK_SHOW_WINDOW_MENU` means nothing to a window manager that doesn't list it.
+            (Frame::Borderless, Backend::X11) => {
+                self.x11(request, can, Some(Gap::NotKnown), |link| link.window_menu())
             }
-            (Frame::Borderless, Backend::X11) => self.x11(request, |link| link.window_menu()),
             (Frame::Borderless, Backend::Headless) => sent(request, Route::Headless),
         };
         self.done(outcome)
     }
 
-    fn x11(&self, request: Request, send: impl FnOnce(&Link) -> Result<(), String>) -> Outcome {
-        match &self.link {
-            None => unsupported(request, Gap::NoWindow),
-            Some(link) => match send(link) {
-                Ok(()) => sent(request, Route::X11),
-                Err(error) => Outcome::Failed { request, error },
-            },
+    /// Sends an X11 request where the link and the window manager allow it ([`gate`]).
+    fn x11(
+        &self,
+        request: Request,
+        can: Option<bool>,
+        unknown: Option<Gap>,
+        send: impl FnOnce(&Link) -> Result<(), String>,
+    ) -> Outcome {
+        let link = match &self.x11 {
+            X11::None => Linking::None,
+            X11::Failed(_) => Linking::Failed,
+            X11::Linked(_) => Linking::Linked,
+        };
+        if let Some(gap) = gate(link, can, unknown) {
+            return unsupported(request, gap);
+        }
+        let X11::Linked(link) = &self.x11 else {
+            return unsupported(request, Gap::NoWindow);
+        };
+        match send(link) {
+            Ok(()) => sent(request, Route::X11),
+            Err(error) => Outcome::Failed { request, error },
         }
     }
 
@@ -255,6 +363,27 @@ impl Csd {
         if let Some(f) = self.observer {
             f(self, notice);
         }
+    }
+}
+
+/// Where an X11 link stands, for [`gate`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Linking {
+    None,
+    Linked,
+    Failed,
+}
+
+/// Why an X11 request can't go out, if it can't: no window or connection first, then what the
+/// window manager says. `can` is its capability, and `unknown` the gap to answer while it is
+/// unknown (`None` sends anyway).
+pub(super) fn gate(link: Linking, can: Option<bool>, unknown: Option<Gap>) -> Option<Gap> {
+    match (link, can) {
+        (Linking::None, _) => Some(Gap::NoWindow),
+        (Linking::Failed, _) => Some(Gap::NoConnection),
+        (Linking::Linked, Some(false)) => Some(Gap::WindowManager),
+        (Linking::Linked, None) => unknown,
+        (Linking::Linked, Some(true)) => None,
     }
 }
 
@@ -274,7 +403,7 @@ fn defaults(frame: Frame, backend: Backend) -> Capabilities {
             maximize: None,
             window_menu: Some(false),
         },
-        // The watcher fills these in.
+        // The link's first read fills these in.
         (Frame::Borderless, Backend::X11 | Backend::Headless) => Capabilities::default(),
     }
 }

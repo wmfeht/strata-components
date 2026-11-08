@@ -16,6 +16,7 @@
 //!   each time the X11 watcher sees the window's state or capabilities change. Each line
 //!   carries `backend`, `frame`, `bands` (whether the resize bands are mounted), `window_menu`,
 //!   `state` and `capabilities`;
+//! - `{"ev":"csd-error","error":"…"}` if its X11 connection fails;
 //! - `{"ev":"outcome","request":"Minimize","result":"sent","route":"X11"}`, or `"unsupported"`
 //!   with its `gap` and `draft`, or `"failed"` with its `error`, for each request;
 //! - `{"ev":"layout","w":…,"h":…}` each time its size in points changes, and
@@ -87,6 +88,7 @@ mod demo {
                     }),
                 );
             }
+            Notice::Error(error) => log("csd-error", json!({ "error": error })),
             Notice::Outcome(outcome) => {
                 let request = format!("{:?}", outcome.request());
                 let fields = match outcome {

@@ -203,7 +203,6 @@ impl Default for Demo {
 /// The controllers the page's collection routes to. Each work package installs its own on its
 /// own line; the blank lines between them keep the branches from colliding.
 fn install(controllers: &mut Controllers) {
-    let _ = controllers;
     controllers.pointer = Some(Box::new(
         strata_components::collection::pointer::PointerIntent::new(),
     ));

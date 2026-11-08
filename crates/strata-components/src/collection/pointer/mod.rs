@@ -15,19 +15,28 @@
 //!
 //! | Press on | Plain | Ctrl | Shift | Past the threshold |
 //! | --- | --- | --- | --- | --- |
-//! | An entry's name or content | Selects it alone, now; inside a multi-selection, keeps the group | Unselected: adds it now. Selected: toggles it off on release | Ranges now | A file drag of the selection |
+//! | An entry's name or content | Selects it alone, now; inside a multi-selection, keeps the group | Unselected: adds it now. Selected: toggles it off on release (a deviation, below) | Ranges now | A file drag of the selection |
 //! | Blank space on a selected entry | As content | As content | As content | A file drag of the selection |
 //! | Blank space on an unselected entry | Selects it alone, now | Toggles on release | Ranges on release | A marquee |
+//! | Anything, with Alt held | As without Alt | Toggles on release | Ranges on release | A marquee |
 //! | Empty space | Clears the selection, now | Nothing | Nothing | A marquee |
 //!
 //! Ctrl+Shift ranges by [`PointerSettings::ctrl_shift`], [`Extend::Replace`] by default, as
-//! Strata's `pointer_selection` does. Alt makes any press a marquee once it drags. A drag needs
-//! [`PointerSettings::drags`].
+//! Strata's `pointer_selection` does. A drag needs [`PointerSettings::drags`].
 //!
 //! Selecting an entry the moment it is pressed is Strata's: a drag then shows and carries its
-//! real source. Blank space on an unselected entry leaves its modified operation to the
-//! release, because a drag from there is a marquee whose Ctrl or Shift applies to the selection
-//! as it was before the press.
+//! real source. Where a drag is a marquee instead (blank space on an unselected entry, or any
+//! press with Alt), Ctrl and Shift wait for the release: the band applies them to the
+//! selection as it was before the press, which Strata takes when the band's press begins
+//! (`src/ui/marquee/state.rs`), before the row's own press changes anything.
+//!
+//! **Deviation:** Strata toggles a Ctrl-pressed entry at the press even when it is selected,
+//! so a Ctrl-drag from a selected entry drags the selection without it. Here that toggle
+//! waits for the release, and a drag keeps the entry: "Ctrl-drag … adds it to the selection".
+//!
+//! Which action a drag asks for (Ctrl copies, Shift moves) is the host's: it reads `tx.mods()`
+//! when it hears `Intent::BeginDrag` (X2 and P1), as Strata's `drag_actions_for_modifiers`
+//! (`src/ui/browser/clipboard.rs`) does.
 //!
 //! # Threshold
 //!
@@ -55,6 +64,7 @@
 //!
 //! A Ctrl or Shift click never opens. Pairs are counted here, from
 //! [`PointerSettings::double_click`]: Rune's own count uses a fixed 0.5 s on Linux (S5 U13).
+//! The click modes themselves, and keeping them across restarts, are the host's preferences.
 //!
 //! # Slow-click rename
 //!
@@ -62,7 +72,8 @@
 //! press arms a rename, when the click doesn't open it (or the entry is
 //! [`PointerSettings::already_open`]) and [`PointerSettings::rename`] is on. An automatic pick
 //! ([`Selection::auto_select`]) counts as that only selection, as GTK shows it selected in
-//! Strata. The rename comes one double-click interval later from [`PointerMachine::tick`], so
+//! Strata. Alt and Super, which stop it, are the ones held at the press. The rename comes one
+//! double-click interval later from [`PointerMachine::tick`], so
 //! that a second press makes a double click instead. Any press, any key the collection hears
 //! (`PointerController::key_seen`), a reset (`PointerController::reset`: another folder, or a
 //! host that saw a press or a key elsewhere, such as another Columns column) or any selection
@@ -93,6 +104,10 @@
 //! Settings arrive by type through the element's `Ctx::settings`, its one settings path for
 //! controllers, so C1b keeps no handle of its own.
 //!
+//! The host must give the element its clock (`Collection::clock`): C1b times double clicks and
+//! the slow-click rename by it. Without one every input reads time 0, so any second press on an
+//! entry pairs into a double click and a rename never comes due.
+//!
 //! The element hit-tests: a press's `Region` becomes the [`Spot`] (a region C1b doesn't know
 //! is gutter). A file drag starts only from the `Intent::BeginDrag` C1b sends past the
 //! threshold, with the pointer's window point; rows have no drag source (C1e's decision). A
@@ -113,6 +128,38 @@
 //! point, and routes the rest of the gesture to the marquee while it is active. C1b is done
 //! with the gesture: its release never reaches C1b, and C1b's next press starts afresh. How
 //! `mods` maps to a band mode (Ctrl toggles, Shift adds) is C1d's.
+//!
+//! With Alt held, a plain press has selected the entry alone or kept its multi-selection, as
+//! without Alt; a Ctrl or Shift one has changed nothing.
+//!
+//! # Hand-off to Columns (C2)
+//!
+//! Strata cancels a pending slow-click rename on a row press in any column
+//! (`ViewState::cancel_click_rename`, `src/ui/browser/inline_edit.rs`). C2 does the same by
+//! calling `reset` on the other columns' pointer controllers. **Seam request for C2's planner:**
+//! C1e has no "a press happened here" hook, so a press that changes no selection and sends no
+//! intent (a Ctrl press on blank row space, say) reaches C2 through no callback; C2 needs one
+//! from the element to reset the other columns on every press.
+//!
+//! # Left to other work packages
+//!
+//! Bullets of the `pointer-intent` and `click-modes` nodes C1b doesn't decide:
+//!
+//! - Icons: the gutter beside the thumbnail inside a card is blank space: C3's regions.
+//! - List: the unused Name-column space and its padding are blank, other cells content: C4's
+//!   regions.
+//! - The click-mode preference, its defaults and persistence, and the single-click preview
+//!   preference: the host's.
+//! - Arrow keys select without opening: C1c.
+//! - Selection after opening a folder: the host's, from `Activation`.
+//!
+//! # Tests
+//!
+//! `tests.rs` holds one test per bullet the machine decides; `tests/element.rs` drives it
+//! through the element, with modifiers held, which Rune scripts can't hold. The page scripts in
+//! `tests/scripts/c1/` use the page's default settings (two clicks open everything).
+//! `middle-dragged` checks only the dragged half of its bullet: the page's intent label can't
+//! count tabs, so the double middle click is `a_double_middle_click_opens_one_tab_and_a_dragged_one_none`.
 
 //! Work package: C1b, `docs/work/phase-2-composites/C1b-pointer-intent.md`.
 

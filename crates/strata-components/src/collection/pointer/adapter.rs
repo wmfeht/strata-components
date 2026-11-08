@@ -23,6 +23,10 @@ use crate::contract::{EntrySource, Rect};
 /// It reads its [`PointerSettings`] from `Collection::settings` on every input, the default
 /// when the host gave none, and turns a read-only collection's drags and renames off.
 ///
+/// It needs the element's clock (`Collection::clock`): it times double clicks and the
+/// slow-click rename by it. With none, every input reads time 0, so any second press on an
+/// entry is a double click and a rename never comes due.
+///
 /// Used by: C2, C3, C4, C14b, and hosts.
 #[derive(Debug, Default)]
 pub struct PointerIntent {

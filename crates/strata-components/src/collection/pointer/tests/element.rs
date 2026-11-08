@@ -387,7 +387,8 @@ fn a_slow_click_on_the_icon_does_not_rename() {
 
 #[test]
 fn a_read_only_collection_neither_drags_nor_renames() {
-    // operations/rename: Slow-click rename does not arm in file choosers, in Trash, with more than one item selected, or with a modifier held.
+    // No bullet of its own: C14b's read-only archive preview (`Collection::read_only`) takes
+    // no file drag and no rename. Choosers and Trash turn renaming off through the settings.
     let mut rt = runtime(PointerSettings::default());
     rt.update(|s, _| s.read_only = true);
     rt.frame(1.0 / 60.0);

@@ -373,6 +373,47 @@ fn an_alt_drag_from_an_entry_starts_a_marquee() {
     assert!(!out.iter().any(drag(&[5])));
 }
 
+#[test]
+fn alt_with_ctrl_or_shift_on_an_entry_leaves_the_selection_to_the_band() {
+    // browser/selection/marquee: Holding Alt starts a marquee even when the press lands on an entry.
+    // browser/selection/marquee: A Ctrl-marquee toggles each crossed entry relative to the selection at press.
+    // browser/selection/marquee: A Shift-marquee adds the crossed entries to the selection at press.
+    // Strata takes the band's selection at press before the row's own press changes anything
+    // (`marquee/state.rs`), so a modified Alt press changes nothing until its release.
+    for (mods, index) in [
+        (Mods { alt: true, ..CTRL }, 5),
+        (Mods { alt: true, ..SHIFT }, 7),
+    ] {
+        let mut r = Rig::double();
+        r.click(3, Spot::Content, PLAIN);
+        r.take();
+        r.wait(1.0).down(index, Spot::Name, mods);
+        assert_eq!(r.selected(), [3], "{mods:?}: nothing changes at the press");
+        r.to(0.0, 30.0);
+        assert_eq!(r.selected(), [3], "{mods:?}: nor when the band starts");
+        assert!(r.take().iter().any(is_marquee));
+    }
+}
+
+#[test]
+fn alt_with_ctrl_or_shift_on_an_entry_toggles_or_ranges_on_release() {
+    // browser/selection: Ctrl+click toggles one entry in or out of the selection and moves the range anchor to it.
+    // browser/selection: Shift+click selects every entry from the range anchor to the clicked entry.
+    let mut r = Rig::double();
+    r.click(3, Spot::Content, PLAIN);
+    r.wait(1.0).down(5, Spot::Name, Mods { alt: true, ..CTRL });
+    r.up();
+    assert_eq!(r.selected(), [3, 5]);
+    r.wait(1.0)
+        .down(7, Spot::Content, Mods { alt: true, ..SHIFT });
+    r.up();
+    assert_eq!(
+        r.selected(),
+        [5, 6, 7],
+        "ranges from the anchor the toggle moved"
+    );
+}
+
 // Threshold.
 
 #[test]
@@ -431,8 +472,8 @@ fn a_press_whose_entry_moved_during_it_does_not_open() {
 
 #[test]
 fn a_press_after_a_release_that_never_came_starts_fresh() {
-    // browser/selection/pointer-intent: A press that crossed the drag threshold does not activate on release, even if the pointer returns to its start.
-    // A system drag can take the release; the next press must not finish the old gesture.
+    // No bullet of its own: a system drag (P1) can take the release, so the next press must
+    // start afresh rather than finish the old gesture.
     let mut r = Rig::new(modes(ClickCount::One, ClickCount::One));
     r.down(4, Spot::Content, PLAIN);
     r.to(0.0, 30.0);
@@ -570,9 +611,28 @@ fn a_slow_click_on_the_sole_selections_name_renames_after_the_interval() {
     r.arm_again(4);
     r.wait(INTERVAL - 0.05);
     assert!(!r.tick(), "not before the interval");
+    r.take();
     r.wait(0.06);
     assert!(r.tick());
     assert_eq!(r.take(), [Outcome::BeginRename { id: id(4) }]);
+}
+
+#[test]
+fn an_early_tick_asks_to_be_woken_when_the_rename_is_due() {
+    // operations/rename: Clicking the name text of the only selected item again, after the double-click interval, opens the editor.
+    // A tick can come early (another controller's wake-up); the rename still needs its own.
+    let mut r = Rig::double();
+    r.arm(4);
+    r.wait(0.1);
+    assert!(!r.tick());
+    match r.take()[..] {
+        [Outcome::WakeAfter(d)] => {
+            assert!((d.as_secs_f64() - (INTERVAL - 0.1)).abs() < 1e-9, "{d:?}")
+        }
+        ref other => panic!("{other:?}"),
+    }
+    r.settle();
+    assert_eq!(r.take().last(), Some(&Outcome::BeginRename { id: id(4) }));
 }
 
 impl Rig {

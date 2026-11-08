@@ -1,7 +1,6 @@
 {
   "bullets": [
-    "browser/selection/pointer-intent: A press that crosses the drag threshold never opens a preview, even after the drop.",
-    "browser/selection/pointer-intent: A press that crossed the drag threshold does not activate on release, even if the pointer returns to its start."
+    "browser/selection/pointer-intent: A press that crosses the drag threshold never opens a preview, even after the drop."
   ],
   "scene": "c1-ten-rows-light",
   "events": [

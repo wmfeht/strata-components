@@ -357,7 +357,13 @@ impl PointerMachine {
             return false;
         };
         match pending.due(now, s.selection(), s.source()) {
-            Due::Wait => false,
+            Due::Wait => {
+                // A tick can come early, from another controller's wake-up: ask for our own.
+                s.emit(Outcome::WakeAfter(Duration::from_secs_f64(
+                    pending.due - now,
+                )));
+                false
+            }
             Due::Cancelled => {
                 self.rename = None;
                 false
@@ -447,37 +453,36 @@ fn primary(
     let selected = s.selection().is_selected_at(s.source(), index);
     let len = s.selection().len();
     g.sole_before = selected && len == 1;
-    if press.spot != Spot::Gutter || selected {
-        // The entry itself, or blank space on a selected one: a drag here drags files, so the
-        // selection it drags is made now.
-        if shift {
+    // The entry itself, or blank space on a selected one, is where a drag drags files.
+    let on_entry = press.spot != Spot::Gutter || selected;
+    // A file drag carries the selection the press makes, so it is made now. A band applies
+    // Ctrl or Shift to the selection as it was before the press (Strata takes it at the band's
+    // press, `marquee/state.rs`), so where a drag is a band they wait for the release.
+    let now = on_entry && !press.mods.alt;
+    if shift {
+        if now {
             apply(s, |sel, src| sel.extend_to(src, index, range));
-        } else if ctrl {
-            if selected {
-                g.deferred = Deferred::Toggle;
-            } else {
-                apply(s, |sel, src| sel.toggle(src, index));
-            }
-        } else if selected && len > 1 {
-            g.kept_group = true;
         } else {
-            apply(s, |sel, src| sel.select_only(src, index));
+            g.deferred = Deferred::Extend(range);
         }
-        g.plan = if settings.drags {
-            Plan::Drag
-        } else {
-            Plan::Nothing
-        };
-    } else if shift {
-        g.deferred = Deferred::Extend(range);
     } else if ctrl {
-        g.deferred = Deferred::Toggle;
+        if now && !selected {
+            apply(s, |sel, src| sel.toggle(src, index));
+        } else {
+            g.deferred = Deferred::Toggle;
+        }
+    } else if on_entry && selected && len > 1 {
+        g.kept_group = true;
     } else {
         apply(s, |sel, src| sel.select_only(src, index));
     }
-    if press.mods.alt {
-        g.plan = Plan::Marquee;
-    }
+    g.plan = if press.mods.alt || !on_entry {
+        Plan::Marquee
+    } else if settings.drags {
+        Plan::Drag
+    } else {
+        Plan::Nothing
+    };
     g
 }
 

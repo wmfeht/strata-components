@@ -393,10 +393,13 @@ impl<'a, S: 'static> Viewport<'a, S> {
         // level and the pan would stay at the old scale (Rune draft "No notification on a
         // scale-only change", draft, not filed, in C14a's report). A fresh element reports its
         // first layout, so while the state is behind, one is mounted to bring it up to date.
+        // It is keyed by the scale it syncs to: the element for an earlier change may still be
+        // mounted (2× for one frame, then 1×), and one key for both would keep it, with no
+        // fresh layout to report.
         if st.frame().is_some() && st.scale() != scale {
             let on_zoom = on_zoom.clone();
             frame = frame.child(
-                el().key(format!("{key}-rescale"))
+                el().key(format!("{key}-rescale-{:08x}", scale.to_bits()))
                     .role("presentation")
                     .pin(Some(0.0), Some(0.0), None, None)
                     .size(0.0, 0.0)

@@ -659,6 +659,35 @@ fn a_scale_change_alone_resyncs_a_fixed_viewport() {
     rescale_with_no_input(Interaction::Fixed);
 }
 
+/// 2× for a single frame, then back to 1×: the second change still resyncs. With one rescale
+/// key for every scale, the element mounted for 2× is still in the tree when 1× asks for it, so
+/// Rune keeps it, it reports no fresh layout, and the state stays at 2×.
+fn rescale_round_trip(interaction: Interaction) {
+    let mut rt = runtime(interaction, false);
+    rt.set_viewport((400.0, 300.0), 2.0);
+    rt.frame(DT);
+    rt.set_viewport((400.0, 300.0), 1.0);
+    settle(&mut rt);
+    assert_eq!(rt.state.view.scale(), 1.0, "{interaction:?}");
+    assert!(
+        near(rt.state.view.level().expect("level"), 0.25),
+        "{interaction:?}: {:?}",
+        rt.state.view.level()
+    );
+    let last = rt.state.reports.last().expect("reports").level;
+    assert!(near(last, 0.25), "{interaction:?}: last report {last}");
+}
+
+#[test]
+fn a_scale_round_trip_in_one_frame_resyncs_a_full_viewport() {
+    rescale_round_trip(Interaction::Full);
+}
+
+#[test]
+fn a_scale_round_trip_in_one_frame_resyncs_a_fixed_viewport() {
+    rescale_round_trip(Interaction::Fixed);
+}
+
 #[test]
 fn pans_pass_rune_s_live_only_check() {
     let mut rt = runtime(Interaction::Full, false);

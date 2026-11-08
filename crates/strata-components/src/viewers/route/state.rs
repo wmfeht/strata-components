@@ -16,7 +16,7 @@ use crate::viewers::viewport::{Mode, ViewportState};
 /// `PLAYBACK_SECONDS`): the marker moves at a steady ground-distance pace.
 pub const PLAYBACK_SECONDS: f64 = 15.0;
 
-/// A route as Strata's helper returns it (Strata's `RoutePreview`, less its PNGs: the route
+/// A route as Strata's helper returns it (Strata's `RoutePreview`, less its PNG images: the route
 /// picture arrives as the host's `Pixels`, and the profile is drawn here from the samples).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RouteData {

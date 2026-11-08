@@ -24,6 +24,7 @@
 //! | `glow.color` | colour | `look.glow.color` |
 //! | `glow.radius` | length | `look.glow.radius` |
 //! | `glow.opacity` | number, 0–1 | `look.glow.opacity` |
+//! | `fill.{muted,highlight}` | colour | `look.fill` |
 //! | `syntax.<kind>` | colour | `look.syntax`, one per `rune_kit::syntax::Syntax` kind |
 //! | `syntax.preprocessor` | colour | `look.syntax_extra.preprocessor` |
 //! | `<slot>.<part>.<property>` | any | a component slot ([`crate::slots`]), such as `list.row.height`: exactly three segments, the slot's id first |
@@ -46,7 +47,7 @@ use rune::Color;
 use rune_kit::syntax::Syntax;
 use rune_kit::{Kit, Palette, Radius, StateColors, Type};
 
-use crate::look::{Content, Frame, IconSizes, Look, Ramp, RowHeights, Space, SyntaxExtra};
+use crate::look::{Content, Fills, Frame, IconSizes, Look, Ramp, RowHeights, Space, SyntaxExtra};
 use crate::slots;
 
 #[cfg(test)]
@@ -308,7 +309,7 @@ pub fn set(look: &mut Look, name: &str, value: Value) -> Result<(), TokenError> 
 
 /// Every core token, by group. A slot's tokens are in `slots::TOKENS`.
 pub(crate) const CORE: &[&[Token]] = &[
-    COLORS, STATES, RADII, TYPE, SPACE, FRAME, CONTENT, ROW, ICON_SIZE, GLOW, SYNTAX,
+    COLORS, STATES, RADII, TYPE, SPACE, FRAME, CONTENT, ROW, ICON_SIZE, GLOW, FILL, SYNTAX,
 ];
 
 /// Names every `Kit` field, so a Rune bump that adds one fails to build until it is either
@@ -508,6 +509,23 @@ const GLOW: &[Token] = &[
         |l, v| l.glow.opacity = v,
     ),
 ];
+
+/// `fill.<field>` for each `look.fill` colour. The pattern names every `Fills` field, so one
+/// added there fails to build until it is registered here.
+const FILL: &[Token] = {
+    const _: fn(Fills) = |Fills {
+                              muted: _,
+                              highlight: _,
+                          }| {};
+    &[
+        Token::color("fill.muted", |l| l.fill.muted, |l, v| l.fill.muted = v),
+        Token::color(
+            "fill.highlight",
+            |l| l.fill.highlight,
+            |l, v| l.fill.highlight = v,
+        ),
+    ]
+};
 
 /// `syntax.<kind>` for each kind rune-kit colours, then for each of `look.syntax_extra`.
 macro_rules! syntax {

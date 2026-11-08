@@ -9,10 +9,11 @@
 //! this order, each step changing the previous step's `Look` in place:
 //!
 //! 1. the theme (K1, `theme/`): [`Look::from_kit`] on the theme's kit, then `syntax`,
-//!    `syntax_extra` and `glow`;
+//!    `syntax_extra`, `fill` and `glow.color`;
 //! 2. the user's shape, density and type settings (K2, `shape.rs`, `density.rs`,
 //!    `typography.rs`): [`Look::apply_params`] sets `kit.radius` and `roundness`, `kit.ty`
-//!    and `ty`, `frame`, `content`, `row`, `icon_size` and `font`;
+//!    and `ty`, `frame`, `content`, `row`, `icon_size` and `font`, plus the two switches the
+//!    look carries, `glow.on` and `animations`, so a look rebuilt from a theme keeps them;
 //! 3. the user's overrides (K4, `overrides/`), by name through [`crate::tokens`];
 //! 4. last, the syntect theme for C10a (K1), built from `syntax` and `syntax_extra` as they
 //!    stand after the overrides, so an override of a `syntax.*` token reaches highlighted
@@ -100,6 +101,8 @@ pub struct Look {
     pub roundness: f32,
     /// The element glow (Strata's "element glow" setting and its theme colour).
     pub glow: Glow,
+    /// Theme fills Kit has no slot for.
+    pub fill: Fills,
     /// Syntax colours for source previews and code blocks (C10a, C11), per rune-kit token
     /// kind. rune-kit's own highlighting reads this directly.
     pub syntax: SyntaxTheme,
@@ -111,7 +114,8 @@ pub struct Look {
     /// The interface and code fonts. `None` keeps the app's own (`AppSpec::families`). The
     /// host passes a change to `Tx::set_font_families`; components never read this.
     pub font: Option<Families>,
-    /// False when the user or the desktop turned animations off (P5's switch, as data).
+    /// False when the user or the desktop turned animations off (P5's switch, as data). Set
+    /// from [`LookParams::animations`], as `glow.on` is from [`LookParams::element_glow`].
     pub animations: bool,
     /// Component slots: tokens one component reads, which default to the tokens above.
     pub slots: Slots,
@@ -173,6 +177,10 @@ impl Look {
             },
             syntax_extra: SyntaxExtra {
                 preprocessor: syntax.color(Syntax::Function),
+            },
+            fill: Fills {
+                muted: kit.c.layer_02,
+                highlight: kit.alpha(kit.c.bg_accent, 0.22),
             },
             syntax,
             icons: icons::lucide::SET,
@@ -382,6 +390,19 @@ impl Hash for Glow {
         bits(*radius).hash(state);
         bits(*opacity).hash(state);
     }
+}
+
+/// Fills a Strata theme sets that Kit has no slot for, named after Strata's theme roles so
+/// a stylesheet's `@strata_muted` and `@strata_highlight` map onto them by name.
+#[derive(Clone, Copy, Debug, PartialEq, Hash)]
+#[non_exhaustive]
+pub struct Fills {
+    /// Strata's `muted`: the quiet control and hover surface (form controls, switch troughs,
+    /// table headers). Defaults to `kit.c.layer_02`.
+    pub muted: Color,
+    /// Strata's `highlight`: the selection surface that drop targets, a selected search
+    /// result and table header cells draw on. Defaults to the accent at 22 %.
+    pub highlight: Color,
 }
 
 /// Syntax colours for the kinds Strata's themes colour and rune-kit's [`SyntaxTheme`] has

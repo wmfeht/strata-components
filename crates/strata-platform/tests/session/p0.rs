@@ -584,6 +584,175 @@ fn peer_drops_three_types_on_a_wayland_window() {
     drag_into_probe(&s, &probe);
 }
 
+/// The review's sequence (round 2): the source offers [copy, ask], the probe prefers ask on
+/// enter and answers the drop with move, which the source lacks. The compositor keeps ask, so
+/// finishing would be a protocol error that ends winit's connection: the probe's finish must
+/// be refused, and the app live on to quit cleanly. Shared.
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn a_drop_left_on_ask_refuses_finish_and_the_app_lives_on() {
+    let s = Session::start();
+    let mut probe = Probe::start(&s, Display::Wayland, &["--answer-ask-with-move"]);
+    if !probe.shared() {
+        return;
+    }
+    let a = s.peer(Display::Wayland);
+    a.map("p0 ask source");
+    let windows = s.wait_windows(&[a.pid(), probe.app.pid()]);
+    let from = windows
+        .iter()
+        .find(|w| w.pid == a.pid())
+        .expect("a's window");
+    let to = windows
+        .iter()
+        .find(|w| w.pid == probe.app.pid())
+        .expect("the probe's window");
+    a.sync();
+    let input = s.input();
+    s.point_at(&a, from.at(0.5, 0.5));
+    input.button(true);
+    a.wait_event("the press", |e| {
+        matches!(e, Event::PointerButton { pressed: true })
+    });
+    let at = probe.app.line_count();
+    a.drag_start(&three(), &[Action::Copy, Action::Ask]);
+    input.path(to.at(0.5, 0.5));
+    probe.wait(at, "the drag entering", |v| v["ev"] == "drag-enter");
+    a.wait_event("the compositor choosing ask", |e| {
+        matches!(
+            e,
+            Event::DragAction {
+                action: Some(Action::Ask)
+            }
+        )
+    });
+    input.button(false);
+    probe.wait(at, "the drop", |v| v["ev"] == "drop");
+    let (_, answered) = probe.wait(at, "the answer", |v| v["ev"] == "ask-answered");
+    assert_eq!(answered["ok"], true, "{answered}");
+    let (_, refused) = probe.wait(at, "the refused finish", |v| {
+        v["ev"] == "drop-error" || v["ev"] == "drop-finished"
+    });
+    assert_eq!(
+        refused["ev"], "drop-error",
+        "finish wasn't refused: {refused}"
+    );
+    let why = refused["error"].as_str().unwrap_or_default();
+    assert!(why.contains("still ask"), "{refused}");
+    let at = probe.send(json!({ "cmd": "quit" }));
+    probe.wait(at, "the shutdown", |v| v["ev"] == "shutdown");
+    let status = probe.app.wait_exit();
+    assert!(
+        status.success(),
+        "the probe exited with {status}: winit's connection died?"
+    );
+    let failed = probe
+        .app
+        .lines()
+        .iter()
+        .filter(|l| l.contains("\"failed\""))
+        .count();
+    assert_eq!(failed, 0, "a connection failed");
+}
+
+/// User and system CPU time of `pid`, in clock ticks.
+fn cpu_ticks(pid: u32) -> u64 {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).expect("the probe's stat");
+    // The fields after the command's closing parenthesis; utime and stime are 14 and 15.
+    let rest = stat.rsplit_once(')').map(|(_, r)| r).unwrap_or_default();
+    let fields: Vec<&str> = rest.split_whitespace().collect();
+    let field = |n: usize| {
+        fields
+            .get(n - 3)
+            .and_then(|f| f.parse::<u64>().ok())
+            .unwrap_or(0)
+    };
+    field(14) + field(15)
+}
+
+/// Threads of `pid` named `name` (as `/proc` truncates names: 15 bytes).
+fn threads_named(pid: u32, name: &str) -> usize {
+    std::fs::read_dir(format!("/proc/{pid}/task"))
+        .map(|tasks| {
+            tasks
+                .flatten()
+                .filter(|t| {
+                    std::fs::read_to_string(t.path().join("comm"))
+                        .is_ok_and(|c| c.trim_end() == name)
+                })
+                .count()
+        })
+        .unwrap_or(0)
+}
+
+/// The probe's stderr log, which a spinning reader would flood.
+fn probe_stderr_len() -> u64 {
+    let test = std::thread::current()
+        .name()
+        .unwrap_or_default()
+        .replace("::", "-");
+    let log = Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join("session")
+        .join(test)
+        .join("probe.stderr.log");
+    std::fs::metadata(log).map(|m| m.len()).unwrap_or(0)
+}
+
+/// The review's B3 (round 2): the compositor ends the Wayland connection of our own with a
+/// protocol error while events are queued on it. libwayland then dispatches nothing, and
+/// wayland-client drops the error, so a reader that only re-prepared spun a core and the app
+/// never heard. Exactly one `Failed` must arrive, the reader must exit, and the process go
+/// quiet. Fails fast on a flood, so a regression can't fill the log.
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn a_dead_wayland_connection_is_reported_once_and_goes_quiet() {
+    let s = Session::start();
+    let mut probe = Probe::start(&s, Display::Wayland, &["--own-data-control"]);
+    let pid = probe.app.pid();
+    assert_eq!(
+        threads_named(pid, "transfer-wl-own"),
+        1,
+        "the own connection's reader"
+    );
+    let at = probe.send(json!({ "cmd": "break-own" }));
+    let (_, broke) = probe.wait(at, "the protocol error asked for", |v| {
+        v["ev"] == "broke-own"
+    });
+    assert_eq!(broke["ok"], true, "{broke}");
+    let failures = || {
+        probe.app.lines()[at..]
+            .iter()
+            .filter(|l| l.contains("\"failed\""))
+            .count()
+    };
+    let deadline = std::time::Instant::now() + timeout();
+    while failures() == 0 {
+        assert!(probe_stderr_len() < 4 << 20, "the probe floods its stderr");
+        assert!(std::time::Instant::now() < deadline, "no Failed event");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    // Settle, then the process must idle: a spinning reader takes a whole core.
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    let before = cpu_ticks(pid);
+    std::thread::sleep(std::time::Duration::from_secs(1));
+    let spent = cpu_ticks(pid) - before;
+    assert!(
+        spent < 50,
+        "the probe used {spent} ticks in 1 s after the failure"
+    );
+    assert_eq!(failures(), 1, "Failed is reported once");
+    assert_eq!(
+        threads_named(pid, "transfer-wl-own"),
+        0,
+        "the reader exited"
+    );
+    assert!(probe_stderr_len() < 1 << 20, "the probe's stderr grew");
+    let at = probe.send(json!({ "cmd": "quit" }));
+    probe.wait(at, "the shutdown", |v| v["ev"] == "shutdown");
+    let status = probe.app.wait_exit();
+    assert!(status.success(), "the probe exited with {status}");
+}
+
 // ---- Wayland: lifecycle ----
 
 /// S5's note on upstream #139: a covered Wayland window's `poll` and timers stop. The
@@ -656,6 +825,16 @@ fn quitting_tears_the_wayland_binding_down_before_run_returns() {
     let s = Session::start();
     let mut probe = Probe::start(&s, Display::Wayland, &[]);
     let shared = probe.shared();
+    // Off the UI thread the shutdown is refused, and the substrate stays bound.
+    let at = probe.send(json!({ "cmd": "shutdown-elsewhere" }));
+    let (_, elsewhere) = probe.wait(at, "a shutdown off the UI thread", |v| {
+        v["ev"] == "shutdown-elsewhere"
+    });
+    assert_eq!(
+        (&elsewhere["refused"], &elsewhere["still_bound"]),
+        (&json!(true), &json!(true)),
+        "{elsewhere}"
+    );
     let at = probe.send(json!({ "cmd": "quit" }));
     let (_, down) = probe.wait(at, "the shutdown", |v| v["ev"] == "shutdown");
     assert_eq!(down["bound"], true, "{down}");

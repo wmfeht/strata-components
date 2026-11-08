@@ -15,7 +15,10 @@
 //! Flags: `--title T`, `--own-data-control` (data control on a connection of its own),
 //! `--data-control ext|wlr` (which protocol first), `--no-shared` (don't bind on winit's
 //! display), `--as-if-libwayland-1-22` (behave as on libwayland < 1.23, which has no route to
-//! winit's display: a test switch).
+//! winit's display: a test switch), `--answer-ask-with-move` (prefer ask on enter, answer the
+//! drop with move). The `break-own` command makes the compositor end the Wayland connection
+//! of our own with a protocol error (a test switch); `shutdown-elsewhere` calls the shutdown
+//! from another thread, which must refuse.
 
 #[cfg(feature = "_transfer")]
 fn main() {
@@ -115,7 +118,12 @@ mod probe {
         let was = Transfer::shutdown();
         log(
             "shutdown",
-            json!({ "why": why, "bound": was, "ms": started.elapsed().as_secs_f64() * 1e3 }),
+            json!({
+                "why": why,
+                "bound": was.as_ref().ok(),
+                "error": was.as_ref().err().map(ToString::to_string),
+                "ms": started.elapsed().as_secs_f64() * 1e3,
+            }),
         );
     }
 
@@ -161,6 +169,8 @@ mod probe {
 
     /// The drag over the window, while one is.
     static DRAG: Mutex<Option<DragOffer>> = Mutex::new(None);
+    /// `--answer-ask-with-move`: prefer ask on enter, then answer the drop with move.
+    static ANSWER_ASK_WITH_MOVE: AtomicBool = AtomicBool::new(false);
 
     fn events() -> bool {
         let Some(sub) = ATTACHED.get() else {
@@ -204,7 +214,14 @@ mod probe {
                     );
                     let first = offer.mimes().first().cloned();
                     let accepted = offer.accept(first.as_deref());
-                    let actions = offer.set_actions(&[Action::Copy], Some(Action::Copy));
+                    let actions = if ANSWER_ASK_WITH_MOVE.load(Ordering::SeqCst) {
+                        offer.set_actions(
+                            &[Action::Copy, Action::Move, Action::Ask],
+                            Some(Action::Ask),
+                        )
+                    } else {
+                        offer.set_actions(&[Action::Copy], Some(Action::Copy))
+                    };
                     if let Err(e) = accepted.and(actions) {
                         log("drag-error", json!({ "error": e.to_string() }));
                     }
@@ -224,6 +241,13 @@ mod probe {
                 Event::Drop => {
                     log("drop", json!({}));
                     if let Some(offer) = DRAG.lock().unwrap_or_else(|e| e.into_inner()).take() {
+                        if ANSWER_ASK_WITH_MOVE.load(Ordering::SeqCst) {
+                            // Answer the ask with move, which a source of [copy, ask] lacks: the
+                            // compositor keeps ask, so the finish must be refused.
+                            let r =
+                                offer.set_actions(&[Action::Move, Action::Ask], Some(Action::Move));
+                            log("ask-answered", json!({ "ok": r.is_ok() }));
+                        }
                         read_drop(offer);
                     }
                 }
@@ -332,6 +356,19 @@ mod probe {
                     None => log("read-error", json!({ "mime": mime, "error": "no offer" })),
                 }
             }
+            "break-own" => log(
+                "broke-own",
+                json!({ "ok": t.provoke_protocol_error_on_own_connection() }),
+            ),
+            // Shutdown from a thread that isn't the UI thread: refused, the substrate stays.
+            "shutdown-elsewhere" => {
+                let r = std::thread::spawn(Transfer::shutdown).join();
+                let refused = matches!(r, Ok(Err(_)));
+                log(
+                    "shutdown-elsewhere",
+                    json!({ "refused": refused, "still_bound": Transfer::current().is_some() }),
+                );
+            }
             "hide" => handle.hide(),
             "show" => handle.show(),
             "quit" => {
@@ -379,6 +416,7 @@ mod probe {
             .position(|a| a == "--title")
             .and_then(|i| args.get(i + 1))
             .map_or("transfer-probe", |t| t.as_str());
+        ANSWER_ASK_WITH_MOVE.store(flag("--answer-ask-with-move"), Ordering::SeqCst);
         let wants = Wants {
             shared: !flag("--no-shared"),
             data_control: if flag("--own-data-control") {

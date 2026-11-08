@@ -103,8 +103,8 @@
 //!   collection [`GroupedRows`]'s page step is the rows that fit below the stuck header, minus
 //!   one, so W1d's row of overlap stays in view. Strata's pages, with no stuck header, count
 //!   the whole viewport.
-//! - **A press on the header part's blank space is on empty space** (owner ruling, C4). It
-//!   reaches the controllers as a press on no entry ([`Region::Gutter`]) at the viewport's top
+//! - **A primary press on the header part's blank space is on empty space** (owner ruling,
+//!   C4). It reaches the controllers as a press on no entry ([`Region::Gutter`]) at the viewport's top
 //!   edge, so a drag from it draws a band into the rows, as Strata's List heading strip does
 //!   (`browser/selection/marquee`). Parts of the header with their own press or drag
 //!   handlers (C4's headings) keep their presses, as Rune gives a press to its innermost
@@ -444,10 +444,11 @@ impl<S: 'static> Collection<S> {
         self
     }
 
-    /// A part above the viewport (C4's column headings). A press on its blank space (where no
-    /// part of it takes presses itself) is on empty space at the viewport's top edge: a plain
-    /// one clears the selection and a drag draws a band from there, as Strata's List heading
-    /// strip does. Its parts with press or drag handlers keep their presses.
+    /// A part above the viewport (C4's column headings). A primary press on its blank space
+    /// (where no part of it takes presses itself) is on empty space at the viewport's top edge:
+    /// a plain one clears the selection and a drag draws a band from there, as Strata's List
+    /// heading strip does. Other buttons there aren't the collection's. Its parts with press or
+    /// drag handlers keep their presses.
     pub fn header(mut self, f: impl Fn(&S) -> Option<El> + 'static) -> Self {
         self.cfg.header = Some(Rc::new(f));
         self

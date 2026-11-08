@@ -1295,6 +1295,35 @@ fn a_press_on_blank_header_space_is_on_empty_space_at_the_viewports_top() {
     assert_eq!(rt.state.app_keys, 0);
 }
 
+/// Only a primary press on blank header space is the collection's: the rule is for a band, and
+/// a middle press there (C24's autoscroll, an open-in-new-tab) is no press on the collection.
+#[test]
+fn a_middle_press_on_blank_header_space_is_not_the_collections() {
+    let log = Rc::new(RefCell::new(Log::default()));
+    let mut host = Host::new(20);
+    host.parts = true;
+    host.coll.controllers.pointer = Some(Box::new(Pointer(log.clone())));
+    let mut rt = runtime(host);
+    let [hx, hy, hw, hh] = element(&rt, "head").unwrap().visible;
+    let (x, y) = (hx + hw - 40.0, hy + hh / 2.0);
+    rt.button_down(x, y, rune::PointerButton::Middle);
+    rt.frame(1.0 / 60.0);
+    rt.pointer_move(x, y + 80.0);
+    rt.frame(1.0 / 60.0);
+    rt.button_up(x, y + 80.0, rune::PointerButton::Middle);
+    rt.frame(1.0 / 60.0);
+    assert!(
+        log.borrow().pointer.is_empty(),
+        "{} inputs reached the controller",
+        log.borrow().pointer.len()
+    );
+    assert!(
+        rt.state.order.borrow().is_empty(),
+        "nor the press hook: {:?}",
+        rt.state.order.borrow()
+    );
+}
+
 /// A build with no header forgets where the last one was, so a later press there isn't taken
 /// for one on its blank space.
 #[test]

@@ -25,6 +25,37 @@
 //!
 //! A file edit is read [`reload::SETTLE`] after the last one, as `examples/shell` reads the
 //! real file; the look then moves through `theme::switch`, as a theme switch does.
+//!
+//! # Coverage
+//!
+//! The header's own bullets (`app/window`) are in `strata_components::header`'s docs, with its
+//! Rune drafts (U-X1-1, U-X1-2). The shell's, as scripts (`tests/scripts/x1/`), tests
+//! (`crates/strata-gallery/tests/x1.rs`) and unit tests (`scenes/x1/tests.rs`) check them:
+//!
+//! | Bullet (opening words) | Checked by |
+//! | --- | --- |
+//! | settings/themes: Creating, editing, or deleting the file while Strata runs re-applies it in every open window… | script `override-burst`; test `a_reload_moves_the_colours_as_a_theme_switch_does`. "Every open window" is `examples/shell`'s broadcast: **hand test pending** |
+//! | settings/themes: Changes to the file less than 75 ms apart trigger one reload, 75 ms after the last | script `override-burst`; unit `changes_less_than_the_settle_apart_read_once_after_the_last` |
+//! | settings/themes: Deleting the file, or making it unreadable, restores Strata's default appearance… | script `override-delete`; test `a_reload_moves_the_colours_as_a_theme_switch_does`. The log line is the demo's ("cannot read overrides file") |
+//! | settings/themes: A rule GTK cannot parse … is skipped … Valid rules in the same file still apply | script `override-problem` (the count; the salvage itself is K4's) |
+//! | settings/themes: With `~/.config/strata/style.css` present at startup, its rules apply in every window…; The file follows `$XDG_CONFIG_HOME`… | `examples/shell` (read before the first window; the path's rule in `args.rs`): **hand test pending** |
+//! | settings/themes/portal-text-scaling: In that process, changing `text-scaling-factor` while the window is open rescales its text and interface icons without a restart | script `text-scale`; test `a_text_scale_change_rescales_the_look`. The portal's side is P5's |
+//! | browser/navigation/startup-arguments: Each argument opens its own window, both at launch and when Strata is already running | `examples/shell` (`controller::on_launch`); the forwarding is P8's, whose session tests check it with its own demo: **hand test pending** for the shell |
+//! | app/dialogs: Closing the last open dialog by any route returns focus… | script `volumes-dialog` (X1's wiring of C15) |
+//!
+//! Not X1's: the rest of `browser/navigation/startup-arguments` (what a path opens and
+//! selects), `integration/file-manager-interface` (P8 and Strata; the demo doesn't opt into
+//! FileManager1), the GTK-only `portal-text-scaling` bullets (`GDK_DEBUG=no-portals`,
+//! `gtk-xft-dpi`), and the user stylesheet's references and roundness (K4's unit tests).
+//!
+//! # Hand tests pending
+//!
+//! `examples/shell` on Hyprland, GNOME (Wayland, and mutter on X11) and KWin on X11: a
+//! borderless themed window with the header; drag, double-click maximise, Close; Minimize hidden
+//! on Wayland with `--all-buttons`; edge resize, Minimize and the window menu on X11; a second
+//! launch with paths opening focused windows in the first process; a live text-scale change
+//! (on Hyprland through xdg-desktop-portal-gtk); a live edit of the overrides file reaching
+//! every window; the volumes dialog listing real mounts.
 
 pub mod reload;
 pub mod shell;

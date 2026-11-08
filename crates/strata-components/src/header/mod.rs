@@ -77,9 +77,9 @@
 //! | A fresh profile shows only the Close button… | golden `x1-header-states` (the first bar); unit `a_fresh_profile_shows_only_close` |
 //! | Show minimize button, Show maximize button, and Show close button … immediately | script `button-preferences` (the header's half: a change shows at once). The Settings rows and "every open window" are Strata's (C20c), and the demo broadcasts them. |
 //! | Saved window-button choices apply when a window is built… | **Strata policy** (its settings file) |
-//! | Maximize maximizes the window; on a maximized window it shows a restore icon… | script `window-buttons`; golden `x1-shell-maximized` |
-//! | On a maximized window the Maximize button's tooltip and accessible name read "Restore window" | script `window-buttons` |
-//! | Minimize minimizes the window and Close closes it | script `minimize-close` (the action the host receives); the window's response is a hand test |
+//! | Maximize maximizes the window; on a maximized window it shows a restore icon… | scripts `maximize`, `restore`; golden `x1-shell-maximized` |
+//! | On a maximized window the Maximize button's tooltip and accessible name read "Restore window" | script `maximize` |
+//! | Minimize minimizes the window and Close closes it | scripts `minimize`, `close` (the action the host receives); the window's response is a **hand test pending** |
 //! | On such a compositor, dragging Strata's header moves the window and dragging a window edge resizes it | test `the_header_moves_the_window_and_its_buttons_keep_their_presses` (the move); edges are strata-platform `csd` (X11 only: Wayland has none until U6, a deliberate change) |
 //! | With compositing, a client-decorated window has square corners and a 1 px border… | golden `x1-shell` (PNG) |
 //! | A maximized, fullscreen, or tiled client-decorated window draws no border | golden `x1-shell-maximized` (PNG); unit `the_frame_follows_what_the_window_manager_says`. Tiled isn't reported by Rune or EWMH (strata-platform `csd`, Limits): a gap |

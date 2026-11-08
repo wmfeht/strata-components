@@ -377,7 +377,36 @@ pub(super) fn on_drag<S: 'static>(cfg: &Rc<Config<S>>, s: &mut S, d: &mut Drag, 
     {
         f(s, &input, tx);
     }
-    let shows = route_pointer(cfg, s, tx, &input);
+    // A press on the header held back (`Collection::header_defers_press`): it reaches the
+    // controllers once it travels past the threshold, with the move that took it there; a
+    // release before then is a click on the header, which the collection doesn't take.
+    let mut released = false;
+    if let Some(threshold) = cfg.header_defer {
+        let st = (cfg.get_mut)(s).1;
+        match phase {
+            PointerPhase::Down if on_header => {
+                st.deferred = Some(input);
+                tx.live_only();
+                return;
+            }
+            PointerPhase::Down => st.deferred = None,
+            PointerPhase::Move if st.deferred.is_some() => {
+                let past = input.travel.x.abs() > threshold || input.travel.y.abs() > threshold;
+                if !past || input.cancelled {
+                    tx.live_only();
+                    return;
+                }
+                let down = st.deferred.take().expect("checked");
+                released = route_pointer(cfg, s, tx, &down);
+            }
+            PointerPhase::Up if st.deferred.take().is_some() => {
+                tx.live_only();
+                return;
+            }
+            _ => {}
+        }
+    }
+    let shows = route_pointer(cfg, s, tx, &input) || released;
     // A move that changed nothing the view reads commits nothing, an open band's included: a
     // marquee that redraws says so with `Ctx::repaint`.
     if phase == PointerPhase::Move && !shows && hover_was_live {

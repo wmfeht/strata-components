@@ -264,6 +264,7 @@ pub(crate) struct Config<S> {
     on_scroll: Option<ScrollFn>,
     keys_by_host: bool,
     on_drag_over: Option<DragOverFn<S>>,
+    header_defer: Option<f32>,
 }
 
 impl<S> Config<S> {
@@ -342,6 +343,7 @@ impl<S: 'static> Collection<S> {
                 on_scroll: None,
                 keys_by_host: false,
                 on_drag_over: None,
+                header_defer: None,
             },
         }
     }
@@ -474,6 +476,17 @@ impl<S: 'static> Collection<S> {
     /// drag handlers keep their presses.
     pub fn header(mut self, f: impl Fn(&S) -> Option<El> + 'static) -> Self {
         self.cfg.header = Some(Rc::new(f));
+        self
+    }
+
+    /// A primary press on the header part's blank space reaches the controllers only once it
+    /// travels more than `threshold` points (along either axis; pass the pointer controller's
+    /// drag threshold): a drag from there then bands as [`Collection::header`] says, and a
+    /// click there changes nothing in the collection. [`Collection::on_press`] still hears the
+    /// press. Columns (C2): a click on a column's title focuses it and keeps its selection,
+    /// while a drag from its header's blank space starts a band, as in Strata.
+    pub fn header_defers_press(mut self, threshold: f32) -> Self {
+        self.cfg.header_defer = Some(threshold);
         self
     }
 

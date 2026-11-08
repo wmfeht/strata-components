@@ -58,6 +58,8 @@ struct Host {
     order: Rc<RefCell<Vec<String>>>,
     /// Hears drags over the drop zones through `on_drag_over`, when set.
     over: Option<Rc<RefCell<Vec<Option<Point>>>>>,
+    /// Holds a header press back until it passes the drag threshold.
+    defer: bool,
 }
 
 impl Host {
@@ -84,6 +86,7 @@ impl Host {
             dropped: Vec::new(),
             order: Rc::default(),
             over: None,
+            defer: false,
         }
     }
 }
@@ -206,6 +209,11 @@ fn collection(s: &Host) -> Collection<Host> {
     }
     if s.drops {
         c = c.on_drop(|s: &mut Host, target, _, _| s.dropped.push(target));
+    }
+    if s.defer {
+        c = c.header_defers_press(
+            crate::collection::pointer::PointerSettings::default().drag_threshold,
+        );
     }
     if let Some(log) = &s.over {
         let log = log.clone();
@@ -2872,4 +2880,52 @@ fn the_drag_over_hook_hears_the_drag_and_replaces_the_edge_scroll() {
     );
     assert_eq!(log.last(), Some(&None), "leaving says so");
     assert_eq!(rt.state.coll.drop_over(), None);
+}
+
+// The held-back header press (C2's request E3).
+
+/// E3: with `header_defers_press`, a click on the header's blank space leaves the selection
+/// alone (the host still hears the press), and a drag from there bands as without it.
+#[test]
+fn a_held_back_header_press_keeps_the_selection_on_a_click_and_bands_on_a_drag() {
+    let mut host = Host::new(20);
+    host.parts = true;
+    host.defer = true;
+    host.coll.controllers.pointer =
+        Some(Box::new(crate::collection::pointer::PointerIntent::new()));
+    host.coll.controllers.marquee = Some(Box::new(crate::collection::marquee::Marquee::new()));
+    let mut rt = runtime(host);
+    click(&mut rt, "row-5");
+    let [hx, hy, hw, hh] = element(&rt, "head").unwrap().visible;
+    let x = hx + hw - 40.0;
+    rt.state.order.borrow_mut().clear();
+    // A click, and a press that moves less than the threshold.
+    click_at(&mut rt, x, hy + hh / 2.0);
+    rt.pointer_down(x, hy + hh / 2.0);
+    rt.frame(1.0 / 60.0);
+    rt.pointer_move(x + 2.0, hy + hh / 2.0 + 2.0);
+    rt.frame(1.0 / 60.0);
+    rt.pointer_up(x + 2.0, hy + hh / 2.0 + 2.0);
+    rt.frame(1.0 / 60.0);
+    {
+        let s = &rt.state;
+        assert_eq!(
+            s.coll.selection.selected_ids(&s.src),
+            [id(5)],
+            "clicks keep it"
+        );
+        assert_eq!(s.order.borrow().len(), 2, "the host heard both presses");
+    }
+    // A drag from the same place bands from the viewport's top.
+    let row_h = rt.state.look.row.list;
+    rt.pointer_down(x, hy + hh / 2.0);
+    rt.frame(1.0 / 60.0);
+    for k in 1..=5 {
+        rt.pointer_move(x - 5.0 * k as f32, hy + hh + row_h * 0.5 * k as f32);
+        rt.frame(1.0 / 60.0);
+    }
+    rt.pointer_up(x - 25.0, hy + hh + row_h * 2.5);
+    settle(&mut rt);
+    let s = &rt.state;
+    assert_eq!(s.coll.selection.selected_ids(&s.src), [id(0), id(1), id(2)]);
 }

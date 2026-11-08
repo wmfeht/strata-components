@@ -76,6 +76,9 @@ pub struct CollectionState {
     /// press on its blank space is on empty space, at the viewport's top. A cell, so a build
     /// with no header clears it.
     pub(super) header: Cell<Rect>,
+    /// A press on the header's blank space held back until it travels past the threshold
+    /// (`Collection::header_defers_press`).
+    pub(super) deferred: Option<super::seam::PointerInput>,
 }
 
 impl Default for CollectionState {
@@ -105,6 +108,7 @@ impl Default for CollectionState {
             stuck_offset: Live::new([0.0, 0.0]),
             top_line: Cell::new(None),
             header: Cell::new(Rect::default()),
+            deferred: None,
         }
     }
 }
@@ -430,6 +434,7 @@ impl CollectionState {
         // The folder left takes its gestures and keyboard mode with it.
         self.controllers.reset();
         self.gesture = None;
+        self.deferred = None;
         self.keyboard = false;
         self.hover_live = true;
         let changed = match position {

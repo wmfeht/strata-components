@@ -1,5 +1,6 @@
 //! Corner roundness, and [`LookParams`]: every K2 setting (roundness, density, text size and
-//! the interface font) applied to a [`Look`] in one step.
+//! the interface font), plus the element glow and animations switches, applied to a [`Look`]
+//! in one step.
 //!
 //! Work package: K2, `docs/work/phase-1-leaves/K2-shape-density-type.md`.
 //!
@@ -26,11 +27,15 @@
 //!
 //! [`Look::apply_params`] is step 2 of the look's build (`look.rs`): after the theme, before
 //! the user's overrides. It sets absolute values from fixed bases, so it owns the fields it
-//! writes: `kit.radius`, `roundness`, `kit.ty`, `ty`, `icon_size`, `frame`, `content`, `row`
-//! and `font`. It never reads what an earlier call left in them, so applying the same
-//! parameters twice changes nothing, and new parameters replace old ones completely. It
-//! leaves `space`, `tiles`, `thumbnails` and `glow` alone: Strata's paddings are fixed
-//! pixels, and thumbnails don't follow the text size.
+//! writes: `kit.radius`, `roundness`, `kit.ty`, `ty`, `icon_size`, `frame`, `content`, `row`,
+//! `font`, `glow.on` and `animations`. It never reads what an earlier call left in them, so
+//! applying the same parameters twice changes nothing, and new parameters replace old ones
+//! completely. It leaves `space`, `tiles`, `thumbnails` and the glow's colour, radius and
+//! opacity alone: Strata's paddings are fixed pixels, thumbnails don't follow the text size,
+//! and the theme (K1) colours the glow.
+//!
+//! The two switches live here, not on the theme, so a host that rebuilds the look from a new
+//! theme and the same parameters keeps them (W2c).
 
 use rune_kit::Radius;
 
@@ -122,6 +127,11 @@ pub struct LookParams {
     /// The app's own families (`AppSpec::families`): the fallback behind a chosen family,
     /// and the mono slot, which a chosen family never changes.
     pub app_families: Families,
+    /// Strata's "Element glow" setting: `glow.on`.
+    pub element_glow: bool,
+    /// False when the user or the desktop turned animations off (P5's switch, as data):
+    /// `animations`.
+    pub animations: bool,
 }
 
 impl Default for LookParams {
@@ -135,6 +145,8 @@ impl Default for LookParams {
             text_scale: 1.0,
             font: None,
             app_families: Families::new("Inter", "Inter"),
+            element_glow: true,
+            animations: true,
         }
     }
 }
@@ -142,7 +154,8 @@ impl Default for LookParams {
 impl Look {
     /// Sets the tokens K2 owns from `params`: the type ramp and icon sizes for the text size,
     /// the bars and rows for the densities (and the text size), the radii for the roundness,
-    /// and the interface families. Applying the same parameters again changes nothing.
+    /// the interface families, and the glow and animations switches. Applying the same
+    /// parameters again changes nothing.
     pub fn apply_params(&mut self, params: &LookParams) {
         let root = typography::root_px(params.text_size, params.text_scale);
         typography::apply(self, root, params.font.as_deref(), &params.app_families);
@@ -156,6 +169,8 @@ impl Look {
         let factor = factor(params.roundness);
         self.roundness = factor;
         self.kit.radius = scale_radii(BASE_RADIUS, factor);
+        self.glow.on = params.element_glow;
+        self.animations = params.animations;
     }
 
     /// `self` with [`Look::apply_params`] applied.

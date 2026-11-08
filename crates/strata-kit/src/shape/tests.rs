@@ -14,6 +14,8 @@ struct K2Tokens {
     content: crate::look::Content,
     row: RowHeights,
     font: Option<Families>,
+    glow_on: bool,
+    animations: bool,
 }
 
 fn tokens(look: &Look) -> K2Tokens {
@@ -44,6 +46,8 @@ fn tokens(look: &Look) -> K2Tokens {
         content: look.content,
         row: look.row,
         font: look.font.clone(),
+        glow_on: look.glow.on,
+        animations: look.animations,
     }
 }
 
@@ -66,6 +70,8 @@ fn samples() -> Vec<LookParams> {
             text_size: 48,
             text_scale: 1.25,
             font: Some("DejaVu Sans".into()),
+            element_glow: false,
+            animations: false,
             ..d.clone()
         },
         LookParams {
@@ -97,6 +103,26 @@ fn new_params_replace_old_ones_completely() {
             assert_eq!(tokens(&fresh), tokens(&over), "{old:?} then {new:?}");
         }
     }
+}
+
+/// A host rebuilds the look from each new theme's kit; the user's switches must survive that.
+#[test]
+fn a_look_rebuilt_from_another_kit_keeps_the_glow_and_animation_switches() {
+    let off = LookParams {
+        element_glow: false,
+        animations: false,
+        ..LookParams::default()
+    };
+    let before = Look::fallback(false).with_params(&off);
+    let rebuilt = Look::from_kit(rune_kit::Kit::neutral(true)).with_params(&off);
+    for look in [before, rebuilt] {
+        assert!(!look.glow.on);
+        assert!(!look.animations);
+    }
+    let on = Look::fallback(false)
+        .with_params(&off)
+        .with_params(&LookParams::default());
+    assert!(on.glow.on && on.animations);
 }
 
 #[test]
@@ -149,14 +175,19 @@ fn roundness_outside_its_range_is_clamped() {
 }
 
 #[test]
-fn params_leave_spacing_ladders_and_glow_alone() {
+fn params_leave_spacing_ladders_and_the_glow_look_alone() {
     let fallback = Look::fallback(false);
     for p in samples() {
         let look = fallback.clone().with_params(&p);
         assert_eq!(look.space, fallback.space, "{p:?}");
         assert_eq!(look.tiles, fallback.tiles, "{p:?}");
         assert_eq!(look.thumbnails, fallback.thumbnails, "{p:?}");
-        assert_eq!(look.glow, fallback.glow, "{p:?}");
+        // The params own only the switch; the theme owns the glow's colour and reach.
+        let glow = crate::look::Glow {
+            on: fallback.glow.on,
+            ..look.glow
+        };
+        assert_eq!(glow, fallback.glow, "{p:?}");
     }
 }
 

@@ -78,12 +78,12 @@ fn token_structs_hash_as_memo_versions() {
                 l.glow,
                 l.ty,
             ),
-            (&l.tiles, &l.thumbnails, l.syntax_extra),
+            (&l.tiles, &l.thumbnails, l.syntax_extra, l.fill),
         ))
     };
     assert_eq!(key(&a), key(&Look::fallback(false)));
 
-    let changes: [(&str, Change); 10] = [
+    let changes: [(&str, Change); 11] = [
         ("space", |l| l.space.xs += 1.0),
         ("frame", |l| l.frame.inset += 1.0),
         ("content", |l| l.content.pad += 1.0),
@@ -100,6 +100,7 @@ fn token_structs_hash_as_memo_versions() {
         ("syntax_extra", |l| {
             l.syntax_extra.preprocessor = l.kit.c.danger.fg
         }),
+        ("fill", |l| l.fill.highlight = l.kit.c.danger.fg),
     ];
     for (name, change) in changes {
         let mut b = a.clone();

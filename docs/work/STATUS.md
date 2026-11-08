@@ -38,12 +38,12 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | C7 | ready | | |
 | C8 | merged | 2 review rounds; own list on SidebarRow+Reorder; keyboard pin reorder left out (no bullet); hover-time folder check needs X2 binder; Rune drafts U18-U23; PNG goldens on NVIDIA | 6277a99 |
 | C9 | merged | 3 review rounds; own split + DrawerState; HostedPreview trait; focus via focus_return stubs (Rune Tx::focus draft); PNG goldens on NVIDIA | bad5d4c |
-| K1 | planning | | |
+| K1 | coding (on W2c) | catalogue copied from Strata (Tinted Theming MIT + LGSE MIT notices); toml dep; Look::fallback stays neutral; syntect theme split to K1b | |
 | K2 | merged | 1 review round + fixes; Strata values at upstream/main 35ee677ab; font list arrives as data (Rune #114/U16); Switch/Button sizes are rune-kit gaps | db41ea7 |
 | K3 | ready | | |
 | K4 | ready | | |
-| P0 | planning | | |
-| P3 | planning | | |
+| P0 | coding | owner: S2 Q1 = a (degrade on libwayland 1.22; own-connection data-control route); owner: move Platform CI to libwayland >= 1.23 in P0 (unverified until a push); S2 Q2/Q3 deferred to P1 | |
+| P3 | planned (owner decisions pending) | | |
 | P5 | ready | | |
 | P6 | ready | | |
 | P7 | ready | | |

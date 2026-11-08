@@ -182,6 +182,8 @@ const OUTLINE: f32 = 1.0;
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Frame {
     pub look_key: u64,
+    /// What the builder's settings make every row: see [`config_key`].
+    pub config_key: u64,
     pub row_height: f32,
     pub per_line: usize,
     pub len: usize,
@@ -213,6 +215,20 @@ pub(super) fn look_key(look: &Look) -> u64 {
     ] {
         v.to_bits().hash(&mut h);
     }
+    h.finish()
+}
+
+/// A key for the builder settings that change what every row is, as a memo version: its
+/// roles, read-only, whether it takes drops, and which parts a slot fills. A collection whose
+/// builder changes one of them (a view that switches roles) builds its rows again.
+pub(super) fn config_key<S>(cfg: &Config<S>) -> u64 {
+    let mut h = std::hash::DefaultHasher::new();
+    cfg.roles.hash(&mut h);
+    cfg.read_only.hash(&mut h);
+    cfg.on_drop.is_some().hash(&mut h);
+    cfg.icon.is_some().hash(&mut h);
+    cfg.label.is_some().hash(&mut h);
+    cfg.content.is_some().hash(&mut h);
     h.finish()
 }
 
@@ -289,6 +305,7 @@ fn build_item<S: 'static>(cfg: &Rc<Config<S>>, frame: &Frame, s: &S, index: usiz
         (entry.name, entry.kind, entry.icon, entry.thumbnail),
         state,
         frame.look_key,
+        frame.config_key,
         frame.row_height.to_bits(),
         frame.hover_live,
         versions,

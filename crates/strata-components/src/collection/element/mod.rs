@@ -465,6 +465,7 @@ impl<S: 'static> Collection<S> {
         let row_height = cfg.row_height_of(s);
         let frame = row::Frame {
             look_key: row::look_key(look),
+            config_key: row::config_key(&cfg),
             row_height,
             per_line: per,
             len,

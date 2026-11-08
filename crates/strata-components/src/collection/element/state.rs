@@ -58,6 +58,8 @@ pub struct CollectionState {
     pub(super) gesture: Option<Hit>,
     /// The selection as last announced: its revision, how many were selected and of how many.
     pub(super) announced: (u64, usize, usize),
+    /// A reveal asked for before the viewport had a width, done at its first layout.
+    pub(super) reveal_after_layout: Cell<Option<EntryId>>,
 }
 
 impl Default for CollectionState {
@@ -80,6 +82,7 @@ impl Default for CollectionState {
             row_height: 0.0,
             gesture: None,
             announced: (0, 0, 0),
+            reveal_after_layout: Cell::new(None),
         }
     }
 }
@@ -235,7 +238,8 @@ impl CollectionState {
 
     /// Brings the collection in step with `source` after it changed: [`Selection::sync`], then
     /// the cursor row keeps its place on screen (`Tx::keep_on_screen`). When the listing is
-    /// complete and a restore waits for it, the restore applies now instead.
+    /// complete and a restore waits for it, the restore applies now instead. While a marquee
+    /// band is open, the status line waits for it to end.
     ///
     /// `scope` is the collection's key, as given to the element.
     pub fn sync(
@@ -249,7 +253,7 @@ impl CollectionState {
             && let Some(position) = self.pending.take()
         {
             let changed = self.apply_position(scope, source, &position, rule, tx);
-            self.note_selection(source);
+            self.note_unless_banding(source);
             return changed;
         }
         let changed = self.selection.sync(source, rule);
@@ -259,8 +263,22 @@ impl CollectionState {
             // Rune finds no drawn rect to hold, and lets it go.
             tx.keep_on_screen(line_path(scope, source, index, self.per_line.get()));
         }
-        self.note_selection(source);
+        self.note_unless_banding(source);
         changed
+    }
+
+    /// [`CollectionState::note_selection`], unless a marquee band is open: the status line
+    /// reads a band's count once its gesture ends (the element notes it then), not a count a
+    /// listing change makes mid-band.
+    fn note_unless_banding(&mut self, source: &dyn EntrySource) {
+        let banding = self
+            .controllers
+            .marquee
+            .as_ref()
+            .is_some_and(|m| m.active());
+        if !banding {
+            self.note_selection(source);
+        }
     }
 
     /// Whether the line holding entry `index` shows whole in the viewport, as last laid out.
@@ -298,6 +316,10 @@ impl CollectionState {
     /// Scrolls the entry at `index` into view, mounted or not, just far enough.
     pub fn reveal(&self, scope: &str, source: &dyn EntrySource, index: usize, tx: &mut Tx) {
         if index >= source.len() {
+            return;
+        }
+        if self.viewport.w <= 0.0 {
+            self.reveal_after_layout.set(Some(source.id_at(index)));
             return;
         }
         let per = self.per_line.get().max(1);
@@ -343,6 +365,7 @@ impl CollectionState {
     ) -> Changed {
         self.pending = None;
         self.drop = None;
+        self.reveal_after_layout.set(None);
         // The folder left takes its gestures and keyboard mode with it.
         self.controllers.reset();
         self.gesture = None;

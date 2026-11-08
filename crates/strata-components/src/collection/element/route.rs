@@ -41,6 +41,7 @@ fn dispatch<S: 'static>(
     f: impl FnOnce(&mut super::Controllers, &mut Ctx<'_>) -> Flow,
 ) -> (Flow, bool) {
     let now = cfg.now(s);
+    let animations = (cfg.look)(s).animations;
     let row_height = cfg.row_height_of(s);
     let (src, st) = (cfg.get_mut)(s);
     let geometry = cfg
@@ -56,6 +57,7 @@ fn dispatch<S: 'static>(
     } = &mut *st;
     let mut cx = Ctx::new(src, &*geometry, visible, now, selection)
         .read_only_mode(cfg.read_only)
+        .with_animations(animations)
         .window_origin(origin)
         .with_settings(cfg.settings.clone());
     let flow = f(controllers, &mut cx);
@@ -63,15 +65,19 @@ fn dispatch<S: 'static>(
     let moved = before != st.selection.cursor();
     // Only what the view reads needs a commit. Scrolls, reveals and wake-ups go through the
     // transaction, which Rune applies whether or not the view runs (a poll's too, even when it
-    // returns false: `runtime/frame.rs`, the poll's `merge`).
+    // returns false: `runtime/frame.rs`, the poll's `merge`). Keyboard mode counts only when
+    // the effects leave it other than it was.
+    let mode_was = (st.keyboard, st.hover_live);
+    let mode = effects.iter().fold(mode_was, |mode, e| match e {
+        Effect::KeyboardMode(on) => (*on, !*on),
+        _ => mode,
+    });
     let shows = changed.any()
         || repaint
-        || effects.iter().any(|e| {
-            matches!(
-                e,
-                Effect::KeyboardMode(_) | Effect::BeginMarquee { .. } | Effect::Intent(_)
-            )
-        });
+        || mode != mode_was
+        || effects
+            .iter()
+            .any(|e| matches!(e, Effect::BeginMarquee { .. } | Effect::Intent(_)));
     after(cfg, s, tx, from, changed, moved, effects);
     (flow, shows)
 }
@@ -437,9 +443,31 @@ pub(super) fn on_layout<S: 'static>(cfg: &Rc<Config<S>>, s: &mut S, r: [f32; 4],
     let per = cfg.lines.per_line(r[2]).max(1);
     let row_height = cfg.row_height_of(s);
     let (src, st) = (cfg.get_mut)(s);
+    let had_width = st.viewport.w > 0.0;
     st.viewport = Rect::from(r);
     st.row_height = row_height;
-    if !st.reflow_to(&cfg.key, src, per, tx) {
+    // A collapsed viewport (a Columns column at no width) keeps its count: the width it comes
+    // back at decides it.
+    if r[2] <= 0.0 {
+        tx.live_only();
+        return;
+    }
+    let changed = if had_width {
+        st.reflow_to(&cfg.key, src, per, tx)
+    } else {
+        // The first width isn't a reflow: nothing was laid out at the count the state started
+        // with, so a restore made before it (`enter`) stands. A reveal asked for before it is
+        // done now, keyed by the lines as they are.
+        let changed = per != st.per_line.get();
+        st.per_line.set(per);
+        if let Some(id) = st.reveal_after_layout.take()
+            && let Some(index) = src.index_of(id)
+        {
+            st.reveal(&cfg.key, src, index, tx);
+        }
+        changed
+    };
+    if !changed {
         tx.live_only();
     }
 }

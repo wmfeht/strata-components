@@ -48,6 +48,10 @@ struct Host {
     tile: Option<f32>,
     /// The collection's width.
     width: f32,
+    /// Roles other than the default, when set.
+    roles: Option<Roles>,
+    /// Takes drops (a no-op `on_drop`).
+    drops: bool,
 }
 
 impl Host {
@@ -69,6 +73,8 @@ impl Host {
             row_h: None,
             tile: None,
             width: W,
+            roles: None,
+            drops: false,
         }
     }
 }
@@ -170,6 +176,12 @@ fn collection(s: &Host) -> Collection<Host> {
             |_: &Host| Some(EntryId::new(2)),
             Slot::pure(|_: &Host, _| rune::el().key("editor")),
         );
+    }
+    if let Some(roles) = s.roles {
+        c = c.roles(roles);
+    }
+    if s.drops {
+        c = c.on_drop(|_: &mut Host, _, _, _| {});
     }
     c.settings(7u32)
 }
@@ -1704,38 +1716,40 @@ fn a_band_that_rides_live_values_runs_no_view_while_it_moves_and_scrolls() {
     }
 }
 
+/// A band that selects the entries above the pointer, as C1d's does.
+struct Selecting(bool);
+impl MarqueeController for Selecting {
+    fn begin(&mut self, _: Point, _: Mods, cx: &mut Ctx<'_>) {
+        self.0 = true;
+        cx.apply(|sel, _| sel.begin_band(crate::collection::selection::BandMode::Replace));
+    }
+    fn moved(&mut self, at: Point, cx: &mut Ctx<'_>) {
+        let crossed = cx
+            .geometry
+            .range_in(crate::contract::Rect::new(0.0, 0.0, 10.0, at.y));
+        cx.apply(|sel, src| sel.band(src, &crossed));
+    }
+    fn end(&mut self, cx: &mut Ctx<'_>) {
+        self.0 = false;
+        cx.apply(|sel, _| {
+            sel.end_band();
+            crate::collection::selection::Changed::NONE
+        });
+    }
+    fn cancel(&mut self, _: &mut Ctx<'_>) -> bool {
+        std::mem::replace(&mut self.0, false)
+    }
+    fn active(&self) -> bool {
+        self.0
+    }
+    fn band(&self) -> Option<crate::contract::Rect> {
+        None
+    }
+}
+
 /// Nit: an open band's selection is announced when its gesture ends, not at each step.
 #[test]
 fn a_band_announces_its_count_when_it_ends() {
-    struct Selecting(bool);
-    impl MarqueeController for Selecting {
-        fn begin(&mut self, _: Point, _: Mods, cx: &mut Ctx<'_>) {
-            self.0 = true;
-            cx.apply(|sel, _| sel.begin_band(crate::collection::selection::BandMode::Replace));
-        }
-        fn moved(&mut self, at: Point, cx: &mut Ctx<'_>) {
-            let crossed = cx
-                .geometry
-                .range_in(crate::contract::Rect::new(0.0, 0.0, 10.0, at.y));
-            cx.apply(|sel, src| sel.band(src, &crossed));
-        }
-        fn end(&mut self, cx: &mut Ctx<'_>) {
-            self.0 = false;
-            cx.apply(|sel, _| {
-                sel.end_band();
-                crate::collection::selection::Changed::NONE
-            });
-        }
-        fn cancel(&mut self, _: &mut Ctx<'_>) -> bool {
-            std::mem::replace(&mut self.0, false)
-        }
-        fn active(&self) -> bool {
-            self.0
-        }
-        fn band(&self) -> Option<crate::contract::Rect> {
-            None
-        }
-    }
     let log = Rc::new(RefCell::new(Log::default()));
     let mut host = Host::new(40);
     host.coll.controllers.pointer = Some(Box::new(Pointer(log)));
@@ -1760,6 +1774,66 @@ fn a_band_announces_its_count_when_it_ends() {
     rt.frame(1.0 / 60.0);
     let n = rt.state.coll.selection.len();
     assert_eq!(status(&rt), format!("{n} items selected"));
+}
+
+/// A listing change synced while a band is open doesn't announce the band's count: it waits
+/// for the band to end (C1d review S3).
+#[test]
+fn a_sync_during_an_open_band_keeps_the_status_line_quiet() {
+    let log = Rc::new(RefCell::new(Log::default()));
+    let mut host = Host::new(40);
+    host.coll.controllers.pointer = Some(Box::new(Pointer(log)));
+    host.coll.controllers.marquee = Some(Box::new(Selecting(false)));
+    let mut rt = runtime(host);
+    let status = |rt: &Runtime<Host>| element(rt, STATUS).and_then(|e| e.text).unwrap_or_default();
+    let [x, y, _, h] = element(&rt, "row-1").unwrap().visible;
+    rt.physical_input(rune::PhysicalInput::Modifiers(Mods {
+        shift: true,
+        ..Mods::default()
+    }));
+    rt.pointer_down(x + 30.0, y + h / 2.0);
+    rt.frame(1.0 / 60.0);
+    rt.physical_input(rune::PhysicalInput::Modifiers(Mods::default()));
+    for k in 1..=4 {
+        rt.pointer_move(x + 30.0, y + h / 2.0 + k as f32 * 26.0);
+        rt.frame(1.0 / 60.0);
+    }
+    assert!(rt.state.coll.selection.len() > 2);
+    rt.update(|s, tx| {
+        s.src.insert_top(2);
+        s.coll
+            .sync(SCOPE, &s.src, SyncRule::complete(CursorGone::Neighbor), tx);
+    });
+    rt.frame(1.0 / 60.0);
+    assert_eq!(status(&rt), "", "no count mid-band");
+    rt.pointer_up(x + 30.0, y + h / 2.0 + 4.0 * 26.0);
+    rt.frame(1.0 / 60.0);
+    let n = rt.state.coll.selection.len();
+    assert_eq!(status(&rt), format!("{n} items selected"), "once it ends");
+}
+
+/// Controllers read whether motion is on from the look the element builds with (C1d review
+/// S2).
+#[test]
+fn controllers_read_whether_animations_are_on() {
+    struct Reads(Rc<RefCell<Vec<bool>>>);
+    impl PointerController for Reads {
+        fn pointer(&mut self, input: &PointerInput, cx: &mut Ctx<'_>) -> Flow {
+            if input.phase == PointerPhase::Down {
+                self.0.borrow_mut().push(cx.animations());
+            }
+            Flow::Handled
+        }
+    }
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let mut host = Host::new(5);
+    host.coll.controllers.pointer = Some(Box::new(Reads(seen.clone())));
+    let mut rt = runtime(host);
+    click(&mut rt, "row-1");
+    rt.update(|s, _| s.look.animations = false);
+    settle(&mut rt);
+    click(&mut rt, "row-2");
+    assert_eq!(*seen.borrow(), [true, false]);
 }
 
 /// B2: a row height that changes through the state draws rows at it, and presses hit the
@@ -1850,31 +1924,187 @@ fn a_reflow_scrolls_the_cursor_into_view() {
     }
 }
 
-/// S1: settings are one value per type.
+// C1e round-3 carry-overs (C1f).
+
+/// SF1: a new grid entered with a remembered position before its first layout keeps the
+/// remembered scroll: the first width isn't a reflow that reveals the cursor instead.
 #[test]
-fn settings_hold_one_value_per_type() {
-    struct A(u32);
-    struct B(u32);
-    let mut settings = Settings::default();
-    settings.insert(A(1));
-    settings.insert(B(2));
-    settings.insert(A(3));
-    let src = FastSource::new(3);
-    let g = OnePerLine.geometry(3, 26.0, 300.0, 200.0);
-    let mut sel = crate::collection::selection::Selection::new();
-    let cx = Ctx::new(
-        &src,
-        &*g,
-        crate::contract::Rect::new(0.0, 0.0, 300.0, 200.0),
-        0.0,
-        &mut sel,
-    )
-    .with_settings(Rc::new(settings));
+fn a_fresh_grid_keeps_a_restored_scroll_through_its_first_layout() {
+    let grid = || {
+        let mut host = Host::new(4_000);
+        host.tile = Some(100.0);
+        host
+    };
+    let mut rt = runtime(grid());
+    settle(&mut rt);
+    click_label(&mut rt, "row-7");
+    for _ in 0..20 {
+        rt.wheel(W / 4.0, H / 2.0, -200.0);
+        rt.frame(1.0 / 60.0);
+    }
+    settle(&mut rt);
+    let offset = rt.state.coll.scroll_offset();
+    assert!(offset > 1_000.0, "scrolled away from the cursor: {offset}");
+    let position = rt.state.coll.position(&rt.state.src);
+
+    for before_first_frame in [true, false] {
+        let mut rt = Runtime::new(grid(), view, (W, H), Env::new(false, 1.0));
+        if !before_first_frame {
+            rt.frame(0.0);
+        }
+        let p = position.clone();
+        rt.update(move |s, tx| {
+            s.coll.enter(SCOPE, &s.src, Some(&p), Listing::Complete, tx);
+        });
+        rt.frame(0.0);
+        settle(&mut rt);
+        assert_eq!(
+            rt.state.coll.scroll_offset(),
+            offset,
+            "entered before the first frame: {before_first_frame}"
+        );
+        assert_eq!(rt.state.coll.selection.cursor(), Some(id(7)));
+    }
+}
+
+/// SF1: a new grid entered before its first layout with a position whose scroll was measured
+/// in another layout shows the cursor's cell, revealed once the lines are known.
+#[test]
+fn a_fresh_grid_restore_in_another_layout_reveals_the_cursor() {
+    let position = {
+        let mut host = Host::new(4_000);
+        host.tile = Some(100.0);
+        let mut rt = runtime(host);
+        settle(&mut rt);
+        rt.update(|s, _| {
+            s.coll.selection.select_only(&s.src, 2_000);
+        });
+        rt.state.coll.position(&rt.state.src)
+    };
+    let mut host = Host::new(4_000);
+    host.tile = Some(100.0);
+    host.coll.set_layout_key(5);
+    let mut rt = Runtime::new(host, view, (W, H), Env::new(false, 1.0));
+    rt.update(move |s, tx| {
+        s.coll
+            .enter(SCOPE, &s.src, Some(&position), Listing::Complete, tx);
+    });
+    rt.frame(0.0);
+    settle(&mut rt);
+    let key = row_key(id(2_000));
+    let shown = element(&rt, &key)
+        .expect("the cursor's cell is mounted")
+        .visible;
+    assert!(shown[3] > 20.0, "and shows whole: {shown:?}");
+}
+
+/// A keyboard controller whose tick says keyboard mode is on, and changes nothing else.
+struct ModeOn;
+
+impl KeyController for ModeOn {
+    fn key(&mut self, _input: &KeyInput<'_>, _cx: &mut Ctx<'_>) -> Flow {
+        Flow::Pass
+    }
+
+    fn tick(&mut self, cx: &mut Ctx<'_>) -> Flow {
+        cx.emit(Effect::KeyboardMode(true));
+        Flow::Handled
+    }
+}
+
+/// A keyboard-mode effect commits only when it changes the mode.
+#[test]
+fn a_keyboard_mode_effect_that_changes_nothing_commits_nothing() {
+    let mut host = Host::new(20);
+    host.coll.controllers.keyboard = Some(Box::new(ModeOn));
+    let mut rt = runtime(host);
+    let mut ticks = Vec::new();
+    for _ in 0..2 {
+        let shows = rt.update_if(|s, tx| collection(s).tick(s, tx));
+        ticks.push(shows);
+    }
+    assert!(rt.state.coll.keyboard_mode());
+    assert_eq!(ticks, [true, false], "on, then on again");
+}
+
+/// Rows built for one builder setting are built again when it changes: the roles, and
+/// read-only (which takes the rows' drop zones away).
+#[test]
+fn switching_roles_or_read_only_rebuilds_the_rows_that_show() {
+    let mut host = Host::new(20);
+    host.drops = true;
+    let mut rt = runtime(host);
+    assert_eq!(element(&rt, "row-3").unwrap().role, "option");
+    rt.update(|s, _| s.roles = Some(Roles::GRID_ROWS));
+    settle(&mut rt);
+    assert_eq!(element(&rt, "row-3").unwrap().role, "row");
+
+    // Entry 0 is a folder: a file drag over it hovers its row.
+    let [x, y, w, h] = element(&rt, "row-0").unwrap().visible;
+    let at = (x + w / 2.0, y + h / 2.0);
+    rt.drag_files(vec!["/tmp/a.txt".into()], Some(at));
+    rt.frame(1.0 / 60.0);
+    assert_eq!(rt.state.coll.drop_over(), Some(DropOver::Row(id(0))));
+    rt.drag_files_leave();
+    rt.frame(1.0 / 60.0);
+    rt.update(|s, _| {
+        s.read_only = true;
+        s.coll.set_drop_over(None);
+    });
+    settle(&mut rt);
+    rt.drag_files(vec!["/tmp/a.txt".into()], Some(at));
+    rt.frame(1.0 / 60.0);
     assert_eq!(
-        cx.settings::<A>().map(|a| a.0),
-        Some(3),
-        "the later A replaces the first"
+        rt.state.coll.drop_over(),
+        None,
+        "a read-only row takes no drop"
     );
-    assert_eq!(cx.settings::<B>().map(|b| b.0), Some(2));
-    assert!(cx.settings::<u64>().is_none());
+}
+
+/// Each controller reads its own type from the builder's settings, the last value of a type
+/// winning.
+#[test]
+fn each_controller_reads_its_own_settings_from_the_builder() {
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    struct A(u32);
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    struct B(u32);
+    type Seen = Rc<RefCell<Vec<String>>>;
+    struct ReadsA(Seen);
+    impl PointerController for ReadsA {
+        fn pointer(&mut self, input: &PointerInput, cx: &mut Ctx<'_>) -> Flow {
+            if input.phase == PointerPhase::Down {
+                let read = cx.settings::<A>().copied();
+                self.0.borrow_mut().push(format!("pointer {read:?}"));
+            }
+            Flow::Handled
+        }
+    }
+    struct ReadsB(Seen);
+    impl KeyController for ReadsB {
+        fn key(&mut self, _input: &KeyInput<'_>, cx: &mut Ctx<'_>) -> Flow {
+            let read = cx.settings::<B>().copied();
+            self.0.borrow_mut().push(format!("keys {read:?}"));
+            Flow::Handled
+        }
+    }
+    fn with_settings(s: &Host, _: &mut Cx<Host>) -> El {
+        col().size(W, H).child(
+            collection(s)
+                .settings(A(1))
+                .settings(B(2))
+                .settings(A(3))
+                .build(s),
+        )
+    }
+    let seen: Seen = Rc::default();
+    let mut host = Host::new(10);
+    host.coll.controllers.pointer = Some(Box::new(ReadsA(seen.clone())));
+    host.coll.controllers.keyboard = Some(Box::new(ReadsB(seen.clone())));
+    let mut rt = Runtime::new(host, with_settings, (W, H), Env::new(false, 1.0));
+    rt.frame(0.0);
+    rt.frame(1.0 / 60.0);
+    click(&mut rt, "row-2");
+    press(&mut rt, Key::Down);
+    assert_eq!(*seen.borrow(), ["pointer Some(A(3))", "keys Some(B(2))"]);
 }

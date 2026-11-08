@@ -32,8 +32,10 @@
 //! edge and beyond ([`edge_speed`], Strata's `auto_scroll_step`). Each tick retargets one Rune
 //! glide a short lead ahead ([`glide_lead`]), which settles at that speed, rather than
 //! stepping instant scrolls, which commit every frame and which Rune warns about. Leaving the
-//! edge band, or reaching the end of the content, ends the glide on a target that brings it
-//! to rest without overshoot ([`stop_lead`]).
+//! edge band mid-band, or reaching the end of the content, ends the glide on a target that
+//! brings it to rest without overshoot ([`stop_lead`]). Ending the band (the release, Escape,
+//! another selecting operation) stops the view dead where it shows ([`Outcome::StopScroll`]),
+//! as Strata's timer stops, so the last row the band took stays under the pointer.
 //!
 //! # Time
 //!
@@ -49,9 +51,10 @@
 //!   most frames. Rune's debug builds warn when one source commits on 6 or more frames and at
 //!   least a quarter of a scroll's frames (`rune/src/tooling/perf_warn/commits.rs`). So while
 //!   the view moves, the band is applied at most once per [`MarqueeSettings::apply_every`]
-//!   (100 ms, 6 frames at 60 Hz; probed silent at one commit in 6 frames, warning at one in
-//!   4). While the view is still, every move applies at once, as do the release and the frame
-//!   the scroll stops. Strata applies every frame.
+//!   (100 ms) and once per [`MarqueeSettings::apply_frames`] frames (6; probed silent at one
+//!   commit in 6 frames, warning at one in 4), so it stays silent below 60 Hz too, at a
+//!   slower update. While the view is still, every move applies at once, as do the release
+//!   and the frame the scroll stops. Strata applies every frame.
 //! - **D2: Escape and a cancelled gesture restore the selection the band started from**
 //!   ([`Selection::cancel_band`]), as the work package asks. Strata has no marquee Escape, and
 //!   its cancelled gesture (`connect_cancel` → `end`) keeps what the band selected.
@@ -65,6 +68,15 @@
 //!   with `Ctx::settings::<MarqueeSettings>()`), C1e's one settings path for every controller,
 //!   rather than by accessor: the element keeps its controllers boxed, where no accessor
 //!   reaches. The band's live rect is state, not settings, and the adapter keeps it.
+//!
+//! # A listing that changes under the band
+//!
+//! After a re-sort or a reload, the same indices name other entries, and the band applies
+//! again to the rows now under it, as Strata's band hit-tests by position. The machine sees
+//! such a change through the selection's revision, or a cheap fingerprint of the listing (its
+//! length and the ids at the ends of what the band crossed). C1e's `Ctx` doesn't expose the
+//! host's listing version, so a re-sort that keeps both end ids and the length goes unseen
+//! until the band next crosses a new row.
 //!
 //! # Drawing
 //!

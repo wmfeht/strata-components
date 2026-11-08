@@ -47,6 +47,13 @@ impl Surface for Fake {
         self.now
     }
 
+    fn content_extent(&self) -> f32 {
+        match self.source.len() {
+            0 => 0.0,
+            n => self.geometry.rect_of(n - 1).bottom(),
+        }
+    }
+
     fn settings(&self) -> MarqueeSettings {
         self.settings
     }
@@ -175,20 +182,42 @@ impl Glide {
     }
 }
 
-/// One frame as the element runs it: the host's poll ticks the machine, then Rune steps the
-/// glide the machine asked for. Returns the tick's result.
-fn frame(f: &mut Fake, m: &mut MarqueeMachine, glide: &mut Glide) -> bool {
-    f.now += FRAME;
-    let changed = m.tick(f);
+/// Applies the scroll requests in `f.out` as Rune does: a glide aims the glide, a stop jumps
+/// and ends it. With `jumps` (reduced motion), a glide lands at once too.
+fn scroll(f: &mut Fake, glide: &mut Glide, jumps: bool) {
     let spring = f.settings.glide;
+    let max = f.geometry.len as f32 * ROW - VIEW;
     for o in std::mem::take(&mut f.out) {
-        if let Outcome::Glide { y, .. } | Outcome::StopGlide { y, .. } = o {
-            glide.aim(spring, f.visible.y, y);
+        match o {
+            Outcome::Glide { y, .. } | Outcome::StopGlide { y, .. } if jumps => {
+                f.visible.y = y.clamp(0.0, max);
+            }
+            Outcome::Glide { y, .. } | Outcome::StopGlide { y, .. } => {
+                glide.aim(spring, f.visible.y, y);
+            }
+            Outcome::StopScroll { y } => {
+                *glide = Glide::default();
+                f.visible.y = y;
+            }
+            _ => {}
         }
     }
+}
+
+/// One frame as the element runs it, `dt` long: the host's poll ticks the machine, then Rune
+/// steps the glide the machine asked for. Returns the tick's result.
+fn frame_of(f: &mut Fake, m: &mut MarqueeMachine, glide: &mut Glide, dt: f64) -> bool {
+    f.now += dt;
+    let changed = m.tick(f);
+    scroll(f, glide, false);
     let max = f.geometry.len as f32 * ROW - VIEW;
-    f.visible.y = glide.step(spring, f.visible.y, max, FRAME as f32);
+    f.visible.y = glide.step(f.settings.glide, f.visible.y, max, dt as f32);
     changed
+}
+
+/// One 60 Hz frame.
+fn frame(f: &mut Fake, m: &mut MarqueeMachine, glide: &mut Glide) -> bool {
+    frame_of(f, m, glide, FRAME)
 }
 
 #[test]
@@ -267,8 +296,9 @@ fn a_shift_band_adds_to_the_selection_at_press() {
 }
 
 #[test]
-fn alt_only_forces_the_marquee_and_replaces() {
-    // browser/selection/marquee: Holding Alt starts a marquee even when the press lands on an entry.
+fn the_mode_mapping_lets_alt_replace() {
+    // The modifiers to band mode: Alt only forces a marquee (C1b's decision), so an Alt band
+    // replaces and a Ctrl+Alt band toggles.
     let alt = Mods {
         alt: true,
         ..Mods::default()
@@ -295,8 +325,9 @@ fn the_selection_survives_pointer_movement_after_release() {
 }
 
 #[test]
-fn the_band_never_moves_the_cursor_or_the_preview() {
-    // browser/selection/marquee: Marquee selection never opens or retargets quick preview, including with single-click previews on.
+fn the_band_never_moves_the_cursor_or_the_anchor() {
+    // D3: the band leaves the cursor and the anchor alone (the marquee-drag script checks the
+    // preview and the intents on the page).
     let mut f = fake(20);
     f.sel.select_only(&f.source, 2);
     let (cursor, anchor) = (f.sel.cursor(), f.sel.anchor());
@@ -305,7 +336,6 @@ fn the_band_never_moves_the_cursor_or_the_preview() {
     m.moved(at_row(9), &mut f);
     m.end(&mut f);
     assert_eq!(selected(&f), [2, 4, 5, 6, 7, 8, 9]);
-    // D3: the cursor and the anchor stay; previews follow the cursor, so they stay too.
     assert_eq!((f.sel.cursor(), f.sel.anchor()), (cursor, anchor));
     assert!(f.applied.iter().all(|(_, c)| !c.cursor && !c.anchor));
 }
@@ -367,8 +397,9 @@ fn a_sync_during_the_band_applies_it_again_over_the_new_listing() {
 }
 
 #[test]
-fn the_speed_grows_with_the_distance_past_the_edge_line() {
-    // browser/selection/marquee: Holding the pointer near a viewport edge scrolls the listing and extends the selection each frame.
+fn the_speed_curve_is_stratas_auto_scroll_step() {
+    // Strata's `auto_scroll_step`: zero to the edge line, linear to the most at the edge, held
+    // beyond it.
     let e = EdgeScroll::STRATA;
     assert_eq!(edge_speed(VIEW / 2.0, VIEW, e), 0.0);
     assert_eq!(edge_speed(e.edge, VIEW, e), 0.0);
@@ -456,7 +487,10 @@ fn holding_at_the_bottom_edge_glides_and_extends_the_selection() {
     let pointer_row = ((f.visible.y + VIEW - 2.0) / ROW) as usize;
     m.end(&mut f);
     assert_eq!(f.sel.len(), pointer_row);
-    assert!(stops(&f.out) >= 1, "the release stops the glide");
+    assert!(
+        f.out.contains(&Outcome::StopScroll { y: f.visible.y }),
+        "the release stops the view dead"
+    );
 }
 
 #[test]
@@ -491,6 +525,8 @@ fn leaving_the_edge_or_reaching_the_end_stops_the_glide() {
     assert!(glides(&f.out).is_empty(), "nothing more to scroll");
     // The top edge doesn't scroll a view at the top.
     let mut f = fake(1_000);
+    let mut m = machine();
+    let mut glide = Glide::default();
     m.begin(at_row(5), Mods::default(), &mut f);
     m.moved(at_view(&f, 0.0), &mut f);
     frame(&mut f, &mut m, &mut glide);
@@ -551,6 +587,105 @@ fn rows_scrolled_out_stay_selected_and_rows_above_the_anchor_stay_unselected() {
     assert_eq!(selected(&f), (4..=10).collect::<Vec<_>>());
 }
 
+#[test]
+fn the_release_and_escape_stop_the_view_dead() {
+    // S1 (review): Strata's auto-scroll timer stops with the band, so the view stays where it
+    // is and the last row the band took stays under the pointer. A soft stop from leaving the
+    // edge just before is cut short too.
+    for (how, leave_first) in [("end", false), ("cancel", false), ("end", true)] {
+        let mut f = fake(10_000);
+        let mut m = machine();
+        let mut glide = Glide::default();
+        m.begin(at_row(1), Mods::default(), &mut f);
+        m.moved(at_view(&f, VIEW - 2.0), &mut f);
+        for _ in 0..60 {
+            frame(&mut f, &mut m, &mut glide);
+        }
+        if leave_first {
+            m.moved(at_view(&f, VIEW - 40.0), &mut f);
+            frame(&mut f, &mut m, &mut glide);
+        }
+        let pointer_y = if leave_first { VIEW - 40.0 } else { VIEW - 2.0 };
+        let at = f.visible.y;
+        if how == "end" {
+            m.end(&mut f);
+        } else {
+            assert!(m.cancel(&mut f));
+        }
+        assert!(
+            f.out.contains(&Outcome::StopScroll { y: at }),
+            "{how}: {:?}",
+            f.out
+        );
+        assert!(
+            glides(&f.out).is_empty() && stops(&f.out) == 0,
+            "no glide after it"
+        );
+        for _ in 0..60 {
+            frame(&mut f, &mut m, &mut glide);
+        }
+        assert!(
+            (f.visible.y - at).abs() < 1.0,
+            "{how}: moved {}",
+            f.visible.y - at
+        );
+        if how == "end" {
+            let under = ((f.visible.y + pointer_y) / ROW) as u64;
+            assert_eq!(
+                selected(&f).last(),
+                Some(&under),
+                "the row under the pointer"
+            );
+        }
+    }
+}
+
+#[test]
+fn with_animations_off_the_edge_scroll_keeps_the_curves_speed() {
+    // S2 (review): under reduced motion Rune lands each glide at once. With the host's
+    // `animations` off, each step aims one frame's travel ahead, so the speed stays the curve's.
+    let mut f = fake(100_000);
+    f.settings.animations = false;
+    let mut m = machine();
+    let mut glide = Glide::default();
+    m.begin(at_row(1), Mods::default(), &mut f);
+    m.moved(at_view(&f, VIEW), &mut f);
+    let mut frames = Vec::new();
+    for _ in 0..60 {
+        f.now += FRAME;
+        m.tick(&mut f);
+        let before = f.visible.y;
+        scroll(&mut f, &mut glide, true);
+        frames.push((f.visible.y - before) / FRAME as f32);
+    }
+    let most = EdgeScroll::STRATA.max_speed;
+    assert!(
+        frames[1..].iter().all(|v| (v - most).abs() < 0.02 * most),
+        "{frames:?}"
+    );
+}
+
+#[test]
+fn below_sixty_hertz_the_band_waits_for_frames_too() {
+    // D1: Rune's warning counts frames, so at 30 Hz the band applies once in 6 frames (0.2 s),
+    // not every 100 ms.
+    let mut f = fake(100_000);
+    let mut m = machine();
+    let mut glide = Glide::default();
+    m.begin(at_row(1), Mods::default(), &mut f);
+    m.moved(at_view(&f, VIEW - 2.0), &mut f);
+    let start = f.applied.len();
+    for _ in 0..60 {
+        frame_of(&mut f, &mut m, &mut glide, 1.0 / 30.0);
+    }
+    let times: Vec<f64> = f.applied[start..].iter().map(|(t, _)| *t).collect();
+    assert!(times.len() >= 5, "it still extends: {times:?}");
+    assert!(
+        times.windows(2).all(|w| w[1] - w[0] >= 6.0 / 30.0 - 1e-9),
+        "{times:?}"
+    );
+}
+
 // The adapter on C1e's seam, through a `Ctx` with no runtime.
 
 mod adapter {
@@ -572,13 +707,24 @@ mod adapter {
         now: f64,
         f: impl FnOnce(&mut Ctx<'_>) -> R,
     ) -> (R, Vec<Effect>) {
+        with_cx_at(sel, settings, now, 0.0, f)
+    }
+
+    /// As [`with_cx`], with the view scrolled to content y `top`.
+    fn with_cx_at<R>(
+        sel: &mut Selection,
+        settings: Option<MarqueeSettings>,
+        now: f64,
+        top: f32,
+        f: impl FnOnce(&mut Ctx<'_>) -> R,
+    ) -> (R, Vec<Effect>) {
         let source = ListSource::new((0..1_000).map(entry).collect());
         let geometry = UniformRows::new(1_000, ROW, WIDTH).viewport_height(VIEW);
         let mut values = Settings::default();
         if let Some(s) = settings {
             values.insert(s);
         }
-        let visible = Rect::new(0.0, 0.0, WIDTH, VIEW);
+        let visible = Rect::new(0.0, top, WIDTH, VIEW);
         let mut cx = Ctx::new(&source, &geometry, visible, now, sel).with_settings(Rc::new(values));
         let r = f(&mut cx);
         let effects = cx.effects().to_vec();
@@ -632,8 +778,36 @@ mod adapter {
         assert!(!sel.is_empty());
         let (taken, effects) = with_cx(&mut sel, None, 2.0 / 60.0, |cx| m.cancel(cx));
         assert!(taken);
-        assert_eq!(glides(&effects), 1, "a glide to rest");
+        assert!(
+            effects
+                .iter()
+                .any(|e| matches!(e, Effect::ScrollTo { y, glide: false } if *y == 0.0)),
+            "a dead stop where the view is: {effects:?}"
+        );
         assert!(sel.is_empty(), "the plain band's press had cleared it");
         assert!(!m.active() && m.overlay(&look).is_none());
+    }
+
+    #[test]
+    fn a_band_wholly_away_from_the_view_draws_nothing() {
+        // S5 (review): when nothing of the band is near the view, the drawn rect goes, rather
+        // than staying where the band last drew.
+        let mut sel = Selection::new();
+        let mut m = Marquee::new();
+        with_cx(&mut sel, None, 0.0, |cx| {
+            m.begin(Point::new(100.0, 13.0), Mods::default(), cx);
+            m.moved(at_row(10), cx);
+        });
+        let [_, _, w, h] = m.drawn_rect();
+        assert!(w * h > 0.0, "it draws near the view");
+        // Scrolled 20,000 pt down by hand, with the pointer two viewports above the window:
+        // the band ends 1,120 pt above the view, more than a viewport away.
+        let top = 20_000.0;
+        with_cx_at(&mut sel, None, 1.0 / 60.0, top, |cx| {
+            m.moved(Point::new(300.0, top - 2.0 * VIEW), cx);
+        });
+        assert!(m.band().is_some(), "the band is still open");
+        let [_, _, w, h] = m.drawn_rect();
+        assert_eq!(w * h, 0.0, "nothing drawn");
     }
 }

@@ -99,6 +99,33 @@ mod c1 {
                 .collect()
         }
 
+        /// Whether any node of the accessibility tree has key `key`.
+        fn heard(rt: &Runtime<Gallery>, key: &str) -> bool {
+            fn walk(v: &serde_json::Value, key: &str) -> bool {
+                v["key"] == key
+                    || v["children"]
+                        .as_array()
+                        .is_some_and(|c| c.iter().any(|c| walk(c, key)))
+            }
+            walk(&rt.accessibility_json(), key)
+        }
+
+        /// Presses beside row `id`, starts the band, and holds it at the viewport's bottom edge
+        /// for `seconds`. Returns the pointer's window x and y.
+        fn hold_at_the_bottom(rt: &mut Runtime<Gallery>, id: u64, seconds: f64) -> (f32, f32) {
+            let (x, y) = beside(rt, id);
+            rt.pointer_down(x, y);
+            rt.frame(FRAME);
+            rt.pointer_move(x, y + 9.0);
+            rt.frame(FRAME);
+            let [_, vy, _, vh] = element(rt, "viewport").expect("the viewport").visible;
+            let at = (x, vy + vh - 2.0);
+            rt.pointer_move(at.0, at.1);
+            rt.frame(FRAME);
+            run(rt, seconds);
+            at
+        }
+
         fn select(rt: &mut Runtime<Gallery>, ids: &[u64]) {
             let d = &mut rt.state.c1;
             for (n, id) in ids.iter().enumerate() {
@@ -179,6 +206,7 @@ mod c1 {
                 rt.pointer_move(x, y + 9.0);
                 rt.frame(FRAME);
                 assert!(element(&rt, BAND).is_some());
+                assert!(!heard(&rt, BAND), "the band is decoration, not in the tree");
                 assert_eq!(selected(&rt), [10_002]);
 
                 // Moves inside one row (the press was mid-row, rows are taller than 22 pt)
@@ -250,15 +278,13 @@ mod c1 {
             support::run(cmd).unwrap_or_else(|e| panic!("{e}"))
         }
 
-        /// Rune's debug builds warn, on stderr, when one source commits through most of a
-        /// scroll, when an app steps its own glide with instant scrolls, and when a resting
-        /// window keeps waking. None of them may fire for a band: dragged, held at the edge for
-        /// ten seconds over 100,000 rows, brought back, or wheeled.
+        /// D1's check: Rune's debug builds warn, on stderr, when one source commits through
+        /// most of a scroll, when an app steps its own glide with instant scrolls, and when a
+        /// resting window keeps waking. None of them may fire for a band: dragged, held at the
+        /// edge for ten seconds over 100,000 rows, brought back, or wheeled.
         #[test]
         #[cfg_attr(not(debug_assertions), ignore = "Rune's perf warnings are debug-only")]
         fn the_marquee_scripts_keep_runes_perf_warnings_silent() {
-            // browser/selection/marquee: Holding the pointer near a viewport edge scrolls the listing and extends the selection each frame.
-            // browser/selection/marquee: Wheel scrolling during a held marquee extends the selection without moving the anchor.
             for name in [
                 "marquee-drag",
                 "marquee-edge-scroll",
@@ -303,6 +329,49 @@ mod c1 {
                 over.is_empty(),
                 "commits over budget while the band auto-scrolls:\n{}",
                 over.join("\n")
+            );
+        }
+
+        /// S1 (review): the release stops the auto-scroll dead, as Strata's timer stops: the
+        /// view stays where it was, and the last row the band took stays under the pointer.
+        #[test]
+        fn releasing_a_band_mid_scroll_stops_the_view_where_it_is() {
+            let mut rt = mount("c1-photos-light");
+            let (x, y) = hold_at_the_bottom(&mut rt, 10_002, 1.0);
+            let at = rt.state.c1.coll.scroll_offset();
+            assert!(at > 500.0, "it scrolled {at} pt");
+            rt.pointer_up(x, y);
+            run(&mut rt, 1.0);
+            let moved = rt.state.c1.coll.scroll_offset() - at;
+            assert!(
+                moved.abs() < 1.0,
+                "the view went on {moved} pt after the release"
+            );
+            let [_, vy, _, _] = element(&rt, "viewport").expect("the viewport").visible;
+            let row = rt.state.look.row.list;
+            let under = 10_000 + ((y - vy + at) / row) as u64;
+            assert_eq!(
+                selected(&rt).last(),
+                Some(&under),
+                "the row under the pointer"
+            );
+        }
+
+        /// S2 (review): the page sets the marquee's animations from its look, so under reduced
+        /// motion, where Rune lands each glide at once, the edge scroll keeps the curve's speed
+        /// (at most 1,500 pt/s) instead of jumping a glide's lead every frame.
+        #[test]
+        fn under_reduced_motion_the_edge_scroll_keeps_the_curves_speed() {
+            let mut rt = mount("c1-photos-light");
+            rt.set_system_reduced_motion(true);
+            rt.state.look.animations = false;
+            run(&mut rt, 0.1);
+            let from = rt.state.c1.coll.scroll_offset();
+            hold_at_the_bottom(&mut rt, 10_002, 1.0);
+            let speed = rt.state.c1.coll.scroll_offset() - from;
+            assert!(
+                (1_000.0..=1_550.0).contains(&speed),
+                "{speed} pt in a second"
             );
         }
     }

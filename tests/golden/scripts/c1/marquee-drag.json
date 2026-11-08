@@ -11,7 +11,7 @@
             },
             {
               "key": "c1-preview",
-              "name": "Preview: Projects",
+              "name": "Preview: backup.tar.gz",
               "role": "label"
             },
             {
@@ -25,7 +25,7 @@
             },
             {
               "key": "c1-intent",
-              "name": "Clicked Projects",
+              "name": "",
               "role": "label"
             },
             {
@@ -38,7 +38,7 @@
                 "focus",
                 "context-menu"
               ],
-              "activeDescendant": "row-1",
+              "activeDescendant": "row-8",
               "children": [
                 {
                   "actions": [
@@ -86,10 +86,7 @@
                           "key": "row-4",
                           "name": "Notes.md",
                           "position": 4,
-                          "role": "list-box-option",
-                          "states": [
-                            "selected"
-                          ]
+                          "role": "list-box-option"
                         },
                         {
                           "actions": [
@@ -177,7 +174,7 @@
                 },
                 {
                   "key": "status",
-                  "name": "7 items selected",
+                  "name": "6 items selected",
                   "role": "label",
                   "states": [
                     "live-polite"

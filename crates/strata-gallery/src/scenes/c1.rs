@@ -514,6 +514,45 @@ fn first_visit(g: &mut Gallery, dark: bool) {
     d.refresh_preview();
 }
 
+/// The marquee's settings on this page: its animations follow the look's (C1d's rule for
+/// hosts), so the edge scroll keeps its speed under reduced motion.
+fn marquee_settings(g: &Gallery) -> strata_components::collection::marquee::MarqueeSettings {
+    let mut settings = strata_components::collection::marquee::MarqueeSettings::default();
+    settings.animations = g.look().animations;
+    settings
+}
+
+/// A Ctrl band held open from the empty space below the rows up into Music, with Receipts and
+/// Music selected before it: Music toggles off, the rows below it on, and Receipts stays. The
+/// band is begun as the element would, in the viewport's content coordinates (960 × 596 at
+/// the gallery's size).
+fn marquee(g: &mut Gallery, dark: bool) {
+    use strata_components::contract::{Point, Rect, UniformRows};
+    scene(g, dark, Folder::Documents);
+    let row = g.look().row.list;
+    let d = &mut g.c1;
+    d.coll.selection.select_only(&d.listing, 1);
+    d.coll.selection.toggle(&d.listing, 2);
+    let geometry = UniformRows::new(d.listing.len(), row, 960.0).viewport_height(596.0);
+    let visible = Rect::new(0.0, 0.0, 960.0, 596.0);
+    let mut cx = strata_components::collection::element::Ctx::new(
+        &d.listing,
+        &geometry,
+        visible,
+        0.0,
+        &mut d.coll.selection,
+    );
+    if let Some(m) = d.coll.controllers.marquee.as_mut() {
+        let ctrl = rune::Mods {
+            ctrl: true,
+            ..rune::Mods::default()
+        };
+        m.begin(Point::new(640.0, 420.0), ctrl, &mut cx);
+        m.moved(Point::new(380.0, row * 2.5), &mut cx);
+    }
+    d.refresh_preview();
+}
+
 pub const SCENES: &[Scene] = &[
     ("c1-empty-folder-light", |g| empty(g, false)),
     ("c1-empty-folder-dark", |g| empty(g, true)),
@@ -527,7 +566,8 @@ pub const SCENES: &[Scene] = &[
     ("c1-drop-hover-dark", |g| drop_hover(g, true)),
     ("c1-rename-light", |g| rename(g, false)),
     ("c1-rename-dark", |g| rename(g, true)),
-    // C1d: ("c1-marquee-light", …), ("c1-marquee-dark", …): a band open over rows.
+    ("c1-marquee-light", |g| marquee(g, false)),
+    ("c1-marquee-dark", |g| marquee(g, true)),
 ];
 
 pub const REVIEW: &[Scene] = &[
@@ -655,7 +695,10 @@ pub fn view(g: &Gallery, _cx: &mut Cx<Gallery>) -> El {
                 .font(kit.ty.ui)
                 .color(kit.c.text_muted),
         );
-    let list = collection().name(d.folder.title()).build(g);
+    let list = collection()
+        .name(d.folder.title())
+        .settings(marquee_settings(g))
+        .build(g);
     col().key("c1-page").w_full().h_full().child(header).child(
         col()
             .w_full()
@@ -701,5 +744,5 @@ pub fn poll(g: &mut Gallery, t: f64, tx: &mut Tx) -> bool {
         d.finish_load(tx);
         changed = true;
     }
-    changed | collection().tick(g, tx)
+    changed | collection().settings(marquee_settings(g)).tick(g, tx)
 }

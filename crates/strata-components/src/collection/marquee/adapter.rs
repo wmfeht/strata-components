@@ -11,9 +11,14 @@ use crate::collection::element::{Ctx, Effect, Flow, MarqueeController};
 use crate::collection::selection::{Changed, Selection};
 use crate::contract::{CollectionGeometry, EntrySource, Point, Rect};
 
+/// Where the band draws when there is nothing near the view to draw: off the content, no size.
+const HIDDEN: [f32; 4] = [-64.0, -64.0, 0.0, 0.0];
+
 /// Marquee selection, installed on a collection:
 /// `state.controllers.marquee = Some(Box::new(Marquee::new()))`. Its settings are the
-/// collection's [`MarqueeSettings`], if the host gives one (`Collection::settings`).
+/// collection's [`MarqueeSettings`], if the host gives one (`Collection::settings`); a host
+/// sets at least [`MarqueeSettings::animations`] from `Look::animations`, or the edge scroll
+/// runs too fast under reduced motion.
 ///
 /// The band draws in the element's marquee layer from a live rect, so a move or an auto-scroll
 /// frame that crosses no new entry runs no view: only showing and hiding the band
@@ -46,10 +51,17 @@ impl Marquee {
             .copied()
             .unwrap_or_default();
         let r = f(&mut self.machine, &mut On { cx, settings });
-        if let Some(band) = self.machine.drawn() {
-            self.rect.set(band.into());
-        }
+        // With nothing to draw near the view, the band goes off it: above the content's top,
+        // with no size, so a band left from before draws nowhere.
+        let drawn = self.machine.drawn().map_or(HIDDEN, <[f32; 4]>::from);
+        self.rect.set(drawn);
         r
+    }
+
+    /// The band's drawn rect now, `[x, y, w, h]` in content coordinates.
+    #[cfg(test)]
+    pub(super) fn drawn_rect(&self) -> [f32; 4] {
+        self.rect.get()
     }
 }
 
@@ -135,6 +147,10 @@ impl Surface for On<'_, '_> {
         self.cx.now
     }
 
+    fn content_extent(&self) -> f32 {
+        self.cx.content_extent()
+    }
+
     fn settings(&self) -> MarqueeSettings {
         self.settings
     }
@@ -155,6 +171,7 @@ impl Surface for On<'_, '_> {
             Outcome::Glide { y, spring } | Outcome::StopGlide { y, spring } => {
                 self.cx.emit(Effect::Glide { y, spring });
             }
+            Outcome::StopScroll { y } => self.cx.emit(Effect::ScrollTo { y, glide: false }),
             Outcome::WakeAfter(d) => self.cx.emit(Effect::WakeAfter(d)),
             Outcome::Repaint => self.cx.repaint(),
         }

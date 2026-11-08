@@ -37,17 +37,19 @@ impl BandLook {
     }
 }
 
-/// The band's key, so tests and scripts can find it while it shows.
+/// The band's key, so in-process tests can find it while it shows. Keyed elements get a group
+/// role in Rune's accessibility tree, so the band also leaves the tree ([`El::a11y_hidden`]).
 pub const KEY: &str = "marquee-band";
 
-/// The band, keyed [`KEY`], out of flow at the top-left of its parent and placed by `rect` (`[x, y, w, h]` in
-/// the parent's points). The parent is the layer the collection draws its marquee in, which
-/// follows the scroll, so `rect` is in content coordinates: fill it from
-/// `MarqueeMachine::drawn`. It has no handlers and no role, so it takes no input and
-/// assistive technology doesn't hear it.
+/// The band, keyed [`KEY`], out of flow at the top-left of its parent and placed by `rect`
+/// (`[x, y, w, h]` in the parent's points). The parent is the layer the collection draws its
+/// marquee in, which follows the scroll, so `rect` is in content coordinates: fill it from
+/// `MarqueeMachine::drawn`. It has no handlers, so it takes no input, and it is hidden from
+/// assistive technology: it's decoration, and the status line speaks the count it selects.
 pub fn band_view(look: &Look, rect: &Live<[f32; 4]>) -> El {
     let style = BandLook::from_look(look);
     el().key(KEY)
+        .a11y_hidden()
         .absolute(0.0, 0.0)
         .fill(style.fill)
         .border(style.border_width, style.border)

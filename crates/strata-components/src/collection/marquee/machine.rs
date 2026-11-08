@@ -42,6 +42,14 @@ pub enum Outcome {
         /// The spring to glide on.
         spring: Spring,
     },
+    /// Stop the view dead at content offset `y`, where it shows now: a jump, which also ends a
+    /// glide in progress. Sent when the band ends (release, Escape, another selection) while
+    /// its auto-scroll still moves the view, so the row under the pointer stays there, as
+    /// Strata's timer stops.
+    StopScroll {
+        /// The offset to stay at.
+        y: f32,
+    },
     /// Call [`MarqueeMachine::tick`] again after this long (zero: the next frame).
     WakeAfter(Duration),
     /// The band was shown or hidden: the view must commit to add or drop it. Its rect moves
@@ -65,6 +73,10 @@ pub trait Surface {
 
     /// The host's clock, in seconds.
     fn now(&self) -> f64;
+
+    /// How tall the content is: the bottom of the last entry, 0 with none (C1e:
+    /// `Ctx::content_extent`).
+    fn content_extent(&self) -> f32;
 
     /// The settings the host gave (C1e: `Collection::settings`), else the defaults.
     fn settings(&self) -> MarqueeSettings;
@@ -130,6 +142,12 @@ struct Band {
     applied_at: f64,
     /// The auto-scroll speed the last step asked for, points a second.
     speed: f32,
+    /// A soft stop ([`Outcome::StopGlide`]) may still be moving the view: the ticks left with
+    /// the view still before it counts as landed. Two, since the tick right after the stop
+    /// comes before Rune steps it.
+    coasting: u8,
+    /// Ticks (frames) since the band was last applied.
+    frames: u32,
     /// When the last tick ran.
     ticked_at: Option<f64>,
 }
@@ -227,6 +245,8 @@ impl MarqueeMachine {
             listing: Listing::default(),
             applied_at: f64::NEG_INFINITY,
             speed: 0.0,
+            coasting: 0,
+            frames: 0,
             ticked_at: None,
         });
         s.emit(Outcome::Repaint);
@@ -251,12 +271,11 @@ impl MarqueeMachine {
     }
 
     /// The button came up: applies the band where it ends, keeps what it selected, and stops
-    /// the auto-scroll.
+    /// the auto-scroll dead, so the last row it selected stays under the pointer.
     pub fn end(&mut self, s: &mut dyn Surface) {
         let Some(mut band) = self.band.take() else {
             return;
         };
-        let settings = s.settings();
         if s.selection().is_banding() {
             band.visible = s.visible();
             let crossed = s.geometry().range_in(band.rect());
@@ -268,13 +287,13 @@ impl MarqueeMachine {
                 Changed::NONE
             });
         }
-        stop(&band, &settings, s.visible(), s);
+        halt(&band, s.visible(), s);
         s.emit(Outcome::Repaint);
     }
 
     /// Escape, or a gesture that ended without a release: puts back the selection the band
-    /// started from (D2 in the module docs) and stops the auto-scroll. False if no band was
-    /// open, so the key goes on.
+    /// started from (D2 in the module docs) and stops the auto-scroll dead. False if no band
+    /// was open, so the key goes on.
     pub fn cancel(&mut self, s: &mut dyn Surface) -> bool {
         let Some(band) = self.band.take() else {
             return false;
@@ -283,7 +302,7 @@ impl MarqueeMachine {
         if open {
             s.apply(&mut |sel, _| sel.cancel_band());
         }
-        stop(&band, &s.settings(), s.visible(), s);
+        halt(&band, s.visible(), s);
         s.emit(Outcome::Repaint);
         open
     }
@@ -301,7 +320,7 @@ impl MarqueeMachine {
             let Some(band) = self.band.take() else {
                 return false;
             };
-            stop(&band, &settings, visible, s);
+            halt(&band, visible, s);
             s.emit(Outcome::Repaint);
             return true;
         }
@@ -312,6 +331,13 @@ impl MarqueeMachine {
         let view_moved = (visible.x - band.visible.x).abs() > MOVED
             || (visible.y - band.visible.y).abs() > MOVED;
         band.visible = visible;
+        if step == Step::Tick {
+            band.frames = band.frames.saturating_add(1);
+            // A soft stop has landed once the view stays still for its ticks.
+            if !view_moved {
+                band.coasting = band.coasting.saturating_sub(1);
+            }
+        }
 
         let was = band.speed;
         let speed = scroll_speed(band, &*s, &settings);
@@ -339,10 +365,12 @@ impl MarqueeMachine {
             s.emit(Outcome::WakeAfter(Duration::ZERO));
         }
         if speed == 0.0 && was != 0.0 {
+            // Leaving the edge mid-band: come to rest softly, as the band goes on.
             s.emit(Outcome::StopGlide {
                 y: visible.y + stop_lead(was, settings.glide),
                 spring: settings.glide,
             });
+            band.coasting = 2;
         }
         band.speed = speed;
 
@@ -351,12 +379,14 @@ impl MarqueeMachine {
             return false;
         }
         // A glide that ran into this step, or a scroll by hand since the last one. A move that
-        // only now reaches the edge isn't scrolling yet, so it applies at once.
+        // only now reaches the edge isn't scrolling yet, so it applies at once. While it
+        // scrolls, an apply waits for both the interval and the frames (D1).
         let scrolling = view_moved || was != 0.0;
         let due = band.applied_at + settings.apply_every.as_secs_f64();
-        if scrolling && now < due {
+        if scrolling && (now < due || band.frames < settings.apply_frames) {
             if speed == 0.0 {
-                s.emit(Outcome::WakeAfter(Duration::from_secs_f64(due - now)));
+                let wait = (due - now).max(0.0);
+                s.emit(Outcome::WakeAfter(Duration::from_secs_f64(wait)));
             }
             return false;
         }
@@ -365,6 +395,7 @@ impl MarqueeMachine {
         band.revision = s.selection().revision();
         band.listing = Listing::of(s.source(), &band.crossed);
         band.applied_at = now;
+        band.frames = 0;
         changed.any()
     }
 }
@@ -374,12 +405,7 @@ impl MarqueeMachine {
 fn scroll_speed(band: &Band, s: &dyn Surface, settings: &MarqueeSettings) -> f32 {
     let v = band.visible;
     let speed = edge_speed(band.pointer.y, v.h, settings.edge);
-    let len = s.source().len();
-    let extent = if len == 0 {
-        0.0
-    } else {
-        s.geometry().rect_of(len - 1).bottom()
-    };
+    let extent = s.content_extent();
     let at_end = if speed < 0.0 {
         v.y <= 0.5
     } else {
@@ -392,13 +418,10 @@ fn scroll_speed(band: &Band, s: &dyn Surface, settings: &MarqueeSettings) -> f32
     }
 }
 
-/// Stops the auto-scroll glide of `band`, if it was gliding.
-fn stop(band: &Band, settings: &MarqueeSettings, visible: Rect, s: &mut dyn Surface) {
-    if band.speed != 0.0 {
-        s.emit(Outcome::StopGlide {
-            y: visible.y + stop_lead(band.speed, settings.glide),
-            spring: settings.glide,
-        });
+/// Stops `band`'s auto-scroll dead where the view shows now, if it is still moving the view.
+fn halt(band: &Band, visible: Rect, s: &mut dyn Surface) {
+    if band.speed != 0.0 || band.coasting > 0 {
+        s.emit(Outcome::StopScroll { y: visible.y });
     }
 }
 

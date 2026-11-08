@@ -204,7 +204,9 @@ impl Default for Demo {
 /// own line; the blank lines between them keep the branches from colliding.
 fn install(controllers: &mut Controllers) {
     let _ = controllers;
-    // C1b: controllers.pointer = Some(Box::new(…));
+    controllers.pointer = Some(Box::new(
+        strata_components::collection::pointer::PointerIntent::new(),
+    ));
 
     // C1c: controllers.keyboard = Some(Box::new(…));
 

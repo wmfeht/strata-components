@@ -163,3 +163,82 @@ fn an_embedded_picture_shows_alone_once_loaded() {
     assert!(st.plain());
     assert!(st.busy().is_none());
 }
+
+// The element, in a runtime.
+
+mod element {
+    use std::cell::Cell;
+
+    use rune::{Cx, DragItem, El, Env, Pixels, Runtime};
+    use strata_kit::look::Look;
+
+    use super::{CameraView, loaded, mesh};
+    use crate::contract::{Dnd, DragSource};
+    use crate::viewers::model::{ModelState, ModelView};
+
+    thread_local! {
+        static DRAG_OUTS: Cell<u32> = const { Cell::new(0) };
+    }
+
+    struct App {
+        model: ModelState,
+        pixels: Pixels,
+        look: Look,
+    }
+
+    fn view(s: &App, cx: &mut Cx<App>) -> El {
+        // A binder that counts the drags it would start.
+        let dnd = Dnd::custom(
+            |el, _| el,
+            |el: El, _source| {
+                el.drag_out(|_: &App| {
+                    DRAG_OUTS.with(|d| d.set(d.get() + 1));
+                    Some(DragItem::new().text("bracket.stl"))
+                })
+            },
+        );
+        ModelView::new(
+            &s.model,
+            |s: &mut App| &mut s.model,
+            |s: &mut App| &mut s.model.viewport,
+        )
+        .pixels(&s.pixels)
+        .drag_source(dnd, DragSource::new(|_: &App| None))
+        .build(&s.look, cx)
+    }
+
+    /// `preview/preview-panel/model-views`: "The model picture keeps the grab cursor and file
+    /// drag." No orbit by drag: a drag on the picture drags the file, and the camera stays.
+    #[test]
+    fn a_drag_on_the_picture_drags_the_file_and_never_turns_the_camera() {
+        let pixels = Pixels::new();
+        pixels.set(8, 8, vec![200; 8 * 8 * 4]);
+        let app = App {
+            model: loaded(),
+            pixels,
+            look: Look::fallback(false),
+        };
+        let mut rt = Runtime::new(app, view, (420.0, 640.0), Env::new(false, 1.0));
+        for _ in 0..30 {
+            rt.frame(1.0 / 60.0);
+        }
+        let r = rt
+            .elements()
+            .into_iter()
+            .find(|e| e.key.as_deref() == Some("model-picture"))
+            .expect("the picture")
+            .rect;
+        let (x, y) = (r[0] + r[2] / 2.0, r[1] + r[3] / 2.0);
+        rt.pointer_move(x, y);
+        rt.pointer_down(x, y);
+        for i in 1..=6 {
+            rt.pointer_move(x + 15.0 * i as f32, y);
+            rt.frame(1.0 / 60.0);
+        }
+        rt.pointer_up(x + 90.0, y);
+        rt.frame(1.0 / 60.0);
+        assert!(DRAG_OUTS.with(Cell::get) > 0, "the file drag started");
+        assert_eq!(rt.state.model.camera(), CameraView::FrontLeft);
+        assert_eq!(rt.state.model.mesh(), Some(mesh(CameraView::FrontLeft)));
+    }
+}

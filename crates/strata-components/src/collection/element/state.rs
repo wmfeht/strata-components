@@ -73,8 +73,9 @@ pub struct CollectionState {
     /// reports it from the layout it is drawing, which the recorded scroll offset can trail.
     pub(super) top_line: Cell<Option<usize>>,
     /// The header part's rect in window points, as last laid out (`Collection::header`): a
-    /// press on its blank space is on empty space, at the viewport's top.
-    pub(super) header: Rect,
+    /// press on its blank space is on empty space, at the viewport's top. A cell, so a build
+    /// with no header clears it.
+    pub(super) header: Cell<Rect>,
 }
 
 impl Default for CollectionState {
@@ -103,7 +104,7 @@ impl Default for CollectionState {
             laid_out: false,
             stuck_offset: Live::new([0.0, 0.0]),
             top_line: Cell::new(None),
-            header: Rect::default(),
+            header: Cell::new(Rect::default()),
         }
     }
 }

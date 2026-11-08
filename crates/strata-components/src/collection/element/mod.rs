@@ -697,11 +697,14 @@ impl<S: 'static> Collection<S> {
                 col()
                     .w_full()
                     .on_layout_tx(move |s: &mut S, r, tx| {
-                        (header_cfg.get_mut)(s).1.header = Rect::from(r);
+                        (header_cfg.get_mut)(s).1.header.set(Rect::from(r));
                         tx.live_only();
                     })
                     .child(header),
             );
+        } else {
+            // No header now: a press where one was is outside the collection again.
+            st.header.set(Rect::default());
         }
         // The viewport and what sits over it: the empty state and the overlay, pinned to the
         // viewport alone, below any header.

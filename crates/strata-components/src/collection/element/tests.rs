@@ -1295,6 +1295,19 @@ fn a_press_on_blank_header_space_is_on_empty_space_at_the_viewports_top() {
     assert_eq!(rt.state.app_keys, 0);
 }
 
+/// A build with no header forgets where the last one was, so a later press there isn't taken
+/// for one on its blank space.
+#[test]
+fn a_build_with_no_header_forgets_its_rect() {
+    let mut host = Host::new(20);
+    host.parts = true;
+    let mut rt = runtime(host);
+    assert!(rt.state.coll.header.get().h > 0.0, "laid out");
+    rt.update(|s, _| s.parts = false);
+    settle(&mut rt);
+    assert_eq!(rt.state.coll.header.get(), crate::contract::Rect::default());
+}
+
 /// With the real pointer and marquee controllers, a drag from blank header space into the rows
 /// draws a band that selects the rows it crosses.
 #[test]

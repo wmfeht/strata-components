@@ -309,8 +309,9 @@ pub(super) fn on_drag<S: 'static>(cfg: &Rc<Config<S>>, s: &mut S, d: &mut Drag, 
     // A press on the header part's blank space (where no part of it takes presses itself) is
     // on empty space at the viewport's top edge, as Strata starts a band from a List heading
     // strip (C4).
-    let on_header =
-        phase == PointerPhase::Down && !st.viewport.contains(window) && st.header.contains(window);
+    let on_header = phase == PointerPhase::Down
+        && !st.viewport.contains(window)
+        && st.header.get().contains(window);
     match phase {
         // Any other press outside the viewport isn't the collection's, and neither are the
         // moves and the release that follow it.

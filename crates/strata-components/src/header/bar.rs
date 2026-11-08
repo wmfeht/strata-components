@@ -69,7 +69,8 @@ impl<'a> Header<'a> {
 
     /// The window buttons: those `buttons` turns on, less any `chrome` says can't work
     /// ([`Shown`]). Maximize shows Restore on a maximised window, and a name that fits both
-    /// while the state is unknown. Each press calls `on_action`.
+    /// while the state is unknown. Each press calls `on_action`. Calling it again replaces the
+    /// buttons, so their keys stay unique.
     pub fn window_buttons<S: 'static>(
         mut self,
         buttons: WindowButtons,
@@ -79,6 +80,7 @@ impl<'a> Header<'a> {
     ) -> Self {
         let shown = Shown::new(buttons, chrome);
         let on_action = Rc::new(on_action);
+        self.window.clear();
         let look = self.look;
         let mut button = |shown: bool, suffix: &str, icon: IconName, label: &str, act| {
             if !shown {
@@ -117,6 +119,9 @@ impl<'a> Header<'a> {
         self
     }
 
+    /// The bar, keyed with the header's key: the leading elements, the flexible middle, then
+    /// the actions and the window buttons, on the surface with a hairline underneath. It is a
+    /// `.window_drag()` region; give it no press handlers of its own.
     pub fn build(self) -> El {
         let look = self.look;
         let k = &look.kit;
@@ -125,8 +130,10 @@ impl<'a> Header<'a> {
             None => row().grow(1.0).min_w(0.0),
         };
         // Strata's `headerbar.browser-header`: the surface, a bar's height plus the Frame
-        // density inset above and below, a hairline at the border colour's 60 % underneath, the
-        // sidebar toggle 5 px in and the actions 6 px from the end, spaced by the inset.
+        // density inset above and below, a hairline at the border colour's 60 % underneath, and
+        // the actions spaced by the inset. Strata puts the sidebar toggle 5 px in and the
+        // actions 6 px from the end; the nearest spacing tokens are `space.xs` (4) and
+        // `space.sm` (6).
         row()
             .key(self.key)
             .w_full()
@@ -160,8 +167,10 @@ pub fn action(look: &Look, icon: IconName, label: &str) -> IconButton {
         .help(label.to_owned())
 }
 
-/// The kit's button size nearest the look's bar control size (`frame.control`), as C9's
-/// header rounds it: rune-kit's icon buttons come in 16, 20, 24, 28 and 36 point squares.
+/// The kit's button size nearest the look's bar control size (`frame.control`): rune-kit's
+/// icon buttons come in 16, 20, 24, 28 and 36 point squares. The same function as C9's
+/// (`preview_drawer/header.rs`), which is private to C9's module; sharing it means moving it to
+/// a module both read, which is C9's file to change (a follow-up, not X1's).
 fn control_size(points: f32) -> ControlSize {
     [
         (16.0, ControlSize::Mini),

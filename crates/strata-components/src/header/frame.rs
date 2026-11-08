@@ -10,15 +10,15 @@ use super::chrome::WindowChrome;
 /// known to be maximised or full screen ([`WindowChrome::framed`]). `content` should fill the
 /// window.
 ///
-/// The line is drawn over the content's edge, and takes no presses and says nothing to
-/// assistive technology.
-pub fn frame(content: El, look: &Look, chrome: &WindowChrome) -> El {
-    let root = col().key("window-frame").w_full().h_full().child(content);
+/// The frame is keyed `key`, and its line `{key}-line`. The line is drawn over the content's
+/// edge, and takes no presses and says nothing to assistive technology.
+pub fn frame(key: &str, content: El, look: &Look, chrome: &WindowChrome) -> El {
+    let root = col().key(key.to_owned()).w_full().h_full().child(content);
     if !chrome.framed() {
         return root;
     }
     root.child(
-        el().key("window-frame-line")
+        el().key(format!("{key}-line"))
             .pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
             .border(1.0, look.kit.c.border_base)
             .inert()

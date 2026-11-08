@@ -71,3 +71,47 @@ fn the_frame_follows_what_the_window_manager_says() {
     assert!(!framed(Some(false), Some(true)));
     assert!(framed(None, None), "unknown (Wayland) keeps the line");
 }
+
+mod bar {
+    use rune::{Cx, El, Env, Runtime, Tx};
+    use strata_kit::look::Look;
+
+    use crate::header::{Header, HeaderLabels, WindowAction, WindowButtons, WindowChrome};
+
+    struct Host {
+        look: Look,
+    }
+
+    fn view(h: &Host, _: &mut Cx<Host>) -> El {
+        let labels = HeaderLabels::default();
+        let route = |_: &mut Host, _: WindowAction, _: &mut Tx| {};
+        Header::new("h", &h.look)
+            .window_buttons(WindowButtons::ALL, &WindowChrome::default(), &labels, route)
+            .window_buttons(
+                WindowButtons::default(),
+                &WindowChrome::default(),
+                &labels,
+                route,
+            )
+            .build()
+    }
+
+    #[test]
+    fn calling_window_buttons_again_replaces_the_buttons() {
+        let host = Host {
+            look: Look::fallback(false),
+        };
+        let mut rt = Runtime::new(host, view, (800.0, 100.0), Env::new(false, 1.0));
+        rt.frame(0.0);
+        let count = |key: &str| {
+            rt.elements()
+                .iter()
+                .filter(|e| e.key.as_deref() == Some(key))
+                .count()
+        };
+        assert_eq!(
+            (count("h-minimize"), count("h-maximize"), count("h-close")),
+            (0, 0, 1)
+        );
+    }
+}

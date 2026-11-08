@@ -120,6 +120,7 @@ pub fn view<S: 'static>(
         .justify_end()
         .child(readout(w, look));
     let window = wrap_window(header::frame(
+        "x1-frame",
         col().w_full().h_full().child(bar).child(body),
         look,
         &w.chrome,

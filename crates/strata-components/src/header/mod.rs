@@ -43,7 +43,7 @@
 //!     })
 //!     .build();
 //! // `csd::header` adds the window menu on a secondary click where the window manager has one.
-//! let root = csd::decorate(header::frame(col().child(csd::header(bar, &s.csd, csd)).child(body), look, &chrome), &s.csd, csd);
+//! let root = csd::decorate(header::frame("frame", col().child(csd::header(bar, &s.csd, csd)).child(body), look, &chrome), &s.csd, csd);
 //! ```
 //!
 //! # Rules
@@ -82,7 +82,7 @@
 //! | Minimize minimizes the window and Close closes it | scripts `minimize`, `close` (the action the host receives); the window's response is a **hand test pending** |
 //! | On such a compositor, dragging Strata's header moves the window and dragging a window edge resizes it | test `the_header_moves_the_window_and_its_buttons_keep_their_presses` (the move); edges are strata-platform `csd` (X11 only: Wayland has none until U6, a deliberate change) |
 //! | With compositing, a client-decorated window has square corners and a 1 px border… | golden `x1-shell` (PNG) |
-//! | A maximized, fullscreen, or tiled client-decorated window draws no border | golden `x1-shell-maximized` (PNG); unit `the_frame_follows_what_the_window_manager_says`. Tiled isn't reported by Rune or EWMH (strata-platform `csd`, Limits): a gap |
+//! | A maximized, fullscreen, or tiled client-decorated window draws no border | **partial**: golden `x1-shell-maximized` (PNG) and unit `the_frame_follows_what_the_window_manager_says`, where the state is known (X11). On Wayland a maximised window keeps its 1 px line: Rune reports no maximised state until U6. A tiled window keeps it everywhere: neither Rune nor EWMH reports tiling (strata-platform `csd`, Limits) |
 //! | On a client-decorating compositor … only Strata's header, with no GTK default title bar; a second browser window … | strata-platform `csd` (`Policy::Auto` is borderless); **hand test pending** (GNOME) |
 //! | A client-decorated window without compositor alpha (`solid-csd`)… | **not applicable**: GTK's fallback, which a borderless Rune window doesn't have (proposed to the owner) |
 //! | The portal file chooser window likewise…; Opening a new tab leaves the window without… | **not applicable here**: the chooser is P4 and Strata's; tabs are C7 |

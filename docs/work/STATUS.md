@@ -31,7 +31,7 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | C21 | ready | | |
 | C22 | ready | | |
 | C23 | ready | | |
-| C24 | ready | | |
+| C24 | planning | | |
 | C25 | ready | | |
 | C5 | ready | | |
 | C6 | ready | | |

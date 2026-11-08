@@ -178,7 +178,17 @@ fn collection(s: &Host) -> Collection<Host> {
     }
     if s.parts {
         c = c
-            .header(|_: &Host| Some(rune::el().key("head").w_full().h(40.0)))
+            .header(|_: &Host| {
+                Some(
+                    rune::row().key("head").w_full().h(40.0).child(
+                        rune::el()
+                            .key("head-button")
+                            .w(60.0)
+                            .h(40.0)
+                            .on_press(|s: &mut Host| s.app_keys += 1),
+                    ),
+                )
+            })
             .overlay(|_: &Host| Some(rune::el().key("band").w_full().h_full()));
     }
     if s.read_only {
@@ -1216,27 +1226,28 @@ fn the_keyboard_controller_hears_pointers_chords_settings_and_ticks() {
     assert!(row.visible[3] > 20.0, "and shows");
 }
 
-/// S2 and S6: a press on the header isn't the collection's, nor are its moves and release;
-/// the overlay sits over the viewport and takes no input.
+/// S2 and S6: a press on a header part that takes presses itself isn't the collection's, nor
+/// are its moves and release; the overlay sits over the viewport and takes no input.
 #[test]
-fn a_header_press_is_not_the_collections_and_the_overlay_passes_presses_through() {
+fn a_header_button_press_is_not_the_collections_and_the_overlay_passes_presses_through() {
     let log = Rc::new(RefCell::new(Log::default()));
     let mut host = Host::new(20);
     host.parts = true;
     host.coll.controllers.pointer = Some(Box::new(Pointer(log.clone())));
     let mut rt = runtime(host);
-    let [hx, hy, hw, hh] = element(&rt, "head").unwrap().visible;
+    let [hx, hy, hw, hh] = element(&rt, "head-button").unwrap().visible;
     rt.pointer_down(hx + hw / 2.0, hy + hh / 2.0);
     rt.frame(1.0 / 60.0);
     rt.pointer_move(hx + hw / 2.0, hy + hh + 80.0);
     rt.frame(1.0 / 60.0);
-    rt.pointer_up(hx + hw / 2.0, hy + hh + 80.0);
+    rt.pointer_up(hx + hw / 2.0, hy + hh / 2.0);
     rt.frame(1.0 / 60.0);
     assert!(
         log.borrow().pointer.is_empty(),
         "{:?}",
         log.borrow().pointer.len()
     );
+    assert_eq!(rt.state.app_keys, 1, "the button kept its press");
 
     let band = element(&rt, "band").unwrap();
     let viewport = element(&rt, VIEWPORT).unwrap();
@@ -1249,6 +1260,67 @@ fn a_header_press_is_not_the_collections_and_the_overlay_passes_presses_through(
         rt.state.coll.selection.cursor(),
         Some(id(2)),
         "through the overlay"
+    );
+}
+
+/// A press on the header's blank space is the collection's: on empty space, at the viewport's
+/// top edge, and its moves and release follow (C4's heading strip).
+#[test]
+fn a_press_on_blank_header_space_is_on_empty_space_at_the_viewports_top() {
+    let log = Rc::new(RefCell::new(Log::default()));
+    let mut host = Host::new(20);
+    host.parts = true;
+    host.coll.controllers.pointer = Some(Box::new(Pointer(log.clone())));
+    let mut rt = runtime(host);
+    let [hx, hy, hw, hh] = element(&rt, "head").unwrap().visible;
+    let viewport = element(&rt, VIEWPORT).unwrap().visible;
+    let x = hx + hw - 40.0;
+    rt.pointer_down(x, hy + hh / 2.0);
+    rt.frame(1.0 / 60.0);
+    rt.pointer_move(x, hy + hh + 80.0);
+    rt.frame(1.0 / 60.0);
+    rt.pointer_up(x, hy + hh + 80.0);
+    rt.frame(1.0 / 60.0);
+    let log = log.borrow();
+    let phases: Vec<_> = log.pointer.iter().map(|p| p.phase).collect();
+    assert_eq!(
+        phases,
+        [PointerPhase::Down, PointerPhase::Move, PointerPhase::Up]
+    );
+    let down = log.pointer[0];
+    assert_eq!(down.hit.index, None, "on no entry");
+    assert_eq!(down.hit.region, Region::Gutter);
+    assert_eq!(down.point.y, 0.0, "at the top of the content shown");
+    assert_eq!(down.point.x, x - viewport[0]);
+    assert_eq!(rt.state.app_keys, 0);
+}
+
+/// With the real pointer and marquee controllers, a drag from blank header space into the rows
+/// draws a band that selects the rows it crosses.
+#[test]
+fn a_drag_from_blank_header_space_bands_the_rows_it_crosses() {
+    let mut host = Host::new(20);
+    host.parts = true;
+    host.coll.controllers.pointer =
+        Some(Box::new(crate::collection::pointer::PointerIntent::new()));
+    host.coll.controllers.marquee = Some(Box::new(crate::collection::marquee::Marquee::new()));
+    let mut rt = runtime(host);
+    let [hx, hy, hw, hh] = element(&rt, "head").unwrap().visible;
+    let x = hx + hw - 40.0;
+    let row_h = rt.state.look.row.list;
+    rt.pointer_down(x, hy + hh / 2.0);
+    rt.frame(1.0 / 60.0);
+    for k in 1..=5 {
+        rt.pointer_move(x - 5.0 * k as f32, hy + hh + row_h * 0.5 * k as f32);
+        rt.frame(1.0 / 60.0);
+    }
+    rt.pointer_up(x - 25.0, hy + hh + row_h * 2.5);
+    settle(&mut rt);
+    let s = &rt.state;
+    assert_eq!(
+        s.coll.selection.selected_ids(&s.src),
+        [id(0), id(1), id(2)],
+        "the band ran from the viewport's top to the release"
     );
 }
 
@@ -2444,8 +2516,8 @@ fn every_press_reaches_on_press_before_the_controllers() {
     rt.button_down(x + w / 2.0, y + h / 2.0, rune::PointerButton::Middle);
     rt.button_up(x + w / 2.0, y + h / 2.0, rune::PointerButton::Middle);
     rt.frame(1.0 / 60.0);
-    // The part above the viewport isn't the collection's.
-    click(&mut rt, "head");
+    // A part above the viewport that takes its own presses isn't the collection's.
+    click(&mut rt, "head-button");
     assert!(rt.state.coll.selection.is_empty());
     assert_eq!(
         *rt.state.order.borrow(),

@@ -103,6 +103,12 @@
 //!   collection [`GroupedRows`]'s page step is the rows that fit below the stuck header, minus
 //!   one, so W1d's row of overlap stays in view. Strata's pages, with no stuck header, count
 //!   the whole viewport.
+//! - **A press on the header part's blank space is on empty space** (owner ruling, C4). It
+//!   reaches the controllers as a press on no entry ([`Region::Gutter`]) at the viewport's top
+//!   edge, so a drag from it draws a band into the rows, as Strata's List heading strip does
+//!   (`browser/selection/marquee`). Parts of the header with their own press or drag
+//!   handlers (C4's headings) keep their presses, as Rune gives a press to its innermost
+//!   handler. C2 and C3 get the same rule for any header they add.
 //! - **A heading per group, nothing per row** (owner ruling). A header line is a heading named
 //!   by its group; rows don't repeat their group's name, as in GTK.
 //!
@@ -438,7 +444,10 @@ impl<S: 'static> Collection<S> {
         self
     }
 
-    /// A part above the viewport (C4's column headings).
+    /// A part above the viewport (C4's column headings). A press on its blank space (where no
+    /// part of it takes presses itself) is on empty space at the viewport's top edge: a plain
+    /// one clears the selection and a drag draws a band from there, as Strata's List heading
+    /// strip does. Its parts with press or drag handlers keep their presses.
     pub fn header(mut self, f: impl Fn(&S) -> Option<El> + 'static) -> Self {
         self.cfg.header = Some(Rc::new(f));
         self
@@ -681,7 +690,18 @@ impl<S: 'static> Collection<S> {
             root = root.active_descendant(keys::entry_path(&cfg.key, src, index, per));
         }
         if let Some(header) = cfg.header.as_ref().and_then(|f| f(s)) {
-            root = root.child(header);
+            // Where it shows, as bookkeeping: a press on its blank space starts on empty space
+            // (`route::on_drag`).
+            let header_cfg = cfg.clone();
+            root = root.child(
+                col()
+                    .w_full()
+                    .on_layout_tx(move |s: &mut S, r, tx| {
+                        (header_cfg.get_mut)(s).1.header = Rect::from(r);
+                        tx.live_only();
+                    })
+                    .child(header),
+            );
         }
         // The viewport and what sits over it: the empty state and the overlay, pinned to the
         // viewport alone, below any header.

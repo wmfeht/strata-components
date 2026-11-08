@@ -219,6 +219,7 @@ type VisibleFn<S> = Rc<dyn Fn(&mut S, Range<usize>) -> bool>;
 type AnnounceFn<S> = Rc<dyn Fn(&S, &Announcement) -> String>;
 type GroupStyleFn = Rc<dyn Fn(&Look) -> GroupStyle>;
 type PressFn<S> = Rc<dyn Fn(&mut S, &PointerInput, &mut Tx)>;
+type ScrollFn = Rc<dyn Fn(ScrollPos)>;
 
 /// What [`Collection`] was built with, shared by its rows and handlers.
 pub(crate) struct Config<S> {
@@ -246,12 +247,14 @@ pub(crate) struct Config<S> {
     header: Option<PartFn<S>>,
     overlay: Option<PartFn<S>>,
     empty: Option<PartFn<S>>,
+    edge: Option<PartFn<S>>,
     on_intent: Option<IntentFn<S>>,
     on_press: Option<PressFn<S>>,
     on_cursor: Option<CursorFn<S>>,
     on_selection: Option<SelectionFn<S>>,
     on_visible: Option<VisibleFn<S>>,
     announce: Option<AnnounceFn<S>>,
+    on_scroll: Option<ScrollFn>,
 }
 
 impl<S> Config<S> {
@@ -319,12 +322,14 @@ impl<S: 'static> Collection<S> {
                 header: None,
                 overlay: None,
                 empty: None,
+                edge: None,
                 on_intent: None,
                 on_press: None,
                 on_cursor: None,
                 on_selection: None,
                 on_visible: None,
                 announce: None,
+                on_scroll: None,
             },
         }
     }
@@ -455,7 +460,7 @@ impl<S: 'static> Collection<S> {
     }
 
     /// A part drawn over the viewport, pinned to it below any header, in its coordinates
-    /// (C1d's band, C24's marker). It takes no input: presses go through it to the rows.
+    /// (C1d's band). It takes no input: presses go through it to the rows.
     pub fn overlay(mut self, f: impl Fn(&S) -> Option<El> + 'static) -> Self {
         self.cfg.overlay = Some(Rc::new(f));
         self
@@ -464,6 +469,23 @@ impl<S: 'static> Collection<S> {
     /// What an empty collection shows, pinned over the viewport below any header.
     pub fn empty(mut self, f: impl Fn(&S) -> Option<El> + 'static) -> Self {
         self.cfg.empty = Some(Rc::new(f));
+        self
+    }
+
+    /// A part over the viewport, pinned to it below any header, in its coordinates, that takes
+    /// input: C24's scroll bar along its edge. Drawn above the overlay. A press on an element of
+    /// it with a press or drag handler is that element's, not the collection's (Rune gives a
+    /// press to its innermost handler); elsewhere presses reach the rows.
+    pub fn edge(mut self, f: impl Fn(&S) -> Option<El> + 'static) -> Self {
+        self.cfg.edge = Some(Rc::new(f));
+        self
+    }
+
+    /// Hears the viewport's scroll position on every frame it changes (Rune's
+    /// `El::on_scroll_offset`), with no view commit: C24's scroll bar and autoscroll follow it
+    /// through live values. It reads no state.
+    pub fn on_scroll(mut self, f: impl Fn(ScrollPos) + 'static) -> Self {
+        self.cfg.on_scroll = Some(Rc::new(f));
         self
     }
 
@@ -621,6 +643,7 @@ impl<S: 'static> Collection<S> {
 
         let live = st.scroll.clone();
         let layer = st.scroll_layer.clone();
+        let on_scroll = cfg.on_scroll.clone();
         let stuck = shown.map(|shown| Stuck {
             map: map.clone(),
             h: row_height,
@@ -656,6 +679,9 @@ impl<S: 'static> Collection<S> {
                 layer.set([0.0, -p.offset[1]]);
                 if let Some(stuck) = &stuck {
                     stuck.follow(p.offset[1]);
+                }
+                if let Some(f) = &on_scroll {
+                    f(p);
                 }
             })
             .on_layout_tx(move |s: &mut S, r, tx| route::on_layout(&layout_cfg, s, r, tx))
@@ -749,6 +775,9 @@ impl<S: 'static> Collection<S> {
         }
         if let Some(overlay) = cfg.overlay.as_ref().and_then(|f| f(s)) {
             over = over.child(pinned(overlay).inert());
+        }
+        if let Some(edge) = cfg.edge.as_ref().and_then(|f| f(s)) {
+            over = over.child(pinned(edge));
         }
         root = root.child(over);
         let announcement = st.announcement();

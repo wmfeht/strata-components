@@ -39,3 +39,18 @@ resized from its edges, maximised by double-click, and given its window menu.
 
 The example app, with no rune-kit, drags, resizes, maximises and opens its menu on Hyprland,
 GNOME and X11. Record the hand test in the PR.
+
+**Narrowed by the owner (P3 planning).** `Policy::Auto` is borderless on Wayland and X11.
+
+- **Wayland:** the window drags and maximises through Rune. It has no edge resize, minimise
+  or window menu until Rune ships U6–U8. Those requests answer Unsupported with their draft.
+- **X11:** a shim on a second connection sends `_NET_WM_MOVERESIZE`, `WM_CHANGE_STATE` and
+  `_GTK_SHOW_WINDOW_MENU`, the last only where `_NET_SUPPORTED` lists it. Whether this works
+  on mutter and KWin is a hand test, still pending.
+- **Also decided:** there is no in-app resize fallback, corners use `Cursor::Move`, and X1
+  builds Strata's header component.
+- **Parity:** the regressions against GTK Strata are deliberate. On Wayland, no edge resize,
+  minimise or window menu. The header's double-click interval is Rune's fixed 0.5 s (U13), not
+  P5's setting.
+
+`csd`'s module docs, under "Where it stands", record this and S1's constraints.

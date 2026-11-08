@@ -96,6 +96,8 @@ struct Model {
     base: BTreeSet<EntryId>,
     /// The entries an open gesture's range or band covers.
     covered: BTreeSet<EntryId>,
+    /// The entries Space flipped inside an extend run, over what its range makes of them.
+    flipped: BTreeSet<EntryId>,
     removal: Option<Removal>,
 }
 
@@ -110,14 +112,16 @@ impl Model {
             gesture: ModelGesture::None,
             base: BTreeSet::new(),
             covered: BTreeSet::new(),
+            flipped: BTreeSet::new(),
             removal: None,
         }
     }
 
-    /// The selection an open gesture makes of its base and what it covers.
+    /// The selection an open gesture makes of its base and what it covers, with the flipped
+    /// entries flipped.
     fn apply_gesture(&mut self) {
         let (base, covered) = (&self.base, &self.covered);
-        self.sel = match self.gesture {
+        let ranged: BTreeSet<EntryId> = match self.gesture {
             ModelGesture::None => return,
             ModelGesture::Extend(Extend::Replace | Extend::Add)
             | ModelGesture::Band(BandMode::Replace | BandMode::Add) => {
@@ -128,6 +132,10 @@ impl Model {
                 base.symmetric_difference(covered).copied().collect()
             }
         };
+        self.sel = ranged
+            .symmetric_difference(&self.flipped)
+            .copied()
+            .collect();
     }
 
     fn end_gesture(&mut self) {
@@ -172,14 +180,31 @@ impl Model {
         };
         if mode == Extend::Replace {
             self.base.clear();
+            self.flipped.clear();
         } else if self.gesture != ModelGesture::Extend(mode) {
             self.base = self.sel.clone();
+            self.flipped.clear();
         }
         self.gesture = ModelGesture::Extend(mode);
         self.covered = (a.min(i)..=a.max(i)).map(|j| s.id_at(j)).collect();
         self.apply_gesture();
         self.provisional = false;
         self.place(s, i);
+    }
+
+    /// Space inside a `v`/`V` run flips the entry over the range; elsewhere it is a toggle.
+    fn toggle_in_run(&mut self, s: &ListSource, i: usize) {
+        if !matches!(
+            self.gesture,
+            ModelGesture::Extend(Extend::Add | Extend::Remove)
+        ) {
+            return self.toggle(s, i);
+        }
+        let id = s.id_at(i);
+        if !self.flipped.remove(&id) {
+            self.flipped.insert(id);
+        }
+        self.apply_gesture();
     }
 
     fn move_cursor(&mut self, s: &ListSource, i: usize, rule: AnchorRule) {
@@ -237,6 +262,7 @@ impl Model {
         }
         self.base = self.sel.clone();
         self.covered.clear();
+        self.flipped.clear();
         self.gesture = ModelGesture::Band(mode);
         self.provisional = false;
     }
@@ -312,6 +338,7 @@ impl Model {
         self.sel.retain(is_listed);
         self.base.retain(is_listed);
         self.covered.retain(is_listed);
+        self.flipped.retain(is_listed);
         match self.cursor {
             Some(c) => match s.index_of(c) {
                 Some(i) => self.seen_at = Some(i),
@@ -351,7 +378,12 @@ impl Model {
     }
 
     fn relocate(&mut self, from: EntryId, to: EntryId) {
-        for set in [&mut self.sel, &mut self.base, &mut self.covered] {
+        for set in [
+            &mut self.sel,
+            &mut self.base,
+            &mut self.covered,
+            &mut self.flipped,
+        ] {
             if set.remove(&from) {
                 set.insert(to);
             }
@@ -429,6 +461,10 @@ fn diff(before: &Model, after: &Model) -> Changed {
 struct Coverage {
     /// An extend run going on over a non-empty base (Add or Remove).
     extend_runs_over_a_base: usize,
+    /// Space flipping an entry inside an Add or Remove run.
+    flips_inside_a_run: usize,
+    /// An extend step of a run that holds a flip.
+    extend_steps_over_a_flip: usize,
     /// A band move over a non-empty selection at press.
     band_moves_over_a_base: usize,
     /// A sync or a rename while a gesture was open.
@@ -560,9 +596,33 @@ impl Run {
         {
             self.coverage.borrow_mut().extend_runs_over_a_base += 1;
         }
+        if m.gesture == ModelGesture::Extend(mode) && !m.flipped.is_empty() {
+            self.coverage.borrow_mut().extend_steps_over_a_flip += 1;
+        }
         self.op(format!("extend_to {i} {mode:?}"), |sel, m, s| {
             m.extend(s, i, mode);
             sel.extend_to(s, i, mode)
+        });
+    }
+
+    /// Space during a run: mostly on the cursor, as Strata does, sometimes elsewhere.
+    fn toggle_in_run(&mut self) {
+        let here = self.model.cursor.and_then(|c| self.s.index_of(c));
+        let Some(i) = here
+            .filter(|_| self.rng.chance(70))
+            .or_else(|| self.index())
+        else {
+            return;
+        };
+        if matches!(
+            self.model.gesture,
+            ModelGesture::Extend(Extend::Add | Extend::Remove)
+        ) {
+            self.coverage.borrow_mut().flips_inside_a_run += 1;
+        }
+        self.op(format!("toggle_in_run {i}"), |sel, m, s| {
+            m.toggle_in_run(s, i);
+            sel.toggle_in_run(s, i)
         });
     }
 
@@ -585,6 +645,7 @@ impl Run {
         // Gestures go on most of the time, so runs and bands get long enough to matter.
         match self.model.gesture {
             ModelGesture::Band(_) if self.rng.chance(70) => return self.band_move(),
+            ModelGesture::Extend(_) if self.rng.chance(10) => return self.toggle_in_run(),
             ModelGesture::Extend(mode) if self.rng.chance(60) => return self.extend(mode),
             _ => {}
         }
@@ -932,6 +993,11 @@ fn random_operations_keep_cursor_and_anchor_on_listed_entries() {
     // Each path the model exists to check must come up, or the weights have drifted.
     for (what, count) in [
         ("extend runs over a base", coverage.extend_runs_over_a_base),
+        ("flips inside a run", coverage.flips_inside_a_run),
+        (
+            "extend steps over a flip",
+            coverage.extend_steps_over_a_flip,
+        ),
         ("band moves over a base", coverage.band_moves_over_a_base),
         ("changes mid-gesture", coverage.changes_mid_gesture),
         (

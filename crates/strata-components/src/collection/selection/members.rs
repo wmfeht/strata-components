@@ -6,6 +6,11 @@
 //! the index. [`Members::freeze`] (on every sync) hashes the copied ids, because after a re-sort
 //! or a live update the indices no longer name the same entries, and the copy is all that
 //! still says which entries the range held.
+//!
+//! On top of both sits a small set of flipped ids: Space inside a 10xer `v`/`V` range flips an
+//! entry over whatever the range makes of it, and the flip holds while later steps replace the
+//! range ([`Members::flip_over`]). An entry is selected if `op(base, overlay)` says so, unless
+//! it is flipped.
 
 use std::collections::HashSet;
 use std::hash::{BuildHasherDefault, Hasher};
@@ -195,11 +200,14 @@ impl Overlay {
     }
 }
 
-/// The selected ids: `base`, combined with `overlay` by its [`Op`].
+/// The selected ids: `base`, combined with `overlay` by its [`Op`], with `flips` flipped.
 #[derive(Clone, Debug, Default)]
 pub(super) struct Members {
     base: IdSet,
     overlay: Option<Overlay>,
+    /// Ids flipped over what the base and the overlay make: Space inside an extend run.
+    /// Usually empty; [`Members::commit`] folds them into the base with the overlay.
+    flips: IdSet,
     /// How many ids are selected, kept exact by every change.
     len: usize,
 }
@@ -209,24 +217,40 @@ impl Members {
         self.len
     }
 
+    fn flipped(&self, id: &EntryId) -> bool {
+        !self.flips.is_empty() && self.flips.contains(id)
+    }
+
+    /// Whether the base and the overlay select `id`, before the flips, reading the overlay's
+    /// copied ids: O(the overlay) for a live one, so callers freeze it first.
+    fn held_before_flips(&self, id: EntryId) -> bool {
+        let in_base = self.base.contains(&id);
+        match &self.overlay {
+            None => in_base,
+            Some(ov) => ov.op.apply(in_base, ov.holds(id)),
+        }
+    }
+
     /// Whether the entry at `index` is selected.
     pub(super) fn contains_at<S: EntrySource + ?Sized>(&self, source: &S, index: usize) -> bool {
         let id = source.id_at(index);
         let in_base = !self.base.is_empty() && self.base.contains(&id);
-        match &self.overlay {
+        let ranged = match &self.overlay {
             None => in_base,
             Some(ov) => ov.op.apply(in_base, ov.contains_at(source, index, id)),
-        }
+        };
+        ranged != self.flipped(&id)
     }
 
     /// Whether `id` is selected. An id the source doesn't list can still be selected while a
     /// listing loads.
     pub(super) fn contains<S: EntrySource + ?Sized>(&self, source: &S, id: EntryId) -> bool {
         let in_base = self.base.contains(&id);
-        match &self.overlay {
+        let ranged = match &self.overlay {
             None => in_base,
             Some(ov) => ov.op.apply(in_base, ov.contains(source, id)),
-        }
+        };
+        ranged != self.flipped(&id)
     }
 
     /// Selects nothing. Returns whether anything was selected.
@@ -234,6 +258,7 @@ impl Members {
         let changed = self.len > 0;
         self.base.clear();
         self.overlay = None;
+        self.flips.clear();
         self.len = 0;
         changed
     }
@@ -244,31 +269,50 @@ impl Members {
         self.base.clear();
         self.base.insert(id);
         self.overlay = None;
+        self.flips.clear();
         self.len = 1;
         changed
     }
 
-    /// Folds the overlay into the base, so the base alone says what is selected.
+    /// Folds the overlay and the flips into the base, so the base alone says what is selected.
     pub(super) fn commit(&mut self) {
-        let Some(ov) = self.overlay.take() else {
-            return;
-        };
         let base = &mut self.base;
-        ov.for_each_id(|id| match ov.op {
-            Op::Add => {
-                base.insert(id);
-            }
-            Op::Remove => {
-                base.remove(&id);
-            }
-            Op::Toggle => {
-                if !base.remove(&id) {
+        if let Some(ov) = self.overlay.take() {
+            ov.for_each_id(|id| match ov.op {
+                Op::Add => {
                     base.insert(id);
                 }
+                Op::Remove => {
+                    base.remove(&id);
+                }
+                Op::Toggle => {
+                    if !base.remove(&id) {
+                        base.insert(id);
+                    }
+                }
+            });
+        }
+        for id in self.flips.drain() {
+            if !base.remove(&id) {
+                base.insert(id);
             }
-        });
+        }
         debug_assert_eq!(self.base.len(), self.len, "selection count drifted");
         self.len = self.base.len();
+    }
+
+    /// Flips `id` over what the base and the overlay select, keeping both: an extend run
+    /// replaces its overlay on every step, and the flip holds through those steps.
+    pub(super) fn flip_over<S: EntrySource + ?Sized>(&mut self, source: &S, id: EntryId) {
+        let was_selected = self.contains(source, id);
+        if !self.flips.remove(&id) {
+            self.flips.insert(id);
+        }
+        if was_selected {
+            self.len -= 1;
+        } else {
+            self.len += 1;
+        }
     }
 
     /// Flips `id` in or out.
@@ -288,15 +332,17 @@ impl Members {
         added
     }
 
-    /// Renames `from` to `to` wherever the selection holds it: in the base and in the
-    /// overlay's copied ids. An open gesture goes on over the renamed id. Returns whether
-    /// `from` was selected.
+    /// Renames `from` to `to` wherever the selection holds it: in the base, in the overlay's
+    /// copied ids and in the flips. An open gesture goes on over the renamed id. Returns
+    /// whether `from` was selected.
     ///
     /// `to` is a new id, so the selection doesn't hold it yet (debug builds check). If it
     /// does, the two merge and the count follows.
     pub(super) fn relocate(&mut self, from: EntryId, to: EntryId) -> bool {
         let holds = |m: &Self, id: EntryId| {
-            m.base.contains(&id) || m.overlay.as_ref().is_some_and(|ov| ov.holds(id))
+            m.base.contains(&id)
+                || m.overlay.as_ref().is_some_and(|ov| ov.holds(id))
+                || m.flips.contains(&id)
         };
         let already = holds(self, to);
         debug_assert!(
@@ -331,6 +377,10 @@ impl Members {
             };
             was_selected = ov.op.apply(in_base, in_overlay);
         }
+        if self.flips.remove(&from) {
+            self.flips.insert(to);
+            was_selected = !was_selected;
+        }
         if already {
             // `to` was held already, so it and `from` may have merged into one member.
             self.recount();
@@ -338,25 +388,20 @@ impl Members {
         was_selected
     }
 
-    /// Adds `id` to the base alone, leaving an open gesture's overlay to apply over it, as
-    /// it does over the rest of the base. Returns whether that selected it.
+    /// Adds `id` to the base alone, leaving an open gesture's overlay and flips to apply over
+    /// it, as they do over the rest of the base. Returns whether that selected it.
     pub(super) fn insert_base(&mut self, id: EntryId) -> bool {
         self.freeze();
-        let selected = |m: &Self| {
-            let in_base = m.base.contains(&id);
-            match &m.overlay {
-                None => in_base,
-                Some(ov) => ov.op.apply(in_base, ov.holds(id)),
-            }
-        };
+        let selected = |m: &Self| m.held_before_flips(id) != m.flipped(&id);
         let before = selected(self);
         self.base.insert(id);
         self.recount();
         selected(self) != before
     }
 
-    /// Replaces the overlay with `ranges`, combined by `op` with the base, or with nothing if
-    /// `clear_base`. Returns whether the selected set changed.
+    /// Replaces the overlay with `ranges`, combined by `op` with the base and under the flips,
+    /// or with nothing if `clear_base`, which drops the flips too. Returns whether the
+    /// selected set changed.
     ///
     /// Callers fold an overlay from another gesture into the base first ([`Members::commit`]):
     /// the overlay this replaces belongs to the same gesture, so the base is that gesture's
@@ -372,7 +417,13 @@ impl Members {
         ids.extend(ranges.indices().map(|i| source.id_at(i)));
 
         let base_after = !clear_base && !self.base.is_empty();
-        let new_len = if base_after {
+        let flips_after = !clear_base && !self.flips.is_empty();
+        let ranged_after = |id: &EntryId| {
+            let in_base = base_after && self.base.contains(id);
+            let in_ranges = source.index_of(*id).is_some_and(|i| ranges.contains(i));
+            op.apply(in_base, in_ranges)
+        };
+        let ranged_len = if base_after {
             let inside = ids.iter().filter(|id| self.base.contains(id)).count();
             match op {
                 Op::Add => self.base.len() + (ids.len() - inside),
@@ -385,26 +436,34 @@ impl Members {
                 Op::Remove => 0,
             }
         };
+        // Each flip takes one member out of the ranged set or adds one to it.
+        let flips = self.flips.iter().filter(|_| flips_after);
+        let new_len = flips.fold(
+            ranged_len,
+            |len, id| {
+                if ranged_after(id) { len - 1 } else { len + 1 }
+            },
+        );
 
         let changed = match self.delta_since_live(source, op, clear_base, &ranges) {
             Some(changed) => changed,
             None if new_len != self.len => true,
             None => {
                 // Same count: the sets differ only if some new member wasn't selected before.
-                let new_contains = |id: &EntryId| {
-                    let in_base = base_after && self.base.contains(id);
-                    let in_ranges = source.index_of(*id).is_some_and(|i| ranges.contains(i));
-                    op.apply(in_base, in_ranges)
-                };
+                let new_contains =
+                    |id: &EntryId| ranged_after(id) != (flips_after && self.flips.contains(id));
                 let base_ids = self.base.iter().filter(|_| base_after);
+                let flipped_ids = self.flips.iter().filter(|_| flips_after);
                 base_ids
                     .chain(ids.iter())
+                    .chain(flipped_ids)
                     .any(|id| new_contains(id) && !self.contains(source, *id))
             }
         };
 
         if clear_base {
             self.base.clear();
+            self.flips.clear();
         }
         self.overlay = (!ids.is_empty()).then(|| Overlay {
             op,
@@ -420,7 +479,7 @@ impl Members {
 
     /// Whether replacing the live overlay with `ranges` changes the set, worked out from the
     /// indices the two cover differently: `None` when there's no live overlay of the same `op`
-    /// over the same base to compare with.
+    /// over the same base and flips to compare with.
     fn delta_since_live<S: EntrySource + ?Sized>(
         &self,
         source: &S,
@@ -439,7 +498,8 @@ impl Members {
         else {
             return None;
         };
-        if *old_op != op || (clear_base && !self.base.is_empty()) || !old.matches(source) {
+        let drops = clear_base && !(self.base.is_empty() && self.flips.is_empty());
+        if *old_op != op || drops || !old.matches(source) {
             // A missed sync leaves the old indices meaningless, possibly past the end.
             return None;
         }
@@ -452,17 +512,19 @@ impl Members {
         })
     }
 
-    /// Drops the overlay, leaving the base. Returns whether the selected set changed.
+    /// Drops the overlay, leaving the base and the flips. Returns whether the selected set
+    /// changed.
     pub(super) fn discard_overlay(&mut self) -> bool {
         let Some(ov) = self.overlay.take() else {
             return false;
         };
         let mut changed = false;
         ov.for_each_id(|id| {
+            // A flip turns both sides over, so it can't make them differ.
             let in_base = self.base.contains(&id);
             changed |= ov.op.apply(in_base, true) != in_base;
         });
-        self.len = self.base.len();
+        self.recount();
         changed
     }
 
@@ -479,6 +541,7 @@ impl Members {
         }
         let changed = source.len() > 0 || self.len > 0;
         self.base.clear();
+        self.flips.clear();
         self.len = ids.len();
         self.overlay = (!ids.is_empty()).then(|| Overlay {
             op: Op::Add,
@@ -514,13 +577,16 @@ impl Members {
         {
             set.retain(listed);
         }
+        self.flips.retain(listed);
         let before = self.len;
         self.recount();
         self.len != before
     }
 
+    /// Counts the members again. Reads a live overlay's copied ids once per flip, so callers
+    /// with flips freeze it first.
     fn recount(&mut self) {
-        self.len = match &self.overlay {
+        let ranged_len = match &self.overlay {
             None => self.base.len(),
             Some(ov) => {
                 let (mut inside, mut outside) = (0, 0);
@@ -538,6 +604,13 @@ impl Members {
                 }
             }
         };
+        self.len = self.flips.iter().fold(ranged_len, |len, &id| {
+            if self.held_before_flips(id) {
+                len - 1
+            } else {
+                len + 1
+            }
+        });
     }
 
     /// The selected ids the source lists, in its order.
@@ -554,10 +627,17 @@ impl Members {
             ov.for_each_id(|id| {
                 copied.insert(id);
             });
-            let selected = |id: &EntryId| ov.op.apply(self.base.contains(id), copied.contains(id));
+            let selected = |id: &EntryId| {
+                ov.op.apply(self.base.contains(id), copied.contains(id)) != self.flipped(id)
+            };
+            let flipped_only = self
+                .flips
+                .iter()
+                .filter(|id| !self.base.contains(id) && !copied.contains(id));
             let mut found: Vec<(usize, EntryId)> = self
                 .base
                 .union(&copied)
+                .chain(flipped_only)
                 .filter(|id| selected(id))
                 .filter_map(|&id| source.index_of(id).map(|i| (i, id)))
                 .collect();
@@ -566,7 +646,7 @@ impl Members {
         }
         let n = source.len();
         // A few ids among many entries: sort them by index rather than scan the source.
-        if self.overlay.is_none() && self.len.saturating_mul(16) < n {
+        if self.overlay.is_none() && self.flips.is_empty() && self.len.saturating_mul(16) < n {
             let mut found: Vec<(usize, EntryId)> = self
                 .base
                 .iter()
@@ -588,13 +668,8 @@ impl Members {
         if self.len != ids.len() {
             return false;
         }
-        ids.iter().all(|id| {
-            let in_base = self.base.contains(id);
-            match &self.overlay {
-                None => in_base,
-                Some(ov) => ov.op.apply(in_base, ov.holds(*id)),
-            }
-        })
+        ids.iter()
+            .all(|id| self.held_before_flips(*id) != self.flipped(id))
     }
 
     /// Selects exactly `ids`.
@@ -602,6 +677,7 @@ impl Members {
         self.len = ids.len();
         self.base = ids;
         self.overlay = None;
+        self.flips.clear();
     }
 }
 

@@ -561,6 +561,89 @@ fn remove_range_unselects_from_the_anchor() {
 }
 
 #[test]
+fn space_inside_a_range_flips_the_cursor_and_the_flip_holds() {
+    // integration/10xer-mode: `v` starts a range from the cursor and `V` starts an unselect range
+    // The feature map has no bullet for Space inside a range yet. Strata's own test says "a
+    // toggled item stays flipped as the range grows" (src/app/navigation/tests/visual.rs).
+    let s = listing(6);
+    let mut sel = Selection::new();
+    sel.select_only(&s, 5);
+    sel.move_cursor(&s, 3, AnchorRule::Move); // `v` at entry 3
+    sel.extend_to(&s, 3, Extend::Add);
+    sel.extend_to(&s, 1, Extend::Add);
+    assert_eq!(selected(&sel, &s), [1, 2, 3, 5]);
+
+    let changed = sel.toggle_in_run(&s, 1);
+    assert_eq!(
+        changed,
+        Changed {
+            selection: true,
+            ..Changed::NONE
+        },
+        "Space in a range moves neither the cursor nor the anchor"
+    );
+    assert_eq!(selected(&sel, &s), [2, 3, 5]);
+    assert_eq!((cursor(&sel), anchor(&sel)), (Some(1), Some(3)));
+
+    sel.extend_to(&s, 0, Extend::Add);
+    assert_eq!(
+        selected(&sel, &s),
+        [0, 2, 3, 5],
+        "the flip holds as the range grows"
+    );
+    // As in Strata, the flip applies over the whole walked result: once the range no longer
+    // covers entry 1, flipping its unselected state selects it.
+    sel.extend_to(&s, 2, Extend::Add);
+    assert_eq!(selected(&sel, &s), [1, 2, 3, 5]);
+    assert_eq!(sel.len(), 4);
+
+    // Leaving the range keeps the fill, and the next `v` starts from it.
+    sel.move_cursor(&s, 4, AnchorRule::Move);
+    sel.extend_to(&s, 4, Extend::Add);
+    assert_eq!(selected(&sel, &s), [1, 2, 3, 4, 5]);
+}
+
+#[test]
+fn space_inside_an_unselect_range_flips_over_the_removal() {
+    // integration/10xer-mode: `v` starts a range from the cursor and `V` starts an unselect range
+    let s = listing(6);
+    let mut sel = Selection::new();
+    sel.select_all(&s);
+    sel.move_cursor(&s, 1, AnchorRule::Move); // `V` at entry 1
+    sel.extend_to(&s, 3, Extend::Remove);
+    assert_eq!(selected(&sel, &s), [0, 4, 5]);
+    sel.toggle_in_run(&s, 3);
+    assert_eq!(selected(&sel, &s), [0, 3, 4, 5]);
+    sel.extend_to(&s, 4, Extend::Remove);
+    assert_eq!(selected(&sel, &s), [0, 3, 5]);
+    sel.toggle_in_run(&s, 3);
+    assert_eq!(selected(&sel, &s), [0, 5], "a second Space flips it back");
+    assert_eq!(anchor(&sel), Some(1));
+}
+
+#[test]
+fn toggle_in_run_outside_a_range_is_a_toggle() {
+    // integration/10xer-mode: Space toggles the focused item in the selection and moves the cursor down
+    let s = listing(6);
+    let mut sel = Selection::new();
+    sel.select_only(&s, 0);
+    sel.toggle_in_run(&s, 2);
+    assert_eq!(selected(&sel, &s), [0, 2]);
+    assert_eq!(anchor(&sel), Some(2));
+    // A Shift range is no `v` range: Space there toggles and re-anchors too.
+    sel.extend_to(&s, 4, Extend::Replace);
+    sel.toggle_in_run(&s, 3);
+    assert_eq!(selected(&sel, &s), [2, 4]);
+    assert_eq!(anchor(&sel), Some(3));
+    // So does a `v` range that a plain move has ended.
+    sel.extend_to(&s, 5, Extend::Add);
+    sel.move_cursor(&s, 1, AnchorRule::Keep);
+    sel.toggle_in_run(&s, 1);
+    assert_eq!(selected(&sel, &s), [1, 2, 3, 4, 5]);
+    assert_eq!(anchor(&sel), Some(1));
+}
+
+#[test]
 fn discard_provisional_then_toggle_adds_the_cursor() {
     // integration/10xer-mode: Space toggles the focused item in the selection and moves the cursor down
     let s = listing(3);

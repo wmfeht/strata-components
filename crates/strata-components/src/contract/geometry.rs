@@ -235,7 +235,11 @@ pub trait CollectionGeometry {
     /// wrap; crossing into another collection (the next column) is the view's call.
     fn neighbor(&self, index: usize, direction: Direction) -> Option<usize>;
 
-    /// How many entries Page Up and Page Down move by. At least 1.
+    /// How many entries Page Up and Page Down move by: the whole rows that fit in the viewport
+    /// minus one, so a row of overlap stays in view across the jump, and at least 1. A grid
+    /// moves by that many rows' worth of entries.
+    ///
+    /// Strata pages this way (`rows_per_page` in `src/ui/scrolling.rs`, line 512 at 35ee677ab).
     fn page_step(&self) -> usize;
 }
 
@@ -364,7 +368,7 @@ impl CollectionGeometry for UniformRows {
         let rows = (f64::from(self.viewport_height) / f64::from(self.row_height)).floor();
         // Also 1 for a NaN, infinite or non-positive height, where `rows` isn't a row count.
         if rows >= 1.0 && rows.is_finite() && self.row_height > 0.0 {
-            rows as usize
+            (rows as usize).saturating_sub(1).max(1)
         } else {
             1
         }

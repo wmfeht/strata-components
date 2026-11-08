@@ -33,7 +33,8 @@
 //! for that change.
 //!
 //! An open gesture (an extend run or a marquee band) survives a sync and a rename: the band
-//! still restores the selection at press when moved back.
+//! still restores the selection at press when moved back, and an extend run keeps the entries
+//! [`Selection::toggle_in_run`] flipped.
 //!
 //! # The cursor, the anchor and the fill
 //!
@@ -469,12 +470,35 @@ impl Selection {
         self.finish(changed)
     }
 
+    /// Flips the entry at `index` inside an [`Extend::Add`] or [`Extend::Remove`] run: 10xer
+    /// Space inside a `v` or `V` range. The flip applies over what the range makes of the
+    /// entry, and holds as later steps of the run grow or shrink the range. The run goes on,
+    /// and the cursor, the anchor and the range stay where they are.
+    ///
+    /// Strata flips the cursor's entry, so callers pass the cursor's index. Outside such a
+    /// run (none open, or an [`Extend::Replace`] run), it is [`Selection::toggle`].
+    pub fn toggle_in_run<S: EntrySource + ?Sized>(&mut self, source: &S, index: usize) -> Changed {
+        if !matches!(self.gesture, Gesture::Extend(Extend::Add | Extend::Remove)) {
+            return self.toggle(source, index);
+        }
+        let Some(id) = listed(source, index) else {
+            return Changed::NONE;
+        };
+        self.members.flip_over(source, id);
+        let changed = Changed {
+            selection: true,
+            ..Changed::NONE
+        };
+        self.finish(changed)
+    }
+
     /// Selects the range from the anchor to the entry at `index` by `mode`, and moves the
     /// cursor there. The anchor stays; with no anchor, it starts at `index`.
     ///
     /// Consecutive calls in the same mode are one run: each replaces the last one's range, so
     /// moving back towards the anchor shrinks it. [`Extend::Add`] and [`Extend::Remove`] apply
-    /// the range to the selection as it was when the run began.
+    /// the range to the selection as it was when the run began, under the entries
+    /// [`Selection::toggle_in_run`] flipped during the run.
     pub fn extend_to<S: EntrySource + ?Sized>(
         &mut self,
         source: &S,

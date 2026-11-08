@@ -7,7 +7,9 @@
 //! the hook's cache key, so the next build asks again and gets them.
 //!
 //! An epoch bump is also where the cache trims: after one, the host builds again and every
-//! block on screen is asked for, through any number of hooks. So a block asked for in the
+//! block on screen is asked for, through any number of hooks. A host may poll any number of
+//! times before it builds: a bump with nothing asked since the last one doesn't count as a
+//! build. So a block asked for in the
 //! last two builds (between bumps) is on screen, or was a moment ago, and is never evicted;
 //! the others go, least recently asked first, down to [`CACHE_BYTES`]. A miss never evicts
 //! a block the current build may still ask for.
@@ -155,6 +157,11 @@ impl CodeBlocks {
 
     /// A highlighter for `Markdown::highlighter`. Build a fresh one each time the view
     /// builds: its cache key changes when colours land or the theme changes.
+    ///
+    /// A host that memoises a view holding such a `Markdown` (`rune::memo`) must make the
+    /// memo's version change with each [`poll`](Self::poll) that returns true, counting them
+    /// itself; otherwise the memo keeps the plain answers of the first build and the colours
+    /// never show.
     pub fn markdown(&self) -> rune_kit::syntax::Highlighter {
         let (id, epoch) = {
             let s = self.state.borrow();

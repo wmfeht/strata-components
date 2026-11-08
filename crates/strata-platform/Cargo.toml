@@ -38,6 +38,7 @@ settings = [
     "dep:futures-util",
     "dep:tokio",
     "dep:zbus",
+    "tokio/macros",
     "tokio/rt",
     "tokio/sync",
     "tokio/time",

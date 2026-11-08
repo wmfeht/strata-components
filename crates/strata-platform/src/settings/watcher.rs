@@ -1,7 +1,9 @@
 //! The watcher thread: a tokio current-thread runtime with one zbus session connection, as
 //! Rune's own `color-scheme` reader runs (`platform/portal_appearance.rs`).
 
+use std::future::Future;
 use std::io;
+use std::pin::Pin;
 use std::pin::pin;
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -24,8 +26,8 @@ const DESTINATION: &str = "org.freedesktop.portal.Desktop";
 const PATH: &str = "/org/freedesktop/portal/desktop";
 const INTERFACE: &str = "org.freedesktop.portal.Settings";
 
-/// The watcher thread's name.
-pub const THREAD_NAME: &str = "desktop-settings";
+/// The watcher thread's name: 15 bytes, so `/proc` shows it whole.
+pub const THREAD_NAME: &str = "settings-portal";
 
 /// How long dropping a [`Watcher`] waits for its thread to stop before leaving it to finish
 /// alone, so a drop never holds the UI thread for long.
@@ -56,7 +58,9 @@ pub struct Options {
     /// it: 100 ms by default, as Rune waits for `color-scheme`. A later answer arrives as
     /// changes. Zero never waits.
     pub first_answer: Duration,
-    /// The bound on connecting, on activating the portal, and on each read: 10 s by default.
+    /// How long connecting may take, and how long a read waits for the portal's answer
+    /// (activating it included) before the defaults go out with [`Fallback::NoPortal`]: 10 s by
+    /// default. The read stays out after that, and a late answer arrives as changes.
     pub timeout: Duration,
 }
 
@@ -70,7 +74,7 @@ impl Default for Options {
 }
 
 impl Options {
-    /// The defaults with another first-answer wait.
+    /// These options with another first-answer wait.
     pub fn first_answer(self, first_answer: Duration) -> Self {
         Options {
             first_answer,
@@ -78,7 +82,7 @@ impl Options {
         }
     }
 
-    /// The defaults with another bound on connecting and reading.
+    /// These options with another bound on connecting, activating and reading.
     pub fn timeout(self, timeout: Duration) -> Self {
         Options { timeout, ..self }
     }
@@ -126,8 +130,8 @@ impl Watcher {
                         // Stopping drops the watch wherever it waits.
                         let _ = select(pin!(watch(options, &mut feed)), stopped).await;
                     }),
-                    Err(error) => feed.missing(Fallback::NoBus(format!(
-                        "no runtime for the connection: {error}"
+                    Err(error) => feed.missing(Fallback::NoPortal(format!(
+                        "the watcher couldn't start its runtime: {error}"
                     ))),
                 }
             })?;
@@ -201,6 +205,32 @@ impl Feed {
         self.fallback(why);
     }
 
+    /// Applies a `ReadAll` reply. Returns the unique name it came from, or None when it isn't
+    /// one (reported as [`Fallback::NoPortal`]).
+    fn reply(&mut self, reply: &Message) -> Option<String> {
+        let Ok(values) = reply.body().deserialize::<Reply>() else {
+            self.missing(Fallback::NoPortal(
+                "the Settings portal's ReadAll answer isn't a{sa{sv}}".into(),
+            ));
+            return None;
+        };
+        let applied = parse::apply_reply(&mut self.settings, &values);
+        self.report(applied);
+        reply.header().sender().map(|name| name.to_string())
+    }
+
+    /// Applies one `SettingChanged`.
+    fn change(&mut self, message: &Message) {
+        let Ok((namespace, name, value)) = message
+            .body()
+            .deserialize::<(String, String, OwnedVariant)>()
+        else {
+            return;
+        };
+        let applied = parse::apply_change(&mut self.settings, &namespace, &name, &value);
+        self.report(applied);
+    }
+
     /// Reports what a reply or a change did. Before the snapshot, the changes are folded into
     /// it; after, each is its own event.
     fn report(&mut self, applied: Applied) {
@@ -223,6 +253,22 @@ enum Input {
     Owner(Option<String>),
 }
 
+/// A `ReadAll` in flight.
+type ReadAll = Pin<Box<dyn Future<Output = zbus::Result<Message>> + Send>>;
+
+fn read_all(portal: &Proxy<'static>) -> ReadAll {
+    let portal = portal.clone();
+    Box::pin(async move { portal.call_method("ReadAll", &(&NAMESPACES[..],)).await })
+}
+
+/// `f`'s output, or never when there is none: a `select!` branch that is off.
+async fn maybe<F: Future + Unpin>(f: &mut Option<F>) -> F::Output {
+    match f {
+        Some(f) => f.await,
+        None => std::future::pending().await,
+    }
+}
+
 async fn watch(options: Options, feed: &mut Feed) {
     let connection = match tokio::time::timeout(options.timeout, Connection::session()).await {
         Ok(Ok(connection)) => connection,
@@ -234,7 +280,7 @@ async fn watch(options: Options, feed: &mut Feed) {
         }
     };
     let subscribed = tokio::time::timeout(options.timeout, subscribe(&connection)).await;
-    let (portal, inputs) = match subscribed {
+    let (portal, mut inputs) = match subscribed {
         Ok(Ok(subscribed)) => subscribed,
         Ok(Err(error)) => return feed.missing(Fallback::NoPortal(error.to_string())),
         Err(_) => {
@@ -243,30 +289,70 @@ async fn watch(options: Options, feed: &mut Feed) {
             ));
         }
     };
-    // Subscribed before the first read, so no change between the two is lost.
-    let mut owner = read(&portal, options.timeout, feed).await;
-    let mut inputs = inputs;
-    while let Some(input) = inputs.next().await {
-        match input {
-            Input::Changed(message) => {
-                let Ok((namespace, name, value)) = message
-                    .body()
-                    .deserialize::<(String, String, OwnedVariant)>()
-                else {
-                    continue;
+    // Subscribed before the first read, so no change between the two is lost. The loop keeps
+    // draining the changes while a read is out: zbus queues a bounded number per match rule and
+    // stops reading the socket when the queue is full, and the reply waits behind them.
+    let new_deadline = || Some(Box::pin(tokio::time::sleep(options.timeout)));
+    let mut read = Some(read_all(&portal));
+    let mut deadline = new_deadline();
+    // Changes that arrive while a read is out, before its timeout: the reply may already hold
+    // them, so they apply after it, in order.
+    let mut held: Vec<Message> = Vec::new();
+    // The unique name the last reply came from.
+    let mut owner: Option<String> = None;
+    // A new owner seen while a read was out: read again after it, unless the reply came from it.
+    let mut reread_for: Option<String> = None;
+    loop {
+        tokio::select! {
+            reply = maybe(&mut read) => {
+                read = None;
+                deadline = None;
+                owner = match reply {
+                    Ok(reply) => feed.reply(&reply),
+                    Err(error) => {
+                        feed.missing(Fallback::NoPortal(error.to_string()));
+                        None
+                    }
                 };
-                let applied = parse::apply_change(&mut feed.settings, &namespace, &name, &value);
-                feed.report(applied);
+                for message in held.drain(..) {
+                    feed.change(&message);
+                }
+                if let Some(name) = reread_for.take()
+                    && owner.as_deref() != Some(name.as_str())
+                {
+                    read = Some(read_all(&portal));
+                    deadline = new_deadline();
+                }
             }
-            // A new portal (a restart, or one that appeared late): read it again. The owner of
-            // a portal the first read activated is the one that answered, so it isn't read twice.
-            Input::Owner(Some(name)) if owner.as_deref() != Some(name.as_str()) => {
-                owner = read(&portal, options.timeout, feed).await;
+            () = maybe(&mut deadline) => {
+                // A slow portal: the defaults go out now, and the read stays out, so its reply
+                // still arrives as changes. Changes apply as they come from here on.
+                deadline = None;
+                feed.missing(Fallback::NoPortal("timed out reading the Settings portal".into()));
+                for message in held.drain(..) {
+                    feed.change(&message);
+                }
             }
-            Input::Owner(Some(_)) => {}
-            Input::Owner(None) => {
-                if owner.take().is_some() {
-                    feed.fallback(Fallback::PortalLost);
+            input = inputs.next() => match input {
+                None => break,
+                Some(Input::Changed(message)) if deadline.is_some() => held.push(message),
+                Some(Input::Changed(message)) => feed.change(&message),
+                Some(Input::Owner(Some(name))) => {
+                    if read.is_some() && deadline.is_none() {
+                        // A new portal replaces one that never answered.
+                        read = Some(read_all(&portal));
+                        deadline = new_deadline();
+                    } else if read.is_some() {
+                        reread_for = Some(name);
+                    } else if owner.as_deref() != Some(name.as_str()) {
+                        read = Some(read_all(&portal));
+                        deadline = new_deadline();
+                    }
+                }
+                Some(Input::Owner(None)) => {
+                    if owner.take().is_some() {
+                        feed.fallback(Fallback::PortalLost);
+                    }
                 }
             }
         }
@@ -296,33 +382,4 @@ async fn subscribe(
         .await?
         .map(|owner| Input::Owner(owner.map(|name| name.to_string())));
     Ok((portal, stream::select(changes, owners).boxed()))
-}
-
-/// Reads every namespace at once and reports it. Returns the unique name that answered, or
-/// None when the read failed (reported as [`Fallback::NoPortal`]).
-async fn read(portal: &Proxy<'static>, timeout: Duration, feed: &mut Feed) -> Option<String> {
-    let namespaces = (&NAMESPACES[..],);
-    let call = portal.call_method("ReadAll", &namespaces);
-    let reply = match tokio::time::timeout(timeout, call).await {
-        Ok(Ok(reply)) => reply,
-        Ok(Err(error)) => {
-            feed.missing(Fallback::NoPortal(error.to_string()));
-            return None;
-        }
-        Err(_) => {
-            feed.missing(Fallback::NoPortal(
-                "timed out reading the Settings portal".into(),
-            ));
-            return None;
-        }
-    };
-    let Ok(values) = reply.body().deserialize::<Reply>() else {
-        feed.missing(Fallback::NoPortal(
-            "the Settings portal's ReadAll answer isn't a{sa{sv}}".into(),
-        ));
-        return None;
-    };
-    let applied = parse::apply_reply(&mut feed.settings, &values);
-    feed.report(applied);
-    reply.header().sender().map(|name| name.to_string())
 }

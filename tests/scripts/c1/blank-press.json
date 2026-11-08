@@ -21,6 +21,10 @@
     {
       "key": "c1-preview",
       "name": "Preview: backup.tar.gz"
+    },
+    {
+      "key": "status",
+      "name": ""
     }
   ]
 }

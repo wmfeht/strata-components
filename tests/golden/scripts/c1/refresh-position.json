@@ -15,6 +15,15 @@
               "role": "label"
             },
             {
+              "actions": [
+                "click",
+                "focus"
+              ],
+              "key": "c1-refresh",
+              "name": "Refresh",
+              "role": "button"
+            },
+            {
               "key": "c1-intent",
               "name": "Clicked IMG_0311.jpg",
               "role": "label"
@@ -43,6 +52,15 @@
                         "scroll-into-view"
                       ],
                       "children": [
+                        {
+                          "actions": [
+                            "scroll-into-view"
+                          ],
+                          "key": "row-10261",
+                          "name": "IMG_0262.jpg",
+                          "position": 262,
+                          "role": "list-box-option"
+                        },
                         {
                           "actions": [
                             "scroll-into-view"
@@ -1070,6 +1088,15 @@
                           "key": "row-10375",
                           "name": "IMG_0376.jpg",
                           "position": 376,
+                          "role": "list-box-option"
+                        },
+                        {
+                          "actions": [
+                            "scroll-into-view"
+                          ],
+                          "key": "row-10376",
+                          "name": "IMG_0377.jpg",
+                          "position": 377,
                           "role": "list-box-option"
                         }
                       ],

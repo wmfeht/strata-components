@@ -150,6 +150,12 @@
       "key": "row-10310"
     },
     {
+      "t": 0.9,
+      "type": "key",
+      "name": "Tab",
+      "shift": true
+    },
+    {
       "t": 1.0,
       "type": "key",
       "name": "i",
@@ -164,16 +170,20 @@
       ]
     },
     {
-      "key": "c1-list",
-      "focused": true
-    },
-    {
       "key": "row-10000",
       "absent": true
     },
     {
       "key": "c1-title",
       "name": "Photos · 2003 items"
+    },
+    {
+      "key": "c1-refresh",
+      "focused": true
+    },
+    {
+      "key": "c1-list",
+      "focused": false
     }
   ]
 }

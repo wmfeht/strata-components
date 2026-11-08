@@ -13,7 +13,7 @@
 //!
 //! | Key | Does |
 //! | --- | --- |
-//! | F5 | Refresh: re-list the folder from its "disk" |
+//! | F5, or the header's Refresh button | Refresh: re-list the folder from its "disk" |
 //! | Ctrl+I | A live update: three new entries appear at the top |
 //! | Delete | Delete the cursor's entry (the default map's rule: the neighbour is selected) |
 //! | Ctrl+Delete | Delete the last selected entry on "disk" only, as another app would |
@@ -30,6 +30,7 @@
 use std::collections::HashMap;
 
 use rune::{Cx, El, Key, KeyEvent, TextEdit, Tx, col, row, text, text_input};
+use rune_kit::{Button, ButtonVariant};
 use strata_components::collection::element::{
     Collection, CollectionState, Controllers, DropOver, Intent, RowMarks, Slot,
 };
@@ -463,6 +464,7 @@ fn selection(g: &mut Gallery, dark: bool) {
         .selection
         .move_cursor(&d.listing, 7, AnchorRule::Keep);
     d.coll.keyboard_moved();
+    d.coll.note_selection(&d.listing);
     d.refresh_preview();
 }
 
@@ -519,6 +521,7 @@ pub const SCENES: &[Scene] = &[
     ("c1-drop-hover-dark", |g| drop_hover(g, true)),
     ("c1-rename-light", |g| rename(g, false)),
     ("c1-rename-dark", |g| rename(g, true)),
+    // C1d: ("c1-marquee-light", …), ("c1-marquee-dark", …): a band open over rows.
 ];
 
 pub const REVIEW: &[Scene] = &[
@@ -553,8 +556,9 @@ pub fn collection() -> Collection<Gallery> {
     .marks(|g: &Gallery, id| g.c1.marks.get(&id).copied().unwrap_or_default())
     .rename(
         |g: &Gallery| g.c1.renaming,
-        // A stand-in until C5's editor lands: a plain field over the label.
-        Slot::new(|g: &Gallery, rcx| {
+        // A stand-in until C5's editor lands: a plain field over the label. Rename rows aren't
+        // memoized, so it needs no version.
+        Slot::pure(|g: &Gallery, rcx| {
             let kit = g.kit();
             row()
                 .grow(1.0)
@@ -566,6 +570,7 @@ pub fn collection() -> Collection<Gallery> {
                 .outline(1.0, -1.0, kit.c.border_focus)
                 .child(
                     text_input(&g.c1.rename_edit, kit.ty.ui_compact)
+                        .color(kit.c.text_base)
                         .key("c1-rename")
                         .label("Rename")
                         .on_edit(|g: &mut Gallery| &mut g.c1.rename_edit)
@@ -624,6 +629,13 @@ pub fn view(g: &Gallery, _cx: &mut Cx<Gallery>) -> El {
                 .key("c1-preview")
                 .font(kit.ty.ui)
                 .color(kit.c.text_muted),
+        )
+        .child(
+            Button::new("Refresh")
+                .variant(ButtonVariant::Ghost)
+                .on_press_tx(|g: &mut Gallery, tx: &mut Tx| g.c1.refresh(tx))
+                .build(kit)
+                .key("c1-refresh"),
         )
         .child(
             text(d.intent.clone())

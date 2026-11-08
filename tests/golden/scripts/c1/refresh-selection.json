@@ -15,6 +15,15 @@
               "role": "label"
             },
             {
+              "actions": [
+                "click",
+                "focus"
+              ],
+              "key": "c1-refresh",
+              "name": "Refresh",
+              "role": "button"
+            },
+            {
               "key": "c1-intent",
               "name": "",
               "role": "label"
@@ -144,7 +153,7 @@
                 },
                 {
                   "key": "status",
-                  "name": "2 of 9 items selected",
+                  "name": "2 items selected",
                   "role": "label",
                   "states": [
                     "live-polite"

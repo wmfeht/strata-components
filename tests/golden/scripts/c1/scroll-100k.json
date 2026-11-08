@@ -15,6 +15,15 @@
               "role": "label"
             },
             {
+              "actions": [
+                "click",
+                "focus"
+              ],
+              "key": "c1-refresh",
+              "name": "Refresh",
+              "role": "button"
+            },
+            {
               "key": "c1-intent",
               "name": "Clicked entry-002453.dat",
               "role": "label"
@@ -1079,6 +1088,15 @@
                           "key": "row-1002510",
                           "name": "entry-002511.dat",
                           "position": 2511,
+                          "role": "list-box-option"
+                        },
+                        {
+                          "actions": [
+                            "scroll-into-view"
+                          ],
+                          "key": "row-1002511",
+                          "name": "entry-002512.dat",
+                          "position": 2512,
                           "role": "list-box-option"
                         }
                       ],

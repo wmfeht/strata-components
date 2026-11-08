@@ -15,6 +15,18 @@
               "role": "label"
             },
             {
+              "actions": [
+                "click",
+                "focus"
+              ],
+              "key": "c1-refresh",
+              "name": "Refresh",
+              "role": "button",
+              "states": [
+                "focused"
+              ]
+            },
+            {
               "key": "c1-intent",
               "name": "Clicked IMG_0311.jpg",
               "role": "label"
@@ -43,6 +55,15 @@
                         "scroll-into-view"
                       ],
                       "children": [
+                        {
+                          "actions": [
+                            "scroll-into-view"
+                          ],
+                          "key": "row-10261",
+                          "name": "IMG_0262.jpg",
+                          "position": 265,
+                          "role": "list-box-option"
+                        },
                         {
                           "actions": [
                             "scroll-into-view"
@@ -1071,6 +1092,15 @@
                           "name": "IMG_0376.jpg",
                           "position": 379,
                           "role": "list-box-option"
+                        },
+                        {
+                          "actions": [
+                            "scroll-into-view"
+                          ],
+                          "key": "row-10376",
+                          "name": "IMG_0377.jpg",
+                          "position": 380,
+                          "role": "list-box-option"
                         }
                       ],
                       "key": "rows",
@@ -1095,10 +1125,7 @@
               ],
               "key": "c1-list",
               "name": "Photos",
-              "role": "list-box",
-              "states": [
-                "focused"
-              ]
+              "role": "list-box"
             }
           ],
           "key": "c1-page",

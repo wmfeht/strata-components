@@ -1,6 +1,6 @@
 {
   "bullets": [
-    "browser/scrolling: Vertical touchpad scrolling in listings moves smoothly instead of in wheel-sized steps."
+    "browser/selection: A plain click on an entry selects only that entry and replaces the previous selection."
   ],
   "scene": "c1-hundred-k-light",
   "events": [
@@ -726,6 +726,12 @@
     {
       "key": "c1-title",
       "name": "Archive · 100000 items"
+    },
+    {
+      "key": "row-1002452",
+      "states": [
+        "selected"
+      ]
     }
   ]
 }

@@ -15,6 +15,15 @@
               "role": "label"
             },
             {
+              "actions": [
+                "click",
+                "focus"
+              ],
+              "key": "c1-refresh",
+              "name": "Refresh",
+              "role": "button"
+            },
+            {
               "key": "c1-intent",
               "name": "Clicked scan.pdf",
               "role": "label"

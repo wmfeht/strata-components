@@ -2,7 +2,9 @@
 //! line.
 //!
 //! Work package: K4, `docs/work/phase-1-leaves/K4-user-overrides.md`. This replaces Strata's
-//! user stylesheet, `~/.config/strata/style.css` (lgse/strata `upstream/main` 35ee677ab).
+//! user stylesheet, `~/.config/strata/style.css` (lgse/strata `upstream/main` 35ee677ab), and
+//! [`migrate_css`] converts what of one can be converted. `MIGRATION.md`, beside this file, is
+//! the note for Strata's changelog (K4 and K5).
 //!
 //! # The file
 //!
@@ -82,7 +84,7 @@
 //!
 //! Settings → Appearance keeps a row for the file (open it, the error count from
 //! [`Overrides::errors`], Reset); it is C20c's row in Strata. On first launch Strata converts
-//! an existing `style.css` with `migrate_css`, writes the result, and lists the rules it
+//! an existing `style.css` with [`migrate_css`], writes the result, and lists the rules it
 //! couldn't convert in a one-time notice. It never deletes the stylesheet.
 //!
 //! # Rulings
@@ -93,6 +95,7 @@
 //! - **Q5, syntax errors.** The rows that survive one still apply.
 //! - **Q6, glow.** An override of `glow.on` beats the Element glow setting.
 
+mod css;
 mod error;
 mod parse;
 mod value;
@@ -104,6 +107,7 @@ use crate::look::Look;
 use crate::theme::Location;
 use crate::tokens::{Token, Value};
 
+pub use css::{Migration, Reason, Unconverted, migrate_css};
 pub use error::{OverrideError, Problem};
 
 /// Which looks a row applies to.

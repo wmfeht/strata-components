@@ -73,7 +73,7 @@ Everything here needs only phase 0.
 | Lane | WPs |
 | --- | --- |
 | Platform | [P0](phase-1-leaves/P0-transfer-substrate.md), [P3](phase-1-leaves/P3-client-side-decorations.md), [P5](phase-1-leaves/P5-desktop-settings.md), [P6](phase-1-leaves/P6-icon-theme.md), [P7](phase-1-leaves/P7-media-output.md), [P8](phase-1-leaves/P8-single-instance.md), [P9](phase-1-leaves/P9-glib-bridge.md) |
-| Look | [K1](phase-1-leaves/K1-theme-mapping.md), [K2](phase-1-leaves/K2-shape-density-type.md), [K3](phase-1-leaves/K3-icon-catalogs.md), [K4](phase-1-leaves/K4-user-overrides.md) |
+| Look | [K1](phase-1-leaves/K1-theme-mapping.md), [K2](phase-1-leaves/K2-shape-density-type.md), [K3](phase-1-leaves/K3-icon-catalogs.md), [K4](phase-1-leaves/K4-user-overrides.md), [K6](phase-1-leaves/K6-bundled-font.md) |
 | Collection | [C1a](phase-1-leaves/C1a-selection-model.md), [C5](phase-1-leaves/C5-inline-rename.md), [C24](phase-1-leaves/C24-scroll-extras.md), [C25](phase-1-leaves/C25-thumbnail-store.md) |
 | Chrome | [C6](phase-1-leaves/C6-location-bar.md), [C7](phase-1-leaves/C7-browser-tabs.md), [C8](phase-1-leaves/C8-places-sidebar.md), [C15](phase-1-leaves/C15-strata-dialog.md), [C21](phase-1-leaves/C21-context-menus.md), [C22](phase-1-leaves/C22-folder-peek.md), [C23](phase-1-leaves/C23-motion-effects.md) |
 | Preview | [C9](phase-1-leaves/C9-preview-drawer.md), [C10a](phase-1-leaves/C10a-highlighter.md), [C14a](phase-1-leaves/C14a-pixels-viewport.md) |

@@ -16,7 +16,7 @@ use rune::{DragOutcome, Mods, WindowHandle};
 use crate::transfer::{self, Subscription, Transfer, Turn, Wants};
 
 use super::api::{Actions, DragAction, DragItem, Error, Status};
-use super::icon::DragImage;
+use super::icon::{self, DragImage};
 use super::local;
 use super::negotiate;
 use super::session::Release;
@@ -534,23 +534,19 @@ pub(crate) fn start_drag(key: &str, item: DragItem, mods: Mods) -> Result<(u64, 
     if let Some(icon) = item.icon.clone() {
         // The picture lands on the UI thread, which hands it to the platform: the Wayland
         // icon surface lives there, and a failure can be reported there.
-        let posters = with(|hub| hub.posters.clone());
-        if let Some(posters) = posters {
-            let spawned = std::thread::Builder::new()
-                .name("dnd-icon".into())
-                .spawn(move || {
-                    let image = icon.produce();
-                    let first = posters
-                        .lock()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .first()
-                        .cloned();
-                    if let Some(p) = first {
-                        p(Job::Icon { id, image });
-                    }
-                });
-            if let Err(e) = spawned {
-                diagnostic(&format!("no thread for the drag icon: {e}"));
+        if let Some(posters) = with(|hub| hub.posters.clone()) {
+            let done = Box::new(move |image| {
+                let first = posters
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .first()
+                    .cloned();
+                if let Some(p) = first {
+                    p(Job::Icon { id, image });
+                }
+            });
+            if let Err(e) = icon::produce_later(icon, done) {
+                diagnostic(&format!("the drag icon: {e}"));
             }
         }
     }
@@ -607,6 +603,7 @@ pub(crate) fn cancel_drag() {
 /// of P1's is left on winit's display. The X11 hook undoes its window properties as the
 /// actor quits.
 fn teardown() {
+    icon::stop();
     let hub = HUB.with(|h| h.borrow_mut().take());
     if let Some(hub) = hub
         && let (Some(out), Some(conn)) = (&hub.out, hub.transfer.shared_conn())

@@ -7,10 +7,16 @@
 //! cold GPU (150–250 ms in S2) never stalls the UI: the drag starts at once with an empty
 //! icon, and the picture lands when it is ready. That GPU device is a second one beside the
 //! window's; on a machine with two GPUs it may be another adapter.
+//!
+//! The worker is one thread for the process, and [`stop`] joins it at `dnd::shutdown`: a render
+//! still running when the process exits dies as the GPU driver is torn down under it (a
+//! SIGSEGV in a session test, before this was so).
 
 use std::fmt;
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
+use std::thread::JoinHandle;
 
 use rune::render::{Gpu, OFFSCREEN_FORMAT, Offscreen, Renderer};
 use rune::{Cx, El, Env, Runtime};
@@ -126,6 +132,53 @@ impl fmt::Debug for DragIcon {
             IconKind::Image(i) => i.fmt(f),
             IconKind::Snapshot(_) => f.write_str("DragIcon::snapshot"),
         }
+    }
+}
+
+type Delivery = Box<dyn FnOnce(Option<DragImage>) + Send>;
+
+/// The worker that renders snapshots, once started.
+struct Worker {
+    jobs: Sender<(DragIcon, Delivery)>,
+    thread: JoinHandle<()>,
+}
+
+static WORKER: Mutex<Option<Worker>> = Mutex::new(None);
+
+/// Produces `icon`'s picture and hands it to `done`: an image at once, a snapshot on the
+/// worker thread. `done` may run on either.
+pub(crate) fn produce_later(icon: DragIcon, done: Delivery) -> Result<(), String> {
+    if let IconKind::Image(i) = &icon.0 {
+        done(Some(i.clone()));
+        return Ok(());
+    }
+    let mut worker = WORKER.lock().unwrap_or_else(PoisonError::into_inner);
+    if worker.is_none() {
+        let (jobs, rx) = mpsc::channel::<(DragIcon, Delivery)>();
+        let thread = std::thread::Builder::new()
+            .name("dnd-icon".into())
+            .spawn(move || {
+                // Ends once `stop` drops the sender, after the job under way.
+                for (icon, done) in rx {
+                    done(icon.produce());
+                }
+            })
+            .map_err(|e| e.to_string())?;
+        *worker = Some(Worker { jobs, thread });
+    }
+    let w = worker.as_ref().expect("started above");
+    w.jobs
+        .send((icon, done))
+        .map_err(|_| "the icon worker stopped".to_owned())
+}
+
+/// Stops the worker and waits for the render under way, if any, to end. On the UI thread,
+/// before the event loop ends.
+pub(crate) fn stop() {
+    let worker = WORKER.lock().unwrap_or_else(PoisonError::into_inner).take();
+    if let Some(Worker { jobs, thread }) = worker {
+        drop(jobs);
+        let _ = thread.join();
     }
 }
 

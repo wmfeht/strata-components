@@ -323,4 +323,12 @@ icon_names! {
     Rotate = "rotate" => line!(r#"<path d="M3 8a5 5 0 1 0 1.5-3.6"/><path d="M3 2.5V5h2.5"/>"#),
     /// Fit to the window.
     Fit = "fit" => line!(r#"<rect x="5" y="5" width="6" height="6" rx="0.5"/><path d="M2.5 5V2.5H5M11 2.5h2.5V5M13.5 11v2.5H11M5 13.5H2.5V11"/>"#),
+
+    // Window buttons (X1's header).
+    /// Minimise the window.
+    Minimize = "minimize" => line!(r#"<path d="M3.5 8h9"/>"#),
+    /// Maximise the window, or maximise or restore it when its state is unknown.
+    Maximize = "maximize" => line!(r#"<path d="M3 6V4a1 1 0 0 1 1-1h2M10 3h2a1 1 0 0 1 1 1v2M13 10v2a1 1 0 0 1-1 1h-2M6 13H4a1 1 0 0 1-1-1v-2"/>"#),
+    /// Restore a maximised window.
+    Restore = "restore" => line!(r#"<path d="M6 3v2a1 1 0 0 1-1 1H3M13 6h-2a1 1 0 0 1-1-1V3M3 10h2a1 1 0 0 1 1 1v2M10 13v-2a1 1 0 0 1 1-1h2"/>"#),
 }

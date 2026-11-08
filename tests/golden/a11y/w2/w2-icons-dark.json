@@ -345,6 +345,18 @@
                 {
                   "name": "fit",
                   "role": "label"
+                },
+                {
+                  "name": "minimize",
+                  "role": "label"
+                },
+                {
+                  "name": "maximize",
+                  "role": "label"
+                },
+                {
+                  "name": "restore",
+                  "role": "label"
                 }
               ],
               "key": "w2-lucide",
@@ -690,6 +702,18 @@
                 },
                 {
                   "name": "fit",
+                  "role": "label"
+                },
+                {
+                  "name": "minimize",
+                  "role": "label"
+                },
+                {
+                  "name": "maximize",
+                  "role": "label"
+                },
+                {
+                  "name": "restore",
                   "role": "label"
                 }
               ],

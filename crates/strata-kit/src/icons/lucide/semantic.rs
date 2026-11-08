@@ -122,5 +122,11 @@ pub(super) const fn index(name: IconName) -> usize {
         IconName::ZoomOut => i::STRATA_KIT_ZOOM_OUT,
         IconName::Rotate => i::STRATA_KIT_ROTATE_CW,
         IconName::Fit => i::STRATA_KIT_SCAN,
+
+        // Window buttons: Strata's header (`src/ui/window/composition/layout.rs`), whose
+        // Restore shows Lucide's minimize.
+        IconName::Minimize => i::STRATA_MINUS,
+        IconName::Maximize => i::STRATA_MAXIMIZE,
+        IconName::Restore => i::STRATA_MINIMIZE,
     }
 }

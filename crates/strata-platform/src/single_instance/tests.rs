@@ -13,7 +13,7 @@ use zbus::OwnedVariant;
 
 use super::event::{CommandLine, Event, Out, RevealMethod};
 use super::forward::primary_gone;
-use super::interfaces::{FileManager1, action};
+use super::interfaces::{FileManager1, Pack, action};
 use super::launch::{Activation, Launch, PlatformData};
 use super::primary::Inbox;
 use super::{AppId, Reveal};
@@ -262,22 +262,25 @@ fn a_launch_tries_again_only_when_the_primary_left() {
 fn actions_are_read_as_glib_reads_them() {
     let accepted = ["go".to_owned()];
     let data = PlatformData::new();
-    let unknown = action(&accepted, "quit".into(), Vec::new(), &data);
+    let unknown = action(&accepted, "quit".into(), Vec::new(), &data, Pack::Tuple);
     assert!(
         matches!(&unknown, Err(zbus::fdo::Error::InvalidArgs(m)) if m.contains("quit")),
         "{unknown:?}"
     );
-    let parameter = |values: Vec<OwnedVariant>| match action(&accepted, "go".into(), values, &data)
-    {
-        Ok(Event::Action { parameter, .. }) => parameter.map(|p| p.value_signature().to_string()),
-        other => panic!("{other:?}"),
-    };
+    let parameter =
+        |values: Vec<OwnedVariant>, pack| match action(&accepted, "go".into(), values, &data, pack)
+        {
+            Ok(Event::Action { parameter, .. }) => {
+                parameter.map(|p| p.value_signature().to_string())
+            }
+            other => panic!("{other:?}"),
+        };
     let s = || OwnedVariant::from(zbus::Str::from("s".to_owned()));
-    assert_eq!(parameter(Vec::new()), None);
-    assert_eq!(parameter(vec![s()]).as_deref(), Some("s"));
-    // Several parameters become one tuple of them, in order.
-    assert_eq!(
-        parameter(vec![s(), OwnedVariant::from(7u32)]).as_deref(),
-        Some("(su)")
-    );
+    let two = || vec![s(), OwnedVariant::from(7u32)];
+    assert_eq!(parameter(Vec::new(), Pack::Tuple), None);
+    assert_eq!(parameter(vec![s()], Pack::Tuple).as_deref(), Some("s"));
+    // org.freedesktop.Application packs several into one tuple, in order; org.gtk.Actions
+    // takes the first.
+    assert_eq!(parameter(two(), Pack::Tuple).as_deref(), Some("(su)"));
+    assert_eq!(parameter(two(), Pack::First).as_deref(), Some("s"));
 }

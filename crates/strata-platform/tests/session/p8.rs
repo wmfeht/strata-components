@@ -551,6 +551,59 @@ fn file_manager1_waits_behind_another_owner() {
     });
 }
 
+/// A primary that prints, answers and gives the app id up at once: the launch still ends
+/// with that answer, its line printed once, and never runs again as a primary of its own. A
+/// release that cut the answer off would look to the launch like a primary gone, and it would
+/// claim the app id and handle itself a second time. Half the rounds release from the main
+/// thread, half from the bus thread (inside the sink).
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn a_release_right_after_answering_never_hands_the_launch_on() {
+    for round in 0..24 {
+        let on = if round % 2 == 0 { "main" } else { "bus" };
+        let s = bus_only();
+        let mut cmd = command(&s, PROBE, Display::None);
+        cmd.env("PROBE_RELEASE_ON", on);
+        let primary = start_primary(&s, "primary", cmd);
+        let mut launch = command(&s, PROBE, Display::None);
+        launch.args(["--print", "--release-after"]);
+        let out = run(launch);
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let context = format!("round {round}, released on {on}: {out:?}");
+        assert_eq!(out.status.code(), Some(0), "{context}");
+        assert_eq!(
+            stdout.matches("hello from the primary").count(),
+            1,
+            "{context}"
+        );
+        assert!(stdout.contains("\"result\":\"forwarded\""), "{context}");
+        assert!(!stdout.contains("\"result\":\"primary\""), "{context}");
+        primary.wait_json("the release", |v| v["ev"] == "released" && v["on"] == on);
+    }
+}
+
+/// A launch the app still holds when it gives the app id up hears that the primary left, at
+/// once rather than after `Options::forward_timeout`, and claims the app id itself.
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn a_launch_held_through_a_release_claims_the_app_id_again() {
+    let s = bus_only();
+    let primary = start_primary(&s, "primary", command(&s, PROBE, Display::None));
+    let mut cmd = command(&s, PROBE, Display::None);
+    cmd.arg("--hold");
+    let launch = s.spawn("launch", cmd);
+    primary.wait_json("the held launch", |v| {
+        v["ev"] == "launch" && v["remote"] == true
+    });
+    let released = Instant::now();
+    primary.send_line("release");
+    assert_eq!(claim_line(&launch)["result"], "primary");
+    assert!(released.elapsed() < timeout(), "{:?}", released.elapsed());
+    launch.wait_json("its own launch", |v| {
+        v["ev"] == "launch" && v["remote"] == false
+    });
+}
+
 /// A bus that won't let the primary have `org.freedesktop.FileManager1` (a sandbox without
 /// permission to own it) leaves it the primary without that name. The probe asks for
 /// `org.freedesktop.DBus` in its place, which every bus refuses.

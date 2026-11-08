@@ -72,6 +72,8 @@ Nothing is released yet. The first release is planned for milestone M1 with the 
     `InvalidArgs`, as a GApplication refuses them.
   - Without a session bus, or with one that doesn't answer within `Options::bus_timeout`, a
     launch runs alone (`Claim::Standalone`).
+  - `Primary::release` gives the app id up when the app quits. Launches it has answered still
+    get their output and status; those it hasn't claim the app id again.
 
   zbus types appear in its API, so a move to another zbus major is a minor release. It uses
   `zbus` and `tokio`, which Rune's `dbus` feature already builds.

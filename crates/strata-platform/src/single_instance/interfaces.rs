@@ -16,7 +16,7 @@ use zbus::{Connection, OwnedObjectPath, OwnedVariant, Signature, Variant, fdo, i
 
 use super::event::{CommandLine, Event, Out, Reveal, RevealMethod};
 use super::launch::{Activation, Launch, PlatformData};
-use super::primary::Inbox;
+use super::primary::{InFlight, Inbox};
 
 /// The forwarder's object for a launch's output, and GLib's interface for it.
 pub(super) const CALLBACK_PATH: &str = "/org/gtk/Application/CommandLine";
@@ -26,6 +26,7 @@ pub(super) const FILE_MANAGER1_PATH: &str = "/org/freedesktop/FileManager1";
 
 pub(super) struct GtkApplication {
     pub inbox: Arc<Inbox>,
+    pub in_flight: Arc<InFlight>,
 }
 
 #[interface(name = "org.gtk.Application")]
@@ -47,6 +48,10 @@ impl GtkApplication {
 
     /// A forwarded launch. The reply, its exit status, waits until the app is done with the
     /// [`CommandLine`]; what it prints meanwhile goes to the caller's `path` first, in order.
+    ///
+    /// Once the primary is giving the app id up, a launch the app hasn't answered yet (and any
+    /// that arrives) fails with `Disconnected`, which the caller reads as a primary gone: it
+    /// claims the app id again. One already answered is sent to the end.
     async fn command_line(
         &self,
         path: OwnedObjectPath,
@@ -54,17 +59,31 @@ impl GtkApplication {
         platform_data: PlatformData,
         #[zbus(header)] header: Header<'_>,
         #[zbus(connection)] conn: &Connection,
-    ) -> i32 {
+    ) -> fdo::Result<i32> {
+        let gone = || fdo::Error::Disconnected("the primary is giving the app id up".into());
+        let Some(_answering) = self.in_flight.enter() else {
+            return Err(gone());
+        };
         let caller: Option<OwnedUniqueName> = header.sender().map(|s| s.to_owned().into());
         let (tx, mut rx) = unbounded_channel();
         let launch = Launch::from_wire(arguments, &platform_data);
         self.inbox
             .deliver(Event::CommandLine(CommandLine::remote(launch, tx)));
-        while let Some(out) = rx.recv().await {
+        loop {
+            let out = tokio::select! {
+                biased;
+                out = rx.recv() => out,
+                () = self.in_flight.stopped() => match rx.try_recv() {
+                    Ok(out) => Some(out),
+                    Err(_) => return Err(gone()),
+                },
+            };
             let (method, text) = match out {
-                Out::Exit(status) => return status,
-                Out::Print(text) => ("Print", text),
-                Out::PrintErr(text) => ("PrintError", text),
+                Some(Out::Exit(status)) => return Ok(status),
+                // Dropping a `CommandLine` always sends `Exit` first.
+                None => return Ok(0),
+                Some(Out::Print(text)) => ("Print", text),
+                Some(Out::PrintErr(text)) => ("PrintError", text),
             };
             // Each line is answered before the next goes, so the caller sees them in order
             // and before the exit status. A caller that went away just misses them.
@@ -78,7 +97,6 @@ impl GtkApplication {
                 )
                 .await;
         }
-        0
     }
 }
 
@@ -110,14 +128,23 @@ impl FreedesktopApplication {
         parameter: Vec<OwnedVariant>,
         platform_data: PlatformData,
     ) -> fdo::Result<()> {
-        let event = action(&self.actions, action_name, parameter, &platform_data)?;
+        let event = action(
+            &self.actions,
+            action_name,
+            parameter,
+            &platform_data,
+            Pack::Tuple,
+        )?;
         self.inbox.deliver(event);
         Ok(())
     }
 }
 
 /// GLib's action group interface. A GApplication forwarder lists the primary's actions first
-/// (`DescribeAll`) and gives up if that fails, so the primary serves an empty list.
+/// (`DescribeAll`) and gives up if that fails, so the primary serves the interface. `List` and
+/// `DescribeAll` return nothing even when `Options::actions` accepts some: a listing needs
+/// each action's parameter type, which the app doesn't give. `Activate` still runs the
+/// accepted ones.
 pub(super) struct GtkActions {
     pub inbox: Arc<Inbox>,
     pub actions: Arc<[String]>,
@@ -145,25 +172,42 @@ impl GtkActions {
         parameter: Vec<OwnedVariant>,
         platform_data: PlatformData,
     ) -> fdo::Result<()> {
-        let event = action(&self.actions, action_name, parameter, &platform_data)?;
+        let event = action(
+            &self.actions,
+            action_name,
+            parameter,
+            &platform_data,
+            Pack::First,
+        )?;
         self.inbox.deliver(event);
         Ok(())
     }
 }
 
-/// An action call as GLib reads one: refused unless the app accepts the name, and several
-/// parameters packed into one tuple.
+/// How an action call's parameter array (`av`) becomes one parameter, as GLib reads each
+/// interface's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Pack {
+    /// `org.freedesktop.Application.ActivateAction`: several pack into one tuple.
+    Tuple,
+    /// `org.gtk.Actions.Activate`: the first, the rest ignored (GLib's callers send at most one).
+    First,
+}
+
+/// An action call as GLib reads one: refused unless the app accepts the name, its parameters
+/// read as `pack` says.
 pub(super) fn action(
     actions: &[String],
     name: String,
     parameter: Vec<OwnedVariant>,
     platform_data: &PlatformData,
+    pack: Pack,
 ) -> fdo::Result<Event> {
     if !actions.contains(&name) {
         return Err(fdo::Error::InvalidArgs(format!("Unknown action ‘{name}’")));
     }
-    let parameter = match parameter.len() {
-        0 | 1 => parameter.into_iter().next(),
+    let parameter = match (parameter.len(), pack) {
+        (0 | 1, _) | (_, Pack::First) => parameter.into_iter().next(),
         _ => {
             let tuple = parameter
                 .into_iter()

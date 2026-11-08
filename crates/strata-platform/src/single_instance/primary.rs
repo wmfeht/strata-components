@@ -240,9 +240,10 @@ fn serve(
                 .clone()
                 .unwrap_or_else(|| FILE_MANAGER1.to_owned())
         });
+        let in_flight = Arc::new(InFlight::default());
         let setup = tokio::time::timeout(
             options.bus_timeout,
-            become_primary(&id, &inbox, extra.as_deref(), &options.actions),
+            become_primary(&id, &inbox, &in_flight, extra.as_deref(), &options.actions),
         )
         .await;
         let (conn, file_manager1) = match setup {
@@ -262,6 +263,7 @@ fn serve(
             runtime: tokio::runtime::Handle::current(),
             stop: Mutex::new(Some(stop)),
             bus_timeout: options.bus_timeout,
+            thread: std::thread::current().id(),
         };
         let names: Vec<&str> = std::iter::once(id.as_str())
             .chain(extra.as_deref())
@@ -275,6 +277,7 @@ fn serve(
         // claims them, and let calls still waiting fail, so their launches try again.
         let done = stopped.await.ok();
         release(&conn, &names).await;
+        finish_answers(&conn, &in_flight, options.bus_timeout).await;
         drop(conn);
         if let Some(done) = done {
             let _ = done.send(());
@@ -287,6 +290,7 @@ fn serve(
 async fn become_primary(
     id: &AppId,
     inbox: &Arc<Inbox>,
+    in_flight: &Arc<InFlight>,
     file_manager1: Option<&str>,
     actions: &[String],
 ) -> Result<Option<(Connection, Option<NameRequest>)>, Unclaimed> {
@@ -300,7 +304,13 @@ async fn become_primary(
     let inbox = || inbox.clone();
     let actions: Arc<[String]> = actions.into();
     server
-        .at(path.as_str(), GtkApplication { inbox: inbox() })
+        .at(
+            path.as_str(),
+            GtkApplication {
+                inbox: inbox(),
+                in_flight: in_flight.clone(),
+            },
+        )
         .await
         .map_err(error)?;
     server
@@ -367,6 +377,96 @@ async fn release(conn: &Connection, names: &[&str]) {
     }
 }
 
+/// After the names are given up and before the connection and runtime go (dropping the runtime
+/// aborts every handler still running): lets each forwarded launch already answered finish
+/// sending its output and status, and tells those the app still holds that the primary left,
+/// so they claim the app id again. Bounded by `limit`.
+///
+/// Then a round trip to the bus on the same connection: zbus writes a handler's reply after
+/// the handler returns, so once none is left in flight and the bus has answered a later call,
+/// it has read every reply written before it.
+async fn finish_answers(conn: &Connection, in_flight: &InFlight, limit: Duration) {
+    in_flight.stop_waiting();
+    let _ = tokio::time::timeout(limit, async {
+        in_flight.drained().await;
+        // The last handler's own task writes its reply after the handler returns.
+        for _ in 0..4 {
+            tokio::task::yield_now().await;
+        }
+        let _ = conn
+            .call_method(
+                Some("org.freedesktop.DBus"),
+                "/org/freedesktop/DBus",
+                Some("org.freedesktop.DBus.Peer"),
+                "Ping",
+                &(),
+            )
+            .await;
+    })
+    .await;
+}
+
+/// The forwarded launches the primary is answering (`CommandLine` calls in flight), and
+/// whether it is giving the app id up.
+#[derive(Debug, Default)]
+pub(super) struct InFlight {
+    state: Mutex<(usize, bool)>,
+    changed: tokio::sync::Notify,
+}
+
+/// One forwarded launch in flight, until dropped.
+pub(super) struct Answering<'a>(&'a InFlight);
+
+impl Drop for Answering<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut state) = self.0.state.lock() {
+            state.0 -= 1;
+        }
+        self.0.changed.notify_waiters();
+    }
+}
+
+impl InFlight {
+    /// Counts a launch in, unless the primary is giving the app id up.
+    pub(super) fn enter(&self) -> Option<Answering<'_>> {
+        let mut state = self.state.lock().ok()?;
+        if state.1 {
+            return None;
+        }
+        state.0 += 1;
+        Some(Answering(self))
+    }
+
+    fn stop_waiting(&self) {
+        if let Ok(mut state) = self.state.lock() {
+            state.1 = true;
+        }
+        self.changed.notify_waiters();
+    }
+
+    /// Returns once the primary is giving the app id up.
+    pub(super) async fn stopped(&self) {
+        self.wait_for(|(_, stopping)| stopping).await;
+    }
+
+    async fn drained(&self) {
+        self.wait_for(|(count, _)| count == 0).await;
+    }
+
+    async fn wait_for(&self, done: impl Fn((usize, bool)) -> bool) {
+        loop {
+            // Registered before the check, so a change between the two isn't missed.
+            let changed = self.changed.notified();
+            tokio::pin!(changed);
+            changed.as_mut().enable();
+            if self.state.lock().map_or(true, |s| done(*s)) {
+                return;
+            }
+            changed.await;
+        }
+    }
+}
+
 /// The primary's side of the bus.
 #[derive(Debug)]
 struct Bus {
@@ -376,6 +476,8 @@ struct Bus {
     runtime: tokio::runtime::Handle,
     stop: Mutex<Option<oneshot::Sender<mpsc::Sender<()>>>>,
     bus_timeout: Duration,
+    /// The bus thread: `release` from it can't wait for it.
+    thread: std::thread::ThreadId,
 }
 
 /// The instance that handles launches: this process's own, then every one forwarded to it.
@@ -474,8 +576,12 @@ impl Primary {
     /// app decides to quit, so a launch at that moment starts a new primary instead of
     /// reaching one about to exit. Launches still waiting for an answer fail, and try again.
     ///
+    /// Forwarded launches the app has answered still get their answer before the connection
+    /// goes; those it hasn't are told the primary left, and try again.
+    ///
     /// From the bus thread itself (an [`Primary::attach`] sink), it asks and returns at once:
-    /// the thread it would wait for is its own.
+    /// the thread it would wait for is its own. From another thread while an attach sink holds
+    /// the bus thread up, it waits until the sink returns, or `Options::bus_timeout`.
     pub fn release(&self) {
         let Some(bus) = &self.bus else { return };
         let Some(stop) = bus.stop.lock().ok().and_then(|mut s| s.take()) else {
@@ -485,7 +591,7 @@ impl Primary {
             conn.take();
         }
         let (done, released) = mpsc::channel();
-        let on_bus_thread = std::thread::current().name() == Some(THREAD_NAME);
+        let on_bus_thread = std::thread::current().id() == bus.thread;
         if stop.send(done).is_ok() && !on_bus_thread {
             let _ = released.recv_timeout(bus.bus_timeout);
         }

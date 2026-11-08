@@ -7,7 +7,10 @@
 //!   bytes, `xdg` and `sid` tokens), `activate`, `open`, `action` and `reveal`.
 //!
 //! As the primary it answers each launch by its arguments: `--print` prints a line to the
-//! launch's stdout, `--usage-error` a line to its stderr and exit status 1. Its stdin takes
+//! launch's stdout, `--usage-error` a line to its stderr and exit status 1, and
+//! `--release-after` answers the launch, then stops being the primary at once: from its main
+//! thread, or with `PROBE_RELEASE_ON=bus` from the bus thread. `--hold` never answers. Its
+//! stdin takes
 //! `release` (stop being the primary) and `quit`; the action `quit` ends it too. With
 //! `PROBE_SERVICE=1` the end of stdin doesn't: the bus starts it with none.
 //!
@@ -29,13 +32,16 @@ fn main() {
 #[cfg(feature = "single-instance")]
 mod probe {
     use std::ffi::OsStr;
-    use std::io::{BufRead, Write};
+    use std::io::Write;
     use std::os::unix::ffi::OsStrExt;
+    use std::sync::mpsc::{SyncSender, sync_channel};
+    use std::sync::{Mutex, OnceLock};
     use std::time::Duration;
 
     use serde_json::{Value, json};
     use strata_platform::single_instance::{
-        AppId, Claim, Event, Launch, NameRequest, Options, RevealMethod, Unclaimed, claim,
+        AppId, Claim, CommandLine, Event, Launch, NameRequest, Options, Primary, RevealMethod,
+        Unclaimed, claim,
     };
 
     const APP_ID: &str = "org.example.SingleInstanceProbe";
@@ -63,6 +69,11 @@ mod probe {
         std::env::var_os(name).is_some_and(|v| v == "1")
     }
 
+    /// The primary, and the way to ask the main thread to release it.
+    static PRIMARY: OnceLock<Primary> = OnceLock::new();
+    static RELEASE: OnceLock<SyncSender<()>> = OnceLock::new();
+    static HELD: Mutex<Vec<CommandLine>> = Mutex::new(Vec::new());
+
     fn on_event(event: Event) {
         match event {
             Event::CommandLine(cmd) => {
@@ -80,6 +91,23 @@ mod probe {
                 let has = |a: &str| cmd.arguments().iter().any(|x| x == a);
                 if has("--print") {
                     cmd.print("hello from the primary\n");
+                }
+                if has("--hold") {
+                    // Never answered: kept until the probe exits.
+                    HELD.lock().unwrap_or_else(|e| e.into_inner()).push(cmd);
+                    return;
+                }
+                if has("--release-after") {
+                    drop(cmd);
+                    if std::env::var_os("PROBE_RELEASE_ON").is_some_and(|v| v == "bus") {
+                        if let Some(primary) = PRIMARY.get() {
+                            primary.release();
+                        }
+                        log("released", json!({ "on": "bus" }));
+                    } else if let Some(release) = RELEASE.get() {
+                        let _ = release.send(());
+                    }
+                    return;
                 }
                 if has("--usage-error") {
                     cmd.print_err("usage: single-instance-probe [--print] [FILE...]\n");
@@ -132,9 +160,8 @@ mod probe {
     }
 
     pub fn main() {
-        let mut lines = std::io::stdin().lock().lines();
         if flag("PROBE_GATE") {
-            let _ = lines.next();
+            let _ = std::io::stdin().read_line(&mut String::new());
         }
         let id = AppId::new(APP_ID).expect("a valid app id");
         let mut options = Options {
@@ -181,15 +208,43 @@ mod probe {
                 std::process::exit(status);
             }
         };
+        let primary = PRIMARY.get_or_init(|| primary);
+        let (release, released) = sync_channel(1);
+        let _ = RELEASE.set(release);
         primary.attach(on_event);
-        for line in lines {
-            match line.as_deref().map(str::trim) {
-                Ok("release") => {
+        // Lines from stdin, and release requests from a sink, on the main thread.
+        let (input, commands) = sync_channel(16);
+        let lines_input = input.clone();
+        std::thread::spawn(move || {
+            for line in std::io::stdin().lines() {
+                let line = line
+                    .map(|l| l.trim().to_owned())
+                    .unwrap_or_else(|_| "quit".into());
+                if lines_input.send(line).is_err() {
+                    return;
+                }
+            }
+            let _ = lines_input.send("quit".into());
+        });
+        std::thread::spawn(move || {
+            while released.recv().is_ok() {
+                if input.send("release-after".into()).is_err() {
+                    return;
+                }
+            }
+        });
+        for command in commands {
+            match command.as_str() {
+                "release" => {
                     primary.release();
                     log("released", json!({ "claimed": primary.is_claimed() }));
                 }
-                Ok("quit") | Err(_) => break,
-                Ok(_) => {}
+                "release-after" => {
+                    primary.release();
+                    log("released", json!({ "on": "main" }));
+                }
+                "quit" => break,
+                _ => {}
             }
         }
         if options.service {

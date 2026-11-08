@@ -365,9 +365,15 @@ impl MarqueeMachine {
             s.emit(Outcome::WakeAfter(Duration::ZERO));
         }
         if speed == 0.0 && was != 0.0 {
-            // Leaving the edge mid-band: come to rest softly, as the band goes on.
+            // Leaving the edge mid-band: come to rest softly, as the band goes on. With
+            // animations off Rune lands a glide at once, so aim where the view is.
+            let ahead = if settings.animations {
+                stop_lead(was, settings.glide)
+            } else {
+                0.0
+            };
             s.emit(Outcome::StopGlide {
-                y: visible.y + stop_lead(was, settings.glide),
+                y: visible.y + ahead,
                 spring: settings.glide,
             });
             band.coasting = 2;

@@ -651,6 +651,7 @@ pub fn collection() -> Collection<Gallery> {
 pub fn view(g: &Gallery, _cx: &mut Cx<Gallery>) -> El {
     let d = &g.c1;
     let look = g.look();
+    _cx.reduced_motion(!look.animations);
     let kit = g.kit();
     let count = d.listing.len();
     let title = if d.loading.is_some() {

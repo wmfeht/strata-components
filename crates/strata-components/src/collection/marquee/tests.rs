@@ -222,7 +222,8 @@ fn frame(f: &mut Fake, m: &mut MarqueeMachine, glide: &mut Glide) -> bool {
 
 #[test]
 fn a_band_selects_every_row_it_crosses_mounted_or_not() {
-    // browser/selection/marquee: A drag from blank pane space draws a band from the press point and selects every entry it crosses.
+    // Hit-testing by index: the band takes every row it crosses, mounted or not (the
+    // marquee-drag script checks the drag from blank space).
     let mut f = fake(10_000);
     let mut m = machine();
     m.begin(at_row(0), Mods::default(), &mut f);
@@ -663,6 +664,34 @@ fn with_animations_off_the_edge_scroll_keeps_the_curves_speed() {
         frames[1..].iter().all(|v| (v - most).abs() < 0.02 * most),
         "{frames:?}"
     );
+}
+
+#[test]
+fn with_animations_off_leaving_the_edge_stops_where_the_view_is() {
+    // Review round 2: Rune lands a glide at once under reduced motion, so a soft stop aimed
+    // ahead would jump the view; with animations off it aims where the view is.
+    for animations in [true, false] {
+        let mut f = fake(10_000);
+        f.settings.animations = animations;
+        let mut m = machine();
+        let mut glide = Glide::default();
+        m.begin(at_row(1), Mods::default(), &mut f);
+        m.moved(at_view(&f, VIEW), &mut f);
+        for _ in 0..30 {
+            frame(&mut f, &mut m, &mut glide);
+        }
+        m.moved(at_view(&f, VIEW / 2.0), &mut f);
+        let to = f.out.iter().find_map(|o| match o {
+            Outcome::StopGlide { y, .. } => Some(*y),
+            _ => None,
+        });
+        let to = to.expect("a soft stop");
+        if animations {
+            assert!(to > f.visible.y + 1.0, "with animations it eases on");
+        } else {
+            assert_eq!(to, f.visible.y, "without, it stays");
+        }
+    }
 }
 
 #[test]

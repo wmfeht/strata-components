@@ -357,22 +357,27 @@ mod c1 {
             );
         }
 
-        /// S2 (review): the page sets the marquee's animations from its look, so under reduced
-        /// motion, where Rune lands each glide at once, the edge scroll keeps the curve's speed
-        /// (at most 1,500 pt/s) instead of jumping a glide's lead every frame.
+        /// S2 and review round 2: the page passes its look's animations switch both to Rune
+        /// (`Cx::reduced_motion`) and to the marquee, so they agree whatever the system says,
+        /// and the edge scroll keeps the curve's speed (at most 1,500 pt/s). Only the look is
+        /// flipped here, against the system preference each way: animations off with the
+        /// system's reduced motion off, and on with it on.
         #[test]
-        fn under_reduced_motion_the_edge_scroll_keeps_the_curves_speed() {
-            let mut rt = mount("c1-photos-light");
-            rt.set_system_reduced_motion(true);
-            rt.state.look.animations = false;
-            run(&mut rt, 0.1);
-            let from = rt.state.c1.coll.scroll_offset();
-            hold_at_the_bottom(&mut rt, 10_002, 1.0);
-            let speed = rt.state.c1.coll.scroll_offset() - from;
-            assert!(
-                (1_000.0..=1_550.0).contains(&speed),
-                "{speed} pt in a second"
-            );
+        fn the_look_alone_decides_reduced_motion_and_the_edge_scroll_keeps_its_speed() {
+            for (animations, system) in [(false, false), (true, true)] {
+                let mut rt = mount("c1-photos-light");
+                rt.set_system_reduced_motion(system);
+                rt.update(|g, _| g.look.animations = animations);
+                run(&mut rt, 0.1);
+                let from = rt.state.c1.coll.scroll_offset();
+                hold_at_the_bottom(&mut rt, 10_002, 1.0);
+                let speed = rt.state.c1.coll.scroll_offset() - from;
+                assert!(
+                    (1_000.0..=1_550.0).contains(&speed),
+                    "animations {animations}, system reduced motion {system}: \
+                     {speed} pt in a second"
+                );
+            }
         }
     }
 }

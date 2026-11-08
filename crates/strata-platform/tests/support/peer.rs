@@ -110,6 +110,42 @@ impl Peer {
         event
     }
 
+    /// Whether an event passing `pred` came from line `mark` on, waiting up to `wait`. For
+    /// what must not happen (a cancelled drag's drop): it doesn't move `wait_event`'s place.
+    #[cfg_attr(
+        not(feature = "dnd"),
+        expect(dead_code, reason = "only P1's session tests, behind dnd, use it")
+    )]
+    pub fn saw_since(&self, mark: usize, wait: Duration, pred: impl Fn(&Event) -> bool) -> bool {
+        let deadline = Instant::now() + wait;
+        loop {
+            let seen = self
+                .proc
+                .lines()
+                .iter()
+                .skip(mark)
+                .any(|line| matches!(parse(line), Some(Message::Event(e)) if pred(&e)));
+            if seen || Instant::now() >= deadline {
+                return seen;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// The first event from line `mark` on that passes `pred`, waiting for it, without
+    /// moving `wait_event`'s place: for events that may come in any order.
+    #[cfg_attr(
+        not(feature = "dnd"),
+        expect(dead_code, reason = "only P1's session tests, behind dnd, use it")
+    )]
+    pub fn event_since(&self, mark: usize, what: &str, pred: impl Fn(&Event) -> bool) -> Event {
+        let (_, event) = self.proc.wait_for(mark, what, |line| match parse(line) {
+            Some(Message::Event(e)) if pred(&e) => Some(e),
+            _ => None,
+        });
+        event
+    }
+
     /// How many lines the peer has written: a point to look for events after.
     pub fn line_count(&self) -> usize {
         self.proc.line_count()
@@ -278,10 +314,25 @@ impl Peer {
     /// Accept drops of the first of `mimes` offered, with any of `actions`, `preferred` first;
     /// no `mimes` refuses them.
     pub fn accept_drops(&self, mimes: &[&str], actions: &[Action], preferred: Action) {
+        self.accept_drops_with(mimes, actions, preferred, false, None);
+    }
+
+    /// [`Peer::accept_drops`], reading every one of `mimes` offered when `read_all`, and
+    /// settling a drop left on ask with `ask_answer`.
+    pub fn accept_drops_with(
+        &self,
+        mimes: &[&str],
+        actions: &[Action],
+        preferred: Action,
+        read_all: bool,
+        ask_answer: Option<Action>,
+    ) {
         self.request(Command::DropAccept {
             mimes: mimes.iter().map(|m| (*m).to_owned()).collect(),
             actions: actions.to_vec(),
             preferred,
+            read_all,
+            ask_answer,
         });
     }
 

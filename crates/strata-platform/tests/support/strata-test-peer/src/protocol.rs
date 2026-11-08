@@ -86,7 +86,8 @@ pub enum Command {
         mime: String,
     },
     /// Starts a drag from the peer's own window. Needs a press on it that is still held
-    /// ([`Event::PointerButton`]): the session's input peer presses, then drags.
+    /// ([`Event::PointerButton`]): the session's input peer presses, then drags. On X11 it
+    /// proposes the first of `actions` and lists them all in `XdndActionList`.
     DragStart {
         offers: Vec<Offer>,
         actions: Vec<Action>,
@@ -97,6 +98,14 @@ pub enum Command {
         mimes: Vec<String>,
         actions: Vec<Action>,
         preferred: Action,
+        /// At the drop, read every one of `mimes` the drag offers, in order, each reported
+        /// as its own [`Event::Dropped`], before finishing; not just the first.
+        #[serde(default)]
+        read_all: bool,
+        /// A drop left on ask is settled with this action before it finishes (Wayland:
+        /// `set_actions(a, a)`; X11: `XdndFinished` with it).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ask_answer: Option<Action>,
     },
     /// X11 only: point the window's `XdndProxy` at a window on a second connection, so drag
     /// messages must go to the proxy ([`Event::DropEnter`] says which way they came).

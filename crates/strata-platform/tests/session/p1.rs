@@ -1,3 +1,918 @@
-//! P1's session tests: drags out to the peer and drops in from it, on Wayland and X11.
+//! P1's session tests: drags out to the peer and drops in from it, on Wayland and X11, with
+//! the `dnd` example (`examples/dnd.rs`) as the app.
 //!
 //! Work package: P1, `docs/work/phase-2-composites/P1-drag-and-drop.md`.
+//!
+//! What runs here, per backend: a drag out with three MIME types that the peer reads; drops
+//! in of `text/uri-list`, `text/plain`, `text/x-moz-url`, `image/png` and HTML; the action
+//! with each modifier, and an ask; cancelled drags; an in-process drag between two windows
+//! with a typed payload. On Wayland also: Rune's capture ends when the drag starts, not at the
+//! drop. Hand tests (Nautilus, Dolphin, Hyprland, GNOME, KDE) are pending, not run here.
+
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
+
+use serde_json::{Value, json};
+use strata_test_peer::protocol::{Action, Event, Offer, Payload, fnv1a64};
+
+use crate::support::{Display, Peer, Proc, Session, Window, example, timeout};
+
+const URI_LIST: &str = "text/uri-list";
+const TEXT: &str = "text/plain;charset=utf-8";
+const MOZ_URL: &str = "text/x-moz-url";
+const PNG: &str = "image/png";
+const HTML: &str = "text/html";
+
+fn fnv(offer: &Offer) -> String {
+    fnv1a64(&offer.data.bytes().expect("offer bytes"))
+}
+
+fn mimes(offers: &[Offer]) -> Vec<&str> {
+    offers.iter().map(|o| o.mime.as_str()).collect()
+}
+
+/// The app, and its windows as sway has them.
+struct Demo {
+    app: Proc,
+    title: String,
+    keys: Vec<&'static str>,
+}
+
+impl Demo {
+    fn start(s: &Session, display: Display, two: bool) -> Demo {
+        let title = "p1 dnd".to_owned();
+        let mut cmd = s.command(example("dnd"), display);
+        cmd.args(["--title", &title]);
+        if two {
+            cmd.arg("--two-windows");
+        }
+        let app = s.spawn("dnd", cmd);
+        let keys = if two {
+            vec!["main", "second"]
+        } else {
+            vec!["main"]
+        };
+        let demo = Demo { app, title, keys };
+        for k in &demo.keys {
+            let (_, v) = demo.wait(0, &format!("{k} attaching"), |v| {
+                (v["ev"] == "attached" || v["ev"] == "attach-error") && v["window"] == *k
+            });
+            assert_eq!(v["ev"], "attached", "{v}");
+            assert_eq!(v["drag_in"], true, "{v}");
+            assert_eq!(v["drag_out"], true, "{v}");
+        }
+        demo.wait(0, "the first frame", |v| v["ev"] == "frame");
+        demo
+    }
+
+    fn title_of(&self, key: &str) -> String {
+        if key == "main" {
+            self.title.clone()
+        } else {
+            format!("{} {key}", self.title)
+        }
+    }
+
+    fn window(&self, s: &Session, key: &str) -> Window {
+        let (title, pid) = (self.title_of(key), self.app.pid());
+        s.wait_window_where(&format!("the {key} window"), |w| {
+            w.pid == pid && w.title == title && w.content.width > 0.0
+        })
+    }
+
+    fn send(&self, cmd: Value) -> usize {
+        let mark = self.app.line_count();
+        self.app.send_line(&cmd.to_string());
+        mark
+    }
+
+    /// Sends `cmd` and waits for its acknowledgement line `ack`, from each window it reaches.
+    fn command(&self, cmd: Value, ack: &str) {
+        let only = cmd["window"].as_str().map(str::to_owned);
+        let at = self.send(cmd);
+        for k in &self.keys {
+            if only.as_ref().is_some_and(|o| o != k) {
+                continue;
+            }
+            self.wait(at, &format!("{ack} from {k}"), |v| {
+                v["ev"] == ack && v["window"] == *k
+            });
+        }
+    }
+
+    fn wait(&self, from: usize, what: &str, pred: impl Fn(&Value) -> bool) -> (usize, Value) {
+        self.app.wait_json_from(from, what, pred)
+    }
+
+    fn lines(&self) -> Vec<Value> {
+        self.app
+            .lines()
+            .iter()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .collect()
+    }
+
+    /// The newest rect of each keyed element of window `key`, in window points.
+    fn rects(&self, key: &str) -> HashMap<String, [f64; 4]> {
+        let mut out = HashMap::new();
+        for v in self.lines() {
+            if v["ev"] == "rect" && v["window"] == key {
+                let r: Vec<f64> = v["r"]
+                    .as_array()
+                    .map(|a| a.iter().filter_map(Value::as_f64).collect())
+                    .unwrap_or_default();
+                if let (Some(k), [x, y, w, h]) = (v["key"].as_str(), r.as_slice()) {
+                    out.insert(k.to_owned(), [*x, *y, *w, *h]);
+                }
+            }
+        }
+        out
+    }
+
+    /// Waits until window `key` has laid out at the size sway gave it: its zone spans it.
+    fn settle(&self, s: &Session, key: &str) -> Window {
+        let deadline = Instant::now() + timeout();
+        loop {
+            let w = self.window(s, key);
+            let r = self.rects(key);
+            let laid = ["tile", "manual", "plain", "zone"]
+                .iter()
+                .all(|k| r.contains_key(*k));
+            if laid && (r["zone"][2] - w.content.width).abs() < 1.0 {
+                return w;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "window {key} never laid out at {:?}: {r:?}",
+                w.content
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// A layout point inside element `el` of window `key`.
+    fn at(&self, s: &Session, key: &str, el: &str, fx: f64, fy: f64) -> (f64, f64) {
+        let w = self.settle(s, key);
+        let r = self.rects(key)[el];
+        (
+            w.content.x + r[0] + r[2] * fx,
+            w.content.y + r[1] + r[3] * fy,
+        )
+    }
+
+    /// Gives window `key` keyboard focus through sway and waits until the app has heard it
+    /// settle. On Xwayland, the click that focuses an unfocused window brings focus in, out
+    /// and in again (W3's `harness-window` shows it too, with no shim), and Rune cancels a
+    /// press that lands inside it: a drag from that press never starts. So the window is
+    /// focused before the press, not by it.
+    fn focus(&self, s: &Session, key: &str) {
+        let w = self.window(s, key);
+        if !w.focused {
+            s.focus(&w);
+        }
+        let last_focus = || {
+            self.lines()
+                .iter()
+                .enumerate()
+                .rev()
+                .find(|(_, v)| v["ev"] == "focus" && v["window"] == key)
+                .map(|(i, v)| (i, v["focused"] == true))
+        };
+        let deadline = Instant::now() + timeout();
+        loop {
+            let before = last_focus();
+            std::thread::sleep(Duration::from_millis(250));
+            let after = last_focus();
+            if before == after && after.is_some_and(|(_, f)| f) {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "window {key} never settled focused: {after:?}"
+            );
+        }
+    }
+
+    /// Moves the pointer onto element `el` until the app has the pointer there: `plain` logs
+    /// its hover, so the pointer goes there first.
+    fn point(&self, s: &Session, key: &str, el: &str) -> (f64, f64) {
+        let plain = self.at(s, key, "plain", 0.5, 0.5);
+        let mark = self.app.line_count();
+        s.point_until(plain, || {
+            self.lines()
+                .iter()
+                .skip(mark)
+                .any(|v| v["ev"] == "plain-hover" && v["over"] == true && v["window"] == key)
+        });
+        let to = self.at(s, key, el, 0.5, 0.5);
+        s.input().pointer_move(to);
+        to
+    }
+
+    fn offer(&self, offers: &[Offer], actions: &[&str], local: Option<&str>, icon: Option<&str>) {
+        self.command(
+            json!({ "cmd": "offer", "offers": offers, "actions": actions, "local": local, "icon": icon }),
+            "offered",
+        );
+    }
+
+    fn zone(&self, window: Option<&str>, zone: Value) {
+        let mut cmd = zone;
+        cmd["cmd"] = json!("zone");
+        if let Some(w) = window {
+            cmd["window"] = json!(w);
+        }
+        self.command(cmd, "zoned");
+    }
+
+    fn no_errors(&self) {
+        let bad: Vec<String> = self
+            .app
+            .lines()
+            .into_iter()
+            .filter(|l| {
+                [
+                    "diagnostic",
+                    "drag-error",
+                    "attach-error",
+                    "exit-error",
+                    "bad-command",
+                ]
+                .iter()
+                .any(|e| l.contains(&format!("\"{e}\"")))
+            })
+            .collect();
+        assert!(bad.is_empty(), "the app reported errors: {bad:?}");
+    }
+
+    fn quit(mut self) {
+        let at = self.send(json!({ "cmd": "quit", "window": "main" }));
+        self.wait(at, "the shutdown", |v| v["ev"] == "shutdown");
+        let status = self.app.wait_exit();
+        assert!(status.success(), "the app exited with {status}");
+        self.no_errors();
+    }
+}
+
+/// A peer with its window mapped, tiled beside the app's.
+fn peer_beside(s: &Session, display: Display, demo: &Demo) -> (Peer, Window) {
+    let peer = s.peer(display);
+    peer.map("p1 peer");
+    let windows = s.wait_windows(&[peer.pid(), demo.app.pid()]);
+    let w = windows
+        .iter()
+        .find(|w| w.pid == peer.pid())
+        .expect("the peer's window")
+        .clone();
+    peer.sync();
+    (peer, w)
+}
+
+/// Presses on `el` of the app's main window, focused first, and waits until the app has
+/// the press.
+fn press_on(s: &Session, demo: &Demo, el: &str) -> usize {
+    demo.focus(s, "main");
+    demo.point(s, "main", el);
+    let mark = demo.app.line_count();
+    s.input().button(true);
+    let phase = if el == "manual" {
+        "manual-phase"
+    } else {
+        "tile-phase"
+    };
+    demo.wait(mark, "the press", |v| {
+        v["ev"] == phase && v["phase"] == "Down"
+    });
+    mark
+}
+
+/// Presses on the peer's window, focused first through sway (see [`Demo::focus`]: a click
+/// that focuses an unfocused Xwayland window can lose its press), and waits until the peer
+/// has the press.
+fn press_on_peer(s: &Session, peer: &Peer, window: &Window) {
+    let w = s.wait_window_where("the peer's window", |w| w.id == window.id);
+    if !w.focused {
+        s.focus(&w);
+    }
+    // Settled: sway has it focused, and the peer heard no focus change for a while.
+    let deadline = Instant::now() + timeout();
+    loop {
+        let mark = peer.line_count();
+        std::thread::sleep(Duration::from_millis(250));
+        peer.sync();
+        let quiet = !peer.saw_since(mark, Duration::ZERO, |e| matches!(e, Event::Focus { .. }));
+        let focused = s
+            .wait_window_where("the peer's window", |w| w.id == window.id)
+            .focused;
+        if focused && quiet {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the peer's window never settled focused"
+        );
+    }
+    s.point_at(peer, window.at(0.5, 0.5));
+    s.input().button(true);
+    wait_peer(peer, "the press", |e| {
+        matches!(e, Event::PointerButton { pressed: true })
+    });
+}
+
+fn wait_peer(peer: &Peer, what: &str, pred: impl Fn(&Event) -> bool) -> Event {
+    peer.wait_event(what, pred)
+}
+
+fn three() -> Vec<Offer> {
+    vec![
+        Offer::text(
+            URI_LIST,
+            "file:///tmp/p1/alpha.txt\r\nfile:///tmp/p1/b%20c.txt\r\n",
+        ),
+        Offer::text(TEXT, "hello from p1"),
+        Offer {
+            mime: PNG.into(),
+            data: Payload::Pattern {
+                len: 1 << 20,
+                seed: 7,
+            },
+        },
+    ]
+}
+
+/// The five types content drops take, from the peer. `text/x-moz-url` is UTF-16, as
+/// Firefox sends it, so it goes in a file.
+fn five(s: &Session) -> Vec<Offer> {
+    let moz: Vec<u8> = "https://example.com/\nExample"
+        .encode_utf16()
+        .flat_map(u16::to_le_bytes)
+        .collect();
+    let path = s.runtime_dir().join("moz-url");
+    std::fs::write(&path, moz).expect("the x-moz-url file");
+    vec![
+        Offer::text(URI_LIST, "file:///tmp/p1/alpha.txt\r\n"),
+        Offer::text(TEXT, "dropped text"),
+        Offer {
+            mime: MOZ_URL.into(),
+            data: Payload::File(path),
+        },
+        Offer {
+            mime: PNG.into(),
+            data: Payload::Pattern {
+                len: 64 << 10,
+                seed: 3,
+            },
+        },
+        Offer::text(HTML, "<a href=\"https://example.com/\">Example</a>"),
+    ]
+}
+
+// ---- drag out ----
+
+fn drag_out_three_types(display: Display) {
+    let s = Session::start();
+    let demo = Demo::start(&s, display, false);
+    let (peer, to) = peer_beside(&s, display, &demo);
+    let offers = three();
+    demo.offer(&offers, &["copy", "move"], None, Some("snapshot"));
+    peer.accept_drops_with(
+        &mimes(&offers),
+        &[Action::Copy, Action::Move],
+        Action::Copy,
+        true,
+        None,
+    );
+    let mark = press_on(&s, &demo, "tile");
+    s.input().path(to.at(0.5, 0.5));
+    demo.wait(mark, "the drag starting", |v| v["ev"] == "drag-start");
+    wait_peer(&peer, "the drag entering the peer", |e| {
+        matches!(e, Event::DropEnter { .. })
+    });
+    let peer_mark = peer.line_count();
+    s.input().button(false);
+    // The peer reads them all at once, and on X11 they finish in any order.
+    for o in &offers {
+        let got = peer.event_since(
+            peer_mark,
+            &format!("{} dropped", o.mime),
+            |e| matches!(e, Event::Dropped { mime, .. } if *mime == o.mime),
+        );
+        let Event::Dropped { data, action, .. } = got else {
+            unreachable!()
+        };
+        assert_eq!(data.fnv1a64, fnv(o), "{}", o.mime);
+        assert_eq!(action, Some(Action::Copy));
+    }
+    let (_, end) = demo.wait(mark, "the outcome", |v| v["ev"] == "drag-end");
+    assert_eq!(end["outcome"], "copied", "{end}");
+    // Each lazy writer ran once, though the peer read each type once only.
+    for o in &offers {
+        let runs = demo
+            .lines()
+            .iter()
+            .filter(|v| v["ev"] == "writer" && v["mime"] == o.mime.as_str())
+            .count();
+        assert_eq!(runs, 1, "{}'s writer", o.mime);
+    }
+    // Nothing of the drag reaches the tile's own handler after it started.
+    let after_start: Vec<Value> = demo
+        .lines()
+        .into_iter()
+        .skip_while(|v| v["ev"] != "drag-start")
+        .filter(|v| v["ev"] == "tile-phase")
+        .collect();
+    assert!(after_start.is_empty(), "{after_start:?}");
+    demo.quit();
+}
+
+/// operations/drag-and-drop: "Dragged items are offered as … `text/uri-list`, so other
+/// applications can receive them" (the platform half: any MIME types, each read intact).
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn wayland_drag_out_offers_three_types_the_peer_reads() {
+    drag_out_three_types(Display::Wayland);
+}
+
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn x11_drag_out_offers_three_types_the_peer_reads() {
+    drag_out_three_types(Display::X11);
+}
+
+/// Rune's capture (U10, draft): on Wayland the drag's start ends it. The cancelled Up that
+/// P1's Escape brings arrives while the button is still held, so it isn't the compositor's
+/// focus bounce at the drop; the Escape reaches no key handler; and after the drop the
+/// pointer hovers again with no move reaching the element.
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn wayland_runes_capture_ends_when_the_drag_starts() {
+    let s = Session::start();
+    let demo = Demo::start(&s, Display::Wayland, false);
+    let (peer, to) = peer_beside(&s, Display::Wayland, &demo);
+    demo.offer(&[Offer::text(TEXT, "capture")], &["copy"], None, None);
+    peer.accept_drops(&[TEXT], &[Action::Copy], Action::Copy);
+    let mark = press_on(&s, &demo, "manual");
+    s.input().path(to.at(0.5, 0.5));
+    demo.wait(mark, "the drag starting", |v| v["ev"] == "drag-start");
+    let (up_at, up) = demo.wait(mark, "the capture ending, button held", |v| {
+        v["ev"] == "manual-phase" && v["phase"] == "Up"
+    });
+    assert_eq!(up["cancelled"], true, "{up}");
+    assert_eq!(up["owned"], true, "{up}");
+    s.input().button(false);
+    wait_peer(&peer, "the drop", |e| matches!(e, Event::Dropped { .. }));
+    demo.wait(mark, "the outcome", |v| v["ev"] == "drag-end");
+    // Back over the window, no button held.
+    let hover_mark = demo.app.line_count();
+    let plain = demo.at(&s, "main", "plain", 0.5, 0.5);
+    s.point_until(plain, || {
+        demo.lines()
+            .iter()
+            .skip(hover_mark)
+            .any(|v| v["ev"] == "plain-hover" && v["over"] == true)
+    });
+    let manual = demo.at(&s, "main", "manual", 0.5, 0.5);
+    s.input().path(manual);
+    s.input().path(plain);
+    let lines = demo.lines();
+    let after: Vec<&Value> = lines
+        .iter()
+        .skip(up_at + 1)
+        .filter(|v| v["ev"] == "manual-phase")
+        .collect();
+    assert!(
+        after.is_empty(),
+        "moves reached the element after the drag: {after:?}"
+    );
+    let escapes: Vec<&Value> = lines
+        .iter()
+        .filter(|v| v["ev"] == "key" && v["key"] == "Escape")
+        .collect();
+    assert!(
+        escapes.is_empty(),
+        "the synthetic Escape leaked: {escapes:?}"
+    );
+    demo.quit();
+}
+
+// ---- drop in ----
+
+fn drop_in_five_types(display: Display) {
+    let s = Session::start();
+    let demo = Demo::start(&s, display, false);
+    let (peer, from) = peer_beside(&s, display, &demo);
+    let offers = five(&s);
+    demo.zone(None, json!({ "mimes": mimes(&offers), "read_all": true }));
+    press_on_peer(&s, &peer, &from);
+    let mark = demo.app.line_count();
+    peer.drag_start(&offers, &[Action::Copy, Action::Move]);
+    let zone_at = demo.at(&s, "main", "zone", 0.5, 0.5);
+    s.input().path(zone_at);
+    let (_, hover) = demo.wait(mark, "the zone accepting", |v| {
+        v["ev"] == "hover"
+            && v["state"]
+                .as_str()
+                .is_some_and(|s| s.starts_with("accepting"))
+    });
+    assert_eq!(hover["mimes"], json!(mimes(&offers)), "{hover}");
+    // Every motion, in the zone's own points.
+    let (_, mv) = demo.wait(mark, "a motion", |v| v["ev"] == "move");
+    let zone = demo.rects("main")["zone"];
+    let (x, wx) = (
+        mv["x"].as_f64().unwrap_or(-1.0),
+        mv["wx"].as_f64().unwrap_or(-2.0),
+    );
+    assert!(
+        (x - (wx - zone[0])).abs() < 0.01,
+        "{mv} with the zone at {zone:?}"
+    );
+    s.input().button(false);
+    let (_, dropped) = demo.wait(mark, "the drop", |v| v["ev"] == "drop");
+    for o in &offers {
+        let item = dropped["items"]
+            .as_array()
+            .and_then(|a| a.iter().find(|i| i["mime"] == o.mime.as_str()))
+            .unwrap_or_else(|| panic!("{} not read: {dropped}", o.mime));
+        assert_eq!(item["fnv1a64"], fnv(o), "{}", o.mime);
+    }
+    assert_eq!(dropped["failed"], json!([]), "{dropped}");
+    assert_eq!(dropped["action"], "copy", "{dropped}");
+    demo.wait(mark, "the hover ending", |v| {
+        v["ev"] == "hover" && v["state"] == "left"
+    });
+    let fin = wait_peer(&peer, "the drag finishing", |e| {
+        matches!(e, Event::DragFinished { .. })
+    });
+    assert_eq!(
+        fin,
+        Event::DragFinished {
+            action: Some(Action::Copy)
+        }
+    );
+    demo.quit();
+}
+
+/// operations/drag-and-drop/content-drops: the platform half, every type read intact.
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn wayland_drop_in_reads_five_types() {
+    drop_in_five_types(Display::Wayland);
+}
+
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn x11_drop_in_reads_five_types() {
+    drop_in_five_types(Display::X11);
+}
+
+// ---- actions ----
+
+/// A drag out with `held` modifier held from before the press; the outcome.
+fn drag_out_with(
+    s: &Session,
+    demo: &Demo,
+    to: &Window,
+    held: Option<&str>,
+    mid: Option<&str>,
+) -> String {
+    if let Some(m) = held {
+        s.input().key_down(m);
+    }
+    let mark = press_on(s, demo, "tile");
+    let half = (
+        (to.at(0.5, 0.5).0 + demo.at(s, "main", "tile", 0.5, 0.5).0) / 2.0,
+        to.at(0.5, 0.5).1,
+    );
+    s.input().path(half);
+    demo.wait(mark, "the drag starting", |v| v["ev"] == "drag-start");
+    if let Some(m) = mid {
+        s.input().key_down(m);
+    }
+    s.input().path(to.at(0.5, 0.5));
+    // Let the peer hear a position with the modifiers as they are now.
+    std::thread::sleep(Duration::from_millis(150));
+    s.input().button(false);
+    for m in held.into_iter().chain(mid) {
+        s.input().key_up(m);
+    }
+    let (_, end) = demo.wait(mark, "the outcome", |v| v["ev"] == "drag-end");
+    end["outcome"].as_str().unwrap_or_default().to_owned()
+}
+
+/// operations/drag-and-drop/copy-or-move: "Holding Ctrl at the drop copies and holding
+/// Shift moves" (the source's half). On Wayland the modifiers at the start narrow what the
+/// source offers; on X11 the proposed action follows them, through the drag.
+fn actions_follow_modifiers_on_drag_out(display: Display) {
+    let s = Session::start();
+    let demo = Demo::start(&s, display, false);
+    let (peer, to) = peer_beside(&s, display, &demo);
+    demo.offer(
+        &[Offer::text(TEXT, "act")],
+        &["copy", "move"],
+        None,
+        Some("image"),
+    );
+    // The peer prefers move: a plain drag shows what the source lets it take.
+    peer.accept_drops(&[TEXT], &[Action::Copy, Action::Move], Action::Move);
+    let plain = drag_out_with(&s, &demo, &to, None, None);
+    let ctrl = drag_out_with(&s, &demo, &to, Some("ctrl"), None);
+    let shift = drag_out_with(&s, &demo, &to, Some("shift"), None);
+    match display {
+        Display::Wayland => {
+            assert_eq!(
+                plain, "moved",
+                "copy and move offered: the target's preference"
+            );
+            assert_eq!(ctrl, "copied", "Ctrl offers copy only");
+            assert_eq!(shift, "moved", "Shift offers move only");
+        }
+        _ => {
+            assert_eq!(
+                plain, "copied",
+                "a plain drag proposes copy, which the peer takes"
+            );
+            assert_eq!(ctrl, "copied");
+            assert_eq!(shift, "moved", "Shift proposes move");
+            let late = drag_out_with(&s, &demo, &to, None, Some("shift"));
+            assert_eq!(late, "moved", "Shift pressed during the drag proposes move");
+        }
+    }
+    demo.quit();
+}
+
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn wayland_drag_out_actions_follow_the_modifiers_at_the_start() {
+    actions_follow_modifiers_on_drag_out(Display::Wayland);
+}
+
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn x11_drag_out_actions_follow_the_modifiers() {
+    actions_follow_modifiers_on_drag_out(Display::X11);
+}
+
+/// A peer drag over the zone, dropped, with `held` held from before it reaches the zone.
+/// The app's drop line and the peer's finish.
+fn drop_in_with(
+    s: &Session,
+    demo: &Demo,
+    peer: &Peer,
+    from: &Window,
+    actions: &[Action],
+    held: Option<&str>,
+) -> (Value, Event) {
+    press_on_peer(s, peer, from);
+    let mark = demo.app.line_count();
+    peer.drag_start(&[Offer::text(URI_LIST, "file:///tmp/p1/x\r\n")], actions);
+    if let Some(m) = held {
+        s.input().key_down(m);
+    }
+    s.input().path(demo.at(s, "main", "zone", 0.5, 0.5));
+    demo.wait(mark, "the zone hovered", |v| {
+        v["ev"] == "hover" && v["state"] != "left"
+    });
+    std::thread::sleep(Duration::from_millis(150));
+    s.input().button(false);
+    if let Some(m) = held {
+        s.input().key_up(m);
+    }
+    let (_, dropped) = demo.wait(mark, "the drop", |v| v["ev"] == "drop");
+    let fin = wait_peer(peer, "the drag finishing", |e| {
+        matches!(e, Event::DragFinished { .. })
+    });
+    (dropped, fin)
+}
+
+/// The target's half of the action: Shift on X11 (known there); on Wayland a drag from
+/// another client brings no modifiers, so the compositor's action stands (the owner's
+/// ruling: a known limit); and an ask, answered after the drop.
+fn actions_on_drop_in(display: Display) {
+    let s = Session::start();
+    let demo = Demo::start(&s, display, false);
+    let (peer, from) = peer_beside(&s, display, &demo);
+    demo.zone(None, json!({ "mimes": [URI_LIST] }));
+    let (dropped, fin) = drop_in_with(
+        &s,
+        &demo,
+        &peer,
+        &from,
+        &[Action::Copy, Action::Move],
+        Some("shift"),
+    );
+    match display {
+        Display::X11 => {
+            assert_eq!(dropped["action"], "move", "{dropped}");
+            assert_eq!(dropped["mods"]["shift"], true, "{dropped}");
+            assert_eq!(
+                fin,
+                Event::DragFinished {
+                    action: Some(Action::Move)
+                }
+            );
+        }
+        _ => {
+            assert_eq!(
+                dropped["mods"],
+                Value::Null,
+                "no modifiers from another client: {dropped}"
+            );
+            assert_eq!(dropped["action"], "copy", "{dropped}");
+            assert_eq!(
+                fin,
+                Event::DragFinished {
+                    action: Some(Action::Copy)
+                }
+            );
+        }
+    }
+    // An ask, answered with move after the drop (on Wayland, S1's confirmation first).
+    demo.zone(
+        None,
+        json!({ "mimes": [URI_LIST], "action": "ask", "ask_answer": "move" }),
+    );
+    let mark = demo.app.line_count();
+    let (dropped, fin) = drop_in_with(
+        &s,
+        &demo,
+        &peer,
+        &from,
+        &[Action::Copy, Action::Move, Action::Ask],
+        None,
+    );
+    demo.wait(mark, "the ask", |v| v["ev"] == "ask");
+    assert_eq!(dropped["action"], "move", "{dropped}");
+    assert_eq!(
+        fin,
+        Event::DragFinished {
+            action: Some(Action::Move)
+        }
+    );
+    demo.quit();
+}
+
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn wayland_drop_in_takes_the_compositors_action_and_answers_an_ask() {
+    actions_on_drop_in(Display::Wayland);
+}
+
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn x11_drop_in_action_follows_shift_and_answers_an_ask() {
+    actions_on_drop_in(Display::X11);
+}
+
+// ---- cancel ----
+
+/// operations/drag-and-drop: "Releasing outside every drop target ends the drag without
+/// transferring"; a drag cancelled by the app; on X11 by Escape; and a drag in that leaves.
+fn cancelled_drags(display: Display) {
+    let s = Session::start();
+    let demo = Demo::start(&s, display, false);
+    let (peer, to) = peer_beside(&s, display, &demo);
+    // Over nothing that takes it: the zone reads uri-lists only.
+    demo.offer(&[Offer::text(TEXT, "nowhere")], &["copy"], None, None);
+    peer.accept_drops(&[TEXT], &[Action::Copy], Action::Copy);
+    let mark = press_on(&s, &demo, "tile");
+    s.input().path(demo.at(&s, "main", "zone", 0.5, 0.5));
+    demo.wait(mark, "the drag starting", |v| v["ev"] == "drag-start");
+    s.input().button(false);
+    let (_, end) = demo.wait(mark, "the outcome", |v| v["ev"] == "drag-end");
+    assert_eq!(end["outcome"], "cancelled", "{end}");
+    // Cancelled by the app, over a peer that would take it.
+    let mark = press_on(&s, &demo, "tile");
+    s.input().path(to.at(0.5, 0.5));
+    demo.wait(mark, "the drag starting", |v| v["ev"] == "drag-start");
+    wait_peer(&peer, "the drag over the peer", |e| {
+        matches!(e, Event::DropEnter { .. })
+    });
+    let peer_mark = peer.line_count();
+    demo.command(json!({ "cmd": "cancel", "window": "main" }), "cancel-sent");
+    let (_, end) = demo.wait(mark, "the outcome", |v| v["ev"] == "drag-end");
+    assert_eq!(end["outcome"], "cancelled", "{end}");
+    s.input().button(false);
+    assert!(
+        !peer.saw_since(peer_mark, Duration::from_millis(500), |e| {
+            matches!(e, Event::Dropped { .. })
+        }),
+        "a cancelled drag dropped"
+    );
+    if display == Display::X11 {
+        // Escape reaches Rune's window (it has focus; the X11 source grabs nothing).
+        let mark = press_on(&s, &demo, "tile");
+        s.input().path(to.at(0.5, 0.5));
+        demo.wait(mark, "the drag starting", |v| v["ev"] == "drag-start");
+        s.input().key("Escape");
+        let (_, end) = demo.wait(mark, "the outcome", |v| v["ev"] == "drag-end");
+        assert_eq!(end["outcome"], "cancelled", "{end}");
+        s.input().button(false);
+    }
+    // A drag in that leaves the zone and drops elsewhere: the zone hears it leave, no drop.
+    let from = to;
+    demo.zone(None, json!({ "mimes": [URI_LIST] }));
+    press_on_peer(&s, &peer, &from);
+    let mark = demo.app.line_count();
+    peer.drag_start(
+        &[Offer::text(URI_LIST, "file:///tmp/p1/x\r\n")],
+        &[Action::Copy],
+    );
+    s.input().path(demo.at(&s, "main", "zone", 0.5, 0.5));
+    demo.wait(mark, "the zone hovered", |v| {
+        v["ev"] == "hover" && v["state"] != "left"
+    });
+    s.input().path(from.at(0.5, 0.5));
+    demo.wait(mark, "the hover ending", |v| {
+        v["ev"] == "hover" && v["state"] == "left"
+    });
+    s.input().button(false);
+    std::thread::sleep(Duration::from_millis(300));
+    let drops = demo
+        .lines()
+        .iter()
+        .skip(mark)
+        .filter(|v| v["ev"] == "drop")
+        .count();
+    assert_eq!(drops, 0, "a drag that left dropped");
+    demo.quit();
+}
+
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn wayland_cancelled_drags_transfer_nothing() {
+    cancelled_drags(Display::Wayland);
+}
+
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn x11_cancelled_drags_transfer_nothing() {
+    cancelled_drags(Display::X11);
+}
+
+// ---- in-process ----
+
+/// A drag between two windows of the app carries the typed payload: nothing is read.
+fn in_process_typed_payload(display: Display) {
+    let s = Session::start();
+    let demo = Demo::start(&s, display, true);
+    // Tiled side by side: both windows are the app's.
+    let deadline = Instant::now() + timeout();
+    while demo
+        .window(&s, "main")
+        .content
+        .overlaps(&demo.window(&s, "second").content)
+    {
+        assert!(
+            Instant::now() < deadline,
+            "the two windows never tiled apart"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    demo.offer(
+        &[Offer::text(URI_LIST, "file:///tmp/p1/local\r\n")],
+        &["copy", "move"],
+        Some("payload-42"),
+        None,
+    );
+    demo.zone(
+        Some("second"),
+        json!({ "mimes": [URI_LIST], "local": true }),
+    );
+    let mark = press_on(&s, &demo, "tile");
+    s.input().path(demo.at(&s, "second", "zone", 0.5, 0.5));
+    demo.wait(mark, "the drag starting", |v| v["ev"] == "drag-start");
+    let (_, hover) = demo.wait(mark, "the second window's zone hovered", |v| {
+        v["ev"] == "hover" && v["window"] == "second" && v["state"] != "left"
+    });
+    assert_eq!(hover["local"], true, "{hover}");
+    s.input().button(false);
+    let (_, dropped) = demo.wait(mark, "the drop", |v| {
+        v["ev"] == "drop" && v["window"] == "second"
+    });
+    assert_eq!(dropped["local"], "payload-42", "{dropped}");
+    assert_eq!(dropped["items"], json!([]), "nothing read: {dropped}");
+    let (_, end) = demo.wait(mark, "the outcome", |v| {
+        v["ev"] == "drag-end" && v["window"] == "main"
+    });
+    assert_eq!(end["outcome"], "copied", "{end}");
+    let writers = demo
+        .lines()
+        .iter()
+        .skip(mark)
+        .filter(|v| v["ev"] == "writer")
+        .count();
+    assert_eq!(writers, 0, "a type was written for an in-process drop");
+    demo.quit();
+}
+
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn wayland_in_process_drag_carries_the_typed_payload() {
+    in_process_typed_payload(Display::Wayland);
+}
+
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn x11_in_process_drag_carries_the_typed_payload() {
+    in_process_typed_payload(Display::X11);
+}

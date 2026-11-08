@@ -173,6 +173,8 @@ pub struct DropPolicy {
     pub mimes: Vec<String>,
     pub actions: Vec<Action>,
     pub preferred: Action,
+    pub read_all: bool,
+    pub ask_answer: Option<Action>,
 }
 
 /// The drag over the peer's window, as a drop target.
@@ -180,6 +182,9 @@ pub struct Drop {
     offer: WlDataOffer,
     mime: Option<String>,
     action: Option<Action>,
+    /// Every type to read at the drop (the accepted one first).
+    reads: Vec<String>,
+    ask_answer: Option<Action>,
 }
 
 fn flags(action: Action) -> DndAction {
@@ -373,6 +378,17 @@ impl Dispatch<WlDataDevice, ()> for St {
                     };
                     offer.set_actions(actions, preferred);
                 }
+                let reads = match (&mime, &policy) {
+                    (Some(_), Some(p)) if p.read_all => p
+                        .mimes
+                        .iter()
+                        .filter(|m| mimes.contains(m))
+                        .cloned()
+                        .collect(),
+                    (Some(m), _) => vec![m.clone()],
+                    _ => Vec::new(),
+                };
+                let ask_answer = policy.as_ref().and_then(|p| p.ask_answer);
                 out::event(Event::DropEnter {
                     mimes,
                     proxied: false,
@@ -381,6 +397,8 @@ impl Dispatch<WlDataDevice, ()> for St {
                     offer,
                     mime,
                     action: None,
+                    reads,
+                    ask_answer,
                 });
             }
             wl_data_device::Event::Motion { x, y, .. } => {
@@ -403,36 +421,55 @@ impl Dispatch<WlDataDevice, ()> for St {
     }
 }
 
-/// Reads a drop on a thread, then finishes the offer and reports what arrived.
+/// Reads a drop on a thread (every type it reads, in order), then finishes the offer and
+/// reports what arrived.
 fn read_drop(d: Drop, conn: Connection) {
-    let Some(mime) = d.mime else {
+    if d.mime.is_none() {
         d.offer.destroy();
         return;
-    };
-    let pipe = std::io::pipe();
-    let (mut reader, writer) = match pipe {
-        Ok(p) => p,
-        Err(e) => return out::error(format!("drop pipe: {e}")),
-    };
-    d.offer.receive(mime.clone(), writer.as_fd());
+    }
+    let mut readers = Vec::new();
+    for mime in &d.reads {
+        let (reader, writer) = match std::io::pipe() {
+            Ok(p) => p,
+            Err(e) => return out::error(format!("drop pipe: {e}")),
+        };
+        d.offer.receive(mime.clone(), writer.as_fd());
+        drop(writer);
+        readers.push((mime.clone(), reader));
+    }
     let _ = conn.flush();
-    drop(writer);
     std::thread::spawn(move || {
-        let mut data = Vec::new();
-        if let Err(e) = reader.read_to_end(&mut data) {
-            out::error(format!("reading the drop: {e}"));
+        let mut got = Vec::new();
+        for (mime, mut reader) in readers {
+            let mut data = Vec::new();
+            if let Err(e) = reader.read_to_end(&mut data) {
+                out::error(format!("reading the drop: {e}"));
+            }
+            got.push((mime, data));
         }
-        // finish is only valid once an action was chosen.
-        if d.offer.version() >= 3 && d.action.is_some() {
+        // An ask drop is settled with one action before it may finish.
+        let mut action = d.action;
+        if action == Some(Action::Ask)
+            && let Some(a) = d.ask_answer
+            && d.offer.version() >= 3
+        {
+            d.offer.set_actions(flags(a), flags(a));
+            action = Some(a);
+        }
+        // finish is only valid once an action (not ask) was chosen.
+        if d.offer.version() >= 3 && action.is_some_and(|a| a != Action::Ask) {
             d.offer.finish();
         }
         d.offer.destroy();
         let _ = conn.flush();
-        out::event(Event::Dropped {
-            mime,
-            action: d.action,
-            data: out::received(&data),
-        });
+        for (mime, data) in got {
+            out::event(Event::Dropped {
+                mime,
+                action,
+                data: out::received(&data),
+            });
+        }
     });
 }
 

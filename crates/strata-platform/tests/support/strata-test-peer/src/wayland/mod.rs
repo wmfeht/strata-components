@@ -273,11 +273,15 @@ impl St {
                 mimes,
                 actions,
                 preferred,
+                read_all,
+                ask_answer,
             } => {
                 self.drop_policy = (!mimes.is_empty()).then_some(data::DropPolicy {
                     mimes,
                     actions,
                     preferred,
+                    read_all,
+                    ask_answer,
                 });
                 out::ok(id);
                 Ok(())

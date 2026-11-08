@@ -6,7 +6,7 @@ use std::hash::{Hash, Hasher};
 
 use rune::{Live, Pixels};
 
-use super::queue::Viewer;
+use super::queue::{Queued, Viewer};
 use super::step::Step;
 use crate::contract::ThumbKey;
 
@@ -294,7 +294,23 @@ pub(super) struct Inner {
     pub wanted: HashMap<ThumbKey, Step>,
     /// Keys whose result the budget dropped: not asked again until the next sync.
     pub deferred: HashSet<ThumbKey>,
+    /// Bytes held for keys some viewer wants or protects: what a margin result may not evict.
+    pub pinned: usize,
+    /// The bytes margin requests out may bring (each at its step's largest), by key.
+    pub margin_out: HashMap<ThumbKey, usize>,
+    pub margin_out_bytes: usize,
+    /// `pop`'s ranked keys, and how far it has gone through them. Rebuilt only when `dirty`.
+    pub queue: Vec<Queued>,
+    pub cursor: usize,
+    pub dirty: bool,
+    /// The earliest time a failed key skipped by the queue may be asked again.
+    pub next_expiry: f64,
+    /// A margin key waited for room since the queue was built.
+    pub gated: bool,
     pub prune_slack: usize,
+    /// Keys `pop` has looked at, for the tests that hold its cost.
+    #[cfg(test)]
+    pub scans: usize,
 }
 
 impl ThumbnailStore {
@@ -316,7 +332,17 @@ impl ThumbnailStore {
                 protected: HashSet::new(),
                 wanted: HashMap::new(),
                 deferred: HashSet::new(),
+                pinned: 0,
+                margin_out: HashMap::new(),
+                margin_out_bytes: 0,
+                queue: Vec::new(),
+                cursor: 0,
+                dirty: true,
+                next_expiry: f64::INFINITY,
+                gated: false,
                 prune_slack: PRUNE_SLACK,
+                #[cfg(test)]
+                scans: 0,
             }),
         }
     }
@@ -326,11 +352,16 @@ impl ThumbnailStore {
         self.inner.borrow().settings
     }
 
-    /// Changes the settings. A smaller budget evicts at once (rows on screen aside).
+    /// Changes the settings. A smaller budget evicts at once (rows on screen aside). A new
+    /// margin applies at each viewer's next sync, even of an unchanged viewport.
     pub fn set_settings(&mut self, settings: Settings) {
         let inner = self.inner.get_mut();
         inner.settings = settings;
+        for w in inner.viewers.iter_mut().flatten() {
+            w.stale();
+        }
         inner.enforce();
+        inner.dirty = true;
     }
 
     /// The key's handles, made the first time anything asks: call it while building the row
@@ -415,11 +446,13 @@ impl ThumbnailStore {
             return Landed::Dropped(Why::Cancelled);
         }
         inner.in_flight.remove(&ticket.key);
+        inner.unmargin(ticket.key);
         let retry = now + inner.settings.retry_after;
         let entry = inner.entries.get_mut(&ticket.key).expect("checked above");
         let (width, height, rgba) = match outcome {
             Outcome::Failed => {
                 entry.job = Job::Failed { until: retry };
+                inner.next_expiry = inner.next_expiry.min(retry);
                 return Landed::Failed;
             }
             Outcome::Stopped => {
@@ -441,6 +474,7 @@ impl ThumbnailStore {
                 == Some(rgba.len());
         if !fits {
             entry.job = Job::Failed { until: retry };
+            inner.next_expiry = inner.next_expiry.min(retry);
             return Landed::Dropped(Why::Invalid);
         }
         entry.job = Job::Idle;
@@ -451,12 +485,23 @@ impl ThumbnailStore {
             height,
         };
         let old = inner.entries[&ticket.key].held.map_or(0, Held::bytes);
-        inner.make_room(ticket.key, old, new.bytes());
-        if !protected && inner.bytes - old + new.bytes() > inner.settings.budget_bytes {
-            inner.deferred.insert(ticket.key);
-            return Landed::Dropped(Why::Budget);
+        let pinned = inner.is_pinned(ticket.key);
+        // Rows on screen win over the budget. Anything else lands only if it fits once the
+        // images nobody wants are evicted: it never evicts a key some viewer still wants, which
+        // would only be asked for again (and evicts nothing when it won't fit anyway).
+        if !protected {
+            let free = inner.bytes - inner.pinned - if pinned { 0 } else { old };
+            let after = inner.bytes - old + new.bytes();
+            if after.saturating_sub(free) > inner.settings.budget_bytes {
+                inner.deferred.insert(ticket.key);
+                return Landed::Dropped(Why::Budget);
+            }
         }
+        inner.make_room(ticket.key, old, new.bytes(), protected);
         inner.bytes = inner.bytes - old + new.bytes();
+        if pinned {
+            inner.pinned = inner.pinned - old + new.bytes();
+        }
         let entry = inner.entries.get_mut(&ticket.key).expect("checked above");
         entry.held = Some(new);
         entry.thumb.pixels.set(width, height, rgba);
@@ -477,16 +522,19 @@ impl ThumbnailStore {
 
     /// The file operation that stopped thumbnails ended: stopped keys are asked for again.
     pub fn requeue_stopped(&mut self) {
-        for e in self.inner.get_mut().entries.values_mut() {
+        let inner = self.inner.get_mut();
+        for e in inner.entries.values_mut() {
             if e.job == Job::Stopped {
                 e.job = Job::Idle;
             }
         }
+        inner.dirty = true;
     }
 
     /// Moves what `from` holds to `to`, keeping its handles (an inline rename that kept the
     /// thumbnail's content, as the host judges it). True if `from` was there to move. A
-    /// request out for `from` is cancelled, and what `to` held is replaced.
+    /// request out for `from` is cancelled, and what `to` held is replaced. Viewers that showed
+    /// `from` show `to` until their next sync, so its protection moves with it.
     pub fn relocate(&mut self, from: ThumbKey, to: ThumbKey) -> bool {
         let inner = self.inner.get_mut();
         if from == to || !inner.entries.contains_key(&from) {
@@ -503,6 +551,11 @@ impl ThumbnailStore {
             inner.lru.insert(entry.stamp, to);
         }
         inner.entries.insert(to, entry);
+        for w in inner.viewers.iter_mut().flatten() {
+            w.rename(from, to);
+        }
+        inner.rewant();
+        inner.enforce();
         true
     }
 
@@ -515,6 +568,7 @@ impl ThumbnailStore {
             return false;
         }
         inner.enabled = on;
+        inner.dirty = true;
         if !on {
             let keys: Vec<ThumbKey> = inner.in_flight.iter().copied().collect();
             for key in keys {
@@ -573,9 +627,34 @@ impl Inner {
             .sum()
     }
 
+    /// Whether some viewer wants or protects `key`.
+    pub fn is_pinned(&self, key: ThumbKey) -> bool {
+        self.wanted.contains_key(&key) || self.protected.contains(&key)
+    }
+
+    /// Recounts the bytes held for keys some viewer wants or protects.
+    pub fn repin(&mut self) {
+        let held = |k: &ThumbKey| {
+            self.entries
+                .get(k)
+                .and_then(|e| e.held)
+                .map_or(0, Held::bytes)
+        };
+        let wanted: usize = self.wanted.keys().map(held).sum();
+        let only_protected: usize = self
+            .protected
+            .iter()
+            .filter(|k| !self.wanted.contains_key(k))
+            .map(held)
+            .sum();
+        self.pinned = wanted + only_protected;
+    }
+
     /// Empties `key`'s image in place (its handles stay, so a row still drawing them shows
     /// the icon again).
     pub fn evict(&mut self, key: ThumbKey) {
+        let pinned = self.is_pinned(key);
+        let wanted = self.wanted.contains_key(&key);
         let Some(e) = self.entries.get_mut(&key) else {
             return;
         };
@@ -586,34 +665,60 @@ impl Inner {
         self.bytes -= held.bytes();
         e.thumb.pixels.set(0, 0, Vec::new());
         e.thumb.icon_alpha.set(1.0);
+        if pinned {
+            self.pinned -= held.bytes();
+        }
+        if wanted {
+            // Wanted and empty again: the queue asks for it.
+            self.dirty = true;
+        }
     }
 
-    /// The least recently touched held key that isn't protected and isn't `except`.
-    fn victim(&self, except: Option<ThumbKey>) -> Option<ThumbKey> {
+    /// The least recently touched held key that isn't protected and isn't `except`: one no
+    /// viewer wants first, else (when `wanted_too`) one in a margin.
+    fn victim(&self, except: Option<ThumbKey>, wanted_too: bool) -> Option<ThumbKey> {
+        let evictable = |k: &ThumbKey| Some(*k) != except && !self.protected.contains(k);
         self.lru
             .values()
             .copied()
-            .find(|k| Some(*k) != except && !self.protected.contains(k))
+            .find(|k| evictable(k) && !self.wanted.contains_key(k))
+            .or_else(|| {
+                wanted_too
+                    .then(|| self.lru.values().copied().find(evictable))
+                    .flatten()
+            })
     }
 
     /// Evicts until `key`'s image, growing from `old` to `new` bytes, fits the budget, or
-    /// nothing evictable is left.
-    fn make_room(&mut self, key: ThumbKey, old: usize, new: usize) {
+    /// nothing evictable is left. Margin images go only for a row on screen (`for_screen`).
+    fn make_room(&mut self, key: ThumbKey, old: usize, new: usize, for_screen: bool) {
         while self.bytes - old + new > self.settings.budget_bytes {
-            let Some(victim) = self.victim(Some(key)) else {
+            let Some(victim) = self.victim(Some(key), for_screen) else {
                 return;
             };
             self.evict(victim);
         }
     }
 
-    /// Evicts until the budget holds, or only protected images are left.
+    /// Evicts until the budget holds, or only protected images are left: images no viewer
+    /// wants first, then margins.
     pub fn enforce(&mut self) {
         while self.bytes > self.settings.budget_bytes {
-            let Some(victim) = self.victim(None) else {
+            let Some(victim) = self.victim(None, true) else {
                 return;
             };
             self.evict(victim);
+        }
+    }
+
+    /// Forgets a margin request's room, once it ended.
+    pub fn unmargin(&mut self, key: ThumbKey) {
+        if let Some(b) = self.margin_out.remove(&key) {
+            self.margin_out_bytes -= b;
+            if self.gated {
+                // A margin key waited for room: look again.
+                self.dirty = true;
+            }
         }
     }
 
@@ -626,6 +731,8 @@ impl Inner {
             e.job = Job::Idle;
             self.in_flight.remove(&key);
             self.cancelled.push(Ticket { key, step, n });
+            self.unmargin(key);
+            self.dirty = true;
         }
     }
 }

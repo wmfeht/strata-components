@@ -18,10 +18,11 @@
 //! | Key | Says |
 //! | --- | --- |
 //! | `c25-status` | What the rows on screen show, and the bytes held against the budget |
-//! | `c25-order` | The first requests since the worker last went idle, in order, and the direction |
+//! | `c25-order` | The first requests since the worker last went idle, and the direction |
 //! | `c25-span` | The rows asked for since then, around the rows on screen |
-//! | `c25-work` | Totals: renders, failures, cancellations, late results dropped, stops, and the view's runs while the last thumbnails landed |
-//! | `c25-snapshot` | The `c25-status` and `c25-work` lines as S last copied them, so a script reads two moments |
+//! | `c25-work` | Totals (renders, failures, cancellations, late results, stops), and the |
+//! | | view's runs while the last thumbnails landed |
+//! | `c25-snapshot` | `c25-status` and `c25-work` as S last copied them (two moments a script) |
 //!
 //! | Key | Does |
 //! | --- | --- |
@@ -373,9 +374,10 @@ impl Demo {
                 shown.len()
             )
         } else {
+            let rows = shown.len();
             format!(
-                "Thumbnails off · {} rows on screen: 0 show thumbnails, {icons} show icons · {held}",
-                shown.len()
+                "Thumbnails off · {rows} rows on screen: 0 show thumbnails, {icons} show icons \
+                 · {held}"
             )
         };
         let direction = match self.store.direction(self.viewer) {

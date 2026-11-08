@@ -54,10 +54,12 @@ fn image(step: Step) -> Outcome {
     }
 }
 
-/// Pops every request, in order, completing each with an image at its step.
+/// Pops every request, in order, completing each with an image at its step. A queue that
+/// doesn't drain within 10,000 requests fails the test.
 fn serve(st: &mut ThumbnailStore, now: f64) -> Vec<usize> {
     let mut order = Vec::new();
     while let Some(r) = st.pop(now) {
+        assert!(order.len() < 10_000, "the queue never drains");
         order.push(index(r.key));
         st.complete(r.ticket, image(r.step), now);
     }
@@ -198,8 +200,9 @@ fn the_budget_is_never_exceeded_unless_rows_on_screen_alone_exceed_it() {
                     st.set_enabled(next(2) == 0);
                 }
                 1 => {
-                    // Replaces what the target held by design: not an eviction.
-                    relocated = st.relocate(key(next(400) as usize), key(next(400) as usize));
+                    // Replaces what the target held by design: not an eviction. Targets include
+                    // keys no viewer shows (400..500).
+                    relocated = st.relocate(key(next(400) as usize), key(next(500) as usize));
                 }
                 2 => st.requeue_stopped(),
                 _ => {
@@ -234,6 +237,24 @@ fn the_budget_is_never_exceeded_unless_rows_on_screen_alone_exceed_it() {
             inner.settings.budget_bytes
         );
         drop(inner);
+        if step % 500 == 499 {
+            // The view stands still: what is wanted loads, and the queue drains. A key is asked
+            // for at most twice (a first load and a new step), whatever the budget.
+            st.set_enabled(true);
+            let wanted = st.inner.borrow().wanted.len();
+            let mut requests = 0;
+            while let Some(r) = st.pop(now) {
+                requests += 1;
+                assert!(
+                    requests <= 2 * wanted + 1,
+                    "op {step}: the queue never drains ({wanted} wanted)"
+                );
+                st.complete(r.ticket, image(r.step), now);
+            }
+            for t in out.drain(..) {
+                st.complete(t, image(t.step()), now);
+            }
+        }
         if relocated {
             continue;
         }
@@ -391,7 +412,7 @@ fn a_rebound_row_draws_only_its_own_entry() {
     let mut st = store(1 << 20);
     let mut src = source(100, &[]);
     let v = st.viewer();
-    st.sync(v, &src, view(0..10));
+    st.sync(v, &src, Viewport::new(0..10, S8));
     let out = drain(&mut st, 0.0);
     src.retain(|e| e.id.get() % 2 == 0);
     st.resync(v, &src, 2);
@@ -400,13 +421,24 @@ fn a_rebound_row_draws_only_its_own_entry() {
         cancelled.iter().all(|i| i % 2 == 0),
         "only keys no longer near: {cancelled:?}"
     );
+    // Each result is as wide as its own entry's index says (1 to 8 px at the 8 px step), so
+    // a handle showing another entry's image would have another width.
+    let tagged = |i: usize| {
+        let w = 1 + (i % 8) as u32;
+        Outcome::Ready {
+            width: w,
+            height: 1,
+            rgba: vec![0; w as usize * 4],
+        }
+    };
     for r in out {
-        st.complete(r.ticket, image(S4), 0.1);
+        st.complete(r.ticket, tagged(index(r.key)), 0.1);
     }
-    for i in [1, 3, 5] {
+    for i in [1, 3, 5, 7] {
+        let w = 1 + (i % 8) as u32;
         assert_eq!(
             st.thumb(key(i)).pixels().size(),
-            (4, 4),
+            (w, 1),
             "entry {i} drew its own image"
         );
     }
@@ -627,6 +659,7 @@ fn pruning_keeps_handles_near_any_viewer_and_asks_for_one_build() {
     assert!(!st.sync(v, &src, view(0..10)));
     let near = st.thumb(key(40)); // within five viewports of 20..30
     let far = st.thumb(key(900));
+    let far_version = st.version(key(900));
     // Many empty handles, as a long scroll builds rows that never load.
     for i in 0..200 {
         let _ = st.thumb(key(1500 + i));
@@ -647,5 +680,213 @@ fn pruning_keeps_handles_near_any_viewer_and_asks_for_one_build() {
         far.epoch(),
         "pruned, and seen again with new handles"
     );
-    assert_ne!(st.version(key(900)), 0);
+    assert_ne!(
+        st.version(key(900)),
+        far_version,
+        "a row drawing the old handles builds again"
+    );
+}
+
+// Review round 1.
+
+/// The scans `pop` has made so far.
+fn scans(st: &ThumbnailStore) -> usize {
+    st.inner.borrow().scans
+}
+
+#[test]
+fn a_still_view_drains_its_queue_when_the_margin_overflows_the_budget() {
+    // Room for 10 images: the 8 on screen and 2 of the 4 in the margin.
+    let mut st = store(10 * 64);
+    let src = source(100, &[]);
+    let v = st.viewer();
+    st.sync(v, &src, view(20..28));
+    let mut requests = 0;
+    while let Some(r) = st.pop(0.0) {
+        requests += 1;
+        st.complete(r.ticket, image(r.step), 0.0);
+        if requests > 100 {
+            break;
+        }
+    }
+    assert!(
+        requests <= 12,
+        "{requests} requests for 12 keys and no scroll"
+    );
+    assert!((20..28).all(|i| ready(&st, i)), "the screen loaded");
+    let stats = st.stats();
+    assert!(stats.bytes <= stats.budget);
+}
+
+#[test]
+fn a_result_dropped_for_the_budget_evicts_nothing() {
+    let small = || Outcome::Ready {
+        width: 4,
+        height: 4,
+        rgba: vec![0; 64],
+    };
+    // Room for 256 bytes: one 8 px image, or four 4 px ones. A one-line margin.
+    let mut st = ThumbnailStore::new(Settings::default().budget(256).margin(1.0));
+    let src = source(100, &[]);
+    let a = st.viewer();
+    st.sync(a, &src, Viewport::new(10..11, S8));
+    let shown = st.pop(0.0).expect("row 10");
+    let margin = st
+        .pop(0.0)
+        .expect("row 11, the margin, while the budget is empty");
+    assert_eq!(margin.tier, Tier::Ahead);
+    // Another view holds a small image, then goes: held, and no one wants it.
+    let b = st.viewer();
+    st.sync(b, &src, Viewport::new(50..51, S8));
+    let other = st.pop(0.0).expect("row 50");
+    assert_eq!(index(other.key), 50);
+    st.complete(other.ticket, small(), 0.0);
+    st.drop_viewer(b);
+    st.complete(shown.ticket, small(), 0.0);
+    // The margin's 8 px image can't fit even with row 50 evicted: it is dropped, and row 50
+    // stays.
+    assert_eq!(
+        st.complete(margin.ticket, image(S8), 0.0),
+        Landed::Dropped(Why::Budget)
+    );
+    assert!(
+        ready(&st, 50),
+        "nothing evicted for a result dropped anyway"
+    );
+}
+
+#[test]
+fn relocating_a_key_on_screen_keeps_it_protected_and_the_budget_whole() {
+    let mut st = store(2 * 64);
+    let src = source(10, &[]);
+    let v = st.viewer();
+    st.sync(v, &src, view(0..4));
+    serve(&mut st, 0.0);
+    let before = st.stats();
+    assert!(
+        before.bytes > before.budget,
+        "the screen alone is over budget"
+    );
+    assert!(st.relocate(key(0), ThumbKey::new(5000)));
+    let after = st.stats();
+    assert_eq!(
+        after.protected_bytes, before.protected_bytes,
+        "still on screen, under its new key"
+    );
+    assert!(after.bytes <= after.budget || after.bytes == after.protected_bytes);
+}
+
+#[test]
+fn an_unchanged_queue_pops_nothing_without_scanning_and_drains_in_one_pass() {
+    let mut st = ThumbnailStore::new(Settings::default().budget(1 << 30));
+    let src = source(20_000, &[]);
+    let v = st.viewer();
+    // 4K at 48 pt: 80 tiles a line, 45 lines on screen.
+    st.sync(v, &src, Viewport::new(0..3600, S4).per_line(80));
+    let start = scans(&st);
+    let served = serve(&mut st, 0.0).len();
+    let drained = scans(&st) - start;
+    assert!(
+        drained <= 3 * served,
+        "{drained} scans to drain {served} requests"
+    );
+    let idle = scans(&st);
+    for _ in 0..100 {
+        assert!(st.pop(0.0).is_none());
+    }
+    assert_eq!(scans(&st), idle, "an idle pop looks at nothing");
+}
+
+#[test]
+fn failed_keys_far_from_every_viewer_are_pruned() {
+    let mut st = store(1 << 20);
+    st.set_prune_slack(50);
+    let src = source(3000, &[]);
+    let v = st.viewer();
+    // A fast scroll through a folder of files that all fail, well within the 30 s.
+    for start in (0..2900).step_by(10) {
+        st.sync(v, &src, view(start..start + 10));
+        for _ in 0..100 {
+            let Some(r) = st.pop(0.0) else { break };
+            st.complete(r.ticket, Outcome::Failed, 0.0);
+        }
+    }
+    let entries = st.stats().entries;
+    assert!(
+        entries < 200,
+        "{entries} entries kept for a 10-row viewport"
+    );
+    assert!(
+        matches!(st.state(key(2895)), State::Failed { .. }),
+        "near ones keep their wait"
+    );
+}
+
+#[test]
+fn a_reflow_is_not_read_as_a_scroll() {
+    let mut st = store(1 << 20);
+    let src = source(2000, &[]);
+    let v = st.viewer();
+    st.sync(v, &src, Viewport::new(30..90, S4).per_line(6));
+    st.sync(v, &src, Viewport::new(42..102, S4).per_line(6));
+    assert_eq!(st.direction(v), Direction::Down);
+    // Narrowed to 4 a line around the same top tile: its line now starts at 40.
+    st.sync(v, &src, Viewport::new(40..80, S4).per_line(4));
+    assert_eq!(
+        st.direction(v),
+        Direction::Down,
+        "a reflow keeps the direction"
+    );
+}
+
+#[test]
+fn a_new_margin_applies_at_the_next_sync_of_the_same_viewport() {
+    let mut st = store(1 << 20);
+    let src = source(100, &[]);
+    let v = st.viewer();
+    st.sync(v, &src, view(40..48));
+    let settings = st.settings().margin(0.0);
+    st.set_settings(settings);
+    st.sync(v, &src, view(40..48));
+    let asked: Vec<usize> = serve(&mut st, 0.0);
+    assert_eq!(asked, (40..48).collect::<Vec<_>>(), "no margin any more");
+}
+
+#[test]
+fn a_step_change_alone_reaches_the_store() {
+    let mut st = store(1 << 20);
+    let src = source(100, &[]);
+    let v = st.viewer();
+    st.sync(v, &src, Viewport::new(40..44, S4).per_line(2));
+    serve(&mut st, 0.0);
+    // Zoomed: no row moved, so no on_visible; the host passes the new step.
+    st.set_step(v, &src, S8);
+    let requests = drain(&mut st, 0.0);
+    let order: Vec<usize> = requests.iter().map(|r| index(r.key)).collect();
+    assert_eq!(
+        order[..4],
+        [40, 41, 42, 43],
+        "the screen first, at the new step"
+    );
+    assert!(requests.iter().all(|r| r.step == S8));
+    assert_eq!(st.direction(v), Direction::Down);
+}
+
+#[test]
+fn a_4k_grid_at_the_default_budget_drains_its_queue() {
+    // C3 on a 4K screen at scale 2 with 72 pt tiles: 128 px classes, 26 a line and 15 lines
+    // (about 25 MiB at 64 KiB each), a 25% margin of 4 lines a side, and a budget that holds
+    // the screen and only part of the margin.
+    let step = Step::new(128);
+    let mut st = ThumbnailStore::new(Settings::default().budget(500 * 128 * 128 * 4));
+    let src = source(5000, &[]);
+    let v = st.viewer();
+    st.sync(v, &src, Viewport::new(1040..1430, step).per_line(26));
+    let wanted = st.inner.borrow().wanted.len();
+    let asked = serve(&mut st, 0.0).len();
+    assert!(asked <= wanted, "{asked} requests for {wanted} keys");
+    assert!((1040..1430).all(|i| ready(&st, i)), "the screen loaded");
+    let stats = st.stats();
+    assert!(stats.bytes <= stats.budget);
+    assert!(st.pop(0.0).is_none(), "and stays drained");
 }

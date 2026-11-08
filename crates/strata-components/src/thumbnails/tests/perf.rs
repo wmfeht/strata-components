@@ -1,6 +1,9 @@
 //! Perf: 100,000 entries on C1e's element, with and without thumbnails landing.
 //!
-//! `cargo test --profile perf -p strata-components --lib thumbnails::tests::perf -- --ignored --nocapture`
+//! ```text
+//! cargo test --profile perf -p strata-components --lib thumbnails::tests::perf \
+//!     -- --ignored --nocapture
+//! ```
 //!
 //! A 900 pt window at scale 2, as C1e's perf test: the first frame, then 600 frames at
 //! 120 Hz, each scrolled 48 pt by the wheel. Three runs side by side: C1e's default icon, the
@@ -13,7 +16,9 @@
 //! - no view run while scrolling with thumbnails landing;
 //! - scroll frames at p50 and p95 within max(1.25 × the default icon's, + 0.5 ms), and none
 //!   over a 60 Hz frame (16.7 ms);
-//! - `sync` within 50 µs at p95, `pop` plus `complete` within 20 µs on average.
+//! - `sync` within 50 µs at p95, `pop` plus `complete` within 20 µs on average;
+//! - with 3,600 tiles on screen (a 4K grid), draining the queue is one pass (within 20 ms) and
+//!   an idle `pop` within 1 µs (174 µs before review round 1).
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -214,11 +219,37 @@ fn thumbnails_at_100k() {
     let per = serve_time / served.max(1) as f64;
     let p95 = pct(&mut syncs, 0.95);
     println!(
-        "store: sync p50 {:.1} µs, p95 {:.1} µs; pop + complete {per:.2} µs each ({served} served), {} bytes held",
+        "store: sync p50 {:.1} µs, p95 {:.1} µs; pop + complete {per:.2} µs each \
+         ({served} served), {} bytes held",
         pct(&mut syncs, 0.5),
         p95,
         store.stats().bytes
     );
     assert!(p95 <= 50.0, "sync p95 {p95:.1} µs");
     assert!(per <= 20.0, "pop + complete {per:.2} µs");
+
+    // A 4K grid: 80 tiles a line, 45 lines on screen, small images so all of it fits.
+    let mut store = ThumbnailStore::new(crate::thumbnails::Settings::default().budget(1 << 30));
+    let v = store.viewer();
+    store.sync(v, &src, Viewport::new(0..3600, step).per_line(80));
+    let small = || crate::thumbnails::Outcome::Ready {
+        width: 4,
+        height: 4,
+        rgba: vec![0; 64],
+    };
+    let t = Instant::now();
+    let mut drained = 0;
+    while let Some(r) = store.pop(0.0) {
+        store.complete(r.ticket, small(), 0.0);
+        drained += 1;
+    }
+    let drain_ms = t.elapsed().as_secs_f64() * 1e3;
+    let t = Instant::now();
+    for _ in 0..1000 {
+        assert!(store.pop(0.0).is_none());
+    }
+    let idle = t.elapsed().as_secs_f64() * 1e6 / 1000.0;
+    println!("4K grid: drained {drained} requests in {drain_ms:.2} ms; an idle pop {idle:.3} µs");
+    assert!(drain_ms <= 20.0, "drain {drain_ms:.2} ms");
+    assert!(idle <= 1.0, "idle pop {idle:.3} µs");
 }

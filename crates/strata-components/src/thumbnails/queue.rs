@@ -100,6 +100,14 @@ pub struct Request {
 
 pub(crate) type Keyed = Vec<(ThumbKey, EntryId)>;
 
+/// A key in `pop`'s ranked list: its tier, its entry and the step its viewer draws at.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Queued {
+    tier: Tier,
+    key: ThumbKey,
+    entry: EntryId,
+}
+
 #[derive(Default)]
 pub(crate) struct Viewer {
     /// The viewport last synced, for the early-out.
@@ -114,6 +122,27 @@ pub(crate) struct Viewer {
 }
 
 impl Viewer {
+    /// Forgets the last viewport, so the next sync recomputes it even when it is unchanged.
+    pub(crate) fn stale(&mut self) {
+        self.view = None;
+    }
+
+    /// Shows `to` wherever this viewer showed `from` (a relocated key), until its next sync.
+    pub(crate) fn rename(&mut self, from: ThumbKey, to: ThumbKey) {
+        for list in [&mut self.visible, &mut self.ahead, &mut self.behind] {
+            for (k, _) in list.iter_mut() {
+                if *k == from {
+                    *k = to;
+                }
+            }
+        }
+        for k in &mut self.prev_visible {
+            if *k == from {
+                *k = to;
+            }
+        }
+    }
+
     fn tier(&self, tier: Tier) -> &Keyed {
         match tier {
             Tier::Visible => &self.visible,
@@ -183,6 +212,26 @@ impl ThumbnailStore {
         }
     }
 
+    /// Syncs viewer `v` again at a new step with its last viewport: a zoom or a change of
+    /// display scale that moved no row.
+    pub fn set_step(&mut self, v: ViewerId, src: &dyn EntrySource, step: Step) -> bool {
+        let last = {
+            let inner = self.inner.borrow();
+            inner
+                .viewers
+                .get(v.0 as usize)
+                .and_then(Option::as_ref)
+                .and_then(|w| w.view.clone().or_else(|| w.last.clone()))
+        };
+        match last {
+            Some(mut view) => {
+                view.step = step;
+                self.sync_with(v, src, view, false)
+            }
+            None => false,
+        }
+    }
+
     fn sync_with(
         &mut self,
         v: ViewerId,
@@ -200,13 +249,16 @@ impl ThumbnailStore {
         }
         if let Some(last) = &w.last
             && last.listing == view.listing
+            && last.per_line == view.per_line
         {
             if view.visible.start > last.visible.start {
                 w.direction = Direction::Down;
             } else if view.visible.start < last.visible.start {
                 w.direction = Direction::Up;
             }
-        } else {
+        } else if w.last.as_ref().is_none_or(|l| l.listing != view.listing) {
+            // A new listing starts afresh; a reflow (another count a line) moves `start`
+            // without a scroll, so it keeps the direction.
             w.direction = Direction::Down;
         }
         let (visible, above, below) = spans(&view, src.len(), margin);
@@ -250,61 +302,63 @@ impl ThumbnailStore {
         if !inner.enabled {
             return None;
         }
-        let protected_bytes = inner.protected_bytes();
+        if now >= inner.next_expiry {
+            inner.dirty = true;
+        }
+        if inner.dirty {
+            inner.rank(now);
+        }
         let budget = inner.settings.budget_bytes;
-        for tier in [Tier::Visible, Tier::Ahead, Tier::Behind] {
-            for restep in [false, true] {
-                let Inner {
-                    viewers,
-                    entries,
-                    in_flight,
-                    deferred,
-                    wanted,
-                    next_ticket,
-                    ..
-                } = &mut *inner;
-                for w in viewers.iter().flatten() {
-                    for &(key, entry) in w.tier(tier) {
-                        if in_flight.contains(&key) || deferred.contains(&key) {
-                            continue;
-                        }
-                        let Some(e) = entries.get_mut(&key) else {
-                            continue;
-                        };
-                        let step = wanted.get(&key).copied().unwrap_or(w.view_step());
-                        match e.job {
-                            Job::Requested { .. } | Job::Stopped => continue,
-                            Job::Failed { until } if now < until => continue,
-                            Job::Failed { .. } => e.job = Job::Idle,
-                            Job::Idle => {}
-                        }
-                        let eligible = match e.held {
-                            None => !restep,
-                            Some(h) => restep && h.step != step,
-                        };
-                        if !eligible {
-                            continue;
-                        }
-                        if tier != Tier::Visible
-                            && protected_bytes.saturating_add(step.max_bytes()) > budget
-                        {
-                            continue;
-                        }
-                        let n = *next_ticket;
-                        *next_ticket += 1;
-                        e.job = Job::Requested { n, step };
-                        in_flight.insert(key);
-                        let ticket = Ticket { key, step, n };
-                        return Some(Request {
-                            ticket,
-                            key,
-                            entry,
-                            step,
-                            tier,
-                        });
-                    }
-                }
+        while inner.cursor < inner.queue.len() {
+            let Queued { tier, key, entry } = inner.queue[inner.cursor];
+            inner.cursor += 1;
+            #[cfg(test)]
+            {
+                inner.scans += 1;
             }
+            if inner.in_flight.contains(&key) || inner.deferred.contains(&key) {
+                continue;
+            }
+            let Some(&step) = inner.wanted.get(&key) else {
+                continue;
+            };
+            let Some(e) = inner.entries.get_mut(&key) else {
+                continue;
+            };
+            match e.job {
+                Job::Requested { .. } | Job::Stopped => continue,
+                Job::Failed { until } if now < until => {
+                    inner.next_expiry = inner.next_expiry.min(until);
+                    continue;
+                }
+                Job::Failed { .. } | Job::Idle => {}
+            }
+            if e.held.is_some_and(|h| h.step == step) {
+                continue;
+            }
+            let room = step.max_bytes();
+            if tier != Tier::Visible && inner.pinned + inner.margin_out_bytes + room > budget {
+                // A margin image could only land by evicting a key some viewer wants: wait
+                // until a request ends, a wanted image goes, or the viewport moves.
+                inner.gated = true;
+                continue;
+            }
+            let n = inner.next_ticket;
+            inner.next_ticket += 1;
+            let e = inner.entries.get_mut(&key).expect("checked above");
+            e.job = Job::Requested { n, step };
+            inner.in_flight.insert(key);
+            if tier != Tier::Visible {
+                inner.margin_out.insert(key, room);
+                inner.margin_out_bytes += room;
+            }
+            return Some(Request {
+                ticket: Ticket { key, step, n },
+                key,
+                entry,
+                step,
+                tier,
+            });
         }
         None
     }
@@ -317,6 +371,44 @@ impl Viewer {
 }
 
 impl Inner {
+    /// Ranks every wanted key that may need a request: by tier, every viewer's viewport
+    /// before any margin, keys never loaded before keys held at another step. `pop` then
+    /// walks it once; it is ranked again only when something it skipped could have changed.
+    fn rank(&mut self, now: f64) {
+        self.queue.clear();
+        self.cursor = 0;
+        self.dirty = false;
+        self.gated = false;
+        self.next_expiry = f64::INFINITY;
+        for tier in [Tier::Visible, Tier::Ahead, Tier::Behind] {
+            for restep in [false, true] {
+                for w in self.viewers.iter().flatten() {
+                    for &(key, entry) in w.tier(tier) {
+                        let Some(e) = self.entries.get(&key) else {
+                            continue;
+                        };
+                        let step = self.wanted.get(&key).copied().unwrap_or(w.view_step());
+                        match e.job {
+                            Job::Requested { .. } | Job::Stopped => continue,
+                            Job::Failed { until } if now < until => {
+                                self.next_expiry = self.next_expiry.min(until);
+                                continue;
+                            }
+                            Job::Failed { .. } | Job::Idle => {}
+                        }
+                        let ranked = match e.held {
+                            None => !restep,
+                            Some(h) => restep && h.step != step,
+                        };
+                        if ranked {
+                            self.queue.push(Queued { tier, key, entry });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     /// Recomputes what every viewer wants and protects, and cancels requests nobody wants.
     pub fn rewant(&mut self) {
         self.wanted.clear();
@@ -339,6 +431,8 @@ impl Inner {
         for k in stale {
             self.cancel(k);
         }
+        self.repin();
+        self.dirty = true;
     }
 
     /// Drops handles that hold nothing and wait for nothing, once there are many, except
@@ -355,8 +449,11 @@ impl Inner {
         keep.extend(self.wanted.keys().copied());
         keep.extend(self.protected.iter().copied());
         let before = self.entries.len();
-        self.entries
-            .retain(|k, e| e.held.is_some() || e.job != Job::Idle || keep.contains(k));
+        // Failed and stopped keys go too: near a viewer they keep their wait, and one seen
+        // again after a prune is just asked for again.
+        self.entries.retain(|k, e| {
+            e.held.is_some() || matches!(e.job, Job::Requested { .. }) || keep.contains(k)
+        });
         self.entries.len() != before
     }
 }

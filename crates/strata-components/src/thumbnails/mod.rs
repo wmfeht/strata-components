@@ -55,32 +55,47 @@
 //!
 //! # The budget, and what is protected
 //!
-//! Bytes count `width × height × 4` of each held image. Eviction empties the least recently
-//! touched image (touched when its row builds, and on every sync that shows it) that no viewer
-//! shows now or showed at its previous sync: Rune reports a reflowed grid's rows a frame late
-//! (C1e's draft U-C1f-5), so the previous sync's rows stay protected for one more sync. Rows
-//! on screen win over the budget (owner ruling): **bytes stay within the budget unless the
-//! protected images alone exceed it**, and then only protected images are held and no margin
-//! is asked for. Evicting empties the handle in place, so a row that still draws it shows its
+//! Bytes count `width × height × 4` of each held image. Eviction empties the least recently touched
+//! image (touched when its row builds, and on every sync that shows it) that no viewer shows now or
+//! showed at its previous sync, images no viewer wants before margin images: Rune reports a
+//! reflowed grid's rows a frame late (C1e's draft U-C1f-5), so the previous sync's rows stay
+//! protected for one more sync. Rows on screen win over the budget (owner ruling): **bytes stay
+//! within the budget unless the protected images alone exceed it**, and then only protected images
+//! are held and no margin is asked for.
+//!
+//! **A margin image never evicts one some viewer still wants**: it lands only if it fits once
+//! the images nobody wants are evicted, and is otherwise dropped ([`Why::Budget`]) with nothing
+//! evicted, and not asked for again until the next sync. `pop` asks for a margin key only while
+//! the images viewers want, plus the margin requests out (each counted at its step's largest),
+//! leave room for it. Without both, a margin that overflows the budget would load, evict
+//! another margin image, ask for it again and never settle (review round 1, B1: a C3 grid at
+//! the default budget on a 4K screen at scale 2 did). A row on screen still evicts margin
+//! images: they are asked for again only once there is room.
+//!
+//! Evicting empties the handle in place, so a row that still draws it shows its
 //! icon again, with no commit. The budget doesn't count Rune's own copy of the images drawn
 //! this frame (its image atlas) or the GPU's.
 //!
 //! # Priority
 //!
-//! A viewer's keys rank in three tiers: the viewport in reading order, then the margin the
-//! viewer is scrolling toward, nearest line first, then the margin behind it, nearest first
-//! ([`Tier`]). Margins are whole lines, [`Settings`]' `margin` of the viewport per side. Within a
-//! tier, keys never loaded go before keys held at another step; every viewer's viewport goes
-//! before any margin. Keys past every viewer's margin are never asked for, and requests out
-//! for them are cancelled. A result for a cancelled request is dropped, as Strata drops it.
+//! A viewer's keys rank in three tiers: the viewport in reading order, then the margin the viewer
+//! is scrolling toward, nearest line first, then the margin behind it, nearest first ([`Tier`]).
+//! `pop` walks a ranked list and builds it again only when something it skipped may have changed (a
+//! sync, a result that frees room, an eviction, a failure's wait ending), so an idle `pop` costs
+//! nothing and draining a queue is one pass. Margins are whole lines, [`Settings`]' `margin` of the
+//! viewport per side. Within a tier, keys never loaded go before keys held at another step; every
+//! viewer's viewport goes before any margin. Keys past every viewer's margin are never asked for,
+//! and requests out for them are cancelled. A result for a cancelled request is dropped, as Strata
+//! drops it.
 //!
 //! # Handles live while a viewer is near
 //!
-//! Empty handles (nothing held, nothing asked) are pruned once there are more than a few
-//! thousand, except near any viewer's viewport. A row still drawing a pruned key's handles would
-//! never see its thumbnail, so a sync that pruned returns true: the host's `on_visible`
-//! returns it, the view runs once, and such a row builds on the key's new handles (its version
-//! carries the handles' epoch).
+//! Handles that hold nothing and wait for no result (empty, failed or stopped) are pruned once
+//! there are more than a few thousand, except near any viewer's viewport: a failed key nearby keeps
+//! its wait, and one pruned is just asked for again when seen. A row still drawing a pruned key's
+//! handles would never see its thumbnail, so a sync that pruned returns true: the host's
+//! `on_visible` returns it, the view runs once, and such a row builds on the key's new handles (its
+//! version carries the handles' epoch).
 //!
 //! # Decisions
 //!
@@ -135,10 +150,21 @@
 //!   it sits under the box, not the image), the icon centred underneath; the caller keys it
 //!   (`ICON`, so C23's flights find it).
 //! - The step: `Step::for_tile(look, tile points, scale)`; one handle per key, replaced in place
-//!   on a zoom, the old image drawing until the new one lands. A change of display scale alone
-//!   reaches no handler (C14a's draft), so the step follows on the next commit.
+//!   on a zoom, the old image drawing until the new one lands. A zoom moves no row, so no
+//!   `on_visible` reaches the store: call [`ThumbnailStore::set_step`] from the zoom's handler.
+//!   A change of display scale alone reaches no handler at all (C14a's draft), so the step
+//!   follows on the next commit that does.
+//! - A zoom waits on old renders: re-steps rank after every first load in their tier, so a
+//!   grid half loaded at the old step finishes those first.
+//! - No class covers tiles over 128 pt at scale 2: the look's largest class is 256 px, drawn
+//!   larger (W2d may add classes).
 //! - [`Viewport::per_line`] from C3's own count; `sync` from `on_visible` (returning its
-//!   result), `resync` after a reflow or a listing change.
+//!   result), `resync` after a listing change. A reflow (another count a line) moves the
+//!   visible range's start without a scroll; the store doesn't read it as one.
+//! - Caption sizes (and an image's dimensions for one) aren't the store's: the host's metadata.
+//! - B1 (fixed in review round 1): at the default 64 MiB a 4K screen at scale 2 with 72 pt tiles
+//!   protects about 60 MiB, so the margin overflows the budget; it now waits for room instead
+//!   of evicting and re-asking forever.
 //! - The tile's version: `version(key)` and the step, never the state.
 //! - The worker in `poll`: `take_cancelled`, `complete`, `pop` to capacity, returning false.
 //! - Placeholder icons at large tiles: K3 measured about 0.5 ms to rasterize a 256 px icon the
@@ -151,11 +177,16 @@
 //!
 //! - **U-C25-1: mipmaps for a streamed `Pixels`.** `Pixels::set` is the streaming path: no mip
 //!   levels (`pixels.rs`), so drawing an image well below its size samples it bilinearly and
-//!   aliases. `ImageCache` images get mips, but their handle is made at decode time, so a view
-//!   would commit to swap one in. Repro: `Pixels::set` a 256 × 256 one-pixel checkerboard and
-//!   `--snap` it drawn at 32 × 32 beside `ImageCache::rgba` of the same bytes. Expected (from
-//!   the code, not yet run): moiré from the first, an even grey from the second. Ask: a mipmapped `set` (levels built off the main thread),
-//!   or `ImageCache::rgba_into(&Pixels, …)` filling an existing handle.
+//!   aliases. `ImageCache` images get mips, but `ImageCache::rgba` makes a new handle for each
+//!   call (keyed by the bytes, `image.rs`) and fills its mips later, so a store holding one
+//!   handle per key can't use it: each landed image would be a new handle, and a view would
+//!   commit to swap it in. Repro (run headless, scale 1, `--snap`): a 256 × 256 one-pixel
+//!   checkerboard drawn at 37 × 37 points, streamed beside `ImageCache::rgba` of the same
+//!   bytes. The streamed square shows a beat pattern of near-black and white blocks (grey
+//!   levels 7 to 255, standard deviation 21 of 255); the cached one is an even grey (188, no
+//!   deviation). A 256 → 32 draw (an exact eighth) hides it: every sample falls between two
+//!   texels and averages to grey. Ask: a mipmapped `set` (levels built off the main thread), or
+//!   `ImageCache::rgba_into(&Pixels, …)` filling an existing handle.
 //! - **U-C25-2: whether a `Pixels` is drawn.** An app can't tell whether or when a handle was
 //!   last drawn, so a cache's recency has to be approximated (here, from builds and visible
 //!   ranges). Repro: none needed; `Pixels` has no such accessor at the pinned rev. Ask:

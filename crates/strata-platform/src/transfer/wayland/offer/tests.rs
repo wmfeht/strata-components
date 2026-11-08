@@ -109,30 +109,156 @@ fn an_ask_drop_settles_on_one_action_the_source_offers() {
     );
 }
 
-/// The review's case: wlroots ignores a preferred action the source doesn't offer and takes
-/// the lowest common one, here ask again, so a finish would end winit's connection.
+/// Round 2's case: wlroots ignores a preferred action the source doesn't offer and takes the
+/// lowest common one, here ask again, so a finish would end winit's connection. After the
+/// drop such answers are refused, and the drop stays on ask.
 #[test]
 fn an_ask_drop_answered_with_an_action_the_source_lacks_stays_ask() {
     let (copy, mv, ask) = (Action::Copy.bits(), Action::Move.bits(), Action::Ask.bits());
-    let mut s = asked(&[Action::Copy, Action::Ask]);
-    s.set_actions(mv | ask, mv).expect("a valid request");
-    assert!(s.finish().is_err(), "move isn't offered: still ask");
-    let mut s = asked(&[Action::Copy, Action::Ask]);
-    s.set_actions(copy | ask, copy).expect("a valid request");
-    assert!(
-        s.finish().is_err(),
-        "two actions: the compositor may still pick ask"
-    );
-    let mut s = asked(&[Action::Copy, Action::Ask]);
-    s.set_actions(ask, ask).expect("a valid request");
-    assert!(s.finish().is_err(), "ask answers nothing");
+    for (mask, preferred, why) in [
+        (mv | ask, mv, "move isn't offered"),
+        (
+            copy | ask,
+            copy,
+            "two actions: the compositor may still pick ask",
+        ),
+        (ask, ask, "ask answers nothing"),
+        (0, 0, "no actions"),
+    ] {
+        let mut s = asked(&[Action::Copy, Action::Ask]);
+        assert!(s.set_actions(mask, preferred).is_err(), "refused: {why}");
+        assert!(s.finish().is_err(), "still ask: {why}");
+    }
     // Source actions never heard: nothing is known to be offered.
     let mut s = DropState::new(3);
     s.accept(Some("text/plain"), &offered()).expect("accept");
     s.on_action(ask);
     s.on_drop();
-    s.set_actions(copy, copy).expect("a valid request");
-    assert!(s.finish().is_err(), "the source's actions are unknown");
+    assert!(
+        s.set_actions(copy, copy).is_err(),
+        "the source's actions are unknown"
+    );
+    assert!(s.finish().is_err());
+}
+
+/// Round 3's case, from sway: a copy drop, then set_actions(none) after it. The compositor
+/// would now have no action, but its answer can't reach a dropped offer (leave has come), so
+/// the request is refused and the drop stays a copy that finish may end.
+#[test]
+fn after_a_settled_drop_set_actions_is_refused() {
+    let (copy, mv) = (Action::Copy.bits(), Action::Move.bits());
+    let mut s = DropState::new(3);
+    s.on_source_actions(copy | mv);
+    s.accept(Some("text/plain"), &offered()).expect("accept");
+    s.set_actions(copy, copy).expect("before the drop");
+    s.on_action(copy);
+    s.on_drop();
+    assert!(s.set_actions(0, 0).is_err(), "no actions, after the drop");
+    assert!(
+        s.set_actions(mv, mv).is_err(),
+        "another action, after the drop"
+    );
+    assert_eq!(s.finish(), Ok(true), "the copy stands");
+}
+
+// ---- DropState against wlroots' data_offer_choose_action (review round 3) ----
+
+const ASK: u32 = 4;
+
+/// wlroots' `data_offer_choose_action` (`types/data_device/wlr_data_offer.c`): the
+/// compositor's forced action if the source and target share it, else the target's preferred
+/// action if they share it, else the lowest action they share, else none.
+fn wlr_choose(target: u32, preferred: u32, source: u32, forced: u32) -> u32 {
+    let shared = target & source;
+    if shared == 0 {
+        0
+    } else if forced & shared != 0 {
+        forced
+    } else if preferred & shared != 0 {
+        preferred
+    } else {
+        1 << shared.trailing_zeros()
+    }
+}
+
+/// Every request set_actions can carry: any mask of the three actions, and no preference or
+/// one action.
+fn requests() -> Vec<(u32, u32)> {
+    (0..8u32)
+        .flat_map(|mask| [0u32, 1, 2, 4].map(|preferred| (mask, preferred)))
+        .collect()
+}
+
+/// For every source mask, compositor-forced action, request before the drop (its action
+/// event applied before the drop or, as it may be, after) and request after the drop (or
+/// none): DropState never lets `finish` through when wlroots would take it as a protocol
+/// error (no action, or ask), and never refuses one wlroots would take.
+#[test]
+fn no_finish_is_allowed_that_wlroots_rejects() {
+    let requests = requests();
+    let (mut unsafe_finishes, mut refused_valid, mut sequences) = (Vec::new(), 0usize, 0usize);
+    for source in 0..8u32 {
+        for forced in [0u32, 1, 2] {
+            for &(mask, preferred) in &requests {
+                for late in [false, true] {
+                    let mut st = DropState::new(3);
+                    st.on_source_actions(source);
+                    st.accept(Some("text/plain"), &offered()).expect("accept");
+                    let mut server = 0;
+                    if st.set_actions(mask, preferred).is_ok() {
+                        server = wlr_choose(mask, preferred, source, forced);
+                    }
+                    if server == 0 {
+                        // No action: the compositor cancels instead of dropping.
+                        continue;
+                    }
+                    if !late {
+                        st.on_action(server);
+                    }
+                    st.on_drop();
+                    if late {
+                        st.on_action(server);
+                    }
+                    let after = std::iter::once(None).chain(requests.iter().copied().map(Some));
+                    for post in after {
+                        let mut s = st.clone();
+                        let mut srv = server;
+                        if let Some((m, p)) = post
+                            && s.set_actions(m, p).is_ok()
+                        {
+                            // Its answer never reaches the dropped offer.
+                            srv = wlr_choose(m, p, source, forced);
+                        }
+                        sequences += 1;
+                        let allowed = s.finish().is_ok();
+                        let valid = srv != 0 && srv != ASK;
+                        if allowed && !valid {
+                            unsafe_finishes.push((
+                                source,
+                                forced,
+                                (mask, preferred),
+                                late,
+                                post,
+                                srv,
+                            ));
+                        }
+                        if !allowed && valid {
+                            refused_valid += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(sequences > 10_000, "{sequences} sequences");
+    assert!(
+        unsafe_finishes.is_empty(),
+        "{} of {sequences} sequences let a finish through that wlroots rejects, e.g. \
+         (source, forced, before, late, after, compositor's action): {:?}",
+        unsafe_finishes.len(),
+        &unsafe_finishes[..unsafe_finishes.len().min(5)]
+    );
+    assert_eq!(refused_valid, 0, "finishes refused that wlroots would take");
 }
 
 // ---- offers without a compositor: closed proxies on a connection to nothing ----

@@ -158,7 +158,11 @@ pub(crate) struct DropState {
     accepted: Option<String>,
     /// The action the compositor settled on (`wl_data_offer.action`).
     action: Option<u32>,
-    /// The actions the drag's source offers (`wl_data_offer.source_actions`).
+    /// The actions the drag's source offers (`wl_data_offer.source_actions`). None until the
+    /// event comes, and for ever if it carries bits outside copy, move and ask: wlroots sends
+    /// all ones (-1) for a source that never set its actions, which wayland-client then
+    /// reports as unknown, and it treats such a source as offering copy. Without known source
+    /// actions an ask can't be answered, and `finish` stays refused.
     source_actions: Option<u32>,
     dropped: bool,
     finished: bool,
@@ -203,16 +207,24 @@ impl DropState {
         if preferred != 0 && (preferred.count_ones() != 1 || preferred & actions == 0) {
             return Err("a preferred action that isn't one of the actions");
         }
-        // After a drop whose action is ask, this request settles it, and no further action
-        // event need come. Only a choice the compositor can't make otherwise counts: one
-        // action, not ask, that the source offers. wlroots takes the preferred action only if
-        // the source offers it, else the lowest of the actions both offer, which may be ask
-        // again; and `finish` while the action is ask is a protocol error that ends winit's
-        // connection. Anything else leaves ask standing, so `finish` is refused.
-        let single = actions.count_ones() == 1 && actions != Action::Ask.bits();
-        let offered = self.source_actions.is_some_and(|s| s & actions != 0);
-        if self.dropped && self.action == Some(Action::Ask.bits()) && single && offered {
-            self.action = Some(actions);
+        // After the drop, the compositor's answer to this request may never reach us: it sends
+        // `leave` right after `drop`, and its new action can be none or ask, either of which
+        // makes `finish` a protocol error that ends winit's connection. So after the drop
+        // only one request is let through: the answer to an ask with one action, not ask, that
+        // the source offers. wlroots takes the preferred action only if the source offers it,
+        // else the lowest of the actions both offer, so with one such action that action is
+        // the one taken, and no event need come. Anything else is refused, and the action
+        // stays what the compositor said (ask stays ask, so `finish` is refused for good).
+        if self.dropped {
+            let single = actions.count_ones() == 1 && actions != Action::Ask.bits();
+            let offered = self.source_actions.is_some_and(|s| s & actions != 0);
+            if self.action == Some(Action::Ask.bits()) && single && offered {
+                self.action = Some(actions);
+                return Ok(());
+            }
+            return Err(
+                "after the drop, set_actions only answers an ask: one action the source offers",
+            );
         }
         Ok(())
     }
@@ -335,7 +347,14 @@ impl DragOffer {
         Ok(())
     }
 
-    /// The actions this target takes, and the one it prefers.
+    /// The actions this target takes, and the one it prefers. Send it on enter and on motion,
+    /// before the drop.
+    ///
+    /// After the drop it is refused, with one exception: answering a drop whose action is ask
+    /// with a single action, not ask, that the source offers (`DragActions::source`). That
+    /// settles the drop, and `finish` works. A refused answer changes nothing: a drop left on
+    /// ask stays on ask, and its `finish` is refused for good (the compositor would take it as
+    /// a protocol error). Read the data and drop the offer instead.
     pub fn set_actions(&self, actions: &[Action], preferred: Option<Action>) -> Result<(), Error> {
         let mask = actions.iter().fold(0, |m, a| m | a.bits());
         let pref = preferred.map_or(0, Action::bits);

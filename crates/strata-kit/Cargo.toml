@@ -18,6 +18,7 @@ rune-kit.workspace = true
 # Shared by two or more work packages.
 
 # K1 theme mapping (syntect's Theme type, theme files)
+toml.workspace = true
 
 # K2 shape, density and type
 

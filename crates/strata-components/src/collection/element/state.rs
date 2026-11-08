@@ -1,11 +1,12 @@
 //! [`CollectionState`]: what the host keeps for one collection, behind the element's accessor.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::ops::Range;
 
 use rune::{Live, Tx};
 
-use super::keys::{line_key, line_path, viewport_path};
+use super::keys::{line_path, viewport_path};
+use super::lines::{Groups, LineMap};
 use super::seam::{Controllers, Hit};
 use crate::collection::selection::{Changed, Listing, Position, ScrollMemo, Selection, SyncRule};
 use crate::contract::{EntryId, EntrySource, Point, Rect};
@@ -60,6 +61,14 @@ pub struct CollectionState {
     pub(super) announced: (u64, usize, usize),
     /// A reveal asked for before the viewport had a width, done at its first layout.
     pub(super) reveal_after_layout: Cell<Option<EntryId>>,
+    /// The groups the last build drew (`Collection::groups`), so reveals and restores made
+    /// outside the element's handlers place entries clear of the stuck header.
+    pub(super) groups: RefCell<Option<Groups>>,
+    /// The stuck header's offset, `[0, dy]`: up by as much as the next header pushes it.
+    pub(super) stuck_offset: Live<[f32; 2]>,
+    /// The first line Rune last reported visible: the one whose group's header sticks. Rune
+    /// reports it from the layout it is drawing, which the recorded scroll offset can trail.
+    pub(super) top_line: Cell<Option<usize>>,
 }
 
 impl Default for CollectionState {
@@ -83,6 +92,9 @@ impl Default for CollectionState {
             gesture: None,
             announced: (0, 0, 0),
             reveal_after_layout: Cell::new(None),
+            groups: RefCell::new(None),
+            stuck_offset: Live::new([0.0, 0.0]),
+            top_line: Cell::new(None),
         }
     }
 }
@@ -128,6 +140,10 @@ impl CollectionState {
     }
 
     /// The entries in the viewport, as last reported: what thumbnails load first (C25).
+    ///
+    /// Rune reports the rows a commit laid out on the frame after it, so for one frame after
+    /// a reflow (a grid's width) or a regroup this is the range before it (Rune draft
+    /// U-C1f-5). It is a priority hint, and catches up on its own.
     pub fn visible_range(&self) -> Range<usize> {
         self.visible.clone()
     }
@@ -281,15 +297,23 @@ impl CollectionState {
         }
     }
 
-    /// Whether the line holding entry `index` shows whole in the viewport, as last laid out.
-    fn shows_line(&self, index: usize) -> bool {
+    /// How the last build laid out `len` entries.
+    pub(super) fn line_map(&self, len: usize) -> LineMap {
+        LineMap::new(self.per_line.get(), self.groups.borrow().as_ref(), len)
+    }
+
+    /// Whether the line holding entry `index` shows whole in the viewport, as last laid out,
+    /// and clear of a stuck group header (which covers the viewport's top line).
+    fn shows_line(&self, index: usize, len: usize) -> bool {
         let h = self.row_height;
         if h <= 0.0 {
             return false;
         }
-        let top = (index / self.per_line.get().max(1)) as f32 * h;
+        let map = self.line_map(len);
+        let top = map.line_of(index) as f32 * h;
         let offset = self.scroll.get();
-        top >= offset && top + h <= offset + self.viewport.h
+        let covered = if map.groups().is_some() { h } else { 0.0 };
+        top >= offset + covered && top + h <= offset + self.viewport.h
     }
 
     /// Takes `per` entries a line from now on. When that differs from before and there is a
@@ -313,7 +337,9 @@ impl CollectionState {
         true
     }
 
-    /// Scrolls the entry at `index` into view, mounted or not, just far enough.
+    /// Scrolls the entry at `index` into view, mounted or not, just far enough. In a grouped
+    /// collection it lands clear of the stuck header: going up, the line above it (another
+    /// entry, or its group's header) shows under the stuck header.
     pub fn reveal(&self, scope: &str, source: &dyn EntrySource, index: usize, tx: &mut Tx) {
         if index >= source.len() {
             return;
@@ -322,9 +348,14 @@ impl CollectionState {
             self.reveal_after_layout.set(Some(source.id_at(index)));
             return;
         }
-        let per = self.per_line.get().max(1);
-        let first = source.id_at(index / per * per);
-        tx.scroll_into_view_in(scope.to_owned(), line_key(first, per));
+        let map = self.line_map(source.len());
+        // Rune runs a transaction's reveals in order, each from where the one before left the
+        // view (`runtime/frame.rs`): the line above comes to the top when the entry is above,
+        // and the entry to the bottom when it is below; neither moves a view showing both.
+        if let Some(above) = map.key_above(source, index) {
+            tx.scroll_into_view_in(scope.to_owned(), above);
+        }
+        tx.scroll_into_view_in(scope.to_owned(), map.line_key(source, map.line_of(index)));
     }
 
     // Position restore.
@@ -366,6 +397,7 @@ impl CollectionState {
         self.pending = None;
         self.drop = None;
         self.reveal_after_layout.set(None);
+        self.top_line.set(None);
         // The folder left takes its gestures and keyboard mode with it.
         self.controllers.reset();
         self.gesture = None;
@@ -414,7 +446,7 @@ impl CollectionState {
                 // Instant either way, and either way a scroll request, which stops a glide in
                 // progress: the reveal when the row is out of view, else a scroll to where the
                 // view is (a reveal that has nowhere to go might leave a glide running).
-                Some(index) if self.shows_line(index) => {
+                Some(index) if self.shows_line(index, source.len()) => {
                     tx.scroll_to_instant(viewport_path(scope), 0.0, self.scroll.get());
                 }
                 Some(index) => self.reveal(scope, source, index, tx),

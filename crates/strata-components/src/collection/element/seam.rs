@@ -68,7 +68,8 @@ impl Region {
 /// Used by: C1b, C1d.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Hit {
-    /// The entry under the pointer, or `None` over empty space.
+    /// The entry under the pointer, or `None` over empty space: a group's header line and the
+    /// stuck group header are empty space too.
     pub index: Option<usize>,
     /// Which part of the entry's row. Empty space is [`Region::Gutter`].
     pub region: Region,

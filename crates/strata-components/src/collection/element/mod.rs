@@ -8,7 +8,9 @@
 //! (W1's [`Dnd`] binder). Drags out start from the pointer controller's
 //! [`Intent::BeginDrag`], not from rows (see Decisions). Pointer, keyboard and marquee input
 //! goes through one seam
-//! ([`seam`]) to the controllers C1b, C1c and C1d install; with none, a press selects.
+//! ([`seam`]) to the controllers C1b, C1c and C1d install; with none, a press selects. A
+//! grouped collection (C4's file-type groups, [`Collection::groups`]) puts a header line above
+//! each group, and keeps the top group's header stuck at the top of the viewport.
 //!
 //! ```ignore
 //! struct App { listing: ListSource, coll: CollectionState, look: Look, version: u64 }
@@ -80,8 +82,32 @@
 //!   descendant (C1c).
 //! - **No cursor reveal on a pointer press.** A key or a tick that moves the cursor scrolls it
 //!   into view; a press moves it only onto what the viewport already shows.
+//! - **Sticky group headers are an overlay** ([`Collection::groups`], C1f). Rune sticks an
+//!   element only inside its own virtual row, which would put a whole group (up to every
+//!   entry) in one row, so each group's header is a virtual line of its own and the header of
+//!   the group at the top is a copy drawn over the viewport's top line (Rune draft U-C1f-4).
+//!   The copy is pushed out by the next header through a live value, with no view commit; its
+//!   label is built, so a scroll into another group builds the view once (none per frame). A
+//!   live label would save that build, but `live_text` anywhere in the tree makes Rune build
+//!   the view on every shift of the virtual window (Rune draft U-C1f-6). The copy takes no
+//!   input and is hidden from assistive technology.
+//! - **A press on a header is on empty space** (owner ruling). A press on a header line or
+//!   the stuck header is on no entry: a plain one clears the selection, a drag starts a band,
+//!   a secondary press opens the background menu. Strata's GTK headers decide nothing of their
+//!   own. A drop there goes to the folder shown.
+//! - **Deviation: header lines are the row height** (owner ruling). Rune's virtual list has one
+//!   height estimate, so a header of another height would put rows where the index geometry
+//!   doesn't. Strata's `.type-group-heading` is about 2 pt taller than a row; this one is a
+//!   row tall until Rune draft U-C1f-1.
+//! - **Deviation: a page leaves a row for the stuck header** (owner ruling). In a grouped
+//!   collection [`GroupedRows`]'s page step is the rows that fit below the stuck header, minus
+//!   one, so W1d's row of overlap stays in view. Strata's pages, with no stuck header, count
+//!   the whole viewport.
+//! - **A heading per group, nothing per row** (owner ruling). A header line is a heading named
+//!   by its group; rows don't repeat their group's name, as in GTK.
 //!
-//! Work package: C1e, `docs/work/phase-2-composites/C1e-collection-element.md`.
+//! Work packages: C1e, `docs/work/phase-2-composites/C1e-collection-element.md`; C1f (group
+//! header lines, the press hook and C1e's round-3 fixes) has no document of its own.
 
 #![warn(missing_docs)]
 
@@ -101,12 +127,16 @@ use std::borrow::Cow;
 use std::ops::Range;
 use std::rc::Rc;
 
-use rune::{El, GrowthSpec, PointerButton, ScrollPos, ScrollSpec, Tx, col};
+use rune::{El, GrowthSpec, Live, PointerButton, ScrollPos, ScrollSpec, Tx, col, text};
 use strata_kit::look::Look;
 
 pub use a11y::{Announcement, Roles, default_announcement};
-pub use keys::{ICON, LABEL, ROWS, STATUS, VIEWPORT, part_path, row_key, row_path, viewport_path};
-pub use lines::{Lines, OnePerLine};
+pub use keys::{
+    ICON, LABEL, ROWS, STATUS, STUCK, VIEWPORT, header_key, part_path, row_key, row_path,
+    viewport_path,
+};
+use lines::LineMap;
+pub use lines::{Group, GroupStyle, GroupedRows, Groups, Lines, OnePerLine};
 pub use row::{ContentSlot, RowCx, RowMarks, RowState, Slot};
 pub use seam::{
     Activation, Controllers, Ctx, Effect, Flow, Hit, Intent, KeyController, KeyInput,
@@ -135,6 +165,8 @@ type CursorFn<S> = Rc<dyn Fn(&mut S, Option<EntryId>, &mut Tx)>;
 type SelectionFn<S> = Rc<dyn Fn(&mut S, &mut Tx)>;
 type VisibleFn<S> = Rc<dyn Fn(&mut S, Range<usize>) -> bool>;
 type AnnounceFn<S> = Rc<dyn Fn(&S, &Announcement) -> String>;
+type GroupsFn<S> = Rc<dyn Fn(&S) -> &Groups>;
+type GroupStyleFn = Rc<dyn Fn(&Look) -> GroupStyle>;
 
 /// What [`Collection`] was built with, shared by its rows and handlers.
 pub(crate) struct Config<S> {
@@ -149,6 +181,8 @@ pub(crate) struct Config<S> {
     roles: Roles,
     row_height: RowHeightFn<S>,
     lines: Rc<dyn Lines>,
+    groups: Option<GroupsFn<S>>,
+    group_style: GroupStyleFn,
     dnd: Dnd<S>,
     read_only: bool,
     on_drop: Option<row::DropFn<S>>,
@@ -220,6 +254,8 @@ impl<S: 'static> Collection<S> {
                 roles: Roles::LISTBOX,
                 row_height: Rc::new(|_, l| l.row.list),
                 lines: Rc::new(OnePerLine),
+                groups: None,
+                group_style: Rc::new(GroupStyle::from_look),
                 dnd: Dnd::rune(),
                 read_only: false,
                 on_drop: None,
@@ -265,6 +301,22 @@ impl<S: 'static> Collection<S> {
     /// How entries pack into lines (C3's grid); [`OnePerLine`] by default.
     pub fn lines(mut self, lines: impl Lines + 'static) -> Self {
         self.cfg.lines = Rc::new(lines);
+        self
+    }
+
+    /// Draws the entries in groups (C4's file-type groups): each group under a header line,
+    /// and the header of the group at the top stuck there while its group scrolls, pushed out
+    /// by the next. Header lines hold no entry: a press on one, or on the stuck header, is on
+    /// empty space. Groups need one entry per line ([`OnePerLine`]); with lines that pack more,
+    /// or groups that don't cover the source, the collection draws ungrouped. See [`Groups`].
+    pub fn groups(mut self, groups: impl Fn(&S) -> &Groups + 'static) -> Self {
+        self.cfg.groups = Some(Rc::new(groups));
+        self
+    }
+
+    /// How header lines and the stuck header draw: [`GroupStyle::from_look`] by default.
+    pub fn group_style(mut self, style: impl Fn(&Look) -> GroupStyle + 'static) -> Self {
+        self.cfg.group_style = Rc::new(style);
         self
     }
 
@@ -433,11 +485,7 @@ impl<S: 'static> Collection<S> {
     /// coordinates: for an anchor out of the element (C21's keyboard menu at the cursor,
     /// through [`CollectionState::content_to_window`]).
     pub fn geometry(&self, s: &S) -> Box<dyn CollectionGeometry> {
-        let row_height = self.cfg.row_height_of(s);
-        let (src, st) = (self.cfg.get)(s);
-        self.cfg
-            .lines
-            .geometry(src.len(), row_height, st.viewport.w, st.viewport.h)
+        route::geometry(&self.cfg, s)
     }
 
     /// Entry `index`'s rect in window points, as the element lays it out now.
@@ -461,14 +509,26 @@ impl<S: 'static> Collection<S> {
             st.per_line.get().max(1)
         };
         st.per_line.set(per);
-        let lines = lines::line_count(len, per);
+        let map = LineMap::new(per, cfg.groups.as_ref().map(|g| g(s)), len);
+        // Recorded so reveals and restores from outside the handlers know the header lines.
+        st.groups.replace(map.groups().cloned());
+        let lines = map.count(len);
         let row_height = cfg.row_height_of(s);
+        // The group whose header this build sticks at the top (see `Stuck`): the one Rune last
+        // reported at the top, else the one at the scroll offset.
+        let shown = st
+            .top_line
+            .get()
+            .and_then(|line| map.group_at_line(line))
+            .or_else(|| map.top_group(st.scroll.get(), row_height))
+            .filter(|_| len > 0);
         let frame = row::Frame {
             look_key: row::look_key(look),
             config_key: row::config_key(&cfg),
             row_height,
             per_line: per,
             len,
+            grouped: map.groups().is_some(),
             hover_live: st.hover_live,
             cursor_shown: st.keyboard && st.active,
             drop: st.drop,
@@ -482,6 +542,7 @@ impl<S: 'static> Collection<S> {
         let key_cfg = cfg.clone();
         let build_cfg = cfg.clone();
         let visible_cfg = cfg.clone();
+        let (key_map, build_map, visible_map) = (map.clone(), map.clone(), map.clone());
         let rows = col()
             .key(ROWS)
             .w_full()
@@ -494,15 +555,38 @@ impl<S: 'static> Collection<S> {
                 row_height,
                 move |s: &S, line| {
                     let src = (key_cfg.get)(s).0;
-                    Cow::Owned(keys::line_key(src.id_at(line * per), per))
+                    Cow::Owned(key_map.line_key(src, line))
                 },
-                move |s: &S, line| row::build_line(&build_cfg, &frame, s, line),
+                move |s: &S, line| row::build_line(&build_cfg, &frame, &build_map, s, line),
             )
-            .virtual_rows_version(((cfg.version)(s), per, len))
-            .on_visible_rows(move |s: &mut S, r| route::on_visible(&visible_cfg, s, r));
+            .virtual_rows_version(((cfg.version)(s), per, len, map.fingerprint()))
+            .on_visible_rows(move |s: &mut S, r| {
+                route::on_visible(&visible_cfg, s, r, &visible_map, shown)
+            });
 
         let live = st.scroll.clone();
         let layer = st.scroll_layer.clone();
+        let stuck = shown.map(|shown| Stuck {
+            map: map.clone(),
+            h: row_height,
+            push: st.stuck_offset.clone(),
+            shown,
+        });
+        // Up to date for this build (a regroup moves no scroll): the scroll keeps it so after.
+        if let Some(stuck) = &stuck {
+            stuck.follow(st.scroll.get());
+        }
+        let stuck_part = stuck.as_ref().and_then(|stuck| {
+            let group = map.groups()?.groups().get(stuck.shown)?;
+            let style = (cfg.group_style)(look);
+            let label = text(group.label.to_string()).truncate();
+            Some(
+                row::header_body(&style, row_height, label)
+                    .key(STUCK)
+                    .fill(style.fill)
+                    .live_offset(&st.stuck_offset),
+            )
+        });
         let layout_cfg = cfg.clone();
         let viewport = col()
             .key(VIEWPORT)
@@ -515,6 +599,9 @@ impl<S: 'static> Collection<S> {
             .on_scroll_offset(move |p: ScrollPos| {
                 live.set(p.offset[1]);
                 layer.set([0.0, -p.offset[1]]);
+                if let Some(stuck) = &stuck {
+                    stuck.follow(p.offset[1]);
+                }
             })
             .on_layout_tx(move |s: &mut S, r, tx| route::on_layout(&layout_cfg, s, r, tx))
             .child(rows);
@@ -564,6 +651,19 @@ impl<S: 'static> Collection<S> {
         {
             over = over.child(pinned(empty));
         }
+        if let Some(part) = stuck_part {
+            // Over the viewport's top line, clipped to it, so the next header pushes it up and
+            // out; it takes no input (presses on it are on no entry: `route::hit`), and the
+            // header line it copies is the one assistive technology reads.
+            let part = col()
+                .pin(Some(0.0), Some(0.0), Some(0.0), None)
+                .h(row_height)
+                .clip_soft(0.0)
+                .a11y_hidden()
+                .inert()
+                .child(part);
+            over = over.child(part);
+        }
         if let Some(band) = st
             .controllers
             .marquee
@@ -599,6 +699,32 @@ impl<S: 'static> Collection<S> {
     }
 }
 
+/// The stuck group header's push, which the viewport's scroll keeps up to date with no view
+/// commit: up by as much as the next group's header line has come into the top line.
+///
+/// Its label is the group the build saw at the top (`shown`). A scroll into another group
+/// builds the view again (`route::on_visible` says so), once per group crossed; until that
+/// build lands the stuck header hides, and the new group's own header line shows at the top.
+/// A live label would save that build, but a `live_text` anywhere in the tree makes Rune build
+/// the view on every shift of the virtual window instead (Rune draft U-C1f-6).
+struct Stuck {
+    map: LineMap,
+    h: f32,
+    push: Live<[f32; 2]>,
+    shown: usize,
+}
+
+impl Stuck {
+    fn follow(&self, offset: f32) {
+        let dy = if self.map.top_group(offset, self.h) == Some(self.shown) {
+            self.map.stuck_extent(offset, self.h) - self.h
+        } else {
+            -self.h
+        };
+        self.push.set([0.0, dy]);
+    }
+}
+
 /// `part` over the whole of its parent.
 fn pinned(part: El) -> El {
     col()
@@ -630,5 +756,5 @@ fn background_zone<S: 'static>(cfg: &Rc<Config<S>>, on_drop: row::DropFn<S>) -> 
             }
         }
     })
-    .on_move(move |s: &mut S, point, tx| route::drop_edge_scroll(&edge, s, point, tx))
+    .on_move(move |s: &mut S, point, tx| route::drop_edge_scroll(&edge, s, point, false, tx))
 }

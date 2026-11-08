@@ -3,7 +3,14 @@
 //!
 //! The cursor's row is the container's active descendant (focus stays on the container). Rune
 //! gives each mounted row of a virtual list its place in the set, and the rows group the set's
-//! size; grid cells state their own. A row's selected state comes from `focus_selected`.
+//! size; grid cells state their own, and so do the rows of a grouped collection, whose header
+//! lines would otherwise count. A row's selected state comes from `focus_selected`.
+//!
+//! A group's header line is a heading named by its label, a sibling of the rows (Rune can't
+//! make rows of a virtual list members of a header: Rune draft U-C1f-3). It carries Rune's
+//! virtual-list index as its position, which Rune gives every virtual row (Rune draft
+//! U-C1f-2). The stuck copy over the viewport is hidden from assistive technology: the header
+//! line itself is in the tree while it is mounted.
 
 use rune::{El, LiveRegion, el, text};
 
@@ -20,6 +27,8 @@ pub struct Roles {
     pub line: Option<&'static str>,
     /// Each entry's role.
     pub item: &'static str,
+    /// A group's header line's role (`Collection::groups`).
+    pub header: &'static str,
 }
 
 impl Roles {
@@ -28,6 +37,7 @@ impl Roles {
         container: "listbox",
         line: None,
         item: "option",
+        header: "heading",
     };
 
     /// A grid of rows, whose cells the content slot draws (C4).
@@ -35,6 +45,7 @@ impl Roles {
         container: "grid",
         line: None,
         item: "row",
+        header: "heading",
     };
 
     /// A grid of rows of cells, one entry per cell (C3).
@@ -42,6 +53,7 @@ impl Roles {
         container: "grid",
         line: Some("row"),
         item: "gridcell",
+        header: "heading",
     };
 }
 

@@ -50,8 +50,11 @@ struct Host {
     width: f32,
     /// Roles other than the default, when set.
     roles: Option<Roles>,
-    /// Takes drops (a no-op `on_drop`).
+    /// Takes drops, recording where each went.
     drops: bool,
+    dropped: Vec<Option<EntryId>>,
+    /// The groups the collection draws in (none by default).
+    groups: Groups,
 }
 
 impl Host {
@@ -75,6 +78,8 @@ impl Host {
             width: W,
             roles: None,
             drops: false,
+            dropped: Vec::new(),
+            groups: Groups::default(),
         }
     }
 }
@@ -153,6 +158,7 @@ fn collection(s: &Host) -> Collection<Host> {
     }))
     .on_cursor(|s: &mut Host, id, _| s.cursors.push(id))
     .on_selection(|s: &mut Host, _| s.selections += 1)
+    .groups(|s: &Host| &s.groups)
     .on_intent(|s: &mut Host, intent, _| {
         s.intents.push(format!("{intent:?}"));
         s.last_intent = Some(intent);
@@ -181,7 +187,7 @@ fn collection(s: &Host) -> Collection<Host> {
         c = c.roles(roles);
     }
     if s.drops {
-        c = c.on_drop(|_: &mut Host, _, _, _| {});
+        c = c.on_drop(|s: &mut Host, target, _, _| s.dropped.push(target));
     }
     c.settings(7u32)
 }
@@ -2107,4 +2113,296 @@ fn each_controller_reads_its_own_settings_from_the_builder() {
     click(&mut rt, "row-2");
     press(&mut rt, Key::Down);
     assert_eq!(*seen.borrow(), ["pointer Some(A(3))", "keys Some(B(2))"]);
+}
+
+// Group header lines (C1f).
+
+/// `n` entries in groups of `size`, keyed by their number and labelled "Group {g}".
+fn grouped(n: usize, size: usize) -> Host {
+    let mut host = Host::new(n);
+    host.groups = groups_of(n, size, "Group");
+    host
+}
+
+fn groups_of(n: usize, size: usize, label: &str) -> Groups {
+    Groups::new(
+        (0..n.div_ceil(size))
+            .map(|g| Group::new(g as u64, format!("{label} {g}"), size.min(n - g * size))),
+    )
+}
+
+/// Scrolls the viewport to content y `y` and lets it settle.
+fn scroll_to(rt: &mut Runtime<Host>, y: f32) {
+    rt.update(move |_, tx| tx.scroll_to_instant(keys::viewport_path(SCOPE), 0.0, y));
+    settle(rt);
+}
+
+fn row_h(rt: &Runtime<Host>) -> f32 {
+    rt.state.look.row.list
+}
+
+/// The stuck header's label and its part's visible rect.
+fn stuck(rt: &Runtime<Host>) -> (Option<String>, [f32; 4]) {
+    let elements = rt.elements();
+    let part = elements
+        .iter()
+        .find(|e| !e.exiting && e.key.as_deref() == Some(STUCK))
+        .expect("a stuck header");
+    let label = elements
+        .iter()
+        .find(|e| e.path.ends_with(&format!("{STUCK}/{LABEL}")))
+        .and_then(|e| e.text.clone());
+    (label, part.visible)
+}
+
+#[test]
+fn grouped_lines_put_a_heading_above_each_group_and_rows_keep_their_entry_positions() {
+    let mut rt = runtime(grouped(100, 10));
+    click(&mut rt, "row-12");
+    let head = a11y_node(&rt, &header_key(1)).expect("group 1's header is in the tree");
+    assert!(head.contains(r#""role":"heading""#), "{head}");
+    assert!(head.contains(r#""name":"Group 1""#), "{head}");
+    let row = a11y_node(&rt, "row-12").unwrap();
+    assert!(
+        row.contains(r#""position":13"#),
+        "its entry's place, not its line's: {row}"
+    );
+    let rows = a11y_node(&rt, ROWS).unwrap();
+    assert!(
+        rows.contains(r#""setSize":100"#),
+        "the entries, not the lines: {rows}"
+    );
+    let list = a11y_node(&rt, SCOPE).unwrap();
+    assert!(list.contains(r#""activeDescendant":"row-12""#), "{list}");
+    assert!(
+        a11y_node(&rt, STUCK).is_none(),
+        "the stuck copy is hidden from assistive technology"
+    );
+}
+
+#[test]
+fn a_press_on_a_header_line_or_the_stuck_header_is_on_no_entry() {
+    let mut rt = runtime(grouped(100, 10));
+    click(&mut rt, "row-3");
+    assert_eq!(rt.state.coll.selection.len(), 1);
+    click(&mut rt, &header_key(1));
+    assert!(
+        rt.state.coll.selection.is_empty(),
+        "a header line is empty space"
+    );
+
+    // Entry 4's line at the top, under the stuck header: a press there is on no entry.
+    let h = row_h(&rt);
+    scroll_to(&mut rt, 5.0 * h);
+    click(&mut rt, "row-6");
+    assert_eq!(rt.state.coll.selection.len(), 1);
+    let vp = rt.state.coll.viewport();
+    click_at(&mut rt, vp.x + 40.0, vp.y + h / 2.0);
+    assert!(rt.state.coll.selection.is_empty(), "the stuck header");
+}
+
+#[test]
+fn a_press_just_below_the_stuck_header_hits_the_entry_drawn_there() {
+    let mut rt = runtime(grouped(100, 10));
+    let h = row_h(&rt);
+    scroll_to(&mut rt, 5.0 * h);
+    let vp = rt.state.coll.viewport();
+    click_at(&mut rt, vp.x + 40.0, vp.y + h + h / 2.0);
+    assert_eq!(
+        rt.state.coll.selection.cursor(),
+        Some(id(5)),
+        "line 6: entry 5"
+    );
+    let shown = element(&rt, "row-5").unwrap().visible;
+    assert!(
+        shown[1] >= vp.y + h - 0.5,
+        "drawn below the stuck header: {shown:?}"
+    );
+}
+
+/// Up and Down move the cursor one entry; the element reveals it.
+struct Step;
+
+impl KeyController for Step {
+    fn key(&mut self, input: &KeyInput<'_>, cx: &mut Ctx<'_>) -> Flow {
+        let Some(i) = cx.selection().cursor_index(cx.source) else {
+            return Flow::Pass;
+        };
+        let to = match input.event.key {
+            Key::Up => i.saturating_sub(1),
+            Key::Down => (i + 1).min(cx.source.len() - 1),
+            _ => return Flow::Pass,
+        };
+        cx.apply(|sel, src| sel.select_only(src, to));
+        Flow::Handled
+    }
+}
+
+#[test]
+fn revealing_an_entry_keeps_it_clear_of_the_stuck_header() {
+    let mut rt = runtime(grouped(1_000, 10));
+    let h = row_h(&rt);
+    let vh = rt.state.coll.viewport().h;
+    let line_of = |i: usize| (i + i / 10 + 1) as f32;
+    let reveal = |rt: &mut Runtime<Host>, i: usize| {
+        rt.update(move |s, tx| s.coll.reveal(SCOPE, &s.src, i, tx));
+        settle(rt);
+        rt.state.coll.scroll_offset()
+    };
+    scroll_to(&mut rt, 900.0 * h);
+    assert_eq!(
+        reveal(&mut rt, 500),
+        (line_of(500) - 1.0) * h,
+        "its header at the top"
+    );
+    scroll_to(&mut rt, 900.0 * h);
+    assert_eq!(
+        reveal(&mut rt, 503),
+        (line_of(503) - 1.0) * h,
+        "the entry above at the top"
+    );
+    assert_eq!(reveal(&mut rt, 0), 0.0, "the first header shows");
+    assert_eq!(
+        reveal(&mut rt, 80) + vh,
+        (line_of(80) + 1.0) * h,
+        "going down, the entry at the bottom"
+    );
+
+    // A key that moves the cursor up onto the line the stuck header covers.
+    let mut host = grouped(1_000, 10);
+    host.coll.controllers.keyboard = Some(Box::new(Step));
+    let mut rt = runtime(host);
+    scroll_to(&mut rt, line_of(504) * h);
+    let vp = rt.state.coll.viewport();
+    click_at(&mut rt, vp.x + 40.0, vp.y + h + h / 2.0);
+    assert_eq!(rt.state.coll.selection.cursor(), Some(id(505)));
+    press(&mut rt, Key::Up);
+    settle(&mut rt);
+    assert_eq!(rt.state.coll.selection.cursor(), Some(id(504)));
+    let shown = element(&rt, "row-504").unwrap().visible;
+    assert!(
+        shown[1] >= vp.y + h - 0.5 && shown[3] > h - 0.5,
+        "whole, below the stuck header: {shown:?}"
+    );
+}
+
+/// The stuck header shows the top group's header, pushed up by the next group's: the push
+/// rides the scroll, and a new group's label costs one view run per group crossed (until it
+/// lands the stuck header hides, and the new group's own header line shows at the top).
+#[test]
+fn the_stuck_header_follows_the_top_group_and_the_next_pushes_it_out() {
+    thread_local! {
+        static VIEWS: Cell<usize> = const { Cell::new(0) };
+    }
+    fn counted(s: &Host, cx: &mut Cx<Host>) -> El {
+        VIEWS.with(|v| v.set(v.get() + 1));
+        view(s, cx)
+    }
+    let mut rt = Runtime::new(grouped(1_000, 10), counted, (W, H), Env::new(false, 1.0));
+    rt.frame(0.0);
+    settle(&mut rt);
+    let h = row_h(&rt);
+    let vp = rt.state.coll.viewport();
+    assert_eq!(stuck(&rt).0.as_deref(), Some("Group 0"));
+    let views = VIEWS.with(Cell::get);
+    let (mut pushed, mut hidden) = (0, 0);
+    let mut groups = std::collections::BTreeSet::new();
+    for _ in 0..200 {
+        rt.wheel(W / 2.0, H / 2.0, -7.0);
+        rt.frame(1.0 / 60.0);
+        let offset = rt.state.coll.scroll_offset();
+        let top = (offset / h) as usize / 11;
+        let next = ((top + 1) * 11) as f32 * h;
+        let extent = (next - offset).clamp(0.0, h);
+        let (label, rect) = stuck(&rt);
+        groups.insert(top);
+        if rect[3] < 0.5 {
+            hidden += 1;
+            continue;
+        }
+        assert_eq!(label, Some(format!("Group {top}")), "at {offset}");
+        assert!(
+            (rect[1] + rect[3] - (vp.y + extent)).abs() < 0.6,
+            "pushed to {extent} at {offset}: {rect:?}"
+        );
+        pushed += usize::from(extent < h - 0.5);
+    }
+    let crossed = groups.len() - 1;
+    assert!(crossed >= 3, "crossed groups: {groups:?}");
+    assert!(pushed > 0, "seen pushed");
+    assert!(
+        hidden <= crossed,
+        "hidden {hidden} frames for {crossed} crossings"
+    );
+    assert_eq!(
+        VIEWS.with(Cell::get) - views,
+        crossed,
+        "a view run per group crossed, none per frame"
+    );
+}
+
+/// A regroup at the same listing version and the same number of lines draws the new groups.
+#[test]
+fn a_regroup_rekeys_the_lines() {
+    let mut rt = runtime(grouped(100, 10));
+    assert!(element(&rt, &header_key(1)).is_some());
+    rt.update(|s, _| {
+        s.groups = Groups::new(
+            (0..10).map(|g| Group::new(g, format!("Big {g}"), if g % 2 == 0 { 5 } else { 15 })),
+        );
+    });
+    settle(&mut rt);
+    let head = a11y_node(&rt, &header_key(0)).unwrap();
+    assert!(head.contains(r#""name":"Big 0""#), "{head}");
+    assert_eq!(stuck(&rt).0.as_deref(), Some("Big 0"), "without a scroll");
+    let top = element(&rt, &header_key(0)).unwrap().visible[1];
+    let [_, y, _, _] = element(&rt, &header_key(1)).unwrap().visible;
+    assert!(
+        (y - top - 6.0 * row_h(&rt)).abs() < 0.5,
+        "group 1 now 6 lines down: {y} {top}"
+    );
+}
+
+#[test]
+fn groups_that_dont_cover_the_listing_draw_it_ungrouped() {
+    let mut host = Host::new(100);
+    host.groups = groups_of(50, 10, "Group");
+    let rt = runtime(host);
+    assert!(element(&rt, &header_key(0)).is_none());
+    assert!(element(&rt, STUCK).is_none());
+    assert!(a11y_node(&rt, "row-3").unwrap().contains(r#""position":4"#));
+}
+
+#[test]
+fn a_drop_over_the_stuck_header_goes_to_the_folder_shown() {
+    let mut host = grouped(100, 10);
+    host.drops = true;
+    let mut rt = runtime(host);
+    let h = row_h(&rt);
+    // Entry 0, a folder, on the top line, under the stuck header.
+    scroll_to(&mut rt, h);
+    let vp = rt.state.coll.viewport();
+    rt.drag_files(
+        vec!["/tmp/a.txt".into()],
+        Some((vp.x + 60.0, vp.y + h / 2.0)),
+    );
+    rt.frame(1.0 / 60.0);
+    rt.drag_files_to(Some((vp.x + 61.0, vp.y + h / 2.0)));
+    rt.frame(1.0 / 60.0);
+    assert_eq!(rt.state.coll.drop_over(), Some(DropOver::Background));
+    rt.drop_files(
+        vec!["/tmp/a.txt".into()],
+        Some((vp.x + 61.0, vp.y + h / 2.0)),
+    );
+    rt.frame(1.0 / 60.0);
+    // Folder 10's row shows below: a drop there goes to it.
+    let [x, y, w, rh] = element(&rt, "row-10").unwrap().visible;
+    let at = (x + w / 2.0, y + rh / 2.0);
+    rt.drag_files(vec!["/tmp/a.txt".into()], Some(at));
+    rt.frame(1.0 / 60.0);
+    rt.drag_files_to(Some((at.0 + 1.0, at.1)));
+    rt.frame(1.0 / 60.0);
+    rt.drop_files(vec!["/tmp/a.txt".into()], Some((at.0 + 1.0, at.1)));
+    rt.frame(1.0 / 60.0);
+    assert_eq!(rt.state.dropped, [None, Some(id(10))]);
 }

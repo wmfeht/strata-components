@@ -605,6 +605,60 @@ fn a_new_display_scale_rescales_before_a_zoom() {
     );
 }
 
+/// A window moved to a 2× display: no input, no layout change in points.
+fn rescale_with_no_input(interaction: Interaction) {
+    // Fit: 0.25 at 1×, so 0.5 at 2×, reported.
+    let mut rt = runtime(interaction, false);
+    let reports = rt.state.reports.len();
+    rt.set_viewport((400.0, 300.0), 2.0);
+    settle(&mut rt);
+    assert_eq!(rt.state.view.scale(), 2.0, "{interaction:?}");
+    assert!(
+        near(rt.state.view.level().expect("level"), 0.5),
+        "{interaction:?}"
+    );
+    assert_eq!(rt.state.reports.len(), reports + 1, "{interaction:?}");
+    assert!(near(rt.state.reports[reports].level, 0.5));
+    if interaction == Interaction::Full {
+        let value = rt.accessibility_json().to_string();
+        assert!(value.contains("\"50%\""), "the image reads 50%");
+    }
+
+    // 1:1 panned to a corner: 1600 × 1000 points at 1×, 800 × 500 at 2×, so the pan's reach
+    // falls from (600, 350) to (200, 100).
+    let mut rt = runtime(interaction, false);
+    rt.update(|s, _| {
+        s.view.set_mode(Mode::Actual);
+        s.view.pan_by([-5000.0, 5000.0]);
+    });
+    settle(&mut rt);
+    assert_eq!(rt.state.view.pan(), [-600.0, 350.0]);
+    rt.set_viewport((400.0, 300.0), 2.0);
+    settle(&mut rt);
+    assert_eq!(rt.state.view.pan(), [-200.0, 100.0], "{interaction:?}");
+    let content = rt
+        .elements()
+        .into_iter()
+        .find(|e| e.key.as_deref() == Some("vp-content"))
+        .expect("the content")
+        .rect;
+    // Panned left and down to the content's top-right corner, which is the frame's: no gap.
+    assert!(
+        near(content[0] + content[2], 400.0) && near(content[1], 0.0),
+        "{content:?}"
+    );
+}
+
+#[test]
+fn a_scale_change_alone_resyncs_a_full_viewport() {
+    rescale_with_no_input(Interaction::Full);
+}
+
+#[test]
+fn a_scale_change_alone_resyncs_a_fixed_viewport() {
+    rescale_with_no_input(Interaction::Fixed);
+}
+
 #[test]
 fn pans_pass_rune_s_live_only_check() {
     let mut rt = runtime(Interaction::Full, false);
@@ -689,9 +743,6 @@ fn scrolling_past_a_viewport_runs_no_view() {
         rt.frame(DT);
     }
     settle(&mut rt);
-    for e in rt.elements() {
-        eprintln!("DBG {:?} {:?} {:?}", e.key, e.rect, e.target);
-    }
     let frame = rt
         .elements()
         .into_iter()

@@ -29,6 +29,13 @@
 //!   [`ZoomReport`] to [`Viewport::on_zoom`]; [`ViewportState`]'s methods return theirs.
 //! - **Pan** by drag, by the wheel, and by the arrow keys, only along an axis the content
 //!   overflows, held at the content's edges. An axis that fits stays centred.
+//!
+//!   At an edge the two differ on purpose. A wheel delta along an overflowing axis is taken
+//!   even when the content can't move further, because Rune gives the rest of a wheel gesture
+//!   (its momentum included) to whichever handler took its first delta: passing deltas on at
+//!   the edge would hand the tail of a pan to the scroll view around the viewport and scroll the
+//!   panel mid-gesture. An arrow is one discrete step, so an arrow that would move nothing
+//!   passes on, to the listing or the panel's own keys.
 //! - **Checkerboard** behind transparent content ([`Viewport::transparent`]), from Kit tokens.
 //! - **Overlay**: children placed in content pixels ([`Viewport::overlay`], [`ContentMap`]),
 //!   which pan with the content and keep their own size as it zooms (C14b's route marker; C13's
@@ -109,18 +116,28 @@
 //!   200)`, so a wheel turned away zooms out; Rune draft "Ctrl+wheel turned into a pinch zooms
 //!   the wrong way", draft, not filed, in C14a's report). So the viewport attaches `on_magnify`
 //!   only on macOS, where pinches arrive as pinches, and hears Ctrl+wheel in `on_wheel` with its
-//!   modifiers everywhere else, in a window and headless alike.
+//!   modifiers everywhere else, in a window and headless alike. In practice pinch is macOS
+//!   only: on Linux winit 0.30.13 delivers no pinch at all (`PinchGesture` is macOS and iOS; a
+//!   Ctrl+wheel standing for a pinch is Windows'), so a Linux trackpad zooms only through
+//!   whatever Ctrl+wheel the compositor or libinput sends.
 //!
 //!   The catch: Rune converts the Ctrl+wheel for any `on_magnify` under the pointer, ancestors
 //!   included. A host that puts `on_magnify` on an element around a Full viewport (a canvas, a
 //!   window-wide zoom) takes Ctrl+wheel from it off macOS: the ancestor hears an inverted pinch
 //!   and the viewport hears nothing. Keep `on_magnify` off a Full viewport's ancestors there.
+//! - A change of display scale alone fires no layout handler; the viewport mounts a one-off
+//!   element to resync (see `build`; Rune draft "No notification on a scale-only change",
+//!   draft, not filed, in C14a's report).
 //! - There is no repeating pattern fill; the checkerboard is a shape of squares.
 //!
 //! # Open items
 //!
 //! - Strata's keymaps haven't been checked for plain `+`, `-` and `0` while a preview has focus.
 //!   [`Viewport::zoom_keys`] takes another key set ([`zoom_key`] is the default).
+//! - A held arrow that pans to an edge goes on repeating, and the repeats past the edge pass on
+//!   to Strata's panel navigation (the next file, say). That matches Strata's archive preview
+//!   (lgse/strata#1343), and Rune's `KeyEvent` has no repeat flag to stop at the edge with; Strata
+//!   decides whether to keep it.
 
 mod checker;
 mod state;
@@ -371,6 +388,25 @@ impl<'a, S: 'static> Viewport<'a, S> {
             });
         }
 
+        // Rune fires `on_layout` only when a rect moves or resizes in points, so a change of
+        // display scale alone (a window moved to another monitor) reaches no handler, and the
+        // level and the pan would stay at the old scale (Rune draft "No notification on a
+        // scale-only change", draft, not filed, in C14a's report). A fresh element reports its
+        // first layout, so while the state is behind, one is mounted to bring it up to date.
+        if st.frame().is_some() && st.scale() != scale {
+            let on_zoom = on_zoom.clone();
+            frame = frame.child(
+                el().key(format!("{key}-rescale"))
+                    .role("presentation")
+                    .pin(Some(0.0), Some(0.0), None, None)
+                    .size(0.0, 0.0)
+                    .on_layout_tx(move |s: &mut S, _r: [f32; 4], tx: &mut Tx| {
+                        let report = access(s).sync_scale(scale);
+                        emit(&on_zoom, s, report, tx);
+                    }),
+            );
+        }
+
         match placed {
             Some((frame_size, content, level)) => {
                 let drawn = zoom::drawn_size(content, level, scale);
@@ -461,18 +497,27 @@ impl<'a, S: 'static> Viewport<'a, S> {
                 look.space.xxl,
             ))
             .on_wheel(wheel_handler(access, on_zoom.clone(), scale));
-        // Off macOS a pinch arrives as Ctrl+wheel, which `on_wheel` hears with its modifiers; an
-        // `on_magnify` there would make Rune turn it into an inverted pinch (module docs).
+        let on_zoom_drag = on_zoom.clone();
+        // Off macOS a pinch arrives as Ctrl+wheel (Windows) or not at all (Linux), and
+        // `on_wheel` hears Ctrl+wheel with its modifiers; an `on_magnify` there would make Rune
+        // turn it into an inverted pinch with none (Rune draft "Ctrl+wheel turned into a pinch
+        // zooms the wrong way", draft, not filed, in C14a's report; module docs).
         if cfg!(target_os = "macos") {
             frame = frame.on_magnify(magnify_handler(access, on_zoom, scale));
         }
         if pans {
+            let on_zoom = on_zoom_drag;
             frame =
                 frame
                     .cursor(Cursor::Grab)
                     .on_drag(move |s: &mut S, d: &mut Drag, tx: &mut Tx| {
+                        let rescaled = access(s).sync_scale(scale);
+                        let commits = rescaled.is_some();
+                        emit(&on_zoom, s, rescaled, tx);
                         access(s).drag(d);
-                        tx.live_only();
+                        if !commits {
+                            tx.live_only();
+                        }
                     });
         }
         frame
@@ -499,6 +544,10 @@ fn key_handler<S: 'static>(
         if st.level().is_none() {
             return false;
         }
+        // The rescale element brings the scale up to date before any input in practice; if a
+        // key still finds it behind, the key is taken whatever it does, so its report never goes
+        // out for a key that then passes on.
+        let take_anyway = rescaled.is_some();
         // A new scale changed the level: this event commits, whatever it does next.
         let rescaled = rescaled.is_some_and(|r| {
             emit(&on_zoom, s, Some(r), tx);
@@ -515,7 +564,7 @@ fn key_handler<S: 'static>(
                 let d = [along(o[0], x), along(o[1], y)];
                 // At the edge already, the key passes on (to the listing, say).
                 if !st.pan_by(d) {
-                    return false;
+                    return take_anyway;
                 }
                 if !rescaled {
                     tx.live_only();

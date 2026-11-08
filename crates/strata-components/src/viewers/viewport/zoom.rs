@@ -15,6 +15,12 @@
 //! visible page itself. Zooming about the pointer moves the scroll offset by
 //! [`zoom_about_scroll`]: `offset' = (offset + anchor) × k − anchor`.
 //!
+//! Strata's PDF zoom keeps the view's centre instead (`preserve_pdf_view_center`,
+//! `src/ui/preview/pdf/zoom.rs`: the anchor is half the viewport), and its Ctrl+0 reset skips
+//! even that, letting the list re-anchor the visible page (lgse/strata#1622). Which anchor C12
+//! uses is C12's choice to make on purpose: the pointer, as the viewport does, or the centre,
+//! as Strata does.
+//!
 //! ```ignore
 //! let limits = ZoomLimits::new(1.0, 4.0);
 //! // Strata's PDF zoom: e^0.14 a notch, and a notch is 40 points. Wheel away (dy > 0) zooms in.

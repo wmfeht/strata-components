@@ -15,8 +15,8 @@ rename, if any, happens before the first release tag.
 
 ## Features
 
-None is on by default. `glib-bridge` and `csd` are implemented; the other modules are placeholders
-until their work packages land. "Issue" is the upstream ask, drafted in
+None is on by default. `glib-bridge`, `csd` and `single-instance` are implemented; the other modules
+are placeholders until their work packages land. "Issue" is the upstream ask, drafted in
 [`docs/decisions/S5-upstream.md`](../../docs/decisions/S5-upstream.md#draft-index), with its link
 once filed.
 
@@ -29,7 +29,7 @@ once filed.
 | `settings` | `settings` | Settings portal keys beyond `color-scheme`, and the desktop's double-click interval | [U12](../../docs/decisions/S5-upstream.md#u12), [U13](../../docs/decisions/S5-upstream.md#u13) |
 | `icon-theme` | `icon_theme` | Freedesktop icon theme lookup | None proposed |
 | `media-audio` | `media` | An audio sink with a playback clock | Related: upstream [#30](https://github.com/anomalyco/rune/issues/30) |
-| `single-instance` | `single_instance` | Single instance and activation over D-Bus | Upstream [#22](https://github.com/anomalyco/rune/issues/22) |
+| `single-instance` | `single_instance` | Single instance on Linux: Rune starts every launch as a new process. Implemented: one primary per app id on the session bus, with a later launch's arguments, working directory and activation token forwarded over GApplication's wire protocol, `org.freedesktop.Application`, and an opt-in `org.freedesktop.FileManager1`. On X11, focusing a window already open ignores the startup id. | Upstream [#22](https://github.com/anomalyco/rune/issues/22); U-P8-1 (draft, not filed) |
 | `glib-bridge` | `glib_bridge` | A GLib main loop: Rune never iterates a `GMainContext`, so GIO's async calls, signals and monitors never dispatch. Implemented: `GlibThread` runs one on its own thread, and answers land in app state for `poll`. Needs GLib and GIO (`libglib2.0-dev` to build). | None: outside Rune's scope |
 
 Each module's own docs say what Rune lacks in detail, and the limits of the shim.

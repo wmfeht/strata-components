@@ -29,8 +29,8 @@ Nothing is released yet. The first release is planned for milestone M1 with the 
 
 - One cargo feature per shim, each gating its own module: `dnd`, `clipboard`, `csd`,
   `foreign-parent`, `settings`, `icon-theme`, `media-audio`, `single-instance` and `glib-bridge`.
-  Apart from `glib-bridge` and `csd`, the modules are placeholders until their work packages
-  land.
+  Apart from `glib-bridge`, `csd` and `single-instance`, the modules are placeholders until
+  their work packages land.
 - `glib-bridge`: a GLib main loop for Rune apps. `GlibThread::start` runs a fresh `MainContext`
   on its own thread and wakes the app's `poll` as answers land in its state.
   - `Glib::spawn` runs a GIO future there, and its output lands in a `Task`.
@@ -56,3 +56,19 @@ Nothing is released yet. The first release is planned for milestone M1 with the 
   On Wayland a borderless window has no edge resize, minimise or window menu until Rune ships
   them (drafts U6, U7 and U8). On X11, resizing may fail where the window manager grabs the
   pointer itself (mutter and KWin are untested). It uses `x11rb`.
+- `single-instance`: one primary process per app id, as `GApplication` gives GTK apps.
+  `single_instance::claim` claims the id on the session bus first thing in `main`. A later
+  launch forwards its arguments (as bytes), working directory and activation token to the
+  primary, prints what the primary sends back and exits with its status (`Claim::Forwarded`).
+  - The primary gets each launch, activation and call as an `Event` on Rune's loop
+    (`Primary::attach_rune`, through `AppHandle::update`), its own launch first.
+    `CommandLine::print`, `print_err` and `exit` answer a forwarded launch.
+  - It speaks GApplication's wire protocol (`org.gtk.Application`, `org.freedesktop.Application`,
+    `org.gtk.Actions`), so a GApplication of the same id and this primary reach each other.
+  - `Options::file_manager1` also serves `org.freedesktop.FileManager1`, delivering its calls
+    as `Reveal` data; the name is queued for, never taken from another file manager.
+  - Without a session bus, or with one that doesn't answer within `Options::bus_timeout`, a
+    launch runs alone (`Claim::Standalone`).
+
+  zbus types appear in its API, so a move to another zbus major is a minor release. It uses
+  `zbus` and `tokio`, which Rune's `dbus` feature already builds.

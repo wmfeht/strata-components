@@ -27,6 +27,10 @@ strata-platform = { version = "0.0.1", path = "crates/strata-platform" }
 strata-kit = { version = "0.0.1", path = "crates/strata-kit" }
 strata-components = { version = "0.0.1", path = "crates/strata-components" }
 
+# strata-kit theme files (K1); K4's overrides.toml reuses it. `parse` gives spanned tables
+# (line numbers) without serde.
+toml = { version = "1", default-features = false, features = ["std", "parse"] }
+
 # strata-platform glib-bridge (P9)
 futures-channel = "0.3"
 gio = { version = "0.22", default-features = false }

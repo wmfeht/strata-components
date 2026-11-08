@@ -17,15 +17,17 @@ mod display;
 mod offer;
 mod reader;
 
+use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::ffi::c_void;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
-use std::thread::ThreadId;
 
 use rune::WindowHandle;
 use rune::raw_window_handle::RawWindowHandle;
-use wayland_backend::client::{ObjectId, WeakBackend};
-use wayland_client::globals::{GlobalListContents, registry_queue_init};
+use wayland_backend::client::ObjectId;
+use wayland_client::globals::{GlobalList, GlobalListContents, registry_queue_init};
+use wayland_client::protocol::wl_compositor::WlCompositor;
 use wayland_client::protocol::wl_data_device::{self, WlDataDevice};
 use wayland_client::protocol::wl_data_device_manager::WlDataDeviceManager;
 use wayland_client::protocol::wl_data_offer::{self, WlDataOffer};
@@ -34,6 +36,7 @@ use wayland_client::protocol::wl_keyboard::{self, WlKeyboard};
 use wayland_client::protocol::wl_pointer::{self, WlPointer};
 use wayland_client::protocol::wl_registry::WlRegistry;
 use wayland_client::protocol::wl_seat::{self, WlSeat};
+use wayland_client::protocol::wl_shm::WlShm;
 use wayland_client::protocol::wl_surface::WlSurface;
 use wayland_client::{
     Connection, Dispatch, EventQueue, Proxy, QueueHandle, WEnum, event_created_child,
@@ -47,7 +50,7 @@ use super::gate::Gate;
 use super::pipe;
 use control::Control;
 pub use offer::DragOffer;
-use offer::{AnyOffer, WlSelection};
+use offer::{AnyOffer, Home, WlSelection};
 use reader::Reader;
 
 /// Which data-control protocol to bind when the compositor has both.
@@ -61,6 +64,8 @@ pub enum Prefer {
 }
 
 const BTN_LEFT: u32 = 0x110;
+
+const ON_UI: &str = "winit's display: call on the UI thread";
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
@@ -107,9 +112,12 @@ struct Source {
 /// What the queue's handlers update. Handlers of a shared connection run on the UI thread.
 pub(crate) struct State {
     kind: Kind,
-    backend: WeakBackend,
+    home: Home,
     windows: Arc<Mutex<Vec<WindowHandle>>>,
     seat: Option<WlSeat>,
+    /// For P1's drag icons, bound on winit's display only.
+    compositor: Option<WlCompositor>,
+    shm: Option<WlShm>,
     pointer: Option<WlPointer>,
     keyboard: Option<WlKeyboard>,
     ddm: Option<WlDataDeviceManager>,
@@ -129,15 +137,21 @@ pub(crate) struct State {
     dropped: Vec<DragOffer>,
     sources: HashMap<u64, Source>,
     events: Vec<Event>,
+    /// Room for the state of protocols other modules bind on this queue (P4's
+    /// `zxdg_importer_v2`): one value per type, which their own `Dispatch<_, _> for State`
+    /// impls reach through [`State::extension`].
+    extensions: HashMap<TypeId, Box<dyn Any + Send>>,
 }
 
 impl State {
-    fn new(kind: Kind, backend: WeakBackend, windows: Arc<Mutex<Vec<WindowHandle>>>) -> State {
+    fn new(kind: Kind, home: Home, windows: Arc<Mutex<Vec<WindowHandle>>>) -> State {
         State {
             kind,
-            backend,
+            home,
             windows,
             seat: None,
+            compositor: None,
+            shm: None,
             pointer: None,
             keyboard: None,
             ddm: None,
@@ -152,7 +166,22 @@ impl State {
             dropped: Vec::new(),
             sources: HashMap::new(),
             events: Vec::new(),
+            extensions: HashMap::new(),
         }
+    }
+
+    /// The extension state of type `T`, made with `Default` on first use. For other modules'
+    /// handlers on this queue; see [`Conn::with_globals`].
+    #[expect(
+        dead_code,
+        reason = "the extension point for P1 and P4, which have no handlers yet"
+    )]
+    pub(crate) fn extension<T: Any + Send + Default>(&mut self) -> &mut T {
+        self.extensions
+            .entry(TypeId::of::<T>())
+            .or_insert_with(|| Box::new(T::default()))
+            .downcast_mut::<T>()
+            .unwrap_or_else(|| unreachable!("keyed by its own type"))
     }
 
     /// Replaces the current offer of a route, destroying the old one.
@@ -170,7 +199,7 @@ impl State {
             let mimes = id
                 .and_then(|id| self.announced.remove(&id))
                 .unwrap_or_default();
-            let offer = WlSelection::new(proxy, mimes, self.backend.clone());
+            let offer = WlSelection::new(Some(proxy), mimes, self.home.clone());
             self.selections.insert(
                 (selection, route),
                 Current {
@@ -239,14 +268,17 @@ pub(crate) struct Conn {
     /// drops it, on the UI thread, so a `Conn` dropped later (after `run` returns) makes no
     /// libwayland call. The backend's own drop destroys its queue, which needs the display.
     queue: Mutex<Option<EventQueue<State>>>,
-    backend: WeakBackend,
+    /// The connection, weakly, and the thread that may use it (the UI thread, when shared).
+    home: Home,
     state: Mutex<State>,
     qh: QueueHandle<State>,
+    /// Kept for the protocols other modules bind later ([`Conn::with_globals`]).
+    globals: Mutex<Option<GlobalList>>,
     gate: Arc<Gate>,
     reader: Mutex<Option<Reader>>,
     subs: Subscribers,
-    /// Shared only: the UI thread, the only one that may dispatch.
-    ui: Option<ThreadId>,
+    /// A dispatch failed: the connection is dead, and that was reported once.
+    failed: AtomicBool,
 }
 
 impl Conn {
@@ -257,8 +289,9 @@ impl Conn {
         subs: Subscribers,
         turn: Turn,
         data_control: Option<Prefer>,
+        as_if_old: bool,
     ) -> Result<Arc<Conn>, Error> {
-        let display = display::winit_display(window)?;
+        let display = display::winit_display(window, as_if_old)?;
         let backend = display::foreign_backend(display);
         let conn = Connection::from_backend(backend);
         Conn::bind(Kind::Shared, conn, windows, subs, data_control, Some(turn))
@@ -281,9 +314,15 @@ impl Conn {
         let (globals, mut queue) =
             registry_queue_init::<State>(&conn).map_err(|e| Error::Connection(e.to_string()))?;
         let qh = queue.handle();
-        let mut state = State::new(kind, conn.backend().downgrade(), windows);
+        let home = Home {
+            backend: conn.backend().downgrade(),
+            ui: (kind == Kind::Shared).then(|| std::thread::current().id()),
+        };
+        let mut state = State::new(kind, home.clone(), windows);
         state.seat = globals.bind::<WlSeat, _, _>(&qh, 1..=8, ()).ok();
         if kind == Kind::Shared {
+            state.compositor = globals.bind::<WlCompositor, _, _>(&qh, 1..=6, ()).ok();
+            state.shm = globals.bind::<WlShm, _, _>(&qh, 1..=2, ()).ok();
             state.ddm = globals
                 .bind::<WlDataDeviceManager, _, _>(&qh, 1..=3, ())
                 .ok();
@@ -303,17 +342,17 @@ impl Conn {
         queue
             .roundtrip(&mut state)
             .map_err(|e| Error::Connection(e.to_string()))?;
-        drop(globals);
         let gate = Arc::new(Gate::default());
         let c = Arc::new(Conn {
             queue: Mutex::new(Some(queue)),
-            backend: conn.backend().downgrade(),
+            home,
+            globals: Mutex::new(Some(globals)),
+            failed: AtomicBool::new(false),
             state: Mutex::new(state),
             qh,
             gate: gate.clone(),
             reader: Mutex::new(None),
             subs: subs.clone(),
-            ui: (kind == Kind::Shared).then(|| std::thread::current().id()),
         });
         let weak = Arc::downgrade(&c);
         let failed = {
@@ -332,8 +371,9 @@ impl Conn {
                         let before = gate.turns();
                         let weak: Weak<Conn> = weak.clone();
                         turn(Box::new(move || {
+                            // On the UI thread, where Turn runs it; refused anywhere else.
                             if let Some(c) = weak.upgrade() {
-                                c.dispatch();
+                                let _ = c.dispatch();
                             }
                         }));
                         gate.wait(before);
@@ -368,17 +408,21 @@ impl Conn {
 
     /// Runs the queued events' handlers and hands their events to subscribers. Shared: the
     /// UI thread only, from the reader's turn or before reading a serial.
-    pub(crate) fn dispatch(&self) -> bool {
-        debug_assert!(
-            self.ui.is_none_or(|ui| ui == std::thread::current().id()),
-            "a shared Wayland connection dispatches on the UI thread only"
-        );
+    pub(crate) fn dispatch(&self) -> Result<bool, Error> {
+        // Handlers call `WindowHandle::with_raw_handle` and parse events naming winit's
+        // objects: both only on the UI thread (see `reader`).
+        if !self.home.here() {
+            return Err(Error::Refused(ON_UI));
+        }
         let any = self.dispatch_here();
         self.gate.turned();
-        any
+        Ok(any)
     }
 
     fn dispatch_here(&self) -> bool {
+        if self.failed.load(Ordering::Acquire) {
+            return false;
+        }
         let events = {
             let mut queue = lock(&self.queue);
             let Some(queue) = queue.as_mut() else {
@@ -386,6 +430,9 @@ impl Conn {
             };
             let mut state = lock(&self.state);
             if let Err(e) = queue.dispatch_pending(&mut state) {
+                // The connection is dead (a protocol error, a closed socket): say so once, and
+                // dispatch no more.
+                self.failed.store(true, Ordering::Release);
                 state.events.push(Event::Failed {
                     message: e.to_string(),
                 });
@@ -396,6 +443,26 @@ impl Conn {
         let any = !events.is_empty();
         self.subs.emit(events);
         any
+    }
+
+    /// Runs `f` with the registry's globals and the queue, to bind a protocol P0 doesn't (P4's
+    /// `zxdg_importer_v2`). The module binding it implements `Dispatch<I, U> for State` for its
+    /// objects and keeps its state in [`State::extension`]. None after shutdown, or off the
+    /// UI thread on winit's display.
+    #[expect(
+        dead_code,
+        reason = "the extension point for P1 and P4, which have no handlers yet"
+    )]
+    pub(crate) fn with_globals<R>(
+        &self,
+        f: impl FnOnce(&GlobalList, &QueueHandle<State>, &mut State) -> R,
+    ) -> Option<R> {
+        if !self.home.here() {
+            return None;
+        }
+        let globals = lock(&self.globals);
+        let mut state = lock(&self.state);
+        Some(f(globals.as_ref()?, &self.qh, &mut state))
     }
 
     pub(crate) fn serials(&self) -> (Option<u32>, Option<u32>) {
@@ -424,6 +491,9 @@ impl Conn {
     ) -> Result<SourceId, Error> {
         if spec.is_empty() {
             return Err(Error::Refused("a source with no types"));
+        }
+        if !self.home.here() {
+            return Err(Error::Refused(ON_UI));
         }
         let id = SourceId::next();
         let mut state = lock(&self.state);
@@ -455,7 +525,7 @@ impl Conn {
         };
         state.sources.insert(id.get(), Source { spec, proxy });
         drop(state);
-        offer::flush(&self.backend);
+        self.home.flush();
         Ok(id)
     }
 
@@ -501,8 +571,17 @@ impl Conn {
         {
             seat.release();
         }
+        if let Some(shm) = state.shm.take()
+            && shm.version() >= 2
+        {
+            shm.release();
+        }
+        // wl_compositor has no destructor.
+        state.compositor = None;
+        state.extensions.clear();
         drop(state);
-        offer::flush(&self.backend);
+        drop(lock(&self.globals).take());
+        self.home.flush();
         // The last strong references to the backend go now, while the display lives.
         drop(lock(&self.queue).take());
     }
@@ -527,6 +606,31 @@ impl Dispatch<WlDataDeviceManager, ()> for State {
         _: &mut Self,
         _: &WlDataDeviceManager,
         _: <WlDataDeviceManager as Proxy>::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl Dispatch<WlCompositor, ()> for State {
+    fn event(
+        _: &mut Self,
+        _: &WlCompositor,
+        _: <WlCompositor as Proxy>::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+/// `format` events list the pixel formats; P1's icons use ARGB8888, which every `wl_shm` has.
+impl Dispatch<WlShm, ()> for State {
+    fn event(
+        _: &mut Self,
+        _: &WlShm,
+        _: <WlShm as Proxy>::Event,
         _: &(),
         _: &Connection,
         _: &QueueHandle<Self>,
@@ -649,7 +753,7 @@ impl Dispatch<WlDataDevice, ()> for State {
                 let actions = st.source_actions.remove(&proxy.id());
                 // Anything else announced for an earlier drag is stale now.
                 st.source_actions.clear();
-                let offer = DragOffer::new(proxy, mimes, serial, st.backend.clone());
+                let offer = DragOffer::new(proxy, mimes, serial, st.home.clone());
                 let window = st.window_of(&surface);
                 if let Some(window) = &window {
                     st.events.push(Event::DragEnter {

@@ -60,8 +60,13 @@ pub(super) fn get_display_with(
 ///
 /// `surface` must be a live `wl_proxy`: winit's `wl_surface`, inside
 /// `WindowHandle::with_raw_handle`.
-pub(super) unsafe fn display_of(surface: NonNull<c_void>) -> Result<NonNull<c_void>, Unsupported> {
-    let get = get_display_with(loaded)?;
+///
+/// With `as_if_old`, behaves as on libwayland < 1.23: the lookup finds nothing.
+pub(super) unsafe fn display_of(
+    surface: NonNull<c_void>,
+    as_if_old: bool,
+) -> Result<NonNull<c_void>, Unsupported> {
+    let get = get_display_with(|| if as_if_old { None } else { loaded() })?;
     // SAFETY: `get` is wl_proxy_get_display and the caller guarantees `surface` is a live
     // proxy; it only reads the proxy's display field.
     let display = unsafe { get(surface.as_ptr()) };
@@ -69,12 +74,18 @@ pub(super) unsafe fn display_of(surface: NonNull<c_void>) -> Result<NonNull<c_vo
 }
 
 /// winit's display, from the window's surface. Call it on the UI thread.
-pub(super) fn winit_display(window: &WindowHandle) -> Result<NonNull<c_void>, Error> {
+pub(super) fn winit_display(
+    window: &WindowHandle,
+    as_if_old: bool,
+) -> Result<NonNull<c_void>, Error> {
     window
         .with_raw_handle(|h| match h.as_raw() {
-            // SAFETY: inside `with_raw_handle` the handle keeps winit's window, and so its
-            // `wl_surface` proxy, alive; the pointer isn't kept past this call.
-            RawWindowHandle::Wayland(w) => unsafe { display_of(w.surface) }.map_err(Error::from),
+            RawWindowHandle::Wayland(w) => {
+                // SAFETY: inside `with_raw_handle` the handle keeps winit's window, and so its
+                // `wl_surface` proxy, alive; the pointer isn't kept past this call.
+                let display = unsafe { display_of(w.surface, as_if_old) };
+                display.map_err(Error::from)
+            }
             other => Err(Error::Refused(
                 if matches!(other, RawWindowHandle::Xlib(_) | RawWindowHandle::Xcb(_)) {
                     "an X11 window has no Wayland display"

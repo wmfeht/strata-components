@@ -215,7 +215,9 @@ pub fn decode_kde_cut(payload: &[u8]) -> bool {
 
 /// The X11 target names that stand for the same data as `mime`, for a source that also wants
 /// to serve X11 clients that ask by the old names. `text/plain;charset=utf-8` is
-/// `UTF8_STRING`; `text/plain` is `STRING` and `TEXT`. Other types have none.
+/// `UTF8_STRING`. `text/plain` is `STRING` and `TEXT`, but ICCCM makes `STRING` ISO Latin-1
+/// (and `TEXT` the owner's choice of encoding): serve the `text/plain` bytes under those names
+/// only when they are ASCII, or convert them. Other types have none.
 pub fn x11_aliases(mime: &str) -> &'static [&'static str] {
     let lower = mime.to_ascii_lowercase().replace(' ', "");
     match lower.as_str() {

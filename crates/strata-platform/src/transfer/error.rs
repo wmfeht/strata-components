@@ -82,6 +82,8 @@ pub enum ReadError {
     NotOffered,
     /// The substrate was shut down.
     Shutdown,
+    /// An offer on winit's display was asked from a thread other than the UI thread.
+    OffUiThread,
     Io(String),
 }
 
@@ -93,6 +95,9 @@ impl fmt::Display for ReadError {
             ReadError::Gone => f.write_str("the offer is gone"),
             ReadError::NotOffered => f.write_str("the source doesn't offer that type"),
             ReadError::Shutdown => f.write_str("the transfer substrate was shut down"),
+            ReadError::OffUiThread => {
+                f.write_str("an offer on winit's display reads from the UI thread only")
+            }
             ReadError::Io(e) => write!(f, "{e}"),
         }
     }

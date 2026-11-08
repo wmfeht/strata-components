@@ -27,6 +27,25 @@
 //! bound on it makes the compositor resend every keyboard's keymap. Later calls add the window
 //! and return the same substrate. Results and events reach the app off the UI thread: a
 //! subscriber's notify and a read's `done` hand them over with `AppHandle::update`.
+//! A [`Subscription`] dropped unsubscribes.
+//!
+//! # Threads
+//!
+//! On winit's display, everything that sends a request or dispatches runs on the UI thread,
+//! and is refused on any other: [`Transfer::dispatch`], [`Transfer::set_selection`], and every
+//! request on an offer. Events naming winit's objects may only be parsed there (the reader
+//! never dispatches; see `wayland::reader`), and a request's brief hold on the connection must
+//! not outlive the UI thread's shutdown. On X11 and on a Wayland connection of our own, any
+//! thread may call.
+//!
+//! # Protocols other modules bind
+//!
+//! On winit's display P0 binds `wl_seat` (with a pointer and keyboard for serials),
+//! `wl_data_device_manager` and its device, data control if asked for, and `wl_compositor`
+//! and `wl_shm` for P1's drag icons. It keeps the registry's globals for the rest:
+//! `wayland::Conn::with_globals` hands them and the queue to another module (P4's
+//! `zxdg_importer_v2`), which implements `Dispatch` for P0's `State` for its own objects and
+//! keeps its own state in `State::extension`.
 //!
 //! # Teardown is the app's job
 //!
@@ -89,6 +108,11 @@ pub struct Wants {
     pub shared: bool,
     pub data_control: DataControl,
     pub prefer: Prefer,
+    /// A test switch: behave as on libwayland < 1.23, whose missing `wl_proxy_get_display`
+    /// puts winit's display out of reach, so the fallback runs on any host. Only
+    /// strata-platform's own tests set it.
+    #[doc(hidden)]
+    pub as_if_libwayland_below_1_23: bool,
 }
 
 impl Default for Wants {
@@ -97,6 +121,7 @@ impl Default for Wants {
             shared: true,
             data_control: DataControl::default(),
             prefer: Prefer::default(),
+            as_if_libwayland_below_1_23: false,
         }
     }
 }
@@ -207,15 +232,15 @@ impl Transfer {
         self.0.subs.add(Arc::new(notify))
     }
 
-    /// Wayland on winit's display: runs the handlers of events already read, now, on the UI
-    /// thread. Call it before reading a serial (a data-device write) so the key or click that
-    /// triggered it is in. True if there were events.
-    pub fn dispatch(&self) -> bool {
+    /// Wayland on winit's display: runs the handlers of events already read, now. Call it on
+    /// the UI thread (it refuses any other) before reading a serial, so the key or click that
+    /// triggered a data-device write is in. True if there were events.
+    pub fn dispatch(&self) -> Result<bool, Error> {
         match &self.0.backend {
             Backend::Wayland {
                 shared: Some(c), ..
             } => c.dispatch(),
-            _ => false,
+            _ => Ok(false),
         }
     }
 
@@ -328,7 +353,14 @@ fn wayland_backend(
     let mut unsupported = None;
     let shared = if wants.shared {
         let control = on_shared.then_some(wants.prefer);
-        match wayland::Conn::shared(window, windows.clone(), subs.clone(), turn, control) {
+        match wayland::Conn::shared(
+            window,
+            windows.clone(),
+            subs.clone(),
+            turn,
+            control,
+            wants.as_if_libwayland_below_1_23,
+        ) {
             Ok(c) => Some(c),
             Err(Error::Unsupported(u)) => {
                 unsupported = Some(u);

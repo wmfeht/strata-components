@@ -70,7 +70,7 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | C14b | coding (plan approved: 5 viewers over C14a and C1e; no orbit drag, follows Strata; canvas elevation profile; ArchivePrompt in C14b; host allocator for archive ids; layout.rs shareable with C13; no 2x upscale cap, deviation) | carries C14a round-3 should-fix: key the rescale child by target scale (`{key}-rescale-{scale bits}`) + regression test (2x, one frame, 1x) | |
 | C2 | waiting (C24) | | |
 | C3 | waiting (C25) | | |
-| C4 | fixing round 1 (B1 AT sort lost after a reorder drag, B2 resize script claim; scroll p95 1.07x Table accepted as report line, hard bars hold) | no rune-kit Table fork (built on C1e; Table drafts R-K1..7); heading-strip marquee via a small C1e edit in C4; widths scale with text size; headings not Tab stops and fit double-click at Rune 0.5 s (deviations) | |
+| C4 | review 2 (round 1 fixed: AT sort after a reorder drag kept, resize-follow script, scripts narrowed, K3 sort icons; scroll p95 1.08-1.10x Table accepted as report line, hard bars hold) | no rune-kit Table fork (built on C1e; Table drafts R-K1..7); heading-strip marquee via a small C1e edit in C4; widths scale with text size; headings not Tab stops and fit double-click at Rune 0.5 s (deviations) | |
 | X3 | waiting | | |
 | C20d | waiting (C3) | | |
 | X2 | waiting | from C1f: drop-by-point routing in row.rs has no test that fails without it; the system binder (never sends on_move) must test it | |

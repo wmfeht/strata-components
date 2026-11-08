@@ -54,7 +54,7 @@ fn reply_with(key: Key, value: Variant<'static>) -> Reply {
 #[test]
 fn a_full_reply_sets_every_key_and_marks_it_known() {
     let mut settings = DesktopSettings::default();
-    let applied = apply_reply(&mut settings, &full_reply());
+    let applied = apply_reply(&mut settings, &full_reply(), |_| true);
 
     assert!(applied.fallbacks.is_empty(), "{:?}", applied.fallbacks);
     assert_eq!(applied.changes.len(), Key::ALL.len());
@@ -71,11 +71,12 @@ fn a_full_reply_sets_every_key_and_marks_it_known() {
 }
 
 #[test]
-fn an_absent_key_keeps_its_value_and_is_reported_unset() {
+fn an_absent_key_stays_at_its_default_and_is_reported_unset() {
     let mut settings = DesktopSettings::default();
     let applied = apply_reply(
         &mut settings,
         &reply_with(Key::TextScale, Variant::F64(1.5)),
+        |_| true,
     );
 
     assert_eq!(settings.text_scale, 1.5);
@@ -95,13 +96,13 @@ fn an_absent_key_keeps_its_value_and_is_reported_unset() {
 #[test]
 fn a_re_read_without_a_key_resets_it() {
     let mut settings = DesktopSettings::default();
-    apply_reply(&mut settings, &full_reply());
+    apply_reply(&mut settings, &full_reply(), |_| true);
     let mut next = full_reply();
     next.get_mut(Key::DragThreshold.namespace())
         .expect("ns")
         .remove(Key::DragThreshold.name());
 
-    let applied = apply_reply(&mut settings, &next);
+    let applied = apply_reply(&mut settings, &next, |_| true);
 
     assert_eq!(
         settings.drag_threshold,
@@ -119,6 +120,23 @@ fn a_re_read_without_a_key_resets_it() {
 }
 
 #[test]
+fn an_answer_leaves_the_keys_a_newer_message_set() {
+    let mut settings = DesktopSettings::default();
+    settings.set(Setting::DragThreshold(99));
+
+    let applied = apply_reply(&mut settings, &full_reply(), |k| k != Key::DragThreshold);
+
+    assert_eq!(settings.drag_threshold, 99);
+    assert_eq!(settings.text_scale, 1.1818);
+    assert!(
+        applied
+            .changes
+            .iter()
+            .all(|(s, _)| s.key() != Key::DragThreshold)
+    );
+}
+
+#[test]
 fn a_value_of_the_wrong_type_is_refused() {
     let wrong: [(Key, Variant<'static>); 5] = [
         (Key::TextScale, Variant::I32(2)),
@@ -129,7 +147,7 @@ fn a_value_of_the_wrong_type_is_refused() {
     ];
     for (key, value) in wrong {
         let mut settings = DesktopSettings::default();
-        let applied = apply_reply(&mut settings, &reply_with(key, value.clone()));
+        let applied = apply_reply(&mut settings, &reply_with(key, value.clone()), |_| true);
 
         assert_eq!(settings, DesktopSettings::default(), "{key:?} {value:?}");
         assert!(
@@ -269,13 +287,13 @@ fn each_fallback_is_reported_once_per_kind_and_key() {
 #[test]
 fn a_re_read_reports_each_differing_key_in_order() {
     let mut settings = DesktopSettings::default();
-    apply_reply(&mut settings, &full_reply());
+    apply_reply(&mut settings, &full_reply(), |_| true);
     let mut next = full_reply();
     let interface = next.get_mut("org.gnome.desktop.interface").expect("ns");
     interface.insert("cursor-blink".into(), owned(Variant::Bool(true)));
     interface.insert("text-scaling-factor".into(), owned(Variant::F64(2.0)));
 
-    let applied = apply_reply(&mut settings, &next);
+    let applied = apply_reply(&mut settings, &next, |_| true);
     let keys: Vec<Key> = applied.changes.iter().map(|(s, _)| s.key()).collect();
 
     assert_eq!(keys, [Key::TextScale, Key::CursorBlink]);

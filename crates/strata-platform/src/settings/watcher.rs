@@ -14,11 +14,12 @@ use futures_util::future::select;
 use futures_util::stream::{self, BoxStream, StreamExt};
 use tokio::sync::oneshot;
 use zbus::OwnedVariant;
+use zbus::message::Sequence;
 use zbus::proxy::{Builder, CacheProperties};
 use zbus::{Connection, Message, Proxy};
 
 use super::fallback::{Fallback, Reported};
-use super::keys::{NAMESPACES, Setting};
+use super::keys::{Key, NAMESPACES, Setting};
 use super::parse::{self, Applied, Reply};
 use super::snapshot::DesktopSettings;
 
@@ -117,6 +118,7 @@ impl Watcher {
             settings: DesktopSettings::default(),
             reported: Reported::default(),
             answered: Some(answered),
+            stamps: [None; Key::ALL.len()],
         };
         let thread = std::thread::Builder::new()
             .name(THREAD_NAME.into())
@@ -176,6 +178,10 @@ struct Feed {
     reported: Reported,
     /// Taken by the snapshot, which ends `start`'s wait.
     answered: Option<mpsc::SyncSender<()>>,
+    /// Per key, the receive position of the message that last set it. Messages on one
+    /// connection are ordered by it, so an older message never overwrites a newer one,
+    /// whichever order the watcher's loop happens to take them in.
+    stamps: [Option<Sequence>; Key::ALL.len()],
 }
 
 impl Feed {
@@ -205,8 +211,13 @@ impl Feed {
         self.fallback(why);
     }
 
-    /// Applies a `ReadAll` reply. Returns the unique name it came from, or None when it isn't
-    /// one (reported as [`Fallback::NoPortal`]).
+    /// Whether a message received at `at` is newer than whatever last set `key`.
+    fn fresh(&self, key: Key, at: Sequence) -> bool {
+        self.stamps[key as usize].is_none_or(|stamp| stamp < at)
+    }
+
+    /// Applies a `ReadAll` reply to every key no newer change has set. Returns the unique name
+    /// it came from, or None when it isn't one (reported as [`Fallback::NoPortal`]).
     fn reply(&mut self, reply: &Message) -> Option<String> {
         let Ok(values) = reply.body().deserialize::<Reply>() else {
             self.missing(Fallback::NoPortal(
@@ -214,20 +225,31 @@ impl Feed {
             ));
             return None;
         };
-        let applied = parse::apply_reply(&mut self.settings, &values);
+        let at = reply.recv_position();
+        let fresh: Vec<Key> = Key::ALL
+            .into_iter()
+            .filter(|k| self.fresh(*k, at))
+            .collect();
+        let applied = parse::apply_reply(&mut self.settings, &values, |k| fresh.contains(&k));
+        for key in fresh {
+            self.stamps[key as usize] = Some(at);
+        }
         self.report(applied);
         reply.header().sender().map(|name| name.to_string())
     }
 
-    /// Applies one `SettingChanged`.
-    fn change(&mut self, message: &Message) {
-        let Ok((namespace, name, value)) = message
-            .body()
-            .deserialize::<(String, String, OwnedVariant)>()
-        else {
+    /// Applies one change, unless a newer message already set its key.
+    fn change(&mut self, change: Change) {
+        if !self.fresh(change.key, change.at) {
             return;
-        };
-        let applied = parse::apply_change(&mut self.settings, &namespace, &name, &value);
+        }
+        self.stamps[change.key as usize] = Some(change.at);
+        let applied = parse::apply_change(
+            &mut self.settings,
+            change.key.namespace(),
+            change.key.name(),
+            &change.value,
+        );
         self.report(applied);
     }
 
@@ -248,8 +270,30 @@ impl Feed {
     }
 }
 
+/// A `SettingChanged` for a key the module reads, with where it was received.
+struct Change {
+    key: Key,
+    value: OwnedVariant,
+    at: Sequence,
+}
+
+impl Change {
+    /// The change `message` carries, or None for a key the module doesn't read.
+    fn of(message: &Message) -> Option<Change> {
+        let (namespace, name, value) = message
+            .body()
+            .deserialize::<(String, String, OwnedVariant)>()
+            .ok()?;
+        Some(Change {
+            key: Key::lookup(&namespace, &name)?,
+            value,
+            at: message.recv_position(),
+        })
+    }
+}
+
 enum Input {
-    Changed(Message),
+    Changed(Option<Change>),
     Owner(Option<String>),
 }
 
@@ -295,15 +339,27 @@ async fn watch(options: Options, feed: &mut Feed) {
     let new_deadline = || Some(Box::pin(tokio::time::sleep(options.timeout)));
     let mut read = Some(read_all(&portal));
     let mut deadline = new_deadline();
-    // Changes that arrive while a read is out, before its timeout: the reply may already hold
-    // them, so they apply after it, in order.
-    let mut held: Vec<Message> = Vec::new();
+    // Changes that arrive while a read is out, before its timeout, the latest per key: they
+    // apply after the reply, and only where they are newer than it.
+    let mut held: [Option<Change>; Key::ALL.len()] = Default::default();
+    let release = |held: &mut [Option<Change>; Key::ALL.len()], feed: &mut Feed| {
+        let mut changes: Vec<Change> = held.iter_mut().filter_map(Option::take).collect();
+        changes.sort_by_key(|c| c.at);
+        for change in changes {
+            feed.change(change);
+        }
+    };
     // The unique name the last reply came from.
     let mut owner: Option<String> = None;
     // A new owner seen while a read was out: read again after it, unless the reply came from it.
     let mut reread_for: Option<String> = None;
     loop {
+        // Biased, the reply first: zbus completes a reply before it hands the messages received
+        // after it to their streams, so taking it first keeps the bus's order where both are
+        // ready (a portal that answers and then leaves is lost after its answer). The stamps keep
+        // a reply from overwriting a newer change either way.
         tokio::select! {
+            biased;
             reply = maybe(&mut read) => {
                 read = None;
                 deadline = None;
@@ -314,9 +370,7 @@ async fn watch(options: Options, feed: &mut Feed) {
                         None
                     }
                 };
-                for message in held.drain(..) {
-                    feed.change(&message);
-                }
+                release(&mut held, feed);
                 if let Some(name) = reread_for.take()
                     && owner.as_deref() != Some(name.as_str())
                 {
@@ -329,19 +383,25 @@ async fn watch(options: Options, feed: &mut Feed) {
                 // still arrives as changes. Changes apply as they come from here on.
                 deadline = None;
                 feed.missing(Fallback::NoPortal("timed out reading the Settings portal".into()));
-                for message in held.drain(..) {
-                    feed.change(&message);
-                }
+                release(&mut held, feed);
             }
             input = inputs.next() => match input {
-                None => break,
-                Some(Input::Changed(message)) if deadline.is_some() => held.push(message),
-                Some(Input::Changed(message)) => feed.change(&message),
+                None => {
+                    feed.missing(Fallback::NoBus("the session bus connection closed".into()));
+                    break;
+                }
+                Some(Input::Changed(None)) => {}
+                Some(Input::Changed(Some(change))) if deadline.is_some() => {
+                    let slot = change.key as usize;
+                    held[slot] = Some(change);
+                }
+                Some(Input::Changed(Some(change))) => feed.change(change),
                 Some(Input::Owner(Some(name))) => {
                     if read.is_some() && deadline.is_none() {
-                        // A new portal replaces one that never answered.
+                        // A new portal replaces one that never answered, and is the one to read.
                         read = Some(read_all(&portal));
                         deadline = new_deadline();
+                        reread_for = None;
                     } else if read.is_some() {
                         reread_for = Some(name);
                     } else if owner.as_deref() != Some(name.as_str()) {
@@ -376,7 +436,7 @@ async fn subscribe(
     let changes = portal
         .receive_signal("SettingChanged")
         .await?
-        .map(Input::Changed);
+        .map(|message| Input::Changed(Change::of(&message)));
     let owners = portal
         .receive_owner_changed()
         .await?

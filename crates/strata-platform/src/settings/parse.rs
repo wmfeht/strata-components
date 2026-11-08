@@ -21,12 +21,17 @@ pub(super) struct Applied {
     pub fallbacks: Vec<Fallback>,
 }
 
-/// Applies a whole `ReadAll` answer: every key it holds with a usable value, and an `Invalid`
-/// for each bad one. A key it lacks goes back to its default and is no longer known (a change,
-/// if it was known), with an `Unset`.
-pub(super) fn apply_reply(settings: &mut DesktopSettings, reply: &Reply) -> Applied {
+/// Applies a whole `ReadAll` answer to each key `fresh` passes (the keys no newer message has
+/// set): every key it holds with a usable value, and an `Invalid` for each bad one. A key it
+/// lacks goes back to its default and is no longer known (a change, if it was known), with an
+/// `Unset`.
+pub(super) fn apply_reply(
+    settings: &mut DesktopSettings,
+    reply: &Reply,
+    fresh: impl Fn(Key) -> bool,
+) -> Applied {
     let mut applied = Applied::default();
-    for key in Key::ALL {
+    for key in Key::ALL.into_iter().filter(|k| fresh(*k)) {
         match reply.get(key.namespace()).and_then(|ns| ns.get(key.name())) {
             Some(value) => apply_value(settings, key, value, &mut applied),
             None => {

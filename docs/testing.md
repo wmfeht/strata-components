@@ -148,18 +148,21 @@ with a header the runner checks:
 
 ```json
 {
-  "bullets": ["browser/selection: Shift+click extends the selection from the anchor"],
+  "bullets": ["browser/selection: Shift+Up and Shift+Down extend the selection"],
   "scene": "c1-ten-rows-light",
   "events": [
     {"t": 0.1, "type": "tap", "key": "row-3"},
-    {"t": 0.3, "type": "tap", "key": "row-6", "shift": true}
+    {"t": 0.3, "type": "key", "name": "Down", "shift": true}
   ],
   "expect": [
-    {"key": "row-5", "states": ["selected"]},
+    {"key": "row-4", "states": ["selected"]},
     {"key": "rename-field", "absent": true}
   ]
 }
 ```
+
+Modifier flags (`shift`, `ctrl`, `alt`, `cmd`) reach key and wheel events only: at Rune `78d22ed`
+a pointer event (`tap`, `down`, `drag`) ignores them, so test a modified click in process.
 
 | Key | Rule |
 | --- | --- |

@@ -52,7 +52,8 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | P8 | merged | 3 review rounds; U-P8-1 text in S5 appendix; 11 unit + 17 session tests incl. GLib interop; open should-fixes: refuse delivery once release starts (launch in the ReleaseName gap), release() wait to cover the drain (2x bus_timeout), held-launch test assert < 2 s; hand tests pending (Hyprland, GNOME, KDE, X11 focus; GTK Strata interop); GApplication-compatible protocol; opt-in FileManager1 Reveal in the shim (deviation from WP doc: policy stays in Strata); zbus 6 + tokio deps (already locked); zbus types exposed (major bump = minor release) | 5c2b38a |
 | P9 | merged | 1 review round + fixes; ci.yml gains libglib2.0-dev (approved exception); example compiled, not run; no desktop hand test | 54786b4 |
 | C10b | ready | | |
-| C11 | planning (must take C10a review-5 SF1 hash-collision loop and SF5 quadratic eviction) | | |
+| C11 | coding (plan approved: Part A, documents and ODT over Strata's DocumentLayout as data, static table grids; Part B split to C11b; takes C10a review-5 SF1 to SF6 in c10a commits; spans in bytes; find through queued requests flushed from the host's poll; C24 bar until C10b's scrollbar; deviations: inline math as source, no caret or keyboard selection (Rune), a match across units selects its first part) | | |
+| C11b | waiting (C11) | split from C11 (no WP doc; scope here): the sheet grid on rune-kit Table: spreadsheets with sheet tabs (Strata needs multi-sheet data), row numbers and column letters, sorting with secondary keys, column resize, cell ranges copied as TSV in sort order, Ctrl+A or Escape clears a range, long cells cut, 100k-row scroll | |
 | C12 | ready | | |
 | C13 | ready | | |
 | C16 | ready | | |

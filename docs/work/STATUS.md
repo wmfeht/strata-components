@@ -44,10 +44,10 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | K4 | ready | | |
 | P0 | review 2 (round 1 fixed: b024a19; reader no longer dispatches; Platform CI on ubuntu-26.04, unverified on GitHub) | owner: S2 Q1 = a (degrade on libwayland 1.22; own-connection data-control route); owner: move Platform CI to libwayland >= 1.23 in P0 (unverified until a push); S2 Q2/Q3 deferred to P1 | |
 | P3 | merged | 2 review rounds, no blockers; owner: borderless on Wayland now with NO edge resize until Rune U6, no minimise (U7) or window menu (U8); X11 borderless under Auto via shim (mutter/KWin hand test pending); no in-app resize; corners Cursor::Move; header component folded into X1; Done-when narrowed (deliberate parity regressions recorded); open should-fixes: Watcher::drop joins even when the fd dup fails (UI hang on EMFILE: detach instead), resize test asserts sway's rect not X geometry; hand tests pending (Hyprland, GNOME, KDE, mutter/KWin X11) | 23d95af |
-| P5 | ready | | |
+| P5 | planning | | |
 | P6 | ready | | |
 | P7 | ready | | |
-| P8 | planning | | |
+| P8 | coding | GApplication-compatible protocol; opt-in FileManager1 Reveal in the shim (deviation from WP doc: policy stays in Strata); zbus 6 + tokio deps (already locked); zbus types exposed (major bump = minor release) | |
 | P9 | merged | 1 review round + fixes; ci.yml gains libglib2.0-dev (approved exception); example compiled, not run; no desktop hand test | 54786b4 |
 | C10b | waiting | | |
 | C11 | waiting | | |

@@ -1,0 +1,110 @@
+//! [`ListTableState`]: what the table keeps between frames, in the host's state.
+
+use super::column::ColumnId;
+use super::layout::DropSite;
+use crate::contract::Rect;
+
+/// Where the columns menu is open.
+///
+/// Used by: C4, hosts.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum MenuAt {
+    /// Under the Columns button ([`super::ListTable::columns_button`]).
+    Button,
+    /// Over the headings: at the pointer after a right-click on them, or under their right end
+    /// (Strata's Appearance → "Customize columns…").
+    Headings(Option<(f32, f32)>),
+}
+
+/// A heading pressed, and whether it has become a reorder drag.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct HeadingDrag {
+    pub column: ColumnId,
+    /// Past the reorder threshold.
+    pub active: bool,
+    /// Where it would drop now, if anywhere.
+    pub site: Option<DropSite>,
+}
+
+/// A resize in progress: the column, its width at the press and now, in base points.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct Resize {
+    pub column: ColumnId,
+    pub start: f32,
+    pub live: f32,
+}
+
+/// The table's own state, kept by the host for the life of the view and handed to the table
+/// by accessor: where the table shows, a heading drag or resize in progress, and where the
+/// columns menu is open.
+///
+/// Used by: hosts.
+#[derive(Debug, Default)]
+pub struct ListTableState {
+    /// The width the table has, as last laid out.
+    pub(super) width: f32,
+    /// The heading strip's rect in window points, as last laid out.
+    pub(super) strip: Rect,
+    pub(super) drag: Option<HeadingDrag>,
+    /// The press that follows a reorder drag's release on the same heading isn't a sort
+    /// click (Rune draft R-C4-1).
+    pub(super) suppress_press: bool,
+    pub(super) resize: Option<Resize>,
+    pub(super) menu: Option<MenuAt>,
+}
+
+impl ListTableState {
+    /// Nothing in progress.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Drops a heading drag or resize in progress, as Strata does when its headings unmap. Call
+    /// it when the table leaves the view (a view switch) mid-gesture: Rune tells an element
+    /// removed under a drag nothing (Rune draft R-C4-2).
+    pub fn reset(&mut self) {
+        self.drag = None;
+        self.resize = None;
+        self.suppress_press = false;
+    }
+
+    /// Opens the columns menu at `at`: [`MenuAt::Headings`]`(None)` is Strata's "Customize
+    /// columns…".
+    pub fn open_columns_menu(&mut self, at: MenuAt) {
+        self.menu = Some(at);
+    }
+
+    /// Closes the columns menu.
+    pub fn close_columns_menu(&mut self) {
+        self.menu = None;
+    }
+
+    /// Where the columns menu is open, if it is.
+    pub fn columns_menu(&self) -> Option<MenuAt> {
+        self.menu
+    }
+
+    /// The heading being dragged past the reorder threshold, and where it would drop.
+    pub fn reordering(&self) -> Option<(&ColumnId, Option<&DropSite>)> {
+        self.drag
+            .as_ref()
+            .filter(|d| d.active)
+            .map(|d| (&d.column, d.site.as_ref()))
+    }
+
+    /// Shows `column`'s heading as dragged past the reorder threshold, dropping at `site`, as
+    /// if the person were dragging it: for gallery scenes and tests that draw a drag in
+    /// progress. The next press on a heading replaces it.
+    pub fn show_reorder(&mut self, column: ColumnId, site: Option<DropSite>) {
+        self.drag = Some(HeadingDrag {
+            column,
+            active: true,
+            site,
+        });
+    }
+
+    /// The column being resized and its width now, in base points.
+    pub fn resizing(&self) -> Option<(&ColumnId, f32)> {
+        self.resize.as_ref().map(|r| (&r.column, r.live))
+    }
+}

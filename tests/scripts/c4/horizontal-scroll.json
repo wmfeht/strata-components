@@ -1,0 +1,39 @@
+{
+  "bullets": [
+    "browser/view-modes/list: Name takes the width left after the metadata columns until it is resized by hand; below the minimum widths the table scrolls horizontally."
+  ],
+  "scene": "c4-narrow-light",
+  "events": [
+    {
+      "t": 0.2,
+      "type": "wheel",
+      "x": 240,
+      "y": 300,
+      "dx": -40
+    },
+    {
+      "t": 0.25,
+      "type": "wheel",
+      "x": 240,
+      "y": 300,
+      "dx": -40
+    },
+    {
+      "t": 0.8,
+      "type": "tap",
+      "key": "row-5/cell-modified"
+    }
+  ],
+  "expect": [
+    {
+      "key": "row-5",
+      "states": [
+        "selected"
+      ]
+    },
+    {
+      "key": "c4-intent",
+      "name": "Clicked budget.ods"
+    }
+  ]
+}

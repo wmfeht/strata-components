@@ -7,6 +7,8 @@ mod catalog;
 mod color;
 mod colors;
 mod file;
+mod map;
+pub mod syntax;
 
 pub use catalog::{DEFAULT_ID, UNKNOWN_ID_FALLBACK, bundled, bundled_theme};
 pub use color::Rgba8;

@@ -22,7 +22,7 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | S3 | merged | sway Wayland/X11 measured; Hyprland/GNOME/KDE/Firefox hand test pending (QEMU Tier B not run); 3 owner decisions | f5682e4 |
 | S4 | merged | owner: onig + dedicated highlighter thread, N=64, RUSTSEC ignore, WTFPL ok; 3 review rounds + 1 owner-allowed fix round; plan §4 C10/C10a doc edits are owner items | 183f7e2 |
 | S5 | merged | 2 review rounds; 16 Rune issue drafts (U1-U17, U4 withdrawn) await owner filing; crate name taken -> owner; release.yml verified locally only (GitHub run pending) | 85ca12b |
-| C10a | review 4 (final; OWNER allowed a 4th round; round 3 blocker fixed: current build never evicted, blocks past the 16 MiB ceiling answer plain, blocks cut at 32 KiB like rune-kit markdown) | gallery rune-kit markdown feature, Vim modelines, editor goldens; perf p95 2.4-6.98 ms; C11 gets no colour past 32 KiB of a block | |
+| C10a | blocked: owner decision (review 4, final, found B1: two Markdown views on one block pool evict each other forever; fix: start the current build at an epoch bump; asked owner for a 5th round) | gallery rune-kit markdown feature, Vim modelines, editor goldens; perf p95 2.4-6.98 ms; C11 gets no colour past 32 KiB of a block | |
 | C14a | merged | 3 review rounds; Ctrl+wheel follows Rune's dy sign, on_magnify macOS only; scale-only change resynced via rescale child (Rune draft); script runner passes --scale 2 (sanctioned); round-3 should-fix (rescale key by target scale) carried to C14b; image zoom/pan is new vs Strata (plan asks for it): deliberate change for owner; pixels set without view commits (probed) | 86a335e |
 | C15 | merged | built on Rune primitives (deviation from WP doc); 6 bullets Strata policy, O6/F13/K6 partial gaps (Rune drafts); PNG goldens on NVIDIA | b38d879 |
 | C1a | merged | 2 review rounds; select_all 149 us / Shift range 148 us at 100k (release, local only); hosts call before_removal + sync | b8c3b8c |
@@ -63,7 +63,7 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | C1d | merged | 3 review rounds; open item S-B: a key during edge auto-scroll loses the cursor reveal — C1e seam; open should-fixes: reduced-motion test lacks the (look off, system on) and (on, off) cases; no "left to other WPs" bullet list in marquee/mod.rs (C2/C3/C4 planners: 17 marquee bullets are theirs or hosts'); ~10 Hz apply while auto-scrolling keeps perf meter silent (deviation) | b355ee6 |
 | C1e | merged | 3 review rounds; all controller seam requests in; scroll p95 0.59 ms vs Table 0.88; S14 sticky group lines deferred to contract WP C1f before C4; round-3 should-fix SF1 (grid restore before first layout) + nits (KeyboardMode commits unchanged, read_only/roles not in row memo) carried to C1f | 8ea925e |
 | C26 | waiting | | |
-| P1 | ready | | |
+| P1 | planning (must take P0 S1 and S3; answers S2 Q2 and Q3 for the owner) | | |
 | P2 | ready | | |
 | P4 | ready | | |
 | X1 | waiting | | |

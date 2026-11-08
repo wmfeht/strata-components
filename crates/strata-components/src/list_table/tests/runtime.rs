@@ -302,10 +302,10 @@ fn a_double_press_on_the_edge_fits_the_column_to_the_widest_cell_on_screen() {
 /// column-layout: "Pressing a List heading and dragging it horizontally shows a grabbing
 /// cursor and a 3 px accent inset line at the drop point. The headings do not move during the
 /// drag", with "The line sits on the left edge of the heading the column would precede", "For
-/// a drop at the end, the line sits on the last heading's right edge", "A drop on the
-/// column's current position shows no line" and "Moving the pointer outside the heading row
-/// hides the line" (the cursor, the line's place and that headings keep theirs; the PNG golden
-/// `c4-reorder` shows the line).
+/// a drop at the end, the line sits on the last heading's right edge", "Moving the pointer
+/// outside the heading row hides the line" and, ending it with Escape, "A cancelled drag…
+/// leaves the order unchanged and clears the line and cursor" (the cursor, the line's place
+/// and that headings keep theirs; the PNG golden `c4-reorder` shows the line).
 #[test]
 fn a_heading_drag_grabs_marks_the_drop_point_and_moves_no_heading() {
     let mut rt = runtime(Host::new(1, Look::fallback(false)));
@@ -370,12 +370,35 @@ fn a_heading_drag_grabs_marks_the_drop_point_and_moves_no_heading() {
     rt.pointer_up(mx + mw - 2.0, py);
     settle(&mut rt);
     assert!(element(&rt, "reorder-line").is_none());
+    assert_ne!(rt.cursor(), Cursor::Grabbing, "Escape clears the cursor");
     assert!(rt.state.layouts.is_empty());
 }
 
+/// column-layout: "A drop on the column's current position shows no line and changes
+/// nothing".
+#[test]
+fn a_drop_on_the_columns_own_place_shows_no_line_and_changes_nothing() {
+    let mut rt = runtime(Host::new(1, Look::fallback(false)));
+    let [x, y, w, h] = heading(&rt, 0, "type");
+    let (px, py) = (x + w / 2.0, y + h / 2.0);
+    rt.pointer_down(px, py);
+    rt.frame(1.0 / 60.0);
+    rt.pointer_move(px + 20.0, py);
+    settle(&mut rt);
+    assert!(
+        rt.state.panes[0].table.reordering().is_some(),
+        "past the threshold"
+    );
+    assert!(element(&rt, "reorder-line").is_none(), "no line");
+    rt.pointer_up(px + 20.0, py);
+    settle(&mut rt);
+    assert!(rt.state.layouts.is_empty(), "nothing changes");
+    assert!(rt.state.sorts.is_empty(), "and it isn't a sort click");
+}
+
 /// column-layout: "A cancelled drag, or headings unmapped mid-drag, leaves the order unchanged
-/// and clears the line and cursor" (the unmapped half, with the host's `reset`; Escape is
-/// `reorder-escape.json`'s).
+/// and clears the line and cursor" (the unmapped half, with the host's `reset`; the cancelled
+/// half is `a_heading_drag_grabs…`'s end).
 #[test]
 fn a_table_removed_mid_drag_leaves_the_order_and_comes_back_with_no_line() {
     let mut rt = runtime(Host::new(1, Look::fallback(false)));
@@ -439,4 +462,81 @@ fn assistive_technology_presses_a_heading_to_sort() {
             dir: SortDir::Ascending
         }]
     );
+}
+
+fn at_press(rt: &mut Runtime<Host>, id: &str) {
+    assert!(rt.accessibility_action(&heading_key(id), rune::accesskit::Action::Click, None));
+    settle(rt);
+}
+
+/// list: "Clicking the Name, Size, Type, or Modified heading sorts by that field" from
+/// assistive technology, after a reorder drag released outside the heading row: Rune presses
+/// no heading after that release, so nothing may swallow the next press.
+#[test]
+fn an_assistive_press_after_a_reorder_released_outside_the_strip_sorts() {
+    let mut rt = runtime(Host::new(1, Look::fallback(false)));
+    let [x, y, w, h] = heading(&rt, 0, "size");
+    rt.pointer_down(x + w / 2.0, y + h / 2.0);
+    rt.frame(1.0 / 60.0);
+    rt.pointer_move(x + w / 2.0 - 30.0, y + h / 2.0 + 150.0);
+    settle(&mut rt);
+    rt.pointer_up(x + w / 2.0 - 30.0, y + h / 2.0 + 150.0);
+    settle(&mut rt);
+    at_press(&mut rt, "type");
+    assert_eq!(rt.state.sorts.len(), 1, "the press on Type sorts");
+}
+
+/// As above, after a reorder drag Escape cancelled.
+#[test]
+fn an_assistive_press_after_an_escaped_reorder_sorts() {
+    let mut rt = runtime(Host::new(1, Look::fallback(false)));
+    let [x, y, w, h] = heading(&rt, 0, "size");
+    rt.pointer_down(x + w / 2.0, y + h / 2.0);
+    rt.frame(1.0 / 60.0);
+    rt.pointer_move(x + w / 2.0 + 40.0, y + h / 2.0);
+    settle(&mut rt);
+    rt.key(rune::KeyEvent {
+        key: rune::Key::Escape,
+        mods: rune::Mods::default(),
+    });
+    settle(&mut rt);
+    rt.pointer_up(x + w / 2.0 + 40.0, y + h / 2.0);
+    settle(&mut rt);
+    at_press(&mut rt, "type");
+    assert_eq!(rt.state.sorts.len(), 1, "the press on Type sorts");
+}
+
+/// As above, after a drag of the heading that doesn't sort (Mode) released on itself: Rune runs
+/// no sort press there, so the next press on Size sorts.
+#[test]
+fn an_assistive_press_after_dragging_a_heading_that_doesnt_sort_sorts() {
+    let mut rt = runtime(Host::new(1, Look::fallback(false)));
+    let [x, y, w, h] = heading(&rt, 0, "mode");
+    drag(&mut rt, x + w / 2.0, y + h / 2.0, 15.0, 3);
+    assert!(rt.state.layouts.is_empty());
+    at_press(&mut rt, "size");
+    assert_eq!(rt.state.sorts.len(), 1, "the press on Size sorts");
+}
+
+/// column-layout: "Moving the pointer outside the heading row hides the line, and releasing
+/// there leaves the order unchanged."
+#[test]
+fn outside_the_heading_row_the_line_hides_and_a_release_changes_nothing() {
+    let mut rt = runtime(Host::new(1, Look::fallback(false)));
+    let [x, y, w, h] = heading(&rt, 0, "mode");
+    let [tx, ..] = heading(&rt, 0, "type");
+    rt.pointer_down(x + w / 2.0, y + h / 2.0);
+    rt.frame(1.0 / 60.0);
+    rt.pointer_move(tx + 10.0, y + h / 2.0);
+    settle(&mut rt);
+    assert!(element(&rt, "reorder-line").is_some(), "over the headings");
+    rt.pointer_move(tx + 10.0, y + h / 2.0 + 150.0);
+    settle(&mut rt);
+    assert!(
+        element(&rt, "reorder-line").is_none(),
+        "outside the heading row"
+    );
+    rt.pointer_up(tx + 10.0, y + h / 2.0 + 150.0);
+    settle(&mut rt);
+    assert!(rt.state.layouts.is_empty(), "the order is unchanged");
 }

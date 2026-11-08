@@ -5,6 +5,12 @@
   "scene": "c4-hundred-k-light",
   "events": [
     {
+      "t": 0.05,
+      "type": "tap",
+      "x": 300,
+      "y": 200
+    },
+    {
       "t": 0.1,
       "type": "wheel",
       "x": 480,
@@ -732,6 +738,10 @@
       "states": [
         "selected"
       ]
+    },
+    {
+      "key": "status",
+      "name": ""
     }
   ]
 }

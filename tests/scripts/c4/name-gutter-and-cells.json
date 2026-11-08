@@ -20,22 +20,64 @@
       "t": 0.3,
       "type": "move",
       "x": 700,
-      "y": 140
+      "y": 125
     },
     {
       "t": 0.35,
       "type": "move",
       "x": 700,
-      "y": 175
+      "y": 140
     },
     {
       "t": 0.4,
       "type": "up",
       "x": 700,
+      "y": 140
+    },
+    {
+      "t": 1.0,
+      "type": "drag",
+      "key": "row-2/cell-size",
+      "dx": 0,
+      "dy": 40,
+      "dur": 0.3
+    },
+    {
+      "t": 2.0,
+      "type": "down",
+      "x": 4,
       "y": 175
+    },
+    {
+      "t": 2.05,
+      "type": "move",
+      "x": 20,
+      "y": 190
+    },
+    {
+      "t": 2.1,
+      "type": "move",
+      "x": 40,
+      "y": 220
+    },
+    {
+      "t": 2.15,
+      "type": "move",
+      "x": 60,
+      "y": 255
+    },
+    {
+      "t": 2.2,
+      "type": "up",
+      "x": 60,
+      "y": 255
     }
   ],
   "expect": [
+    {
+      "key": "c4-intent",
+      "name": "Dragging 3 items"
+    },
     {
       "key": "status",
       "name": "4 items selected"
@@ -47,8 +89,10 @@
       ]
     },
     {
-      "key": "c4-intent",
-      "name": ""
+      "key": "row-9",
+      "states": [
+        "selected"
+      ]
     }
   ]
 }

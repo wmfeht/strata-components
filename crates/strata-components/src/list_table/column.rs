@@ -111,6 +111,11 @@ impl Cell {
     }
 }
 
+/// The widest a column without a max is drawn, in base points.
+///
+/// Used by: C4, hosts (to bound a saved width).
+pub const WIDTH_CEILING: f32 = 4096.0;
+
 pub(super) type CellFn<S> = Rc<dyn Fn(&S, &RowCx<'_>) -> Cell>;
 
 /// One column: its id, its heading's title, its sizing, alignment, whether a heading click
@@ -249,5 +254,18 @@ impl<S> Column<S> {
     /// to the min.
     pub fn clamp(&self, w: f32) -> f32 {
         w.max(self.min).min(self.max.max(self.min))
+    }
+
+    /// `w` as the table draws it, in base points: within the column's bounds, at most
+    /// [`WIDTH_CEILING`] when the column has no max, and the default width for a width that
+    /// isn't a finite number. A saved width can be anything a hand-edited file holds.
+    pub fn bounded(&self, w: f32) -> f32 {
+        let w = if w.is_finite() { w } else { self.width };
+        let w = self.clamp(w);
+        if w.is_finite() {
+            w.min(WIDTH_CEILING.max(self.min))
+        } else {
+            WIDTH_CEILING.max(self.min)
+        }
     }
 }

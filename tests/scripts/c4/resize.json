@@ -1,6 +1,5 @@
 {
   "bullets": [
-    "browser/view-modes/list: Dragging a heading's right edge resizes that column and follows the pointer without an initial jump.",
     "browser/view-modes/list: A drag cannot shrink a column below its minimum: Name 160, Mode 80, Size 70, Type 80, and Modified 110 px.",
     "browser/view-modes/list: Resized widths are saved as `[browser_list_columns]`"
   ],

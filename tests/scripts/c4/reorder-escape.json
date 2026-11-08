@@ -1,8 +1,7 @@
 {
   "bullets": [
     "browser/view-modes/list/column-layout: Pressing Escape mid-drag and then releasing leaves the column order and the saved `list_column_order` unchanged, and keeps the file selection.",
-    "browser/view-modes/list/column-layout: After a drag cancelled with Escape, the next heading drag reorders and saves as usual.",
-    "browser/view-modes/list/column-layout: A cancelled drag, or headings unmapped mid-drag, leaves the order unchanged and clears the line and cursor."
+    "browser/view-modes/list/column-layout: After a drag cancelled with Escape, the next heading drag reorders and saves as usual."
   ],
   "scene": "c4-default-light",
   "events": [

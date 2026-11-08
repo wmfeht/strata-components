@@ -1,7 +1,6 @@
 {
   "bullets": [
-    "browser/view-modes/list/column-layout: A drag only starts after 10 px of horizontal movement; a shorter press and release stays a sort click.",
-    "browser/view-modes/list/column-layout: A drop on the column's current position shows no line and changes nothing."
+    "browser/view-modes/list/column-layout: A drag only starts after 10 px of horizontal movement; a shorter press and release stays a sort click."
   ],
   "scene": "c4-default-light",
   "events": [

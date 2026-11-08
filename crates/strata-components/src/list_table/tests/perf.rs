@@ -17,7 +17,8 @@
 //! - no view run while scrolling, either way (grouped: once per group crossed), nor for
 //!   reorder moves that keep their drop point;
 //! - scroll frames within C1e's ceilings: max(1.5 × Table's, 0.5 ms) at p50 and
-//!   max(1.5 × Table's, 1.5 ms) at p95, none over 16.7 ms. The run also prints whether
+//!   max(1.5 × Table's, 1.5 ms) at p95, none over 16.7 ms; sideways frames within the same p95
+//!   ceiling, none over 16.7 ms. The run also prints whether
 //!   ListTable stays at or under Table's own p50 and p95, the target C1e met with one column
 //!   (0.59 ms against 0.88 at p95). With five columns it doesn't quite (a few percent over at
 //!   the pinned rev, with an icon per row that Table's rows don't draw), so that line is a
@@ -253,6 +254,7 @@ struct Run {
     resort: f64,
     insert: f64,
     hscroll_p95: f64,
+    hscroll_max: f64,
     hscroll_views: usize,
     resize_p95: f64,
     reorder_views: usize,
@@ -278,6 +280,7 @@ impl Run {
             resort: min(|r| r.resort),
             insert: min(|r| r.insert),
             hscroll_p95: min(|r| r.hscroll_p95),
+            hscroll_max: min(|r| r.hscroll_max),
             hscroll_views: max(|r| r.hscroll_views),
             resize_p95: min(|r| r.resize_p95),
             reorder_views: max(|r| r.reorder_views),
@@ -464,6 +467,7 @@ fn list_run(group: Option<usize>) -> Run {
         frames.push(ms(t));
     }
     run.hscroll_views = views() - v;
+    run.hscroll_max = frames.iter().copied().fold(0.0, f64::max);
     run.hscroll_p95 = percentile(&mut frames, 0.95);
     run
 }
@@ -600,6 +604,7 @@ fn perf_hundred_thousand_entries_in_five_columns_against_rune_kit_table() {
     row("re-sort (#203) ms", |r| r.resort, None);
     row("live insert (#203) ms", |r| r.insert, None);
     row("sideways scroll p95 ms", |r| r.hscroll_p95, None);
+    row("sideways scroll max ms", |r| r.hscroll_max, None);
     row("view runs sideways", |r| r.hscroll_views as f64, None);
     row("resize move commit p95 ms", |r| r.resize_p95, None);
     row(
@@ -645,6 +650,11 @@ fn perf_hundred_thousand_entries_in_five_columns_against_rune_kit_table() {
         assert!(
             c.hscroll_p95 <= (1.5 * t.scroll_p95).max(1.5),
             "{name}: sideways p95"
+        );
+        assert!(
+            c.hscroll_max < 16.7,
+            "{name}: a sideways scroll frame took {:.2} ms",
+            c.hscroll_max
         );
         assert!(
             c.scroll_max < 16.7,

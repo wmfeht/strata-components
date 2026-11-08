@@ -69,7 +69,7 @@ pub(super) fn resolve<S>(defs: &[Column<S>], i: &Inputs<'_>) -> Resolved {
         if set.is_none() && c.fill && filler.is_none() {
             filler = Some(cols.len());
         }
-        let w = c.clamp(set.unwrap_or(c.width)) * scale;
+        let w = c.bounded(set.unwrap_or(c.width)) * scale;
         cols.push(Placed {
             id: id.clone(),
             def,

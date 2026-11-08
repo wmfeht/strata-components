@@ -169,6 +169,38 @@ fn the_fill_column_takes_what_the_others_leave_until_resized_and_overflows_below
     );
 }
 
+/// A saved width that isn't a finite number takes the default, and one past all reason the
+/// ceiling.
+#[test]
+fn a_saved_width_that_isnt_a_number_or_is_absurd_is_bounded() {
+    let layout = ColumnLayout::new(defaults());
+    let size = |w: f32| {
+        let widths = ColumnWidths::new().with(&id("size"), w);
+        resolved(&layout, &widths, 1200.0, 1.0).cols[2].w
+    };
+    assert_eq!(size(f32::NAN), 90.0, "the default");
+    assert_eq!(size(f32::INFINITY), 90.0, "not finite: the default");
+    assert_eq!(size(1e9), WIDTH_CEILING);
+    assert_eq!(size(-5.0), 70.0, "the minimum");
+}
+
+/// The table's own normalize knows its default order and its primary column.
+#[test]
+fn a_tables_normalize_knows_its_columns_and_its_primary_one() {
+    let table = ListTable::new(
+        "t",
+        strata(),
+        |_: &()| unreachable!("not built"),
+        |_: &mut ()| unreachable!("not built"),
+    );
+    let layout = table.normalize(["size", "size"], ["name", "mode"]);
+    assert_eq!(
+        layout.order(),
+        ids(&["size", "name", "mode", "type", "modified"])
+    );
+    assert!(layout.is_visible(&id("name")) && !layout.is_visible(&id("mode")));
+}
+
 /// Owner ruling (Q4): widths follow the text size, and stay in base units.
 #[test]
 fn a_larger_text_size_widens_the_columns_by_its_factor() {

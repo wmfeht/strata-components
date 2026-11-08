@@ -103,8 +103,8 @@ fn heading<S: 'static>(shared: &Rc<Shared<S>>, resolved: &Rc<Resolved>, s: &S, p
         );
     if let Some(dir) = sorted {
         let glyph = match dir {
-            SortDir::Ascending => look.icon(IconName::ChevronUp),
-            SortDir::Descending => look.icon(IconName::ChevronDown),
+            SortDir::Ascending => look.icon(IconName::SortAscending),
+            SortDir::Descending => look.icon(IconName::SortDescending),
         };
         title_row = title_row.child(
             icon(glyph, look.icon_size.sm)
@@ -128,7 +128,7 @@ fn heading<S: 'static>(shared: &Rc<Shared<S>>, resolved: &Rc<Resolved>, s: &S, p
         column.align,
     )
     .child(title_row)
-    .on_drag(reorder(shared, resolved, id.clone()));
+    .on_drag(reorder(shared, resolved, id.clone(), column.sortable));
     h = h.cursor(match drag {
         Some(_) => Cursor::Grabbing,
         None if column.sortable => Cursor::Pointer,
@@ -184,6 +184,7 @@ fn reorder<S: 'static>(
     shared: &Rc<Shared<S>>,
     resolved: &Rc<Resolved>,
     id: super::ColumnId,
+    sortable: bool,
 ) -> impl Fn(&mut S, &mut Drag, &mut Tx) + 'static {
     let shared = shared.clone();
     let resolved = resolved.clone();
@@ -236,11 +237,15 @@ fn reorder<S: 'static>(
                     return;
                 }
                 // Rune presses the heading after a drag released on it (Rune draft R-C4-1):
-                // that press isn't a sort click.
-                st.suppress_press = true;
+                // that press isn't a sort click. Only then: a release outside the heading, a
+                // cancelled drag and a heading with no press of its own (it doesn't sort) get no
+                // press, and a flag left set would swallow the next press from assistive
+                // technology, which comes with no drag before it.
+                let inside = d.x >= 0.0 && d.x < d.w && d.y >= 0.0 && d.y < d.h;
                 if d.cancelled() {
                     return;
                 }
+                st.suppress_press = sortable && inside;
                 let moved = site.and_then(|site| (shared.parts)(s).layout.moved(&id, &site));
                 if let (Some(layout), Some(f)) = (moved, &shared.on_layout) {
                     f(
@@ -298,7 +303,7 @@ fn resize_handle<S: 'static>(
                         tx.live_only();
                         return;
                     };
-                    let live = column.clamp(r.start + d.dx / scale);
+                    let live = column.bounded(r.start + d.dx / scale);
                     if live == r.live {
                         tx.live_only();
                         return;
@@ -321,7 +326,7 @@ fn resize_handle<S: 'static>(
                         }
                         return;
                     }
-                    let live = column.clamp(r.start + d.dx / scale);
+                    let live = column.bounded(r.start + d.dx / scale);
                     // A cancelled drag puts the width back; a press that moved nothing (half
                     // a double press) changes nothing.
                     if d.cancelled() || live == r.start {
@@ -382,5 +387,5 @@ pub(super) fn fit<S: 'static>(shared: &Shared<S>, resolved: &Resolved, s: &S, de
         };
         widest = widest.max(w);
     }
-    column.clamp((widest / resolved.scale).ceil())
+    column.bounded((widest / resolved.scale).ceil())
 }

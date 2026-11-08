@@ -44,6 +44,9 @@
 //! [`text_scale`], `kit.ty.ui.size` over K2's base size. So a saved width means the same at any
 //! text size, and a larger text size widens every column by the same factor.
 //!
+//! A saved width is bounded before it is drawn ([`Column::bounded`]): one that isn't a finite
+//! number takes the column's default, and none is wider than its max, or [`WIDTH_CEILING`].
+//!
 //! The layout ([`ColumnLayout`]: order and visibility) is one value every window and the
 //! chooser share, and [`ColumnWidths`] one per scope (browser, chooser). The table reads both
 //! by accessor and hands the host the new value when the person changes one, once: a reorder
@@ -131,35 +134,35 @@
 //! `tests/scripts/c4/` (on the gallery page, `crates/strata-gallery/src/scenes/c4.rs`, whose
 //! host stands in for Strata's sorting, grouping and saving); "runtime" tests are in
 //! `tests/runtime.rs`, unit tests in `tests.rs`, and "gallery" tests in
-//! `crates/strata-gallery/tests/c4.rs`. A check marked *partial* covers the half named, and the
-//! rest is the host's or another work package's.
+//! `crates/strata-gallery/tests/c4.rs`. A check marked *partial* covers only the half named;
+//! the rest is the host's or another work package's, as the table says.
 //!
 //! | Bullet (node) | Check |
 //! | --- | --- |
 //! | list: Name takes the width left…; below the minimum widths the table scrolls horizontally | unit `the_fill_column_takes…` (the rule); `horizontal-scroll` (a click on a cell after scrolling sideways) |
-//! | list: Clicking the Name, Size, Type, or Modified heading sorts…, reverses it, and an arrow marks it | `sort-intent` (the arrow's direction is in its tree golden); runtime `assistive_technology_presses_a_heading_to_sort` |
+//! | list: Clicking the Name, Size, Type, or Modified heading sorts…, reverses it, and an arrow marks it | `sort-intent` (the arrow's direction is in its tree golden); runtime `assistive_technology_presses_a_heading_to_sort` and the three `an_assistive_press_after_…` (a press after a reorder drag released outside, Escaped, or on a heading that doesn't sort) |
 //! | list: Clicking the Mode heading does not sort | `sort-mode-heading` |
 //! | list: Sorted by Extension, Created, or Unsorted, no heading shows an arrow | `sort-no-column`, *partial*: a sort with no column (Extension) shows none; which fields have columns is the host's |
-//! | list: Dragging a heading's right edge resizes… without an initial jump | runtime `a_resize_follows_the_pointer…` (the width mid-drag); `resize` (what the host hears) |
+//! | list: Dragging a heading's right edge resizes… without an initial jump | runtime `a_resize_follows_the_pointer…` (the width mid-drag); `resize-follow` (one drag lands at the drawn width plus the travel) |
 //! | list: A drag cannot shrink a column below its minimum… | `resize` (Size stops at 70) |
 //! | list: Double-clicking a heading's right edge fits the column to its widest content | runtime `a_double_press_on_the_edge_fits…` |
 //! | list: Resized widths are saved…; Name is saved only after it is resized itself | runtime `a_resize_follows…`; `resize`, *partial*: the table hands the host widths with no Name until Name is resized; saving and the scopes are the host's |
 //! | column-layout: A List pane header has a Columns menu button with the tooltip "Columns" | `columns-button` (its name; the tooltip is its description in the tree golden) |
 //! | view-modes: The List view's Columns menu button is named "Columns" | `columns-button` |
-//! | column-layout: The popover is headed COLUMNS and lists check items…, a separator, then "Reset to default columns" | `columns-popover` (the items and the heading; the separator draws in the PNG golden `c4-columns-menu` only, as Rune puts none in the tree) |
+//! | column-layout: The popover is headed COLUMNS and lists check items…, a separator, then "Reset to default columns" | `columns-popover`, *partial*: the heading and the items; the separator draws in the PNG golden `c4-columns-menu` only, as Rune puts none in the tree |
 //! | column-layout: The Name item is checked and insensitive, with the accessible description… | `columns-popover` (checked and disabled; the description is in its tree golden) |
 //! | column-layout: Right-clicking the List heading row opens the same popover at the pointer | `heading-right-click` |
-//! | column-layout: Appearance has a "Customize columns…" item… opens the Columns popover on the headings | `customize-opener`, *partial*: the opener ([`ListTableState::open_columns_menu`]); the Appearance item is the host's |
+//! | column-layout: Appearance has a "Customize columns…" item… opens the Columns popover on the headings | `customize-opener`, *partial*: what the item opens, through [`ListTableState::open_columns_menu`] (a page key stands in for the item); the Appearance item is the host's |
 //! | column-layout: Clicking a checked… item hides that column's heading and cells…; again shows them. The check mark follows the saved state | `toggle-hide`, `toggle-show`, `toggle-check` |
-//! | column-layout: A hand-edited `list_hidden_columns` that names `name` loads with Name shown | unit `a_saved_layout_drops…`, *partial*: [`ColumnLayout::normalize`]; reading the file is the host's |
+//! | column-layout: A hand-edited `list_hidden_columns` that names `name` loads with Name shown | unit `a_saved_layout_drops…` and `a_tables_normalize…`, *partial*: [`ListTable::normalize`]; reading the file is the host's |
 //! | column-layout: "Reset to default columns" restores…, shows every column, and removes… | `reset-columns`, *partial*: the layout; removing the saved keys is the host's, on [`LayoutWhy::Reset`] |
 //! | column-layout: Pressing a List heading and dragging it horizontally shows a grabbing cursor and a 3 px accent inset line…; headings do not move | runtime `a_heading_drag_grabs…`; PNG golden `c4-reorder` |
 //! | column-layout: The line sits on the left edge of the heading the column would precede | runtime `a_heading_drag_grabs…`; unit `a_dragged_heading_drops…` |
 //! | column-layout: For a drop at the end, the line sits on the last heading's right edge | runtime `a_heading_drag_grabs…`; unit `a_dragged_heading_drops…` |
 //! | column-layout: Releasing over the headings moves the column…; one drag can move it several positions | `reorder`, `reorder-several` |
-//! | column-layout: A drop on the column's current position shows no line and changes nothing | runtime (no line); `reorder-threshold` (no change) |
-//! | column-layout: Moving the pointer outside the heading row hides the line, and releasing there leaves the order unchanged | runtime `a_heading_drag_grabs…` (the line hides); `reorder-outside` (the release) |
-//! | column-layout: A cancelled drag, or headings unmapped mid-drag, leaves the order unchanged and clears the line and cursor | `reorder-escape` (cancelled); runtime `a_table_removed_mid_drag…` (unmapped, with the host's [`ListTableState::reset`]) |
+//! | column-layout: A drop on the column's current position shows no line and changes nothing | runtime `a_drop_on_the_columns_own_place…` |
+//! | column-layout: Moving the pointer outside the heading row hides the line, and releasing there leaves the order unchanged | runtime `outside_the_heading_row…` |
+//! | column-layout: A cancelled drag, or headings unmapped mid-drag, leaves the order unchanged and clears the line and cursor | runtime `a_heading_drag_grabs…` (ended with Escape) and `a_table_removed_mid_drag…` (unmapped, with the host's [`ListTableState::reset`]) |
 //! | column-layout: Pressing Escape mid-drag and then releasing leaves the column order… unchanged, and keeps the file selection | `reorder-escape` |
 //! | column-layout: After a drag cancelled with Escape, the next heading drag reorders and saves as usual | `reorder-escape` |
 //! | column-layout: Moving the Name heading does not change the sort | `reorder-name` |
@@ -167,24 +170,25 @@
 //! | column-layout: A press within 8 px of a heading's right edge resizes the column and never reorders it | `resize-edge` |
 //! | column-layout: Dragging Mode 180 px to the right and releasing gives the order Name, Size, Mode, Type, Modified | `reorder`; unit `a_dragged_heading_drops…` |
 //! | column-layout: A drag saves `list_column_order` once, on release, and every window and the chooser then update | `reorder`, *partial*: one change, on release; saving and sharing are the host's |
-//! | column-layout: On load, duplicate columns are dropped and missing ones are appended in default order | unit `a_saved_layout_drops…` |
+//! | column-layout: On load, duplicate columns are dropped and missing ones are appended in default order | unit `a_saved_layout_drops…`, `a_tables_normalize…` |
 //! | column-layout: Every browser window and the portal file chooser share order and visibility, and update live | runtime `two_tables_over_one_layout…`, *partial*: two tables over one layout in one process; across processes is the host's |
 //! | column-layout: Hiding, showing, reordering, or resetting columns never changes the sort key, direction, or file order | `toggle-hide`, `reorder`, `reset-columns` (no sort sent; the gallery's host sorts only on a sort) |
 //! | column-layout: A hidden sort column stays the active sort… | `hidden-sort-column`, *partial*: the table sends no sort while its column is hidden; folder sorts and view switches are the host's |
 //! | column-layout: Showing the hidden sort column again restores its arrow; clicking it then reverses the existing direction | `hidden-sort-column` |
-//! | pointer-intent: In List, unused Name-column space and its row padding are blank, even when Name is not the first column; other column cells count as item content | unit `the_name_columns_blank_space…`; `name-gutter-marquee` (blank, with Name last); `cell-drag` (content) |
+//! | pointer-intent: In List, unused Name-column space and its row padding are blank, even when Name is not the first column; other column cells count as item content | `name-gutter-and-cells` (with Name last: a band from blank Name space, a drag from a cell that carries the selection, then a band from the row's padding); unit `the_name_columns_blank_space…` |
 //! | marquee: A drag from blank space in a pane header, List's heading strip… starts a marquee | `heading-strip-marquee`, *partial*: List's heading strip (C1e's header rule) |
 //! | marquee: A press on a button… keeps that control's own behavior and starts no marquee | `reorder-outside`, *partial*: List's headings |
 //! | view-modes: Click the first of five entries and Ctrl+click the third. Shift+Down in List… selects only the third and fourth | gallery `a_ctrl_click_then_shift_down…`, *partial*: List |
 //! | view-modes: Long filenames are middle-ellipsized in… the List Name column | PNG golden `c4-default` (the tree keeps the whole name, so no script can see the cut) |
-//! | selection: A plain click on an entry selects only that entry… | `cell-click` (on a cell, through C4's regions); `scroll-100k` (100,000 rows) |
+//! | selection: A plain click on an entry selects only that entry and replaces the previous selection | `cell-click` (on a cell, through C4's regions); `scroll-100k` (100,000 rows) |
 //! | keyboard-navigation: In Icons and List, Up and Down move focus and selection…; In List, Right keeps focus on the current entry… | `keyboard-grid` |
 //!
 //! The sticky group header has no feature-map bullet (Strata's GTK headers don't stick; the
 //! plan adds it), and its stuck copy is hidden from assistive technology, so no script can
 //! see it: gallery `the_top_groups_header_stays_stuck…` and the PNG golden `c4-grouped-stuck`
 //! check it (owner ruling). Text size (owner ruling): unit `a_larger_text_size_widens…` and
-//! runtime `at_a_larger_text_size_a_resize_hands_the_host_base_units`. Perf: `tests/perf.rs`.
+//! runtime `at_a_larger_text_size_a_resize_hands_the_host_base_units`. Saved widths are
+//! bounded (unit `a_saved_width_that_isnt…`). Perf: `tests/perf.rs`.
 //!
 //! # Rune and rune-kit drafts (not filed)
 //!
@@ -265,7 +269,7 @@ use std::rc::Rc;
 use rune::{El, Tx, col};
 use strata_kit::look::Look;
 
-pub use column::{Cell, Column, ColumnId};
+pub use column::{Cell, Column, ColumnId, WIDTH_CEILING};
 pub use groups::groups_from_runs;
 pub use header::{REORDER_THRESHOLD, RESIZE_EDGE, heading_key};
 pub use layout::{ColumnLayout, ColumnWidths, DropSite, LayoutChange, LayoutWhy};
@@ -411,6 +415,24 @@ impl<S: 'static> ListTable<S> {
         &self.shared.columns
     }
 
+    /// A saved layout made whole for this table's columns ([`ColumnLayout::normalize`] with
+    /// their default order and the primary column): what a host loads `list_column_order` and
+    /// `list_hidden_columns` with.
+    pub fn normalize<'a>(
+        &self,
+        order: impl IntoIterator<Item = &'a str>,
+        hidden: impl IntoIterator<Item = &'a str>,
+    ) -> ColumnLayout {
+        let defaults: Vec<ColumnId> = self.shared.columns.iter().map(|c| c.id.clone()).collect();
+        let primary = self
+            .shared
+            .columns
+            .iter()
+            .find(|c| c.is_primary())
+            .map(|c| &c.id);
+        ColumnLayout::normalize(&defaults, primary, order, hidden)
+    }
+
     /// The default layout: every column, in the order given, shown.
     pub fn default_layout(&self) -> ColumnLayout {
         ColumnLayout::new(self.shared.columns.iter().map(|c| c.id.clone()))
@@ -440,14 +462,25 @@ impl<S: 'static> ListTable<S> {
     pub fn collection(&self, s: &S, base: Collection<S>) -> Collection<S> {
         let shared = Rc::new(self.shared.clone());
         let resolved = self.resolved(s);
+        self.collection_with(s, base, &shared, &resolved)
+    }
+
+    /// [`ListTable::collection`] with the columns as this build laid them out.
+    fn collection_with(
+        &self,
+        s: &S,
+        base: Collection<S>,
+        shared: &Rc<Shared<S>>,
+        resolved: &Rc<Resolved>,
+    ) -> Collection<S> {
         let region_shared = shared.clone();
         let region_resolved = resolved.clone();
         base.roles(Roles::GRID_ROWS)
             .row_height(|_: &S, look: &Look| strata_kit::slots::list::row_height(look))
             .label(self.shared.label.clone().unwrap_or_else(rows::label))
             .content(rows::content(
-                &shared,
-                &resolved,
+                shared,
+                resolved,
                 rows::Fonts::of((self.shared.parts)(s).look),
             ))
             .regions(move |s: &S, index, local| {
@@ -469,7 +502,7 @@ impl<S: 'static> ListTable<S> {
         let strip = menu::headings(&shared, s, strip, layer);
         let header = Rc::new(RefCell::new(Some(strip)));
         let list = self
-            .collection(s, base)
+            .collection_with(s, base, &shared, &resolved)
             .header(move |_: &S| header.borrow_mut().take())
             .build(s);
         let width = (shared.parts)(s).table.width;

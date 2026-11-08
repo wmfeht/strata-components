@@ -1,6 +1,5 @@
 {
   "bullets": [
-    "browser/view-modes/list/column-layout: Moving the pointer outside the heading row hides the line, and releasing there leaves the order unchanged.",
     "browser/selection/marquee: A press on a button, text entry, label, image, slider, scrollbar, or sidebar place keeps that control's own behavior and starts no marquee."
   ],
   "scene": "c4-default-light",

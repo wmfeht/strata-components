@@ -57,13 +57,16 @@
 //!    that gesture first, so the group still drags (`browser_modes/clicks.rs`: "Capture must
 //!    snapshot selection before GTK changes it for the bubble gesture").
 //! 2. The entry opens ([`Outcome::Activate`]) on the first click where its kind opens on one
-//!    ([`ClickModes`]), or on the second click of a pair where it opens on two. Alt doesn't
+//!    ([`ClickModes`]), or on the second click of a run where it opens on two. Alt doesn't
 //!    stop it, as Strata's `plain_single` reads only Ctrl and Shift.
 //! 3. Otherwise a slow click may arm a rename (below).
 //! 4. Otherwise a first click sends [`Outcome::Clicked`].
 //!
-//! A Ctrl or Shift click never opens. Pairs are counted here, from
-//! [`PointerSettings::double_click`]: Rune's own count uses a fixed 0.5 s on Linux (S5 U13).
+//! A Ctrl or Shift click never opens. A press continues a run (2, 3, …) when it comes within
+//! the double-click interval and distance of the one before, as GTK counts it; Strata acts on
+//! the first and second press of a run only, so a third press opens nothing, renames nothing
+//! and sends no click. Runs are counted here, from [`PointerSettings::double_click`]: Rune's
+//! own count uses a fixed 0.5 s on Linux (S5 U13).
 //! The click modes themselves, and keeping them across restarts, are the host's preferences.
 //!
 //! # Slow-click rename
@@ -87,7 +90,7 @@
 //!
 //! # Middle and secondary presses
 //!
-//! A middle click (released within the threshold, the first of a pair) opens a folder in a new
+//! A middle click (released within the threshold, the first of a run) opens a folder in a new
 //! tab, or a new window with Ctrl or Shift held at the release, as Strata reads them then. On a
 //! file it selects the file and opens nothing. Strata reveals a file in its own folder, which
 //! is this one except in recursive search results; that reveal is left to C17 and C18.
@@ -100,7 +103,9 @@
 //! Install [`PointerIntent`] as the collection's pointer controller, and pass the
 //! [`PointerSettings`] with `Collection::settings` each time the view builds: the interval from
 //! P5, the click modes from the preferences, `already_open` from Columns. With none, the
-//! defaults apply. A read-only collection (`Collection::read_only`) neither drags nor renames.
+//! defaults apply. A read-only collection (`Collection::read_only`, C14b) neither drags nor
+//! renames: a drag from an entry starts neither a file drag nor a band (an Alt drag still
+//! bands), and a Ctrl press on a selected entry that then drags neither toggles nor drags.
 //! Settings arrive by type through the element's `Ctx::settings`, its one settings path for
 //! controllers, so C1b keeps no handle of its own.
 //!

@@ -326,6 +326,7 @@ fn ctrl_and_shift_clicks_on_blank_row_space_toggle_and_range() {
 #[test]
 fn ctrl_drag_from_an_entry_adds_it_and_drags() {
     // browser/selection/pointer-intent: Ctrl-drag from an entry's icon or name copies it and adds it to the selection.
+    // Checks the "adds it" half: the copy is the host's, from the modifiers at the drag.
     let mut r = Rig::double();
     r.select(&[3]);
     r.down(5, Spot::Content, CTRL);
@@ -355,6 +356,7 @@ fn ctrl_drag_from_an_entry_adds_it_and_drags() {
 #[test]
 fn shift_drag_from_an_entry_drags_the_range() {
     // browser/selection/pointer-intent: Shift-drag from an entry's icon or name moves it.
+    // Checks the drag of the range; the move is the host's, from the modifiers at the drag.
     let mut r = Rig::double();
     r.click(3, Spot::Content, PLAIN);
     r.wait(1.0).down(5, Spot::Name, SHIFT);
@@ -376,9 +378,7 @@ fn an_alt_drag_from_an_entry_starts_a_marquee() {
 #[test]
 fn alt_with_ctrl_or_shift_on_an_entry_leaves_the_selection_to_the_band() {
     // browser/selection/marquee: Holding Alt starts a marquee even when the press lands on an entry.
-    // browser/selection/marquee: A Ctrl-marquee toggles each crossed entry relative to the selection at press.
-    // browser/selection/marquee: A Shift-marquee adds the crossed entries to the selection at press.
-    // Strata takes the band's selection at press before the row's own press changes anything
+    // How the band then toggles or adds is C1d's. Strata takes the band's selection at press before the row's own press changes anything
     // (`marquee/state.rs`), so a modified Alt press changes nothing until its release.
     for (mods, index) in [
         (Mods { alt: true, ..CTRL }, 5),
@@ -391,7 +391,13 @@ fn alt_with_ctrl_or_shift_on_an_entry_leaves_the_selection_to_the_band() {
         assert_eq!(r.selected(), [3], "{mods:?}: nothing changes at the press");
         r.to(0.0, 30.0);
         assert_eq!(r.selected(), [3], "{mods:?}: nor when the band starts");
-        assert!(r.take().iter().any(is_marquee));
+        assert!(
+            r.take().contains(&Outcome::BeginMarquee {
+                at: Point::new(40.0, index as f32 * ROW + ROW / 2.0),
+                mods,
+            }),
+            "the band gets the modifiers held at the press"
+        );
     }
 }
 
@@ -451,7 +457,7 @@ fn a_press_that_crossed_the_threshold_never_previews_or_opens() {
             id: id(4),
             how: ActivateBy::Click
         }],
-        "the dragged press is no half of a pair"
+        "the dragged press ends the run"
     );
 
     r.wait(1.0).down(4, Spot::Content, PLAIN);
@@ -521,7 +527,7 @@ fn with_single_set_one_click_opens_on_release() {
     r.wait(0.1).click(1, Spot::Content, PLAIN);
     assert!(
         r.take().is_empty(),
-        "the second click of a pair doesn't open it again"
+        "the second click of a run doesn't open it again"
     );
 }
 
@@ -538,6 +544,46 @@ fn with_double_set_one_click_only_selects_and_two_open() {
         [Outcome::Activate {
             id: id(1),
             how: ActivateBy::DoubleClick
+        }]
+    );
+}
+
+#[test]
+fn a_triple_click_opens_once_and_arms_no_rename() {
+    // operations/rename: A quick double-click opens the item instead; another click, a drag, any key press, or a selection change before the interval cancels the pending rename.
+    // GTK keeps counting a third press (3, 4, …) and Strata acts only on the first and second.
+    let mut r = Rig::double();
+    for _ in 0..3 {
+        r.click(4, Spot::Name, PLAIN);
+        r.wait(0.1);
+    }
+    r.settle();
+    assert_eq!(
+        r.take(),
+        [
+            Outcome::Clicked { id: id(4) },
+            Outcome::Activate {
+                id: id(4),
+                how: ActivateBy::DoubleClick
+            }
+        ]
+    );
+}
+
+#[test]
+fn a_triple_click_with_single_set_opens_once() {
+    // browser/selection/click-modes: With Single set, one click on a folder opens it.
+    let mut r = Rig::columns();
+    for _ in 0..3 {
+        r.click(1, Spot::Name, PLAIN);
+        r.wait(0.1);
+    }
+    r.settle();
+    assert_eq!(
+        r.take(),
+        [Outcome::Activate {
+            id: id(1),
+            how: ActivateBy::Click
         }]
     );
 }
@@ -584,6 +630,7 @@ fn an_alt_click_opens_with_single_set() {
 #[test]
 fn a_changed_click_count_applies_to_the_next_click() {
     // browser/selection/click-modes: A changed click count applies to open windows without restarting and persists across restarts.
+    // Checks the "without restarting" half: persistence is the host's preferences.
     let mut r = Rig::double();
     r.click(1, Spot::Content, PLAIN);
     assert_eq!(r.take(), [Outcome::Clicked { id: id(1) }]);
@@ -894,6 +941,23 @@ fn a_middle_click_on_a_file_selects_it_and_opens_nothing() {
     r.middle(6, PLAIN);
     assert_eq!(r.selected(), [6]);
     assert!(r.take().is_empty());
+}
+
+#[test]
+fn a_triple_middle_click_opens_one_tab() {
+    // browser/selection: A double middle-click on a folder opens one tab; a middle press dragged past the drag threshold opens nothing.
+    let mut r = Rig::double();
+    for _ in 0..3 {
+        r.middle(1, PLAIN);
+        r.wait(0.1);
+    }
+    assert_eq!(
+        r.take(),
+        [Outcome::OpenInNew {
+            id: id(1),
+            window: false
+        }]
+    );
 }
 
 #[test]

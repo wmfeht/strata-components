@@ -192,7 +192,7 @@ struct Gesture {
     press: Press,
     /// The entry at the press, and its index then.
     entry: Option<(usize, EntryId)>,
-    /// Which click of a pair the press is.
+    /// Which click of a run the press is: 1, 2, 3, …
     count: u32,
     plan: Plan,
     deferred: Deferred,
@@ -532,7 +532,7 @@ fn primary_release(
 }
 
 /// A middle click opens a folder in a new tab, or a window with Ctrl or Shift held at release,
-/// and selects a file. Only the first click of a pair counts.
+/// and selects a file. Only the first click of a run counts.
 fn middle(g: &Gesture, index: usize, id: EntryId, mods: Mods, s: &mut dyn Surface) {
     if g.count != 1 {
         return;

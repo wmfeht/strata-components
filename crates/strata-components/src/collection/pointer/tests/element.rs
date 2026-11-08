@@ -405,6 +405,24 @@ fn a_read_only_collection_neither_drags_nor_renames() {
     rt.pointer_up(x, y + 30.0);
     rt.frame(1.0 / 60.0);
     assert_eq!(heard(&mut rt), ["clicked 4", "clicked 4"]);
+    assert!(rt.state.bands.borrow().is_empty(), "nor a band");
+
+    wait(&mut rt, 1.0);
+    hold(&mut rt, CTRL);
+    rt.pointer_down(x, y);
+    rt.frame(1.0 / 60.0);
+    rt.pointer_move(x, y + 30.0);
+    rt.frame(1.0 / 60.0);
+    rt.pointer_up(x, y + 30.0);
+    rt.frame(1.0 / 60.0);
+    hold(&mut rt, Mods::default());
+    assert_eq!(
+        selected(&rt),
+        [4],
+        "a Ctrl drag from a selected entry doesn't toggle it"
+    );
+    assert!(heard(&mut rt).is_empty());
+    assert!(rt.state.bands.borrow().is_empty());
 }
 
 #[test]

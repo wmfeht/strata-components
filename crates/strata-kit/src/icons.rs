@@ -10,7 +10,7 @@
 //! A component draws `look.icon(IconName::Folder)` and never names a catalog. An
 //! [`IconSet`] maps every name onto one of its icons, and also finds any of its icons by the
 //! catalog's own name ([`IconSet::named`]), for Strata's file-name → icon mapping and C20d's
-//! picker. Until K3 lands, both catalogs are [`PLACEHOLDER`] under their own names.
+//! picker. K3 generates them from `crates/strata-kit/icons/`; [`PLACEHOLDER`] stays for tests.
 //!
 //! Adding a name is a W2 contract change (rule 4 in `docs/work/README.md`): it needs an icon
 //! in every catalog, and K3's mapping fails to build without one.
@@ -29,17 +29,27 @@ mod tests;
 /// Rows look icons up while they draw, by name for every entry, so both lookups must be
 /// sublinear in the catalog's size: an index, a generated `match` or a binary search over a
 /// sorted list, never a scan of `all`.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 #[non_exhaustive]
 pub struct IconSet {
-    /// The catalog's id, as settings name it (`lucide`, `catppuccin`).
+    /// The catalog's id (`lucide`, `catppuccin-mocha`, `catppuccin-latte`).
     pub name: &'static str,
     /// The catalog's icon for each semantic name.
     pub icon: fn(IconName) -> &'static Icon,
-    /// The catalog's icon by its own name (`Icon::name`), or `None`.
+    /// The catalog's icon by its own name (`Icon::name`), or by an [`IconName::id`], or `None`.
     pub named: fn(&str) -> Option<&'static Icon>,
     /// Every icon in the catalog, for pickers. `named` finds each by its `Icon::name`.
     pub all: &'static [Icon],
+}
+
+/// The name and the icon count: the icons themselves are about 0.7 MB of SVG.
+impl std::fmt::Debug for IconSet {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("IconSet")
+            .field("name", &self.name)
+            .field("icons", &self.all.len())
+            .finish_non_exhaustive()
+    }
 }
 
 impl IconSet {
@@ -50,6 +60,7 @@ impl IconSet {
 }
 
 /// Every catalog Strata offers, in settings order. The gallery's `w2-icons` scenes draw each.
+/// Latte is Mocha's light flavour: `catppuccin::for_background`.
 pub fn catalogs() -> [IconSet; 2] {
     [lucide::SET, catppuccin::SET]
 }

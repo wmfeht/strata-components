@@ -53,6 +53,7 @@ use crate::look::Look;
 pub mod collection;
 pub mod icons;
 pub mod list;
+pub mod scroll;
 pub mod sidebar;
 pub mod tabs;
 
@@ -69,6 +70,8 @@ pub struct Slots {
     pub icons: icons::Icons,
     /// ListTable (C4).
     pub list: list::List,
+    /// C24's overlay scroll bar and autoscroll anchor.
+    pub scroll: scroll::Scroll,
     /// PlacesSidebar (C8).
     pub sidebar: sidebar::Sidebar,
     /// BrowserTabs (C7).
@@ -81,6 +84,7 @@ pub const TOKENS: &[(&str, &[Token])] = &[
     ("collection", collection::TOKENS),
     ("icons", icons::TOKENS),
     ("list", list::TOKENS),
+    ("scroll", scroll::TOKENS),
     ("sidebar", sidebar::TOKENS),
     ("tabs", tabs::TOKENS),
 ];

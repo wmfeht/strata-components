@@ -64,7 +64,7 @@
                         "context-menu",
                         "scroll-into-view"
                       ],
-                      "activeDescendant": "row-2",
+                      "activeDescendant": "row-1",
                       "children": [
                         {
                           "actions": [
@@ -82,16 +82,6 @@
                                     "click",
                                     "scroll-into-view"
                                   ],
-                                  "children": [
-                                    {
-                                      "actions": [
-                                        "scroll-into-view"
-                                      ],
-                                      "key": "resize",
-                                      "name": "Resize Name",
-                                      "role": "splitter"
-                                    }
-                                  ],
                                   "key": "head-name",
                                   "name": "Name",
                                   "role": "column-header",
@@ -100,16 +90,6 @@
                                 {
                                   "actions": [
                                     "scroll-into-view"
-                                  ],
-                                  "children": [
-                                    {
-                                      "actions": [
-                                        "scroll-into-view"
-                                      ],
-                                      "key": "resize",
-                                      "name": "Resize Mode",
-                                      "role": "splitter"
-                                    }
                                   ],
                                   "key": "head-mode",
                                   "name": "Mode",
@@ -120,16 +100,6 @@
                                     "click",
                                     "scroll-into-view"
                                   ],
-                                  "children": [
-                                    {
-                                      "actions": [
-                                        "scroll-into-view"
-                                      ],
-                                      "key": "resize",
-                                      "name": "Resize Size",
-                                      "role": "splitter"
-                                    }
-                                  ],
                                   "key": "head-size",
                                   "name": "Size",
                                   "role": "column-header"
@@ -139,16 +109,6 @@
                                     "click",
                                     "scroll-into-view"
                                   ],
-                                  "children": [
-                                    {
-                                      "actions": [
-                                        "scroll-into-view"
-                                      ],
-                                      "key": "resize",
-                                      "name": "Resize Type",
-                                      "role": "splitter"
-                                    }
-                                  ],
                                   "key": "head-type",
                                   "name": "Type",
                                   "role": "column-header"
@@ -157,16 +117,6 @@
                                   "actions": [
                                     "click",
                                     "scroll-into-view"
-                                  ],
-                                  "children": [
-                                    {
-                                      "actions": [
-                                        "scroll-into-view"
-                                      ],
-                                      "key": "resize",
-                                      "name": "Resize Modified",
-                                      "role": "splitter"
-                                    }
                                   ],
                                   "key": "head-modified",
                                   "name": "Modified",
@@ -294,7 +244,10 @@
                                   "key": "row-1",
                                   "name": "Projects",
                                   "position": 2,
-                                  "role": "row"
+                                  "role": "row",
+                                  "states": [
+                                    "selected"
+                                  ]
                                 },
                                 {
                                   "actions": [
@@ -345,10 +298,7 @@
                                   "key": "row-2",
                                   "name": "Receipts",
                                   "position": 3,
-                                  "role": "row",
-                                  "states": [
-                                    "selected"
-                                  ]
+                                  "role": "row"
                                 },
                                 {
                                   "actions": [

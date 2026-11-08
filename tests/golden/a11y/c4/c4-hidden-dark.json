@@ -81,16 +81,6 @@
                                     "click",
                                     "scroll-into-view"
                                   ],
-                                  "children": [
-                                    {
-                                      "actions": [
-                                        "scroll-into-view"
-                                      ],
-                                      "key": "resize",
-                                      "name": "Resize Size",
-                                      "role": "splitter"
-                                    }
-                                  ],
                                   "key": "head-size",
                                   "name": "Size",
                                   "role": "column-header"
@@ -100,16 +90,6 @@
                                     "click",
                                     "scroll-into-view"
                                   ],
-                                  "children": [
-                                    {
-                                      "actions": [
-                                        "scroll-into-view"
-                                      ],
-                                      "key": "resize",
-                                      "name": "Resize Modified",
-                                      "role": "splitter"
-                                    }
-                                  ],
                                   "key": "head-modified",
                                   "name": "Modified",
                                   "role": "column-header"
@@ -118,16 +98,6 @@
                                   "actions": [
                                     "click",
                                     "scroll-into-view"
-                                  ],
-                                  "children": [
-                                    {
-                                      "actions": [
-                                        "scroll-into-view"
-                                      ],
-                                      "key": "resize",
-                                      "name": "Resize Name",
-                                      "role": "splitter"
-                                    }
                                   ],
                                   "key": "head-name",
                                   "name": "Name",

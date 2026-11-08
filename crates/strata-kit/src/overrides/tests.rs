@@ -535,7 +535,14 @@ fn an_override_is_final_over_the_theme_and_the_settings() {
         // Only what the file names moves.
         let mut moved = changed(&look, &base);
         moved.sort_unstable();
-        let mut expected = vec!["glow.on", "list.row.height", "radius.md", "row.list"];
+        // C4's heading strip follows `row.list` (slots inherit).
+        let mut expected = vec![
+            "glow.on",
+            "list.heading.height",
+            "list.row.height",
+            "radius.md",
+            "row.list",
+        ];
         if base.kit.radius.md != 4.0 {
             // The collection rows' radius follows `radius.md` (slots inherit).
             expected.insert(0, "collection.row.radius");

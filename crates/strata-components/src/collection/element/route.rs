@@ -306,10 +306,18 @@ pub(super) fn on_drag<S: 'static>(cfg: &Rc<Config<S>>, s: &mut S, d: &mut Drag, 
     };
     let st = (cfg.get)(s).1;
     let press = st.gesture;
+    // A primary press on the header part's blank space (where no part of it takes presses
+    // itself) is on empty space at the viewport's top edge, as Strata starts a band from a List
+    // heading strip (C4). Only a primary one: the rule is for a band, and a middle press there
+    // (an autoscroll, a new tab) isn't on the collection.
+    let on_header = phase == PointerPhase::Down
+        && tx.button() == PointerButton::Primary
+        && !st.viewport.contains(window)
+        && st.header.get().contains(window);
     match phase {
-        // A press outside the viewport (on a header) isn't the collection's, and neither are
-        // the moves and the release that follow it.
-        PointerPhase::Down if !st.viewport.contains(window) => {
+        // Any other press outside the viewport isn't the collection's, and neither are the
+        // moves and the release that follow it.
+        PointerPhase::Down if !st.viewport.contains(window) && !on_header => {
             (cfg.get_mut)(s).1.gesture = None;
             tx.live_only();
             return;
@@ -320,14 +328,25 @@ pub(super) fn on_drag<S: 'static>(cfg: &Rc<Config<S>>, s: &mut S, d: &mut Drag, 
         }
         _ => {}
     }
-    let point = st.content_point(window);
+    let point = if on_header {
+        Point::new(window.x - st.viewport.x, st.scroll.get())
+    } else {
+        st.content_point(window)
+    };
     let hover_was_live = st.hover_live;
-    let hit = hit(
-        cfg,
-        s,
-        point,
-        (phase == PointerPhase::Move).then_some(press).flatten(),
-    );
+    let hit = if on_header {
+        Hit {
+            index: None,
+            region: Region::Gutter,
+        }
+    } else {
+        hit(
+            cfg,
+            s,
+            point,
+            (phase == PointerPhase::Move).then_some(press).flatten(),
+        )
+    };
     {
         let st = (cfg.get_mut)(s).1;
         match phase {

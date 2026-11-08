@@ -29,8 +29,8 @@ Nothing is released yet. The first release is planned for milestone M1 with the 
 
 - One cargo feature per shim, each gating its own module: `dnd`, `clipboard`, `csd`,
   `foreign-parent`, `settings`, `icon-theme`, `media-audio`, `single-instance` and `glib-bridge`.
-  Apart from `glib-bridge`, `csd` and `single-instance`, the modules are placeholders until
-  their work packages land.
+  Apart from `glib-bridge`, `csd`, `settings` and `single-instance`, the modules are
+  placeholders until their work packages land.
 - `glib-bridge`: a GLib main loop for Rune apps. `GlibThread::start` runs a fresh `MainContext`
   on its own thread and wakes the app's `poll` as answers land in its state.
   - `Glib::spawn` runs a GIO future there, and its output lands in a `Task`.
@@ -77,3 +77,17 @@ Nothing is released yet. The first release is planned for milestone M1 with the 
 
   zbus types appear in its API, so a move to another zbus major is a minor release. It uses
   `zbus` and `tokio`, which Rune's `dbus` feature already builds.
+- `settings`: the desktop's settings from the XDG Settings portal. `Watcher::start` reads them
+  on a thread of its own and follows `SettingChanged` and the portal's restarts, with no polling;
+  `settings::follow` lands each change in the app's state through `AppHandle::update_if`.
+  - `DesktopSettings` holds the text scale, double-click interval, drag threshold, caret blink
+    (on, time and timeout), GNOME's animations switch, the portal's `reduced-motion` and the
+    recent-files switch, each with its default until the desktop gives a value
+    (`DesktopSettings::is_known`).
+  - Events arrive in order: one `Event::Snapshot`, then an `Event::Changed` per change, and an
+    `Event::Fallback` the first time each fallback happens (no bus, no portal, an unset key, an
+    unusable value, the portal leaving). The module never prints.
+
+  The portal is the only source: without one (an X11 session with only XSETTINGS, say) the
+  values are the defaults. Rune's own double press keeps its fixed 0.5 s (draft U13). It uses
+  `zbus` and `tokio`, as Rune's `dbus` feature does.

@@ -116,6 +116,23 @@ impl Control {
         }
     }
 
+    /// A test switch: commits a protocol error (`invalid_offer`, an offer after
+    /// `set_selection`), which ends the connection.
+    pub(super) fn provoke_protocol_error(&self, qh: &QueueHandle<State>) {
+        match self {
+            Control::Ext(m, d) => {
+                let s = m.create_data_source(qh, 0);
+                d.set_selection(Some(&s));
+                s.offer("text/plain".to_owned());
+            }
+            Control::Wlr(m, d) => {
+                let s = m.create_data_source(qh, 0);
+                d.set_selection(Some(&s));
+                s.offer("text/plain".to_owned());
+            }
+        }
+    }
+
     pub(super) fn destroy(self) {
         match self {
             Control::Ext(m, d) => {

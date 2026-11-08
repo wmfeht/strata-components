@@ -20,6 +20,9 @@
 //!   952–1000 and 536–557): on the reader thread it was a use-after-free race. On the UI
 //!   thread winit can't free anything meanwhile.
 //!
+//! - A dead connection ends it: when a prepare finds events queued but the backend has an
+//!   error (libwayland then dispatches nothing more), it stops and reports the error once.
+//!
 //! On a connection of our own the same loop runs, and `on_events` dispatches on the thread
 //! itself. That is safe there: winit has no objects on that connection, so every object an
 //! event names is ours, and wayland-backend takes our backend's lock both to parse an event
@@ -64,6 +67,12 @@ impl Reader {
                         break None;
                     }
                     let Some(guard) = conn.prepare_read() else {
+                        // A dead connection keeps its events queued: libwayland dispatches
+                        // nothing once it has an error, and wayland-client's dispatch_pending
+                        // drops that error. Without this check the loop would spin forever.
+                        if let Some(e) = conn.backend().last_error() {
+                            break Some(e.to_string());
+                        }
                         on_events();
                         continue;
                     };

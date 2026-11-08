@@ -150,6 +150,8 @@ enum Backend {
 }
 
 struct Hub {
+    /// The thread that attached: the UI thread.
+    ui: std::thread::ThreadId,
     status: Status,
     windows: Arc<Mutex<Vec<WindowHandle>>>,
     subs: Subscribers,
@@ -208,6 +210,7 @@ impl Transfer {
             ),
         };
         let h = Arc::new(Hub {
+            ui: std::thread::current().id(),
             status,
             windows,
             subs,
@@ -241,6 +244,17 @@ impl Transfer {
                 shared: Some(c), ..
             } => c.dispatch(),
             _ => Ok(false),
+        }
+    }
+
+    /// A test switch for strata-platform's own tests: makes the compositor end the Wayland
+    /// connection of our own with a protocol error, to check how a dead connection is
+    /// reported. False without one.
+    #[doc(hidden)]
+    pub fn provoke_protocol_error_on_own_connection(&self) -> bool {
+        match &self.0.backend {
+            Backend::Wayland { own: Some(c), .. } => c.provoke_protocol_error(),
+            _ => false,
         }
     }
 
@@ -322,11 +336,23 @@ impl Transfer {
 
     /// Stops and destroys the process's substrate: on the UI thread, before the event loop
     /// ends (see the module docs). True if one was bound. Handles kept elsewhere stay valid
-    /// to drop, and their calls fail or do nothing.
-    pub fn shutdown() -> bool {
-        let Some(hub) = lock(&HUB).take() else {
-            return false;
+    /// to drop, and their calls fail or do nothing. Refused off the UI thread (the one that
+    /// attached), and the substrate stays: its teardown drops winit's display binding, which
+    /// must happen there.
+    pub fn shutdown() -> Result<bool, Error> {
+        let mut slot = lock(&HUB);
+        let Some(hub) = slot.as_ref() else {
+            return Ok(false);
         };
+        if hub.ui != std::thread::current().id() {
+            return Err(Error::Refused(
+                "shut down on the UI thread, the one that attached",
+            ));
+        }
+        let Some(hub) = slot.take() else {
+            return Ok(false);
+        };
+        drop(slot);
         match &hub.backend {
             Backend::Wayland { shared, own } => {
                 for c in [shared, own].into_iter().flatten() {
@@ -335,7 +361,7 @@ impl Transfer {
             }
             Backend::X11(x) => x.shutdown(),
         }
-        true
+        Ok(true)
     }
 }
 

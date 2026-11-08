@@ -279,6 +279,8 @@ pub(crate) struct Conn {
     subs: Subscribers,
     /// A dispatch failed: the connection is dead, and that was reported once.
     failed: AtomicBool,
+    /// A Turn ran dispatch off the UI thread, and that was reported once.
+    misrouted: AtomicBool,
 }
 
 impl Conn {
@@ -348,6 +350,7 @@ impl Conn {
             home,
             globals: Mutex::new(Some(globals)),
             failed: AtomicBool::new(false),
+            misrouted: AtomicBool::new(false),
             state: Mutex::new(state),
             qh,
             gate: gate.clone(),
@@ -356,14 +359,18 @@ impl Conn {
         });
         let weak = Arc::downgrade(&c);
         let failed = {
-            let subs = subs.clone();
-            move |message: String| subs.emit(vec![Event::Failed { message }])
+            let weak = weak.clone();
+            move |message: String| {
+                if let Some(c) = weak.upgrade() {
+                    c.report_failure(message);
+                }
+            }
         };
         let reader = match turn {
             Some(turn) => {
                 let gate = gate.clone();
                 Reader::spawn(
-                    "transfer-wayland",
+                    "transfer-wl",
                     conn,
                     gate.clone(),
                     move || {
@@ -371,9 +378,12 @@ impl Conn {
                         let before = gate.turns();
                         let weak: Weak<Conn> = weak.clone();
                         turn(Box::new(move || {
-                            // On the UI thread, where Turn runs it; refused anywhere else.
-                            if let Some(c) = weak.upgrade() {
-                                let _ = c.dispatch();
+                            // On the UI thread, where Turn runs it; refused anywhere else, and the
+                            // reader then waits for a turn that never comes: say so, once.
+                            if let Some(c) = weak.upgrade()
+                                && let Err(e) = c.dispatch()
+                            {
+                                c.report_misrouted_turn(e);
                             }
                         }));
                         gate.wait(before);
@@ -382,7 +392,7 @@ impl Conn {
                 )
             }
             None => Reader::spawn(
-                "transfer-wayland-own",
+                "transfer-wl-own",
                 conn,
                 gate,
                 move || {
@@ -423,26 +433,51 @@ impl Conn {
         if self.failed.load(Ordering::Acquire) {
             return false;
         }
-        let events = {
+        let (events, dead) = {
             let mut queue = lock(&self.queue);
             let Some(queue) = queue.as_mut() else {
                 return false;
             };
             let mut state = lock(&self.state);
-            if let Err(e) = queue.dispatch_pending(&mut state) {
-                // The connection is dead (a protocol error, a closed socket): say so once, and
-                // dispatch no more.
-                self.failed.store(true, Ordering::Release);
-                state.events.push(Event::Failed {
-                    message: e.to_string(),
-                });
-            }
+            let result = queue.dispatch_pending(&mut state);
             let _ = queue.flush();
-            std::mem::take(&mut state.events)
+            // wayland-client's dispatch_pending drops the inner queue's error (a protocol error,
+            // a closed socket): the backend keeps it, so ask there.
+            let dead = match result {
+                Err(e) => Some(e.to_string()),
+                Ok(_) => self
+                    .home
+                    .backend
+                    .upgrade()
+                    .and_then(|b| b.last_error())
+                    .map(|e| e.to_string()),
+            };
+            (std::mem::take(&mut state.events), dead)
         };
         let any = !events.is_empty();
         self.subs.emit(events);
+        if let Some(message) = dead {
+            self.report_failure(message);
+        }
         any
+    }
+
+    /// A Turn ran off the UI thread, so nothing was dispatched and the reader waits for a turn
+    /// that never comes. Reported once, as a failure, since events stop.
+    fn report_misrouted_turn(&self, e: Error) {
+        if !self.misrouted.swap(true, Ordering::AcqRel) {
+            self.subs.emit(vec![Event::Failed {
+                message: format!("the Turn ran dispatch off the UI thread, so events stop: {e}"),
+            }]);
+        }
+    }
+
+    /// The connection is dead: say so once, from whichever thread noticed first, and dispatch
+    /// no more.
+    fn report_failure(&self, message: String) {
+        if !self.failed.swap(true, Ordering::AcqRel) {
+            self.subs.emit(vec![Event::Failed { message }]);
+        }
     }
 
     /// Runs `f` with the registry's globals and the queue, to bind a protocol P0 doesn't (P4's
@@ -463,6 +498,22 @@ impl Conn {
         let globals = lock(&self.globals);
         let mut state = lock(&self.state);
         Some(f(globals.as_ref()?, &self.qh, &mut state))
+    }
+
+    /// A test switch: makes the compositor end this connection with a protocol error. Only
+    /// for a connection of our own (on winit's display it would end winit's too).
+    pub(crate) fn provoke_protocol_error(&self) -> bool {
+        if self.home.ui.is_some() {
+            return false;
+        }
+        let state = lock(&self.state);
+        let Some(control) = state.control.as_ref() else {
+            return false;
+        };
+        control.provoke_protocol_error(&self.qh);
+        drop(state);
+        self.home.flush();
+        true
     }
 
     pub(crate) fn serials(&self) -> (Option<u32>, Option<u32>) {
@@ -754,6 +805,9 @@ impl Dispatch<WlDataDevice, ()> for State {
                 // Anything else announced for an earlier drag is stale now.
                 st.source_actions.clear();
                 let offer = DragOffer::new(proxy, mimes, serial, st.home.clone());
+                if let Some(a) = actions {
+                    offer.with_state(|s| s.on_source_actions(a));
+                }
                 let window = st.window_of(&surface);
                 if let Some(window) = &window {
                     st.events.push(Event::DragEnter {
@@ -826,11 +880,15 @@ impl Dispatch<WlDataOffer, ()> for State {
             wl_data_offer::Event::SourceActions {
                 source_actions: WEnum::Value(a),
             } => match drag {
-                Some(d) if d.window.is_some() => st.events.push(Event::DragActions {
-                    source: Action::all_in(a.bits()),
-                    chosen: None,
-                }),
-                Some(_) => {}
+                Some(d) => {
+                    d.offer.with_state(|s| s.on_source_actions(a.bits()));
+                    if d.window.is_some() {
+                        st.events.push(Event::DragActions {
+                            source: Action::all_in(a.bits()),
+                            chosen: None,
+                        });
+                    }
+                }
                 // Not entered yet: told at enter.
                 None => {
                     st.source_actions.insert(id, a.bits());

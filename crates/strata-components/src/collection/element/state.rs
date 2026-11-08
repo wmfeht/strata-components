@@ -66,6 +66,8 @@ pub struct CollectionState {
     pub(super) groups: RefCell<Option<Groups>>,
     /// The stuck header's offset, `[0, dy]`: up by as much as the next header pushes it.
     pub(super) stuck_offset: Live<[f32; 2]>,
+    /// The viewport has had a width: a later width that changes the count is a reflow.
+    pub(super) laid_out: bool,
     /// The first line Rune last reported visible: the one whose group's header sticks. Rune
     /// reports it from the layout it is drawing, which the recorded scroll offset can trail.
     pub(super) top_line: Cell<Option<usize>>,
@@ -94,6 +96,7 @@ impl Default for CollectionState {
             reveal_after_layout: Cell::new(None),
             groups: RefCell::new(None),
             stuck_offset: Live::new([0.0, 0.0]),
+            laid_out: false,
             top_line: Cell::new(None),
         }
     }

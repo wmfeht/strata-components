@@ -490,30 +490,30 @@ pub(super) fn on_layout<S: 'static>(cfg: &Rc<Config<S>>, s: &mut S, r: [f32; 4],
     let per = cfg.lines.per_line(r[2]).max(1);
     let row_height = cfg.row_height_of(s);
     let (src, st) = (cfg.get_mut)(s);
-    let had_width = st.viewport.w > 0.0;
     st.viewport = Rect::from(r);
     st.row_height = row_height;
     // A collapsed viewport (a Columns column at no width) keeps its count: the width it comes
-    // back at decides it.
+    // back at decides it, as a reflow. Reveals asked for meanwhile wait for it.
     if r[2] <= 0.0 {
         tx.live_only();
         return;
     }
-    let changed = if had_width {
+    let changed = if st.laid_out {
         st.reflow_to(&cfg.key, src, per, tx)
     } else {
-        // The first width isn't a reflow: nothing was laid out at the count the state started
-        // with, so a restore made before it (`enter`) stands. A reveal asked for before it is
-        // done now, keyed by the lines as they are.
+        // The very first width isn't a reflow: nothing was laid out at the count the state
+        // started with, so a restore made before it (`enter`) stands.
+        st.laid_out = true;
         let changed = per != st.per_line.get();
         st.per_line.set(per);
-        if let Some(id) = st.reveal_after_layout.take()
-            && let Some(index) = src.index_of(id)
-        {
-            st.reveal(&cfg.key, src, index, tx);
-        }
         changed
     };
+    // A reveal asked for while the viewport had no width, keyed by the lines as they are now.
+    if let Some(id) = st.reveal_after_layout.take()
+        && let Some(index) = src.index_of(id)
+    {
+        st.reveal(&cfg.key, src, index, tx);
+    }
     if !changed {
         tx.live_only();
     }

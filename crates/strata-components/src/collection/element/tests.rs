@@ -2463,3 +2463,34 @@ fn every_press_reaches_on_press_before_the_controllers() {
         ]
     );
 }
+
+// C1f review round 1.
+
+/// S1: a grid collapsed to no width and back at another width reflows, and reveals its cursor.
+#[test]
+fn a_grid_collapsed_and_back_at_another_width_reveals_its_cursor() {
+    let mut host = Host::new(4_000);
+    host.tile = Some(100.0);
+    let mut rt = runtime(host);
+    settle(&mut rt);
+    for _ in 0..20 {
+        rt.wheel(W / 4.0, H / 2.0, -200.0);
+        rt.frame(1.0 / 60.0);
+    }
+    settle(&mut rt);
+    let key = rt
+        .elements()
+        .into_iter()
+        .find(|e| !e.exiting && e.role == "gridcell" && e.visible[1] > 150.0 && e.visible[3] > 20.0)
+        .and_then(|e| e.key)
+        .unwrap();
+    click_label(&mut rt, &key);
+    rt.update(|s, _| s.width = 0.0);
+    settle(&mut rt);
+    rt.update(|s, _| s.width = 250.0);
+    settle(&mut rt);
+    let shown = element(&rt, &key)
+        .expect("the cursor's cell is mounted")
+        .visible;
+    assert!(shown[3] > 20.0, "and shows whole: {shown:?}");
+}

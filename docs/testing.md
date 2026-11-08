@@ -334,9 +334,9 @@ The task builds the peer and strata-platform's examples, then runs the `#[ignore
 | `STRATA_SESSION_REPORT` | A file a session appends its directory and pids to (W3's kill tests) |
 | `STRATA_SESSION_NAME` | The session's log directory name, instead of the test's (a test binary run as a child) |
 
-CI runs them in `.github/workflows/platform.yml` on Ubuntu 26.04 (sway 1.11, libwayland 1.24), with the packages
-in `crates/strata-platform/tests/support/packages.txt`. A work package that needs another
-package adds its own block there.
+CI runs them in `.github/workflows/platform.yml` on Ubuntu 26.04 (sway 1.11, libwayland
+1.24), with the packages in `crates/strata-platform/tests/support/packages.txt`. A work
+package that needs another package adds its own block there.
 
 ### Writing one
 

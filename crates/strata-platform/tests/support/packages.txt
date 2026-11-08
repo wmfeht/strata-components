@@ -19,8 +19,8 @@ libvulkan1
 libglib2.0-dev
 
 # P0: the X11 client libraries winit loads at run time (x11-dl): Xlib, Xlib-xcb, Xcursor, XInput2
-# and Xrandr. The 24.04 runner image carried them; a bare Ubuntu 26.04 doesn't, and without them
-# no Rune window opens on X11.
+# and Xrandr. Without them no Rune window opens on X11. The ubuntu:26.04 container image lacks
+# them (checked); whether GitHub's 26.04 runner image carries them isn't known, so name them.
 libx11-6
 libx11-xcb1
 libxcursor1

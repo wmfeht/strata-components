@@ -32,5 +32,6 @@ Read the desktop settings that Rune does not, and report their changes.
 
 ## Done when
 
-A small example prints the snapshot and every change. It works on GNOME and on Hyprland with
-`xdg-desktop-portal-hyprland` (hand test).
+A small example prints the snapshot and every change. It works on GNOME and on Hyprland (hand
+test). On Hyprland, `xdg-desktop-portal-gtk` serves the Settings interface:
+`xdg-desktop-portal-hyprland` has none (S1, question 4).

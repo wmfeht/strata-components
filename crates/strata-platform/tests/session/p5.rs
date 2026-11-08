@@ -403,22 +403,48 @@ fn a_burst_of_changes_during_a_slow_read_still_lands() {
     let started = Instant::now();
 
     // More than zbus queues per match rule (64) while the reply is outstanding, then one real
-    // change the reply won't hold.
+    // change, stored before it is announced, so the reply holds it.
     for i in 0..100 {
         portal.emit(INTERFACE, "font-name", Variant::from(format!("Sans {i}")));
     }
-    portal.emit(INTERFACE, "text-scaling-factor", Variant::F64(1.75));
+    portal.set(INTERFACE, "text-scaling-factor", Variant::F64(1.75));
 
-    assert_desktop(&snapshot(&app));
+    let settings = snapshot(&app);
     assert!(
         started.elapsed() < Duration::from_secs(5),
         "the reply waited for the read's timeout: {:?}",
         started.elapsed()
     );
-    // The change that arrived during the read applies after the reply, in order.
-    let (_, settings) = wait_changed(&app, 0, "text-scaling-factor");
     assert_eq!(settings["text_scale"], 1.75, "{settings}");
+    assert_eq!(settings["double_click_ms"], 1200, "{settings}");
+    assert_eq!(known(&settings), ALL_KEYS, "{settings}");
+    // The change, received before the reply that holds it, doesn't replay after it.
+    settle(&app, Duration::from_millis(300));
+    assert!(events(&app, 0, "changed").is_empty(), "{:?}", app.lines());
     assert!(events(&app, 0, "fallback").is_empty(), "{:?}", app.lines());
+}
+
+/// A portal that leaves without answering: the changes it sent during the read still apply.
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn changes_from_a_portal_that_left_mid_read_still_apply() {
+    let s = bus_only();
+    let portal = FakePortal::start(s.bus().address(), &desktop(), true);
+    portal.hold();
+    let app = watch_with(&s, &["--first-answer-ms", "0"]);
+    wait_reads(&portal, 1);
+    portal.set(MOUSE, "drag-threshold", Variant::I32(21));
+    // Past the bus delivering the change, before the portal goes.
+    std::thread::sleep(Duration::from_millis(100));
+
+    drop(portal);
+
+    let snap = snapshot(&app);
+    assert_defaults(&snap);
+    let (_, settings) = wait_changed(&app, 0, "drag-threshold");
+    assert_eq!(settings["drag_threshold"], 21, "{settings}");
+    let fallback = app.wait_json("why", |v| v["ev"] == "fallback");
+    assert_eq!(fallback["kind"], "no-portal", "{fallback}");
 }
 
 #[test]
@@ -513,6 +539,207 @@ fn a_restarted_portal_without_a_key_resets_it() {
         v["ev"] == "fallback" && v["kind"] == "unset" && v["key"] == "drag-threshold"
     });
     assert_eq!(events(&app, at, "changed").len(), 1, "{:?}", app.lines());
+}
+
+/// The example without a window, with `args`.
+fn watch_with(s: &Session, args: &[&str]) -> Proc {
+    let mut cmd = s.command(example("settings"), Display::None);
+    cmd.arg("--no-window").args(args);
+    let app = s.spawn("settings", cmd);
+    app.wait_json("the watcher started", |v| v["ev"] == "started");
+    app
+}
+
+/// Waits until `portal` has been asked `ReadAll` `n` times.
+fn wait_reads(portal: &FakePortal, n: usize) {
+    let deadline = Instant::now() + timeout();
+    while portal
+        .calls()
+        .iter()
+        .filter(|c| c.method == "ReadAll")
+        .count()
+        < n
+    {
+        assert!(Instant::now() < deadline, "{n} reads: {:?}", portal.calls());
+        std::thread::sleep(Duration::from_millis(2));
+    }
+}
+
+fn reads(portal: &FakePortal) -> usize {
+    portal
+        .calls()
+        .iter()
+        .filter(|c| c.method == "ReadAll")
+        .count()
+}
+
+/// The settings the last snapshot or change reported.
+fn last_settings(app: &Proc) -> Value {
+    app.lines()
+        .iter()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .rfind(|v| v["ev"] == "snapshot" || v["ev"] == "changed")
+        .map(|v| v["settings"].clone())
+        .unwrap_or(Value::Null)
+}
+
+/// A read that times out, then answers with drag-threshold 12 and changes it to 99 right
+/// after: the answer must not overwrite the change, whichever the watcher's loop sees first.
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn a_late_answer_never_overwrites_a_later_change() {
+    let s = bus_only();
+    let runs = 30;
+    let mut stale = Vec::new();
+    for run in 0..runs {
+        let portal = FakePortal::start(s.bus().address(), &desktop(), true);
+        portal.hold();
+        portal.change_after_answer(MOUSE, "drag-threshold", Variant::I32(99));
+        let app = watch_with(&s, &["--first-answer-ms", "0", "--timeout-ms", "150"]);
+        app.wait_json("the timeout", |v| {
+            v["ev"] == "fallback" && v["kind"] == "no-portal"
+        });
+
+        portal.answer();
+
+        wait_changed(&app, 0, "remember-recent-files");
+        app.wait_json("the later change", |v| {
+            v["settings"]["drag_threshold"] == 99
+        });
+        settle(&app, Duration::from_millis(150));
+        if last_settings(&app)["drag_threshold"] != 99 {
+            stale.push(run);
+        }
+    }
+    assert!(
+        stale.is_empty(),
+        "runs ending on the answer's older value: {stale:?} of {runs}"
+    );
+}
+
+/// A portal that answers its late read and leaves at once is reported lost, whichever the
+/// watcher's loop sees first.
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn a_portal_that_leaves_right_after_a_late_answer_is_lost() {
+    let s = bus_only();
+    let runs = 20;
+    let mut unreported = Vec::new();
+    for run in 0..runs {
+        let portal = FakePortal::start(s.bus().address(), &desktop(), true);
+        portal.hold();
+        portal.leave_after_answer();
+        let app = watch_with(&s, &["--first-answer-ms", "0", "--timeout-ms", "150"]);
+        app.wait_json("the timeout", |v| {
+            v["ev"] == "fallback" && v["kind"] == "no-portal"
+        });
+
+        portal.answer();
+
+        let (at, _) = wait_changed(&app, 0, "remember-recent-files");
+        settle(&app, Duration::from_millis(150));
+        if events(&app, at, "fallback")
+            .iter()
+            .all(|v| v["kind"] != "portal-lost")
+        {
+            unreported.push(run);
+        }
+    }
+    assert!(
+        unreported.is_empty(),
+        "runs with no portal-lost: {unreported:?} of {runs}"
+    );
+}
+
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn changes_during_a_slow_read_never_go_backwards() {
+    let s = bus_only();
+    let portal = FakePortal::start(s.bus().address(), &desktop(), true);
+    let app = watch_slow(&s, &portal, &[]);
+
+    // Each is stored before it is announced; then one more is stored unannounced, so the
+    // answer holds a value no held change has.
+    for i in 0..500 {
+        portal.set(MOUSE, "drag-threshold", Variant::I32(100 + i));
+    }
+    portal.set_quietly(MOUSE, "drag-threshold", Variant::I32(600));
+
+    assert_eq!(snapshot(&app)["drag_threshold"], 600);
+    settle(&app, Duration::from_millis(500));
+    let changed = events(&app, 0, "changed");
+    assert!(
+        changed.is_empty(),
+        "replayed after the answer: {} changes, first {:?}",
+        changed.len(),
+        changed.first()
+    );
+    assert_eq!(last_settings(&app)["drag_threshold"], 600);
+}
+
+/// The portal's values, with the scale at 2.0 and the threshold at 30.
+fn replacement() -> Vec<(&'static str, &'static str, Variant<'static>)> {
+    let mut values = desktop();
+    values[0] = (INTERFACE, "text-scaling-factor", Variant::F64(2.0));
+    values[2] = (MOUSE, "drag-threshold", Variant::I32(30));
+    values
+}
+
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn a_portal_replaced_during_a_read_is_read_again_after_it() {
+    let s = bus_only();
+    let old = FakePortal::start(s.bus().address(), &desktop(), false);
+    old.take_over();
+    old.hold();
+    let app = watch_with(&s, &["--first-answer-ms", "0"]);
+    wait_reads(&old, 1);
+
+    // A new portal takes the name while the first read is out; the old one stays on the bus
+    // and answers that read afterwards.
+    let new = FakePortal::start(s.bus().address(), &replacement(), false);
+    new.take_over();
+    old.answer();
+
+    assert_desktop(&snapshot(&app));
+    app.wait_json("the new portal's values", |v| {
+        v["ev"] == "changed" && v["settings"]["text_scale"] == 2.0
+    });
+    settle(&app, Duration::from_millis(300));
+    let last = last_settings(&app);
+    assert_eq!(last["text_scale"], 2.0, "{last}");
+    assert_eq!(last["drag_threshold"], 30, "{last}");
+    assert_eq!(reads(&new), 1, "{:?}", new.calls());
+    assert!(events(&app, 0, "fallback").is_empty(), "{:?}", app.lines());
+}
+
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn a_new_portal_replaces_a_read_that_never_answered() {
+    let s = bus_only();
+    let silent = FakePortal::start(s.bus().address(), &desktop(), false);
+    silent.take_over();
+    silent.hold();
+    let app = watch_with(&s, &["--first-answer-ms", "0", "--timeout-ms", "300"]);
+    wait_reads(&silent, 1);
+    // One portal takes the name before the timeout, the read still out...
+    let passing = FakePortal::start(s.bus().address(), &desktop(), false);
+    passing.take_over();
+    passing.hold();
+    app.wait_json("the timeout", |v| {
+        v["ev"] == "fallback" && v["kind"] == "no-portal"
+    });
+
+    // ...and another after it: the read that never answered gives way to the newest portal.
+    let newest = FakePortal::start(s.bus().address(), &replacement(), false);
+    newest.take_over();
+
+    let (_, settings) = wait_changed(&app, 0, "remember-recent-files");
+    assert_eq!(settings["text_scale"], 2.0, "{settings}");
+    assert_eq!(settings["drag_threshold"], 30, "{settings}");
+    settle(&app, Duration::from_millis(300));
+    assert_eq!(reads(&newest), 1, "read once: {:?}", newest.calls());
+    assert_eq!(reads(&passing), 0, "{:?}", passing.calls());
 }
 
 /// The example's window under sway, fed by `settings::follow`; returns once its first frame is

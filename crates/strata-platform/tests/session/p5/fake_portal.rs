@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use tokio::runtime::Handle;
 use tokio::sync::oneshot;
+use zbus::fdo::RequestNameFlags;
 use zbus::message::Header;
 use zbus::{Connection, OwnedVariant, Variant, fdo};
 
@@ -32,6 +33,17 @@ struct State {
     calls: Vec<Call>,
     /// How long `ReadAll` waits before it answers (with the values as they are then).
     delay: Duration,
+    /// What the next `ReadAll` does just after it answers.
+    after_answer: Option<After>,
+}
+
+/// Something the fake does right after a `ReadAll` answer goes out: it is queued on the fake's
+/// runtime as the answer is built, so it reaches the bus just after the answer.
+enum After {
+    /// Store this value and announce it.
+    Change(String, String, OwnedVariant),
+    /// Give up the portal's name.
+    Leave,
 }
 
 struct Settings {
@@ -74,6 +86,7 @@ impl Settings {
         &self,
         namespaces: Vec<String>,
         #[zbus(header)] header: Header<'_>,
+        #[zbus(connection)] connection: &Connection,
     ) -> HashMap<String, HashMap<String, OwnedVariant>> {
         self.record("ReadAll", &header);
         let delay = self
@@ -85,7 +98,7 @@ impl Settings {
             tokio::time::sleep(delay).await;
         }
         let _ = self.gate.clone().wait_for(|open| *open).await;
-        let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         let mut reply: HashMap<String, HashMap<String, OwnedVariant>> = HashMap::new();
         for ((namespace, key), value) in &state.values {
             if namespaces.is_empty() || namespaces.contains(namespace) {
@@ -94,6 +107,32 @@ impl Settings {
                     .or_default()
                     .insert(key.clone(), value.try_clone().expect("a plain value"));
             }
+        }
+        let connection = connection.clone();
+        match state.after_answer.take() {
+            Some(After::Change(namespace, key, value)) => {
+                state.values.insert(
+                    (namespace.clone(), key.clone()),
+                    value.try_clone().expect("a plain value"),
+                );
+                tokio::spawn(async move {
+                    let _ = connection
+                        .emit_signal(
+                            None::<&str>,
+                            PATH,
+                            INTERFACE,
+                            "SettingChanged",
+                            &(namespace, key, value),
+                        )
+                        .await;
+                });
+            }
+            Some(After::Leave) => {
+                tokio::spawn(async move {
+                    let _ = connection.release_name(NAME).await;
+                });
+            }
+            None => {}
         }
         reply
     }
@@ -194,14 +233,42 @@ impl FakePortal {
             .expect("owning the portal's name");
     }
 
+    /// Takes the portal's name so that another portal may take it over, taking it over from
+    /// the current owner if there is one. The replaced portal stays on the bus and can still
+    /// answer a read it was asked.
+    pub fn take_over(&self) {
+        let flags = RequestNameFlags::ALLOW_REPLACEMENT
+            | RequestNameFlags::REPLACE_EXISTING
+            | RequestNameFlags::DO_NOT_QUEUE;
+        self.runtime
+            .block_on(self.connection().request_name_with_flags(NAME, flags))
+            .expect("taking over the portal's name");
+    }
+
+    /// Right after the next `ReadAll` answer, stores and announces this value.
+    pub fn change_after_answer(&self, namespace: &str, key: &str, value: Variant<'static>) {
+        self.state
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .after_answer = Some(After::Change(namespace.into(), key.into(), owned(&value)));
+    }
+
+    /// Right after the next `ReadAll` answer, gives up the portal's name.
+    pub fn leave_after_answer(&self) {
+        self.state
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .after_answer = Some(After::Leave);
+    }
+
     /// Sets a value and announces it with `SettingChanged`.
     pub fn set(&self, namespace: &str, key: &str, value: Variant<'static>) {
         self.set_quietly(namespace, key, value.try_clone().expect("a plain value"));
         self.emit(namespace, key, value);
     }
 
-    /// Sets a value without a signal.
-    fn set_quietly(&self, namespace: &str, key: &str, value: Variant<'static>) {
+    /// Sets a value without a signal: the next answer holds it, no change announces it.
+    pub fn set_quietly(&self, namespace: &str, key: &str, value: Variant<'static>) {
         self.state
             .lock()
             .unwrap_or_else(PoisonError::into_inner)

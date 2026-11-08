@@ -29,7 +29,7 @@
 //! [`Watcher::start`] runs a thread ([`THREAD_NAME`]) with its own session-bus connection. It
 //! subscribes to the portal's `SettingChanged` and to the portal's name owner, then reads every
 //! key in one `ReadAll`, taking changes all the while (those that arrive during the read apply
-//! after its answer, in order). After that it only waits on the connection: no timers, no
+//! after its answer, where they are newer than it). After that it only waits on the connection: no timers, no
 //! polling. Its sink hears [`Event`]s in order: one
 //! [`Event::Snapshot`], then an [`Event::Changed`] per change and an [`Event::Fallback`] the
 //! first time each fallback happens. [`follow`] is the sink that applies them to the app's state
@@ -67,13 +67,19 @@
 //! | `remember_recent_files` | `org.gnome.desktop.privacy` `remember-recent-files` (`b`) | on |
 //!
 //! The scale must be a `d`, finite and above 0; integer keys take any integer type above 0.
-//! Anything else keeps the key's value and reports [`Fallback::Invalid`]. A key the portal
-//! lacks keeps its value and reports [`Fallback::Unset`]. Each fallback is reported once; the
-//! module never prints, and the app decides what to log.
+//! Anything else keeps the key's value and reports [`Fallback::Invalid`]. A key the portal's
+//! answer lacks has its default, isn't [known](DesktopSettings::is_known), and reports
+//! [`Fallback::Unset`]. Each fallback is reported once; the module never prints, and the app
+//! decides what to log.
+//!
+//! Values follow the order the bus delivered them in: an answer never overwrites a change
+//! received after it, and a change received before an answer (which already holds it) doesn't
+//! replay after it.
 //!
 //! # Without a portal
 //!
-//! - No session bus: the defaults and [`Fallback::NoBus`].
+//! - No session bus: the defaults and [`Fallback::NoBus`]. Losing the bus later reports it
+//!   too, and the watcher stops with the values it had.
 //! - No portal, one that can't be activated, or a failed read: the defaults and
 //!   [`Fallback::NoPortal`]. The watcher reads again when a portal takes the name.
 //! - A portal slower than [`Options::timeout`]: the defaults and [`Fallback::NoPortal`] at the

@@ -10,7 +10,8 @@ use super::keys::Key;
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub enum Fallback {
-    /// No session bus to connect to: every value stays its default.
+    /// No session bus to connect to: every value stays its default. Also sent when the
+    /// connection closes later; the values then stay as they were.
     NoBus(String),
     /// The Settings portal didn't answer in time: not running, not activatable, slow, or it
     /// failed (or the watcher couldn't start its connection's runtime). Values stay as they

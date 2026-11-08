@@ -118,7 +118,10 @@ fn check_expect_shape(e: &Value) -> Result<(), String> {
 pub fn run(script: &Path, scene: &str, tree_out: &Path) -> Result<Value, String> {
     std::fs::create_dir_all(tree_out.parent().expect("tree directory")).expect("tree directory");
     let mut cmd = support::gallery();
+    // Scripts run at scale 2, Rune's headless default, named so a change of default can't
+    // move what a script's expectations (a zoom level, a drawn size) see.
     cmd.args(["--scene", scene, "--theme", support::theme_of(scene)])
+        .args(["--scale", "2"])
         .arg("--script")
         .arg(script)
         .arg("--tree")

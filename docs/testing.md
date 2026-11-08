@@ -170,7 +170,8 @@ with a header the runner checks:
 | `displays`, `pointer` | Optional: passed to Rune as they are. |
 
 Any other key is an error, so typos fail. The runner starts the gallery headless with
-`--scene <scene> --script <file> --tree <out>`. It fails when:
+`--scene <scene> --scale 2 --script <file> --tree <out>`: scripts run at scale 2, while PNG
+goldens render at scale 1. It fails when:
 
 - Rune exits with an error;
 - Rune reports key warnings (duplicate keys break scripts that target keys);

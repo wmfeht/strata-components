@@ -5,6 +5,7 @@
 //! so parallel branches never touch this file.
 
 pub mod density;
+pub mod fonts;
 pub mod icons;
 pub mod look;
 pub mod overrides;

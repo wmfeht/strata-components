@@ -6,6 +6,17 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish = false
+readme = "README.md"
+# The bundled data ships with its licences: icons/, themes/ and fonts/ each hold theirs.
+include = [
+    "Cargo.toml",
+    "README.md",
+    "build.rs",
+    "src/**",
+    "icons/**",
+    "themes/**",
+    "fonts/**",
+]
 
 # Each work package adds its third-party dependencies in its own block below. Keep the blank
 # lines: git conflicts when two branches edit neighbouring lines. A crate appears once: one

@@ -37,6 +37,24 @@ mod c14b {
             .unwrap_or_else(|| panic!("no element {key}"))
     }
 
+    /// The accessible description of the node keyed `key`.
+    fn description(rt: &Runtime<Gallery>, key: &str) -> Option<String> {
+        fn find<'a>(v: &'a serde_json::Value, key: &str) -> Option<&'a serde_json::Value> {
+            if v.get("key").and_then(|k| k.as_str()) == Some(key) {
+                return Some(v);
+            }
+            v.get("children")?
+                .as_array()?
+                .iter()
+                .find_map(|c| find(c, key))
+        }
+        let tree = rt.accessibility_json();
+        let node = find(&tree, key).unwrap_or_else(|| panic!("no node {key}"));
+        node.get("description")
+            .and_then(|d| d.as_str())
+            .map(str::to_owned)
+    }
+
     fn click(rt: &mut Runtime<Gallery>, x: f32, y: f32) {
         rt.pointer_move(x, y);
         rt.pointer_down(x, y);
@@ -124,9 +142,10 @@ mod c14b {
         rt.update(|g, _| g.look = Look::fallback(true));
         frames(&mut rt, 30);
         assert_eq!(rt.state.c14b.model.camera(), CameraView::BackLeft);
-        let tree = rt.accessibility_json().to_string();
-        assert!(tree.contains("Back left"), "the indicator reads Back left");
-        assert!(!element(&rt, "c14b-model-next").moving);
+        assert_eq!(
+            description(&rt, "c14b-model-camera").as_deref(),
+            Some("Back left")
+        );
     }
 
     /// `operations/archives/preview`: "A click at a row's top edge selects it and opens a
@@ -139,5 +158,18 @@ mod c14b {
         frames(&mut rt, 5);
         let a = rt.state.c14b.archive.as_ref().expect("the archive");
         assert_eq!(a.listing().crumbs(), ["docs"]);
+    }
+
+    /// A button whose tooltip says what its name says isn't described by it too: a screen reader
+    /// would read the name twice.
+    #[test]
+    fn buttons_named_by_their_tooltip_have_no_description() {
+        let rt = scene("c14b-model-light");
+        assert_eq!(description(&rt, "c14b-model-next"), None);
+        assert_eq!(description(&rt, "c14b-model-previous"), None);
+        let mut rt = scene("c14b-archive-light");
+        click_key(&mut rt, "row-8000000006");
+        frames(&mut rt, 5);
+        assert_eq!(description(&rt, "c14b-archive-up"), None);
     }
 }

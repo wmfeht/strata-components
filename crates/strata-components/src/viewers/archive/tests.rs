@@ -72,14 +72,31 @@ fn the_listing_shows_one_folder_and_finds_ids_only_in_it() {
     assert!(!l.open(2), "a file doesn't open");
 }
 
+/// Every member's id, at every level, by walking the folders.
+fn all_ids(l: &mut super::ArchiveListing, out: &mut Vec<u64>) {
+    let depth = l.depth();
+    for i in 0..l.len() {
+        out.push(l.id_at(i).get());
+        if l.is_dir(i) {
+            assert!(l.open(i));
+            all_ids(l, out);
+            l.go_to(depth);
+        }
+    }
+}
+
 #[test]
 fn every_member_gets_its_own_id_from_the_host() {
-    let l = super::ArchiveListing::new(tree());
-    let ids: Vec<u64> = (0..l.len()).map(|i| l.id_at(i).get()).collect();
+    let mut l = super::ArchiveListing::new(tree());
+    let mut ids = Vec::new();
+    all_ids(&mut l, &mut ids);
+    // docs/, api/, index.html, guide.md, src/, README.md.
+    assert_eq!(ids.len(), 6);
     assert!(ids.iter().all(|&id| id > 7_000_000));
-    let mut sorted = ids.clone();
-    sorted.dedup();
-    assert_eq!(sorted.len(), ids.len());
+    let mut unique = ids.clone();
+    unique.sort_unstable();
+    unique.dedup();
+    assert_eq!(unique.len(), ids.len(), "{ids:?}");
 }
 
 #[test]

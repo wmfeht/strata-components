@@ -444,6 +444,8 @@ impl<S: 'static> ArchiveView<S> {
                         get_mut(s).up(tx);
                     })
                     .build(k)
+                    // The tooltip repeats the name: no description, so it isn't read twice.
+                    .description("")
                     .key(format!("{scope}-up")),
             );
         }

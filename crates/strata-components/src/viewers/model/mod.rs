@@ -205,6 +205,8 @@ impl<'a, S: 'static> ModelView<'a, S> {
                     }
                 })
                 .build(k)
+                // The tooltip says what the name says: no description, so it isn't read twice.
+                .description("")
         };
         let buttons = row()
             .gap(look.space.xl)

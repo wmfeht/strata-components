@@ -133,7 +133,6 @@
                             {
                               "children": [
                                 {
-                                  "description": "Previous model view",
                                   "key": "c14b-model-previous",
                                   "name": "Previous model view",
                                   "role": "button",
@@ -148,7 +147,6 @@
                                   "role": "image"
                                 },
                                 {
-                                  "description": "Next model view",
                                   "key": "c14b-model-next",
                                   "name": "Next model view",
                                   "role": "button",

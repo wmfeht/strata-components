@@ -102,7 +102,6 @@
                                         "focus",
                                         "scroll-into-view"
                                       ],
-                                      "description": "Go up one level",
                                       "key": "c14b-archive-up",
                                       "name": "Go up one level",
                                       "role": "button"

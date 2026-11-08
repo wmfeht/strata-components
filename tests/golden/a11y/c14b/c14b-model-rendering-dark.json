@@ -137,7 +137,6 @@
                                     "click",
                                     "focus"
                                   ],
-                                  "description": "Previous model view",
                                   "key": "c14b-model-previous",
                                   "name": "Previous model view",
                                   "role": "button"
@@ -153,7 +152,6 @@
                                     "click",
                                     "focus"
                                   ],
-                                  "description": "Next model view",
                                   "key": "c14b-model-next",
                                   "name": "Next model view",
                                   "role": "button"

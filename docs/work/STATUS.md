@@ -11,6 +11,8 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | W2b | merged | Look::fallback = Strata defaults via K2; slot tokens moved off w2-tokens goldens to w2-slots review scene; confirms row.sidebar 24 / row.palette 53 | 8c12ef3 |
 | W1d | merged | contract changes for C1c: UniformRows::page_step = rows that fit minus one (meaning changed, 10->9); Selection::toggle_in_run for Space inside v/V | 21f28e7 |
 | C1f | ready | contract addition for C4: Lines spans (group-header lines); also C1e round-3 SF1 + nits | |
+| W2c | coding (in K1 worktree, branch feat/w2c-look-fills) | contract additions for K1: Look::fill {muted, highlight}; LookParams keeps glow on/animations; no golden moves | |
+| K1b | waiting (after C10a, K1) | syntect Theme from strata-kit SCOPES; replaces C10a interim theme_from_look | |
 | G1 | merged | owner request: index is rune-kit Buttons grouped by lane; markers from registry (has golden scenes); index goldens hide markers, review scene shows them | 9b4bf5c |
 | W2 | merged | 1 review round + fixes; token-name review by K1/K2/C1e owners pending; PNG goldens on NVIDIA | 341e8cb |
 | W3 | merged | 3 review rounds + final nits; private headless sway sessions, env-scoped watchdog; Platform CI workflow never run (needs push to main/PR, owner); lavapipe run local only | 5c8ea08 |
@@ -20,7 +22,7 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | S4 | merged | owner: onig + dedicated highlighter thread, N=64, RUSTSEC ignore, WTFPL ok; 3 review rounds + 1 owner-allowed fix round; plan §4 C10/C10a doc edits are owner items | 183f7e2 |
 | S5 | merged | 2 review rounds; 16 Rune issue drafts (U1-U17, U4 withdrawn) await owner filing; crate name taken -> owner; release.yml verified locally only (GitHub run pending) | 85ca12b |
 | C10a | coding (plan approved: gallery rune-kit markdown feature, Vim modelines, editor goldens) | | |
-| C14a | review 2 (script runner passes --scale 2 explicitly: sanctioned) | B1 Ctrl+wheel zoom direction inverted off macOS (attach on_magnify only on macOS); S1 +/- wrong way at extreme fits; S2 set_content sends no report; S3-S6 | image zoom/pan is new vs Strata (plan asks for it): deliberate change for owner; pixels set without view commits (probed) | |
+| C14a | fixing round 2 (round 3 review is last; script runner passes --scale 2: sanctioned) | B1 Ctrl+wheel zoom direction inverted off macOS (attach on_magnify only on macOS); S1 +/- wrong way at extreme fits; S2 set_content sends no report; S3-S6 | image zoom/pan is new vs Strata (plan asks for it): deliberate change for owner; pixels set without view commits (probed) | |
 | C15 | merged | built on Rune primitives (deviation from WP doc); 6 bullets Strata policy, O6/F13/K6 partial gaps (Rune drafts); PNG goldens on NVIDIA | b38d879 |
 | C1a | merged | 2 review rounds; select_all 149 us / Shift range 148 us at 100k (release, local only); hosts call before_removal + sync | b8c3b8c |
 | C20a | ready | | |
@@ -55,8 +57,8 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | C17 | ready | | |
 | C18 | ready | | |
 | C19 | ready | | |
-| C1b | coding (state machine done; adapter waits on C1e merge) | 37 unit tests; PointerHandle shared settings (deviation); no rename timeout (Strata) | |
-| C1c | coding (machine done, 51 tests incl. Space-in-range; adapter waits on C1e) | default + 10xer maps; layout-aware chord workaround (U-C1c-1) | |
+| C1b | coding (adapter on C1e) | 37 unit tests; PointerHandle shared settings (deviation); no rename timeout (Strata) | |
+| C1c | coding (adapter on C1e; machine 51 tests) | default + 10xer maps; layout-aware chord workaround (U-C1c-1) | |
 | C1d | coding (machine done, 17 tests; adapter waits on C1e + C1b adapter) | ~10 Hz apply while auto-scrolling keeps perf meter silent (deviation) | |
 | C1e | merged | 3 review rounds; all controller seam requests in; scroll p95 0.59 ms vs Table 0.88; S14 sticky group lines deferred to contract WP C1f before C4; round-3 should-fix SF1 (grid restore before first layout) + nits (KeyboardMode commits unchanged, read_only/roles not in row memo) carried to C1f | 8ea925e |
 | C26 | waiting | | |

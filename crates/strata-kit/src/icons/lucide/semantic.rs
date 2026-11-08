@@ -103,7 +103,7 @@ pub(super) const fn index(name: IconName) -> usize {
         IconName::Error => i::STRATA_X,
         IconName::Success => i::STRATA_CHECK,
         IconName::Keyboard => i::STRATA_KEYBOARD,
-        IconName::Help => i::STRATA_KIT_HELP,
+        IconName::Help => i::STRATA_KIT_CIRCLE_QUESTION_MARK,
         IconName::Clipboard => i::STRATA_KIT_CLIPBOARD,
         IconName::Settings => i::STRATA_SETTINGS,
 

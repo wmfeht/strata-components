@@ -334,9 +334,9 @@ The task builds the peer and strata-platform's examples, then runs the `#[ignore
 | `STRATA_SESSION_REPORT` | A file a session appends its directory and pids to (W3's kill tests) |
 | `STRATA_SESSION_NAME` | The session's log directory name, instead of the test's (a test binary run as a child) |
 
-CI runs them in `.github/workflows/platform.yml` on Ubuntu 24.04 (sway 1.9), with the packages
-in `crates/strata-platform/tests/support/packages.txt`. A work package that needs another
-package adds its own block there.
+CI runs them in `.github/workflows/platform.yml` on Ubuntu 26.04 (sway 1.11, libwayland
+1.24), with the packages in `crates/strata-platform/tests/support/packages.txt`. A work
+package that needs another package adds its own block there.
 
 ### Writing one
 
@@ -389,7 +389,7 @@ target's `XdndProxy`.
 - **Wait for the layout before input.** On X11 a window maps at its own size and sway tiles it
   after. Input sent before the app lays out again can land outside its old size. The
   harness's example logs `layout`; W3's tests wait until it matches sway's size.
-- **An X11 window can stay unmapped in sway.** wlroots up to 0.20.2 (Ubuntu 24.04 has 0.17)
+- **An X11 window can stay unmapped in sway.** wlroots up to 0.20.2 (Ubuntu 26.04 has 0.19)
   maps an Xwayland window only on a buffer commit that arrives after it has paired the window
   with its `wl_surface`. The commit and the pairing travel on different sockets, so a fast
   first commit leaves the window unmapped for good. wlroots fixed this after 0.20.2. The X11
@@ -409,8 +409,8 @@ target's `XdndProxy`.
 - **Floating windows.** `floating enable, resize set` didn't always reach a peer as a configure,
   and its old, larger surface then covered the window under it. W3's tests stay tiled.
 - sway launches as `setpriv --no-new-privs sway --unsupported-gpu`. The first works around a
-  `cap_sys_nice` sway under a zero `RLIMIT_RTTIME`; the second lets sway 1.9 start on a
-  host with NVIDIA's kernel module.
+  `cap_sys_nice` sway under a zero `RLIMIT_RTTIME`; the second lets sway start on a host
+  with NVIDIA's kernel module (sway 1.9 refused to).
 
 ### Publishing strata-platform
 
@@ -424,6 +424,13 @@ strata-platform needs one of these first (owner's call; kept as it is for now):
 
 ### Testing internal modules
 
-A session test can only spawn binaries and call strata-platform's public API, and P0's
-`transfer` module is private. How P0 reaches it under a session (a `#[doc(hidden)]` seam, an
-example behind a feature, or tests through P1's and P2's public APIs) is P0's decision.
+A session test can only spawn binaries and call strata-platform's API. P0's substrate is
+internal, so `lib.rs` declares it `#[doc(hidden)] pub mod transfer` behind the internal
+`_transfer` feature: it is no public API and outside semver, and only strata-platform's own
+examples and tests use it. `examples/transfer-probe.rs` is a Rune window with the substrate
+attached, driven by JSON lines on stdin; `tests/session/p0.rs` runs it against the peer. P1, P2
+and P4 test through their own public APIs.
+
+P0's tests that need winit's own Wayland display ("shared" in `p0.rs`) need libwayland 1.23 or
+later (`wl_proxy_get_display`). On an older host, Ubuntu 24.04 among them, they check only that
+the probe reports that route Unsupported, and say so on stderr.

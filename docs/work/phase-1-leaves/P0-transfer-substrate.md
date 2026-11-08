@@ -38,5 +38,9 @@ Wayland display and X11 connection, and moving typed data between processes.
 
 ## Done when
 
-Both directions work under headless sway and Xwayland in CI. Each feature compiles alone
-(`mise run compile-features`).
+Both directions work under headless sway and Xwayland in CI, which runs Ubuntu 26.04
+(libwayland 1.24): offers in and sources out on the data device, on data control (bound on
+winit's display and on a connection of its own) and on X11, and drops into a Wayland window.
+On a host with libwayland older than 1.23 (Ubuntu 24.04), winit's display is out of reach: the
+tests that need it check only that it is reported Unsupported, and data control falls back to a
+connection of its own. Each feature compiles alone (`mise run compile-features`).

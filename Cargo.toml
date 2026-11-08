@@ -41,6 +41,10 @@ glib = { version = "0.22", default-features = false }
 futures-util = { version = "0.3", default-features = false }
 tokio = { version = "1", default-features = false }
 zbus = { version = "6", default-features = false }
+# strata-platform transfer substrate (P0): winit's display through wayland-backend's
+# `client_system` (as Rune enables it), and dlsym, pipe2 and poll through libc.
+libc = "0.2"
+wayland-backend = "0.3"
 
 # PNG goldens: decodes rendered scenes for the tolerance check (gallery dev-dependency only).
 png = "0.18"

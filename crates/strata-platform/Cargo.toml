@@ -70,7 +70,7 @@ glib-bridge = ["dep:futures-channel", "dep:gio", "dep:glib"]
 
 # Internal, not public API: P0's transfer substrate (src/transfer/), enabled by dnd, clipboard
 # and foreign-parent.
-_transfer = []
+_transfer = ["dep:libc", "dep:wayland-backend", "dep:wayland-client", "dep:wayland-protocols", "dep:wayland-protocols-wlr", "dep:x11rb", "x11rb/xfixes"]
 
 # Depends on `rune` only: never rune-kit, strata-kit or Strata (docs/plan.md §3). Each shim's
 # optional dependencies go in its own block below, enabled with `dep:` from its feature.
@@ -81,13 +81,14 @@ rune.workspace = true
 # settings (P5) and single-instance (P8): each feature enables the tokio and zbus features it uses.
 tokio = { workspace = true, optional = true }
 zbus = { workspace = true, optional = true }
+# x11rb: csd (P3) and _transfer (P0); each feature names the x11rb features it needs.
+x11rb = { workspace = true, optional = true }
 
 # dnd (P1)
 
 # clipboard (P2)
 
 # csd (P3)
-x11rb = { workspace = true, optional = true }
 
 # foreign-parent (P4)
 
@@ -106,6 +107,11 @@ gio = { workspace = true, optional = true }
 glib = { workspace = true, optional = true }
 
 # _transfer (P0)
+libc = { workspace = true, optional = true }
+wayland-backend = { workspace = true, optional = true, features = ["client_system"] }
+wayland-client = { workspace = true, optional = true }
+wayland-protocols = { workspace = true, optional = true, features = ["client", "staging"] }
+wayland-protocols-wlr = { workspace = true, optional = true, features = ["client"] }
 
 # Tests only. tests/session/ is one binary: each work package's compositor and D-Bus tests run
 # in private sessions from tests/support/ (docs/testing.md). Same layout as [dependencies]: a

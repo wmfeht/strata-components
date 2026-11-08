@@ -3,6 +3,11 @@ name: Platform
 # strata-platform's compositor and D-Bus tests (W3): `mise run test-platform`, each test in its
 # own headless sway, Xwayland and session bus. No GPU: sway composites with pixman and Rune
 # renders on lavapipe (crates/strata-platform/tests/support/gpu.rs).
+#
+# Ubuntu 26.04 (libwayland 1.24, sway 1.11), not 24.04: P0's transfer substrate reaches winit's
+# Wayland display through `wl_proxy_get_display`, which libwayland 1.23 added. On 24.04's 1.22
+# its tests that need that display could only check that it is reported Unsupported
+# (crates/strata-platform/tests/session/p0.rs).
 
 on:
   workflow_dispatch:
@@ -34,7 +39,7 @@ concurrency:
 jobs:
   sessions:
     name: Compositor and D-Bus tests
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     env:
       # Software rendering and four vCPUs: waits get three times as long, and two sessions run

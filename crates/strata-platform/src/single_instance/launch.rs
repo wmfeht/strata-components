@@ -113,12 +113,11 @@ impl Launch {
 
     pub(super) fn platform_data(&self) -> PlatformData {
         let mut data = PlatformData::new();
-        if let Some(cwd) = &self.cwd {
-            data.insert(
-                CWD.to_owned(),
-                OwnedVariant::try_from(Variant::from(bytestring(cwd.as_os_str().as_bytes())))
-                    .unwrap_or_else(|_| OwnedVariant::from(0u8)),
-            );
+        // A working directory that won't convert is left out: the primary then has none.
+        if let Some(cwd) = self.cwd.as_ref().and_then(|cwd| {
+            OwnedVariant::try_from(Variant::from(bytestring(cwd.as_os_str().as_bytes()))).ok()
+        }) {
+            data.insert(CWD.to_owned(), cwd);
         }
         self.activation.write_platform_data(&mut data);
         data

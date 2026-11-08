@@ -13,7 +13,7 @@ use zbus::OwnedVariant;
 
 use super::event::{CommandLine, Event, Out, RevealMethod};
 use super::forward::primary_gone;
-use super::interfaces::FileManager1;
+use super::interfaces::{FileManager1, action};
 use super::launch::{Activation, Launch, PlatformData};
 use super::primary::Inbox;
 use super::{AppId, Reveal};
@@ -235,6 +235,11 @@ fn a_launch_tries_again_only_when_the_primary_left() {
             "org.freedesktop.DBus.Error.NoReply",
             "Message recipient disconnected from message bus without replying",
         ),
+        // dbus-broker's wording.
+        (
+            "org.freedesktop.DBus.Error.NoReply",
+            "Remote peer disconnected",
+        ),
     ];
     for (name, text) in gone {
         assert!(primary_gone(name, text), "{name}");
@@ -251,4 +256,28 @@ fn a_launch_tries_again_only_when_the_primary_left() {
     for (name, text) in stay {
         assert!(!primary_gone(name, text), "{name}: {text}");
     }
+}
+
+#[test]
+fn actions_are_read_as_glib_reads_them() {
+    let accepted = ["go".to_owned()];
+    let data = PlatformData::new();
+    let unknown = action(&accepted, "quit".into(), Vec::new(), &data);
+    assert!(
+        matches!(&unknown, Err(zbus::fdo::Error::InvalidArgs(m)) if m.contains("quit")),
+        "{unknown:?}"
+    );
+    let parameter = |values: Vec<OwnedVariant>| match action(&accepted, "go".into(), values, &data)
+    {
+        Ok(Event::Action { parameter, .. }) => parameter.map(|p| p.value_signature().to_string()),
+        other => panic!("{other:?}"),
+    };
+    let s = || OwnedVariant::from(zbus::Str::from("s".to_owned()));
+    assert_eq!(parameter(Vec::new()), None);
+    assert_eq!(parameter(vec![s()]).as_deref(), Some("s"));
+    // Several parameters become one tuple of them, in order.
+    assert_eq!(
+        parameter(vec![s(), OwnedVariant::from(7u32)]).as_deref(),
+        Some("(su)")
+    );
 }

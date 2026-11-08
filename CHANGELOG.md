@@ -66,7 +66,10 @@ Nothing is released yet. The first release is planned for milestone M1 with the 
   - It speaks GApplication's wire protocol (`org.gtk.Application`, `org.freedesktop.Application`,
     `org.gtk.Actions`), so a GApplication of the same id and this primary reach each other.
   - `Options::file_manager1` also serves `org.freedesktop.FileManager1`, delivering its calls
-    as `Reveal` data; the name is queued for, never taken from another file manager.
+    as `Reveal` data; the name is queued for, never taken from another file manager. Asking for
+    it is best effort: `Primary::file_manager1` says whether it was owned, queued or refused.
+  - `Options::actions` names the actions `ActivateAction` may run; others are refused with
+    `InvalidArgs`, as a GApplication refuses them.
   - Without a session bus, or with one that doesn't answer within `Options::bus_timeout`, a
     launch runs alone (`Claim::Standalone`).
 

@@ -25,11 +25,15 @@ use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::net::UnixListener;
+use std::pin::Pin;
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
-use strata_platform::single_instance::zbus::{self, Connection, OwnedVariant, connection};
+use strata_platform::single_instance::zbus::export::futures_core::Stream;
+use strata_platform::single_instance::zbus::{
+    self, Connection, Message, MessageStream, OwnedVariant, connection,
+};
 
 use crate::support::{Display, Options, Proc, Session, example, timeout};
 
@@ -420,6 +424,17 @@ fn gapplication_and_freedesktop_methods_arrive_as_events() {
     let act = primary.wait_json("action", |v| v["ev"] == "action");
     assert_eq!(act["name"], "go");
     assert_eq!(act["xdg"], "t3");
+    // An action the app doesn't accept is refused, as a GApplication refuses one.
+    let unknown = call(
+        &rt,
+        &conn,
+        PROBE_ID,
+        PROBE_PATH,
+        fdo,
+        "ActivateAction",
+        &("explode", Vec::<OwnedVariant>::new(), platform("")),
+    );
+    assert!(error_name(unknown).contains("InvalidArgs"));
     let gtk = "org.gtk.Application";
     call(
         &rt,
@@ -456,6 +471,7 @@ fn file_manager1_calls_arrive_as_reveals_and_bad_calls_fail() {
     let mut cmd = command(&s, PROBE, Display::None);
     cmd.env("PROBE_FILE_MANAGER1", "1");
     let primary = start_primary(&s, "primary", cmd);
+    assert_eq!(claim_line(&primary)["file_manager1"], "owned");
     let (rt, conn) = client(&s);
     let (fm, path) = (
         "org.freedesktop.FileManager1",
@@ -467,12 +483,8 @@ fn file_manager1_calls_arrive_as_reveals_and_bad_calls_fail() {
         ("ShowItems", "items"),
         ("ShowItemProperties", "item-properties"),
     ] {
-        // The name may still be on its way: the first call retries until it is owned.
-        let deadline = Instant::now() + timeout();
-        while let Err(e) = call(&rt, &conn, fm, path, fm, method, &(uris.clone(), "sid")) {
-            assert!(Instant::now() < deadline, "{method}: {e}");
-            std::thread::sleep(Duration::from_millis(50));
-        }
+        // Owned before the claim returned, so the first call reaches the primary.
+        call(&rt, &conn, fm, path, fm, method, &(uris.clone(), "sid")).expect(method);
         let r = primary.wait_json(method, |v| v["ev"] == "reveal" && v["method"] == kind);
         assert_eq!(r["uris"], serde_json::json!(uris));
         assert_eq!(r["startup_id"], "sid");
@@ -494,6 +506,7 @@ fn file_manager1_waits_behind_another_owner() {
     let mut cmd = command(&s, PROBE, Display::None);
     cmd.env("PROBE_FILE_MANAGER1", "1");
     let primary = start_primary(&s, "primary", cmd);
+    assert_eq!(claim_line(&primary)["file_manager1"], "queued");
     let owner = |rt: &tokio::runtime::Runtime| -> String {
         let reply = call(
             rt,
@@ -536,6 +549,152 @@ fn file_manager1_waits_behind_another_owner() {
     primary.wait_json("the reveal", |v| {
         v["ev"] == "reveal" && v["uris"][0] == "file:///c"
     });
+}
+
+/// A bus that won't let the primary have `org.freedesktop.FileManager1` (a sandbox without
+/// permission to own it) leaves it the primary without that name. The probe asks for
+/// `org.freedesktop.DBus` in its place, which every bus refuses.
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn a_refused_file_manager1_leaves_the_primary_claimed() {
+    let s = bus_only();
+    let mut cmd = command(&s, PROBE, Display::None);
+    cmd.env("PROBE_FILE_MANAGER1", "1")
+        .env("PROBE_FILE_MANAGER1_NAME", "org.freedesktop.DBus");
+    let primary = start_primary(&s, "primary", cmd);
+    let claim = claim_line(&primary);
+    assert!(
+        claim["file_manager1"]
+            .as_str()
+            .is_some_and(|r| r.starts_with("failed")),
+        "{claim}"
+    );
+    // Still the one instance: a later launch reaches it.
+    let mut launch = command(&s, PROBE, Display::None);
+    launch.arg("still-single");
+    assert_eq!(run(launch).status.code(), Some(0));
+    primary.wait_json("the forwarded launch", |v| {
+        v["ev"] == "launch" && v["args"][1] == hex(b"still-single")
+    });
+}
+
+/// A primary that takes a launch and leaves without answering: the launch hears `NoReply`,
+/// claims the app id again, becomes the primary and handles itself, once.
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn a_launch_whose_primary_vanishes_unanswered_becomes_the_primary() {
+    let s = bus_only();
+    let (rt, fake) = client(&s);
+    let mut stream = rt.block_on(async { MessageStream::from(&fake) });
+    rt.block_on(fake.request_name(PROBE_ID))
+        .expect("the fake takes the app id");
+    let mut cmd = command(&s, PROBE, Display::None);
+    cmd.arg("vanished");
+    let launch = s.spawn("launch", cmd);
+    let taken = rt.block_on(async {
+        tokio::time::timeout(timeout(), async {
+            loop {
+                let message = std::future::poll_fn(|cx| Pin::new(&mut stream).poll_next(cx))
+                    .await
+                    .expect("the bus stream")
+                    .expect("a message");
+                if message
+                    .header()
+                    .member()
+                    .is_some_and(|m| m.as_str() == "CommandLine")
+                {
+                    return message;
+                }
+            }
+        })
+        .await
+    });
+    let taken = taken.expect("the launch's CommandLine call");
+    assert_eq!(taken.body().signature().to_string(), "(oaaya{sv})");
+    // Gone without a word: the bus answers the launch for it.
+    rt.block_on(async move {
+        drop(stream);
+        drop(fake);
+    });
+    drop(rt);
+    assert_eq!(claim_line(&launch)["result"], "primary");
+    launch.wait_json("its own launch", |v| v["ev"] == "launch");
+    let mut forwarded = command(&s, PROBE, Display::None);
+    forwarded.arg("after");
+    assert_eq!(run(forwarded).status.code(), Some(0));
+    launch.wait_json("the next launch", |v| {
+        v["ev"] == "launch" && v["remote"] == true
+    });
+    let own = launch
+        .lines()
+        .iter()
+        .filter(|l| l.contains("\"ev\":\"launch\"") && l.contains("\"remote\":false"))
+        .count();
+    assert_eq!(own, 1, "{:?}", launch.lines());
+}
+
+/// Calls sent back to back reach the app in the order they were sent, across interfaces.
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn pipelined_calls_arrive_in_order() {
+    let s = bus_only();
+    let primary = start_primary(&s, "primary", command(&s, PROBE, Display::None));
+    let (rt, conn) = client(&s);
+    const N: usize = 90;
+    rt.block_on(async {
+        let mut stream = MessageStream::from(&conn);
+        for i in 0..N {
+            let (interface, method) = [
+                ("org.freedesktop.Application", "Activate"),
+                ("org.freedesktop.Application", "Open"),
+                ("org.gtk.Application", "Open"),
+            ][i % 3];
+            let builder = Message::method_call(PROBE_PATH, method)
+                .destination(PROBE_ID)
+                .interface(interface);
+            let data = platform(&i.to_string());
+            let message = match (interface, method) {
+                (_, "Activate") => builder.build(&(data,)),
+                ("org.gtk.Application", _) => {
+                    builder.build(&(vec![format!("file:///{i}")], "", data))
+                }
+                _ => builder.build(&(vec![format!("file:///{i}")], data)),
+            };
+            conn.send(&message.expect("a call")).await.expect("sending");
+        }
+        let mut answered = 0;
+        tokio::time::timeout(timeout(), async {
+            while answered < N {
+                let message = std::future::poll_fn(|cx| Pin::new(&mut stream).poll_next(cx))
+                    .await
+                    .expect("the bus stream")
+                    .expect("a message");
+                match message.message_type() {
+                    zbus::message::Type::MethodReturn => answered += 1,
+                    zbus::message::Type::Error => panic!("a call failed: {message:?}"),
+                    _ => {}
+                }
+            }
+        })
+        .await
+        .expect("every call answered");
+    });
+    wait_until("every event", || {
+        primary
+            .lines()
+            .iter()
+            .filter(|l| l.contains("\"ev\":\"activate\"") || l.contains("\"ev\":\"open\""))
+            .count()
+            == N
+    });
+    let order: Vec<usize> = primary
+        .lines()
+        .iter()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter(|v| v["ev"] == "activate" || v["ev"] == "open")
+        .filter_map(|v| v["xdg"].as_str().and_then(|t| t.parse().ok()))
+        .collect();
+    assert_eq!(order, (0..N).collect::<Vec<_>>());
 }
 
 #[test]
@@ -714,12 +873,30 @@ fn second_window_focused(display: Display) {
 
     let mut second = command(&s, DEMO, display);
     second.arg("c");
+    // On Wayland the launch carries a launcher's token, made by a focused peer, so the
+    // primary gives it to the new window's app before `open_window`. sway focuses a new window
+    // with or without one, so this shows the token reaching that path, not the compositor
+    // using it; the WAYLAND_DEBUG probe (P-a) showed the window created with it.
+    let peer = (display == Display::Wayland).then(|| {
+        let peer = s.peer(Display::Wayland);
+        peer.map("launcher");
+        s.focus(&s.wait_window(peer.pid()));
+        peer
+    });
+    let token = peer.as_ref().map(|p| p.activation_token());
+    if let Some(token) = &token {
+        second.env("XDG_ACTIVATION_TOKEN", token);
+    }
     let out = run(second);
     assert_eq!(out.status.code(), Some(0), "{out:?}");
     assert!(
         String::from_utf8_lossy(&out.stdout).contains("opened in the running instance"),
         "{out:?}"
     );
+    let launch = primary.wait_json("the forwarded launch", |v| {
+        v["ev"] == "launch" && v["remote"] == true
+    });
+    assert_eq!(launch["token"].as_str(), token.as_deref());
     primary.wait_json("the second window", |v| {
         v["ev"] == "ready" && v["key"] == "launch-2"
     });
@@ -748,7 +925,8 @@ fn second_launch_opens_a_focused_window_in_the_primary_x11() {
 /// A bare launch of the running app brings its window forward. On Wayland only a token lets
 /// it take focus; without one sway marks it urgent. sway focuses an X11 window that asks
 /// (`focus_on_window_activation focus`, W3's config) with or without a startup id, so the X11
-/// case can't show what mutter and KWin do with the timestamp-less request (U-P8-1).
+/// case can't show what mutter and KWin do with the timestamp-less request (U-P8-1,
+/// `docs/decisions/S5-upstream.md#u-p8-1`).
 fn bare_launch_raises(display: Display) {
     let s = Session::start();
     let primary = start_primary(&s, "demo", command(&s, DEMO, display));

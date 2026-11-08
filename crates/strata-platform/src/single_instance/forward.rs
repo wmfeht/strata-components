@@ -38,8 +38,9 @@ pub(super) fn primary_gone(error_name: &str, message: &str) -> bool {
         | "org.freedesktop.DBus.Error.NameHasNoOwner"
         | "org.freedesktop.DBus.Error.UnknownObject"
         | "org.freedesktop.DBus.Error.Disconnected" => true,
-        // dbus-daemon's answer for a call whose recipient disconnected, as opposed to its own
-        // reply timeout.
+        // A call whose recipient disconnected, as opposed to the bus's own reply timeout:
+        // dbus-daemon says "Message recipient disconnected from message bus without
+        // replying", dbus-broker "Remote peer disconnected".
         "org.freedesktop.DBus.Error.NoReply" => message.contains("disconnected"),
         _ => false,
     }

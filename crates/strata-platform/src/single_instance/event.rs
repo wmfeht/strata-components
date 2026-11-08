@@ -27,8 +27,9 @@ pub enum Event {
         hint: String,
         activation: Activation,
     },
-    /// `ActivateAction`, or `org.gtk.Actions.Activate`: run the app's action `name`. The
-    /// primary exports no actions, so a GApplication lists none; names arrive as sent.
+    /// `ActivateAction`, or `org.gtk.Actions.Activate`: run the app's action `name`, one of
+    /// `Options::actions`. Several parameters arrive packed in one tuple, as GLib packs them.
+    /// `org.gtk.Actions` lists no actions, so a GApplication forwarder offers none.
     Action {
         name: String,
         parameter: Option<OwnedVariant>,

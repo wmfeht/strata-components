@@ -1,8 +1,8 @@
 //! The `single-instance` shim without Rune, for strata-platform's session tests (P8). It
 //! claims `org.example.SingleInstanceProbe` and reports as JSON lines on stdout:
 //!
-//! - `{"ev":"claim","result":"primary"}`, `"forwarded"` with `"status"`, or `"standalone"`
-//!   with `"reason"`;
+//! - `{"ev":"claim","result":"primary"}` (with `"file_manager1"`: `owned`, `queued` or
+//!   `failed: …`), `"forwarded"` with `"status"`, or `"standalone"` with `"reason"`;
 //! - as the primary, one line per event: `launch` (with `remote`, `args` and `cwd` as hex
 //!   bytes, `xdg` and `sid` tokens), `activate`, `open`, `action` and `reveal`.
 //!
@@ -12,8 +12,9 @@
 //! `PROBE_SERVICE=1` the end of stdin doesn't: the bus starts it with none.
 //!
 //! The environment sets the rest: `PROBE_GATE=1` waits for a line on stdin before claiming,
-//! `PROBE_SERVICE=1` and `PROBE_FILE_MANAGER1=1` set those options, and
-//! `PROBE_BUS_TIMEOUT_MS` the bus timeout.
+//! `PROBE_SERVICE=1` and `PROBE_FILE_MANAGER1=1` set those options, `PROBE_FILE_MANAGER1_NAME`
+//! the name asked for in place of `org.freedesktop.FileManager1`, and `PROBE_BUS_TIMEOUT_MS`
+//! the bus timeout. It accepts the actions `go` and `quit`.
 
 #[cfg(feature = "single-instance")]
 fn main() {
@@ -34,7 +35,7 @@ mod probe {
 
     use serde_json::{Value, json};
     use strata_platform::single_instance::{
-        AppId, Claim, Event, Launch, Options, RevealMethod, Unclaimed, claim,
+        AppId, Claim, Event, Launch, NameRequest, Options, RevealMethod, Unclaimed, claim,
     };
 
     const APP_ID: &str = "org.example.SingleInstanceProbe";
@@ -139,6 +140,8 @@ mod probe {
         let mut options = Options {
             service: flag("PROBE_SERVICE"),
             file_manager1: flag("PROBE_FILE_MANAGER1"),
+            actions: vec!["go".into(), "quit".into()],
+            file_manager1_name: std::env::var("PROBE_FILE_MANAGER1_NAME").ok(),
             ..Options::default()
         };
         if let Some(ms) = std::env::var("PROBE_BUS_TIMEOUT_MS")
@@ -149,9 +152,18 @@ mod probe {
         }
         let primary = match claim(&id, Launch::from_env(), &options) {
             Claim::Primary(p) => {
+                let file_manager1 = p.file_manager1().map(|r| match r {
+                    NameRequest::Owned => "owned".to_owned(),
+                    NameRequest::Queued => "queued".to_owned(),
+                    NameRequest::Failed(e) => format!("failed: {e}"),
+                });
                 log(
                     "claim",
-                    json!({ "result": "primary", "pid": std::process::id() }),
+                    json!({
+                        "result": "primary",
+                        "pid": std::process::id(),
+                        "file_manager1": file_manager1,
+                    }),
                 );
                 p
             }

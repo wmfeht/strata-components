@@ -11,7 +11,8 @@ use std::sync::Arc;
 use tokio::sync::mpsc::unbounded_channel;
 use zbus::message::Header;
 use zbus::names::OwnedUniqueName;
-use zbus::{Connection, OwnedObjectPath, OwnedVariant, Signature, fdo, interface};
+use zbus::wire::StructureBuilder;
+use zbus::{Connection, OwnedObjectPath, OwnedVariant, Signature, Variant, fdo, interface};
 
 use super::event::{CommandLine, Event, Out, Reveal, RevealMethod};
 use super::launch::{Activation, Launch, PlatformData};
@@ -83,6 +84,7 @@ impl GtkApplication {
 
 pub(super) struct FreedesktopApplication {
     pub inbox: Arc<Inbox>,
+    pub actions: Arc<[String]>,
 }
 
 #[interface(name = "org.freedesktop.Application")]
@@ -107,9 +109,10 @@ impl FreedesktopApplication {
         action_name: String,
         parameter: Vec<OwnedVariant>,
         platform_data: PlatformData,
-    ) {
-        self.inbox
-            .deliver(action(action_name, parameter, &platform_data));
+    ) -> fdo::Result<()> {
+        let event = action(&self.actions, action_name, parameter, &platform_data)?;
+        self.inbox.deliver(event);
+        Ok(())
     }
 }
 
@@ -117,6 +120,7 @@ impl FreedesktopApplication {
 /// (`DescribeAll`) and gives up if that fails, so the primary serves an empty list.
 pub(super) struct GtkActions {
     pub inbox: Arc<Inbox>,
+    pub actions: Arc<[String]>,
 }
 
 #[interface(name = "org.gtk.Actions")]
@@ -140,18 +144,43 @@ impl GtkActions {
         action_name: String,
         parameter: Vec<OwnedVariant>,
         platform_data: PlatformData,
-    ) {
-        self.inbox
-            .deliver(action(action_name, parameter, &platform_data));
+    ) -> fdo::Result<()> {
+        let event = action(&self.actions, action_name, parameter, &platform_data)?;
+        self.inbox.deliver(event);
+        Ok(())
     }
 }
 
-fn action(name: String, parameter: Vec<OwnedVariant>, platform_data: &PlatformData) -> Event {
-    Event::Action {
-        name,
-        parameter: parameter.into_iter().next(),
-        activation: Activation::from_platform_data(platform_data),
+/// An action call as GLib reads one: refused unless the app accepts the name, and several
+/// parameters packed into one tuple.
+pub(super) fn action(
+    actions: &[String],
+    name: String,
+    parameter: Vec<OwnedVariant>,
+    platform_data: &PlatformData,
+) -> fdo::Result<Event> {
+    if !actions.contains(&name) {
+        return Err(fdo::Error::InvalidArgs(format!("Unknown action ‘{name}’")));
     }
+    let parameter = match parameter.len() {
+        0 | 1 => parameter.into_iter().next(),
+        _ => {
+            let tuple = parameter
+                .into_iter()
+                .fold(StructureBuilder::new(), |b, p| {
+                    b.append_field(Variant::from(p))
+                })
+                .build()
+                .and_then(OwnedVariant::try_from)
+                .map_err(|e| fdo::Error::InvalidArgs(e.to_string()))?;
+            Some(tuple)
+        }
+    };
+    Ok(Event::Action {
+        name,
+        parameter,
+        activation: Activation::from_platform_data(platform_data),
+    })
 }
 
 pub(super) struct FileManager1 {

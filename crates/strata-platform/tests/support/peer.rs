@@ -155,6 +155,13 @@ impl Peer {
     }
 
     /// Wayland: an `xdg_activation_v1` token for the peer's focused window (P8).
+    #[cfg_attr(
+        not(feature = "single-instance"),
+        expect(
+            dead_code,
+            reason = "only P8's session tests, behind single-instance, ask for one"
+        )
+    )]
     pub fn activation_token(&self) -> String {
         self.request_as::<ActivationToken>(Command::ActivationToken)
             .token

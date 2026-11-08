@@ -10,7 +10,8 @@
 //! reopen through `org.freedesktop.Application`, single instance). U-P8-1 (draft, not filed):
 //! on X11, `activate(token)` on a window already open drops the `DESKTOP_STARTUP_ID`. It sends
 //! `_NET_ACTIVE_WINDOW` with no timestamp and never ends the startup notification, so window
-//! managers that prevent focus stealing (mutter, KWin) may refuse it.
+//! managers that prevent focus stealing (mutter, KWin) may refuse it. Its text is in
+//! `docs/decisions/S5-upstream.md`, "Drafts added by later work packages", `#u-p8-1`.
 //!
 //! Work package: P8, `docs/work/phase-1-leaves/P8-single-instance.md`. One change from it:
 //! the `org.freedesktop.FileManager1` interface is served here, opted into with
@@ -91,5 +92,5 @@ mod tests;
 pub use app_id::{AppId, InvalidAppId};
 pub use event::{CommandLine, Event, Reveal, RevealMethod};
 pub use launch::{Activation, Launch};
-pub use primary::{Claim, Options, Primary, THREAD_NAME, Unclaimed, claim};
+pub use primary::{Claim, NameRequest, Options, Primary, THREAD_NAME, Unclaimed, claim};
 pub use zbus;

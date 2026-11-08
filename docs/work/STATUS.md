@@ -10,7 +10,7 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | W1c | merged | contract additions for C1e: collection slot; geometry docs no longer rely on on_drag | 0b52156 |
 | W2b | merged | Look::fallback = Strata defaults via K2; slot tokens moved off w2-tokens goldens to w2-slots review scene; confirms row.sidebar 24 / row.palette 53 | 8c12ef3 |
 | W1d | merged | contract changes for C1c: UniformRows::page_step = rows that fit minus one (meaning changed, 10->9); Selection::toggle_in_run for Space inside v/V | 21f28e7 |
-| C1f | review 2 (round 1 fixed: 7cc9453; groups now via CollectionState::set_groups; coded a4a0cb5; stuck label built: 1 view run per group crossed, Rune draft U-C1f-6; Groups + stuck overlay header; on_press hook; C1e carry-overs; header = row height, page step leaves a row: deviations) | contract addition for C4: Lines spans (group-header lines); also C1e round-3 SF1 + nits | |
+| C1f | merged | 2 review rounds; groups via CollectionState::set_groups (call before enter/sync; wrong order fails silently: doc nit open); coded a4a0cb5; stuck label built: 1 view run per group crossed, Rune draft U-C1f-6; Groups + stuck overlay header; on_press hook; C1e carry-overs; header = row height, page step leaves a row: deviations | contract addition for C4: Lines spans (group-header lines); also C1e round-3 SF1 + nits | 99f4863 |
 | W2c | merged | 1 review round, no blockers; contract additions for K1: Look::fill {muted, highlight}; LookParams keeps glow on/animations; no golden moves | 07eb69c |
 | K1b | waiting (after C10a) | syntect Theme from strata-kit SCOPES; replaces C10a interim theme_from_look; carries K1 should-fixes: kit.alpha(c, c.a*x) for translucent theme colours + test; port Strata's extreme-palette Contrast test; theme::switch honours look.animations; Role::Error drops danger background (note) | |
 | G1 | merged | owner request: index is rune-kit Buttons grouped by lane; markers from registry (has golden scenes); index goldens hide markers, review scene shows them | 9b4bf5c |
@@ -67,9 +67,9 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | P4 | waiting | | |
 | X1 | waiting | | |
 | C14b | ready | carries C14a round-3 should-fix: key the rescale child by target scale (`{key}-rescale-{scale bits}`) + regression test (2x, one frame, 1x) | |
-| C2 | waiting | | |
-| C3 | waiting | | |
-| C4 | waiting | | |
+| C2 | ready | | |
+| C3 | ready | | |
+| C4 | ready | | |
 | X3 | waiting | | |
 | C20d | waiting | | |
-| X2 | waiting | | |
+| X2 | waiting | from C1f: drop-by-point routing in row.rs has no test that fails without it; the system binder (never sends on_move) must test it | |

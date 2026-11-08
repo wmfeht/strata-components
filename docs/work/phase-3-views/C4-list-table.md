@@ -21,7 +21,7 @@ The List view: C1e rows with cells, using rune-kit `TableColumn` sizing.
   (`browser/view-modes/sorting`). The heading shows the direction.
 - Reorder by dragging headings (an in-window `on_drag`).
 - A visibility popover listing columns with checkboxes.
-- Sticky file-type group headers, through C1f's `Groups` and `Collection::groups`: header lines
+- Sticky file-type group headers, through C1f's `Groups`, set with `CollectionState::set_groups` before `enter` or `sync`: header lines
   in the line model, and one stuck copy the element draws over the viewport (C1f decision; one
   virtual row per section would defeat virtualization for large groups). C4 supplies the groups
   and owns the "sticky header while scrolling" script.

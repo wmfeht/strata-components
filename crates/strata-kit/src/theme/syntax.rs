@@ -51,14 +51,27 @@ pub struct Palette {
 
 /// The theme's syntax colours, each left-out one blended from the accent toward the text.
 pub fn resolve(colors: &Colors) -> Palette {
+    resolve_over(colors, None)
+}
+
+/// [`resolve`], with left-out colours taken from `fallback` when there is one (an Omarchy
+/// theme's terminal palette), else blended.
+pub(crate) fn resolve_over(colors: &Colors, fallback: Option<Palette>) -> Palette {
     let (accent, text) = (colors.accent, colors.text);
+    let f = fallback.unwrap_or(Palette {
+        statement: accent,
+        string: blend(accent, text, 0.48),
+        constant: blend(accent, text, 0.18),
+        type_: blend(accent, text, 0.24),
+        preprocessor: blend(accent, text, 0.32),
+    });
     let s = &colors.syntax;
     Palette {
-        statement: s.keyword.unwrap_or(accent),
-        string: s.string.unwrap_or_else(|| blend(accent, text, 0.48)),
-        constant: s.constant.unwrap_or_else(|| blend(accent, text, 0.18)),
-        type_: s.type_.unwrap_or_else(|| blend(accent, text, 0.24)),
-        preprocessor: s.preprocessor.unwrap_or_else(|| blend(accent, text, 0.32)),
+        statement: s.keyword.unwrap_or(f.statement),
+        string: s.string.unwrap_or(f.string),
+        constant: s.constant.unwrap_or(f.constant),
+        type_: s.type_.unwrap_or(f.type_),
+        preprocessor: s.preprocessor.unwrap_or(f.preprocessor),
     }
 }
 

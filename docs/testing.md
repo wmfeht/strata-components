@@ -88,7 +88,8 @@ as Strata does. `strata_gallery::spec` passes it to `AppSpec::fonts` and `famili
 accessibility goldens, page tests) shape text as `--snap` and `--script` runs do. A page test
 that builds a runtime of its own with `Runtime::new` shapes in Rune's built-in Inter instead;
 use `strata_gallery::runtime`. strata-components' own unit tests use `Runtime::new` and stay
-in Inter.
+in Inter. A runtime's `set_font_families` (K2's picker) moves the families `rune::text::measure`
+uses process-wide, so a test that measures text holds a `rune::text::with_families` guard.
 
 Open the gallery with `mise run gallery`. A button on the index opens its page (click, Space
 or Return), and Escape returns to the index. `mise run gallery -- --scene c1-ten-rows-dark`

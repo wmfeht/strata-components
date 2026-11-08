@@ -93,6 +93,32 @@ fn an_absent_key_keeps_its_value_and_is_reported_unset() {
 }
 
 #[test]
+fn a_re_read_without_a_key_resets_it() {
+    let mut settings = DesktopSettings::default();
+    apply_reply(&mut settings, &full_reply());
+    let mut next = full_reply();
+    next.get_mut(Key::DragThreshold.namespace())
+        .expect("ns")
+        .remove(Key::DragThreshold.name());
+
+    let applied = apply_reply(&mut settings, &next);
+
+    assert_eq!(
+        settings.drag_threshold,
+        DesktopSettings::default().drag_threshold
+    );
+    assert!(!settings.is_known(Key::DragThreshold));
+    assert!(settings.is_known(Key::DoubleClick), "the rest stay known");
+    let keys: Vec<Key> = applied.changes.iter().map(|(s, _)| s.key()).collect();
+    assert_eq!(keys, [Key::DragThreshold]);
+    assert!(
+        applied
+            .fallbacks
+            .contains(&Fallback::Unset(Key::DragThreshold))
+    );
+}
+
+#[test]
 fn a_value_of_the_wrong_type_is_refused() {
     let wrong: [(Key, Variant<'static>); 5] = [
         (Key::TextScale, Variant::I32(2)),

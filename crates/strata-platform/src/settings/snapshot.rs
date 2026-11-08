@@ -59,7 +59,10 @@ impl DesktopSettings {
         self.enable_animations && !self.reduced_motion
     }
 
-    /// Whether `key`'s value came from the desktop rather than its default.
+    /// Whether `key`'s value came from the desktop rather than its default. A key stops being
+    /// known when a later read of the portal (after it restarted, say) lacks it: it goes back
+    /// to its default. A portal that leaves the bus without a successor keeps its values, and
+    /// they stay known.
     pub fn is_known(&self, key: Key) -> bool {
         self.known & key.bit() != 0
     }
@@ -77,6 +80,15 @@ impl DesktopSettings {
             Key::ReducedMotion => Setting::ReducedMotion(self.reduced_motion),
             Key::RememberRecentFiles => Setting::RememberRecentFiles(self.remember_recent_files),
         }
+    }
+
+    /// Puts `key` back to its default and marks it unknown. Returns whether anything changed.
+    pub fn reset(&mut self, key: Key) -> bool {
+        let before = *self;
+        let default = DesktopSettings::default();
+        self.set(default.get(key));
+        self.known &= !key.bit();
+        *self != before
     }
 
     /// Takes a value from the desktop and marks its key known. Returns whether anything

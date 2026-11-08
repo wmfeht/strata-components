@@ -21,14 +21,20 @@ pub(super) struct Applied {
     pub fallbacks: Vec<Fallback>,
 }
 
-/// Applies a whole `ReadAll` answer: every key it holds with a usable value, an `Unset` for
-/// each key it lacks (which keeps its value), and an `Invalid` for each bad one.
+/// Applies a whole `ReadAll` answer: every key it holds with a usable value, and an `Invalid`
+/// for each bad one. A key it lacks goes back to its default and is no longer known (a change,
+/// if it was known), with an `Unset`.
 pub(super) fn apply_reply(settings: &mut DesktopSettings, reply: &Reply) -> Applied {
     let mut applied = Applied::default();
     for key in Key::ALL {
         match reply.get(key.namespace()).and_then(|ns| ns.get(key.name())) {
             Some(value) => apply_value(settings, key, value, &mut applied),
-            None => applied.fallbacks.push(Fallback::Unset(key)),
+            None => {
+                if settings.reset(key) {
+                    applied.changes.push((settings.get(key), *settings));
+                }
+                applied.fallbacks.push(Fallback::Unset(key));
+            }
         }
     }
     applied
@@ -68,7 +74,7 @@ fn apply_value(
 }
 
 /// `value` as `key`'s typed setting, or None when its type is wrong or the value unusable.
-/// The scale must be a `d`, as Strata on GTK took it. Integer keys take any integer type, since
+/// The scale must be a `d`, its schema's type. Integer keys take any integer type, since
 /// backends other than GSettings may not keep the schema's `i`.
 pub(super) fn setting(key: Key, value: &Variant<'_>) -> Option<Setting> {
     let value = plain(value);

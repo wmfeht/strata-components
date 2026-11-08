@@ -476,6 +476,15 @@ impl Conn {
     /// no more.
     fn report_failure(&self, message: String) {
         if !self.failed.swap(true, Ordering::AcqRel) {
+            // Nothing is held or heard on a dead connection: owns() turns false for every
+            // source, and no current offer is left to read. Its proxies need no destroy.
+            {
+                let mut state = lock(&self.state);
+                state.sources.clear();
+                for (_, current) in state.selections.drain() {
+                    current.offer.close();
+                }
+            }
             self.subs.emit(vec![Event::Failed { message }]);
         }
     }
@@ -545,6 +554,9 @@ impl Conn {
         }
         if !self.home.here() {
             return Err(Error::Refused(ON_UI));
+        }
+        if self.failed.load(Ordering::Acquire) {
+            return Err(Error::Connection("the connection failed".into()));
         }
         let id = SourceId::next();
         let mut state = lock(&self.state);
@@ -905,6 +917,11 @@ impl Dispatch<WlDataOffer, ()> for State {
                             chosen: Action::from_bits(a.bits()),
                         });
                     }
+                } else if let Some(dropped) = st.dropped.iter().find(|o| o.is(&id)) {
+                    // A dropped offer outlives the `leave` that follows its drop, and the
+                    // compositor may still change its action (answering a set_actions sent
+                    // before the drop): `finish` must see that.
+                    dropped.with_state(|s| s.on_action(a.bits()));
                 }
             }
             _ => {}

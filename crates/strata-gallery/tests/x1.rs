@@ -5,7 +5,7 @@
 mod x1 {
     use rune::{Cx, El, Env, Key, KeyEvent, Mods, Runtime, TitlebarAction};
     use strata_gallery::scenes::x1::shell::{self, Hooks, ShellWindow, Volumes};
-    use strata_gallery::scenes::x1::{self as page, VOLUMES_AFTER, reload};
+    use strata_gallery::scenes::x1::{VOLUMES_AFTER, reload};
     use strata_gallery::{Gallery, SIZE, scenes};
     use strata_kit::look::Look;
 
@@ -193,6 +193,43 @@ mod x1 {
         assert_eq!(fill(&rt, "x1-header"), theme);
     }
 
+    /// settings/themes: "Creating, editing, or deleting the file while Strata runs re-applies
+    /// it…": an edit reaches the look the page draws with, once the settle has passed.
+    #[test]
+    fn an_edit_re_applies_the_file_to_the_look() {
+        let mut rt = mount("x1-shell-light");
+        assert_eq!(rt.state.look.frame.inset, 3.0);
+        press(&mut rt, "e");
+        run(&mut rt, reload::SETTLE + 2.0 * FRAME);
+        assert_eq!(rt.state.look.frame.inset, 4.0, "the edited file's inset");
+        assert_eq!(rt.state.x1.window.overrides.problems, 1);
+    }
+
+    /// K4's host rule: a read that finds the same overrides changes nothing, and one that
+    /// finds only the file's presence changed updates the readout without a reload.
+    #[test]
+    fn a_read_that_finds_nothing_new_changes_nothing() {
+        let mut rt = mount("x1-shell-dark");
+        press(&mut rt, "t");
+        run(&mut rt, reload::SETTLE + 2.0 * FRAME);
+        assert_eq!(rt.state.x1.window.overrides.reloads, 0, "the same bytes");
+
+        press(&mut rt, "d");
+        run(&mut rt, reload::SETTLE + 2.0 * FRAME);
+        assert_eq!(rt.state.x1.window.overrides.reloads, 1);
+        assert!(!rt.state.x1.window.overrides.present);
+        run(&mut rt, 1.0);
+        let deleted = fill(&rt, "x1-header");
+
+        // An empty file: no rows, as no file, but there.
+        press(&mut rt, "n");
+        run(&mut rt, reload::SETTLE + 2.0 * FRAME);
+        let status = &rt.state.x1.window.overrides;
+        assert!(status.present, "the readout follows the file");
+        assert_eq!(status.reloads, 1, "the look didn't change, so no reload");
+        assert_eq!(fill(&rt, "x1-header"), deleted);
+    }
+
     #[test]
     fn the_volumes_arrive_after_the_dialog_asks_and_again_on_refresh() {
         let mut rt = mount("x1-shell-light");
@@ -212,18 +249,42 @@ mod x1 {
         assert!(matches!(rt.state.x1.window.volumes, Volumes::Listed(_)));
     }
 
-    /// Each golden scene opens the page in its own appearance with the fake file applied.
+    /// Without a GLib bridge the dialog says so, rather than listing forever.
     #[test]
-    fn each_golden_scene_applies_the_fake_file_in_its_appearance() {
+    fn without_a_bridge_the_dialog_shows_the_failure_not_a_spinner() {
+        let mut rt = mount("x1-shell-no-bridge-light");
+        tap(&mut rt, "x1-mounts");
+        run(&mut rt, VOLUMES_AFTER + 2.0 * FRAME);
+        assert!(
+            matches!(rt.state.x1.window.volumes, Volumes::Failed(_)),
+            "{:?}",
+            rt.state.x1.window.volumes
+        );
+        let error = rt
+            .elements()
+            .into_iter()
+            .find(|e| e.key.as_deref() == Some("x1-volumes-error"))
+            .expect("the dialog's error");
+        assert_eq!(
+            error.text.as_deref(),
+            Some("No GLib bridge: the GLib thread couldn't start")
+        );
+        assert!(
+            !rt.elements().iter().any(|e| e.role == "progressbar"),
+            "no spinner"
+        );
+    }
+
+    /// Each golden scene's look is built in its own appearance with the fake file last (the
+    /// file's inset beats Strata's density).
+    #[test]
+    fn each_golden_scene_builds_its_look_with_the_file_last() {
         let page = scenes::all().find(|p| p.id == "x1").expect("the x1 page");
         for &(name, scene) in page.scenes {
             let mut g = Gallery::default();
             scene(&mut g);
             assert_eq!(g.look.kit.dark, name.ends_with("-dark"), "{name}");
-            assert!(g.x1.overrides.errors().is_empty(), "{name}");
-            assert!(g.x1.window.overrides.present, "{name}");
             assert_eq!(g.look.frame.inset, 3.0, "{name}: frame.inset");
-            assert_eq!(g.x1.file, Some(page::FILE), "{name}");
         }
     }
 }

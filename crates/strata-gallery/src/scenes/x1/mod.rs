@@ -4,9 +4,11 @@
 //!
 //! Work package: `docs/work/phase-2-composites/X1-shell-demo.md`.
 //!
-//! - `x1-header-states-*` stacks five headers: a fresh profile (Close only), X11 with every
-//!   button, a maximised window, Wayland with every button turned on (Minimize can't work and
-//!   the maximised state is unknown), and a window without focus.
+//! - `x1-header-states-*` stacks four headers: a fresh profile (Close only), X11 with every
+//!   button, a maximised window, and Wayland with every button turned on (Minimize can't work
+//!   and the maximised state is unknown). A window without focus draws the same until the
+//!   owner decides its look, so it has no row; `tests/x1.rs` checks that focus reaches
+//!   `WindowChrome::active`.
 //! - `x1-shell-*` is the themed empty window (a bundled theme, the desktop's settings, a fake
 //!   overrides file) with its header and readout; `x1-shell-maximized-*` the same maximised.
 //! - `x1-volumes-*` has the mounted-volumes dialog open over it.
@@ -20,6 +22,8 @@
 //! | `1`, `2`, `3` | Turns the Minimize, Maximize or Close button preference off or on |
 //! | `e` | Edits the fake overrides file: it alternates between [`FILE`] and [`FILE_BROKEN`] |
 //! | `d` | Deletes the fake file |
+//! | `t` | Touches the fake file: a change event, the same bytes |
+//! | `n` | Empties the fake file: present, with no rows |
 //! | `s` | The desktop's text scale moves between 1 and 1.25 |
 //! | `a` | The desktop's animations switch |
 //!
@@ -34,14 +38,19 @@
 //!
 //! | Bullet (opening words) | Checked by |
 //! | --- | --- |
-//! | settings/themes: Creating, editing, or deleting the file while Strata runs re-applies it in every open window… | script `override-burst`; test `a_reload_moves_the_colours_as_a_theme_switch_does`. "Every open window" is `examples/shell`'s broadcast: **hand test pending** |
-//! | settings/themes: Changes to the file less than 75 ms apart trigger one reload, 75 ms after the last | script `override-burst`; unit `changes_less_than_the_settle_apart_read_once_after_the_last` |
+//! | settings/themes: Creating, editing, or deleting the file while Strata runs re-applies it in every open window… | script `override-burst` (the readout's bar inset is read from the look); tests `an_edit_re_applies_the_file_to_the_look`, `a_reload_moves_the_colours_as_a_theme_switch_does`. "Every open window" is `examples/shell`'s broadcast: **hand test pending** |
+//! | settings/themes: Changes to the file less than 75 ms apart trigger one reload, 75 ms after the last | script `override-burst` (three edits, one reload); unit `changes_less_than_the_settle_apart_read_once_after_the_last` |
+//! | K4's host rule: a read that finds the same overrides changes nothing | script `override-unchanged`; test `a_read_that_finds_nothing_new_changes_nothing`; unit `a_read_changes_the_look_only_when_the_overrides_differ` |
 //! | settings/themes: Deleting the file, or making it unreadable, restores Strata's default appearance… | script `override-delete`; test `a_reload_moves_the_colours_as_a_theme_switch_does`. The log line is the demo's ("cannot read overrides file") |
 //! | settings/themes: A rule GTK cannot parse … is skipped … Valid rules in the same file still apply | script `override-problem` (the count; the salvage itself is K4's) |
 //! | settings/themes: With `~/.config/strata/style.css` present at startup, its rules apply in every window…; The file follows `$XDG_CONFIG_HOME`… | `examples/shell` (read before the first window; the path's rule in `args.rs`): **hand test pending** |
-//! | settings/themes/portal-text-scaling: In that process, changing `text-scaling-factor` while the window is open rescales its text and interface icons without a restart | script `text-scale`; test `a_text_scale_change_rescales_the_look`. The portal's side is P5's |
+//! | settings/themes/portal-text-scaling: In that process, changing `text-scaling-factor` while the window is open rescales its text and interface icons without a restart | script `text-scale` (the readout's interface text size is read from the look); test `a_text_scale_change_rescales_the_look`. The portal's side is P5's |
 //! | browser/navigation/startup-arguments: Each argument opens its own window, both at launch and when Strata is already running | `examples/shell` (`controller::on_launch`); the forwarding is P8's, whose session tests check it with its own demo: **hand test pending** for the shell |
 //! | app/dialogs: Closing the last open dialog by any route returns focus… | script `volumes-dialog` (X1's wiring of C15) |
+//!
+//! The volumes dialog without a GLib bridge shows the failure rather than a spinner that never
+//! ends: test `without_a_bridge_the_dialog_shows_the_failure_not_a_spinner` (no bullet: the
+//! review scenes `x1-shell-no-bridge-*`).
 //!
 //! Not X1's: the rest of `browser/navigation/startup-arguments` (what a path opens and
 //! selects), `integration/file-manager-interface` (P8 and Strata; the demo doesn't opt into
@@ -66,7 +75,7 @@ use strata_kit::overrides::Overrides;
 use strata_kit::theme::{self, Theme, bundled_theme};
 
 use crate::{Gallery, Scene};
-use reload::Debounce;
+use reload::{Change, Debounce};
 use shell::{Hooks, ShellWindow, Volume, Volumes};
 
 /// The fake overrides file the shell scenes open with: a Frame density inset, and the bar's
@@ -83,9 +92,10 @@ color.border_base = "#7aa2f7"
 color.bg_deep = "#16161e"
 "##;
 
-/// [`FILE`] with a row that has a problem: it doesn't apply, and the rest still does.
+/// [`FILE`] edited: a wider inset, and a row that has a problem, which doesn't apply while the
+/// rest still does.
 pub const FILE_BROKEN: &str = r##"# The gallery's fake overrides.toml: the page never reads a real file.
-frame.inset = 3
+frame.inset = 4
 color.text_base = "nope"
 
 [light]
@@ -106,7 +116,7 @@ pub enum Mode {
     /// One shell window.
     #[default]
     Shell,
-    /// Five headers, one per window state.
+    /// Four headers, one per window state that draws differently.
     HeaderStates,
 }
 
@@ -125,6 +135,8 @@ pub struct Demo {
     pub edited: bool,
     /// The volumes were asked for; the next poll times the fake listing.
     pub volumes_asked: bool,
+    /// The fake GLib bridge didn't start, with why: a listing fails at once.
+    pub no_bridge: Option<&'static str>,
     pub volumes_due: Option<f64>,
 }
 
@@ -215,7 +227,8 @@ pub const SCENES: &[Scene] = &[
     }),
 ];
 
-/// Scenes for review with `--scene` only: the dialog's other states.
+/// Scenes for review with `--scene` only: the dialog's other states, and a shell whose bridge
+/// didn't start.
 pub const REVIEW: &[Scene] = &[
     ("x1-volumes-loading-light", |g| {
         volumes(g, false, Volumes::Loading)
@@ -231,7 +244,15 @@ pub const REVIEW: &[Scene] = &[
     }),
     ("x1-volumes-failed-light", |g| volumes(g, false, failed())),
     ("x1-volumes-failed-dark", |g| volumes(g, true, failed())),
+    ("x1-shell-no-bridge-light", |g| no_bridge(g, false)),
+    ("x1-shell-no-bridge-dark", |g| no_bridge(g, true)),
 ];
+
+/// A shell whose GLib bridge didn't start.
+fn no_bridge(g: &mut Gallery, dark: bool) {
+    open(g, dark, Mode::Shell);
+    g.x1.no_bridge = Some("the GLib thread couldn't start");
+}
 
 fn failed() -> Volumes {
     Volumes::Failed("No GLib bridge: the GLib thread couldn't start".into())
@@ -249,9 +270,17 @@ fn on_action(g: &mut Gallery, action: WindowAction, _: &mut Tx) {
     }
 }
 
+/// As `examples/shell`'s controller answers: a listing on the bridge, or the bridge's failure
+/// at once.
 fn on_volumes(g: &mut Gallery) {
-    g.x1.window.volumes = Volumes::Loading;
-    g.x1.volumes_asked = true;
+    let d = &mut g.x1;
+    match d.no_bridge {
+        Some(why) => d.window.volumes = Volumes::Failed(format!("No GLib bridge: {why}")),
+        None => {
+            d.window.volumes = Volumes::Loading;
+            d.volumes_asked = true;
+        }
+    }
 }
 
 const HOOKS: Hooks<Gallery> = Hooks {
@@ -274,7 +303,7 @@ pub fn view(g: &Gallery, cx: &mut Cx<Gallery>) -> El {
     }
 }
 
-/// The five header states, each under a caption, each with its own keys.
+/// The header states that draw differently, each under a caption, each with its own keys.
 fn header_states(g: &Gallery, cx: &mut Cx<Gallery>) -> El {
     let look = g.look();
     let k = &look.kit;
@@ -298,15 +327,6 @@ fn header_states(g: &Gallery, cx: &mut Cx<Gallery>) -> El {
                 can_minimize: Some(false),
                 can_maximize: None,
                 active: true,
-            },
-        ),
-        (
-            "backdrop",
-            "A window without focus",
-            all,
-            WindowChrome {
-                active: false,
-                ..x11(false)
             },
         ),
     ];
@@ -366,6 +386,11 @@ pub fn on_key(g: &mut Gallery, key: &KeyEvent, tx: &mut Tx) -> bool {
             d.file = None;
             d.edited = true;
         }
+        "t" => d.edited = true,
+        "n" => {
+            d.file = Some("");
+            d.edited = true;
+        }
         "s" => {
             let desktop = &mut d.window.desktop;
             desktop.text_scale = if desktop.text_scale == 1.0 { 1.25 } else { 1.0 };
@@ -398,11 +423,20 @@ pub fn poll(g: &mut Gallery, t: f64, tx: &mut Tx) -> bool {
     }
     if d.debounce.take_due(t) {
         let (overrides, present) = reload::read(d.file.map(str::as_bytes));
-        let reloads = d.window.overrides.reloads + 1;
-        d.window.overrides = reload::status(&overrides, present, reloads);
-        d.overrides = overrides;
-        relook(g, tx);
-        changed = true;
+        let status = &mut d.window.overrides;
+        match Change::of(&d.overrides, status.present, &overrides, present) {
+            Change::Nothing => {}
+            Change::Presence => {
+                status.present = present;
+                changed = true;
+            }
+            Change::Look => {
+                *status = reload::status(&overrides, present, status.reloads + 1);
+                d.overrides = overrides;
+                relook(g, tx);
+                changed = true;
+            }
+        }
     }
     let d = &mut g.x1;
     if std::mem::take(&mut d.volumes_asked) {

@@ -1,6 +1,6 @@
 {
   "bullets": [
-    "app/window: Minimize minimizes the window and Close closes it"
+    "app/window: Minimize minimizes the window and Close closes it (the header's half: the host receives the action; the window's response is a hand test)"
   ],
   "scene": "x1-shell-dark",
   "events": [

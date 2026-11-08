@@ -1,6 +1,6 @@
 use strata_kit::overrides::Overrides;
 
-use super::reload::{Debounce, SETTLE};
+use super::reload::{Change, Debounce, SETTLE};
 use super::{FILE, FILE_BROKEN};
 
 #[test]
@@ -31,4 +31,23 @@ fn changes_less_than_the_settle_apart_read_once_after_the_last() {
     assert!(d.take_due(3.1));
     d.changed(3.2);
     assert!(d.take_due(3.3));
+}
+
+#[test]
+fn a_read_changes_the_look_only_when_the_overrides_differ() {
+    let file = Overrides::from_bytes(FILE.as_bytes());
+    let none = Overrides::default();
+    assert_eq!(
+        Change::of(&file, true, &file.clone(), true),
+        Change::Nothing
+    );
+    assert_eq!(
+        Change::of(&none, false, &none, true),
+        Change::Presence,
+        "an empty file appears"
+    );
+    assert_eq!(Change::of(&none, true, &none, false), Change::Presence);
+    assert_eq!(Change::of(&file, true, &none, false), Change::Look);
+    let broken = Overrides::from_bytes(FILE_BROKEN.as_bytes());
+    assert_eq!(Change::of(&file, true, &broken, true), Change::Look);
 }

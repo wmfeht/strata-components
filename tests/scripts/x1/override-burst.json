@@ -11,7 +11,12 @@
       "name": "e"
     },
     {
-      "t": 0.24,
+      "t": 0.23,
+      "type": "key",
+      "name": "e"
+    },
+    {
+      "t": 0.26,
       "type": "key",
       "name": "e"
     }
@@ -23,7 +28,7 @@
     },
     {
       "key": "x1-overrides",
-      "name": "Overrides: applied"
+      "name": "Overrides: applied, 1 row with a problem · bar inset 4 pt"
     }
   ]
 }

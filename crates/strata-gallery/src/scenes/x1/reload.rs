@@ -72,6 +72,31 @@ pub fn read(bytes: Option<&[u8]>) -> (Overrides, bool) {
     }
 }
 
+/// What a read of the file changes, against what the host has: K4's host rule is that a read
+/// that finds the same overrides changes nothing (`strata_kit::overrides`, "The host").
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Change {
+    /// The same overrides, and the file there or not as before: nothing to do.
+    Nothing,
+    /// The same overrides (none), but the file appeared or went: only the readout changes, as
+    /// an empty file and no file apply alike.
+    Presence,
+    /// Other overrides: rebuild the look and move to it, as a theme switch does.
+    Look,
+}
+
+impl Change {
+    pub fn of(current: &Overrides, was_present: bool, next: &Overrides, present: bool) -> Change {
+        if next != current {
+            Change::Look
+        } else if present != was_present {
+            Change::Presence
+        } else {
+            Change::Nothing
+        }
+    }
+}
+
 /// The readout's status after a read.
 pub fn status(overrides: &Overrides, present: bool, reloads: u32) -> OverridesStatus {
     OverridesStatus {

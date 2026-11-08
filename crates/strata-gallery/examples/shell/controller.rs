@@ -13,13 +13,13 @@ use std::time::Duration;
 use gio::prelude::*;
 use rune::{App, AppHandle, AppSpec, Cx, El, Tx, col};
 use serde_json::json;
-use strata_gallery::scenes::x1::reload::{self, Debounce};
+use strata_gallery::scenes::x1::reload::{self, Change, Debounce};
 use strata_gallery::scenes::x1::shell::{Desktop, OverridesStatus, Volume, Volumes};
 use strata_kit::look::Look;
 use strata_kit::overrides::Overrides;
 use strata_kit::theme::{DEFAULT_ID, Theme, bundled_theme};
 use strata_platform::csd::{Frame, Policy};
-use strata_platform::glib_bridge::{GlibThread, Keep, Signal, Task};
+use strata_platform::glib_bridge::{GlibThread, Keep, Signal, Task, TaskState};
 use strata_platform::settings::{self, DesktopSettings, Event as SettingsEvent};
 use strata_platform::single_instance::{
     AppId, Claim, CommandLine, Event, Launch, Options as ClaimOptions, Primary, claim,
@@ -148,7 +148,7 @@ pub fn run(options: Options) -> i32 {
 
     // Read the file once before any window opens, so the first frame has its look.
     let first = state.path.as_deref().map(read_now);
-    state.apply_read(first.unwrap_or(Ok(None)), 0);
+    state.first_read(first.unwrap_or(Ok(None)));
 
     let wake = handle.clone();
     match GlibThread::start(Arc::new(move || wake.wake())) {
@@ -232,7 +232,10 @@ fn on_event(c: &mut Controller, event: Event, _: &mut Tx) {
 /// `browser/navigation/startup-arguments`: each path opens its own window, at launch and
 /// when already running; the last takes the launch's activation token, so it ends focused.
 fn on_launch(c: &mut Controller, cmd: CommandLine) {
-    let paths = args::paths(cmd.arguments());
+    let args::LaunchArgs {
+        paths,
+        startup_only,
+    } = args::launch(cmd.arguments());
     let token = cmd.activation().token().map(str::to_owned);
     log(
         "launch",
@@ -242,6 +245,14 @@ fn on_launch(c: &mut Controller, cmd: CommandLine) {
             "token": token.is_some(),
         }),
     );
+    // A running shell keeps the theme, file and frame it started with.
+    if cmd.is_remote() && !startup_only.is_empty() {
+        let flags = startup_only.join(", ");
+        log("launch", json!({ "ignored": startup_only }));
+        cmd.print_err(&format!(
+            "shell: {flags} apply only when the shell starts; the running one keeps its own\n"
+        ));
+    }
     let cwd = cmd.cwd().map(Path::to_path_buf);
     let newest = windows().last().map(|(_, h)| h.clone());
     match (paths.is_empty(), newest) {
@@ -257,9 +268,11 @@ fn on_launch(c: &mut Controller, cmd: CommandLine) {
         (false, _) => {
             let last = paths.len() - 1;
             for (i, path) in paths.iter().enumerate() {
+                // A URI goes through untouched; a path is resolved against the launch's
+                // working directory.
                 let full = match &cwd {
-                    Some(cwd) => cwd.join(path),
-                    None => PathBuf::from(path),
+                    Some(cwd) if !args::is_uri(path) => cwd.join(path),
+                    _ => PathBuf::from(path),
                 };
                 let token = if i == last { token.as_deref() } else { None };
                 window::open(c, args::shown(full.as_os_str()), token);
@@ -288,9 +301,7 @@ fn poll(c: &mut Controller, t: f64, tx: &mut Tx) -> bool {
     }
     if let Some(read) = c.reading.as_ref().and_then(Task::take) {
         c.reading = None;
-        let reloads = c.status.reloads + 1;
-        c.apply_read(read, reloads);
-        c.send_look();
+        c.reread(read);
     }
     if c.mount_changes
         .as_ref()
@@ -302,18 +313,35 @@ fn poll(c: &mut Controller, t: f64, tx: &mut Tx) -> bool {
         c.listing = None;
         log("volumes", json!({ "count": list.len() }));
         c.mounts = Volumes::Listed(list);
-        let mounts = c.mounts.clone();
-        broadcast(move |w, _| w.shell.volumes = mounts.clone());
+        c.send_mounts();
+    } else if c
+        .listing
+        .as_ref()
+        .is_some_and(|task| task.state() == TaskState::Stopped)
+    {
+        // The future panicked or the bridge stopped: it will never land.
+        c.listing = None;
+        log("volumes", json!({ "error": "the listing stopped" }));
+        c.mounts = Volumes::Failed("The volume listing stopped before it finished".into());
+        c.send_mounts();
     }
     false
 }
 
 impl Controller {
     /// Lists the mounted volumes again; the listing reaches every window.
+    /// Without a bridge every window gets the failure at once, so no dialog waits on a listing
+    /// that can never come.
     pub fn list_volumes(&mut self) {
-        if let Some(bridge) = &self.bridge {
-            self.listing = Some(list_mounts(bridge));
+        match &self.bridge {
+            Some(bridge) => self.listing = Some(list_mounts(bridge)),
+            None => self.send_mounts(),
         }
+    }
+
+    fn send_mounts(&self) {
+        let mounts = self.mounts.clone();
+        broadcast(move |w, _| w.shell.volumes = mounts.clone());
     }
 
     fn read_again(&mut self) {
@@ -329,20 +357,35 @@ impl Controller {
         }));
     }
 
-    /// Takes a read of the file: no file or an unreadable one is no overrides, which restores
-    /// the theme's look.
-    fn apply_read(&mut self, read: Read, reloads: u32) {
-        let bytes = match read {
-            Ok(bytes) => bytes,
-            Err(why) => {
+    /// The first read, before any window opens: whatever it finds is the look.
+    fn first_read(&mut self, read: Read) {
+        let (overrides, present) = parse(read);
+        self.take(overrides, present, 0);
+    }
+
+    /// A read after a change to the file. K4's host rule: the same overrides change nothing,
+    /// and the same overrides with the file there or gone only change the readout.
+    fn reread(&mut self, read: Read) {
+        let (overrides, present) = parse(read);
+        match Change::of(&self.overrides, self.status.present, &overrides, present) {
+            Change::Nothing => {}
+            Change::Presence => {
+                self.status.present = present;
                 log(
                     "overrides",
-                    json!({ "error": format!("cannot read overrides file: {why}") }),
+                    json!({ "present": present, "reloads": self.status.reloads }),
                 );
-                None
+                let status = self.status.clone();
+                broadcast(move |w, _| w.shell.overrides = status.clone());
             }
-        };
-        let (overrides, present) = reload::read(bytes.as_deref());
+            Change::Look => {
+                self.take(overrides, present, self.status.reloads + 1);
+                self.send_look();
+            }
+        }
+    }
+
+    fn take(&mut self, overrides: Overrides, present: bool, reloads: u32) {
         for e in overrides.errors() {
             log("overrides", json!({ "problem": e.to_string() }));
         }
@@ -402,6 +445,22 @@ pub fn broadcast(f: impl Fn(&mut Window, &mut Tx) + Clone + Send + 'static) {
     }
 }
 
+/// A read's overrides and whether the file was there: no file or an unreadable one is no
+/// overrides, which restores the theme's look.
+fn parse(read: Read) -> (Overrides, bool) {
+    let bytes = match read {
+        Ok(bytes) => bytes,
+        Err(why) => {
+            log(
+                "overrides",
+                json!({ "error": format!("cannot read overrides file: {why}") }),
+            );
+            None
+        }
+    };
+    reload::read(bytes.as_deref())
+}
+
 /// The file's bytes now, before the loop runs.
 fn read_now(path: &Path) -> Read {
     match std::fs::read(path) {
@@ -446,15 +505,21 @@ fn watch_mounts(bridge: &GlibThread) -> Signal<()> {
 }
 
 /// Any change to the overrides file: created, written, moved over (an editor's save), deleted
-/// or made unreadable. The settle in `poll` turns a burst into one read.
+/// or made unreadable, plus one change when the monitor goes live. The settle in `poll` turns
+/// a burst into one read.
 fn watch_file(bridge: &GlibThread, path: PathBuf) -> Signal<()> {
     bridge.handle().listen(move |emit| {
         let file = gio::File::for_path(&path);
         match file.monitor_file(gio::FileMonitorFlags::WATCH_MOVES, gio::Cancellable::NONE) {
             Ok(monitor) => {
+                let live = emit.clone();
                 let changed = monitor.connect_changed(move |_, _, _, _| {
                     let _ = emit.emit(());
                 });
+                // The first read ran before the monitor existed, so a write in between went
+                // unseen: read once more now it's live, as Strata's theme watch does
+                // (`src/ui/theme/watch.rs`). A read that finds nothing new changes nothing.
+                let _ = live.emit(());
                 Keep::new().object(&monitor).handler(&monitor, changed)
             }
             Err(e) => {

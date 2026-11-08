@@ -2,7 +2,7 @@
 //! what the platform layer said, and the mounted-volumes dialog. The gallery page draws it on
 //! fake data; `examples/shell` draws it on the real platform shims, so both run the same view.
 
-use rune::{Cx, El, Tx, col, el, row, text};
+use rune::{Cx, El, Tx, col, row, text};
 use strata_components::dialog::StrataDialog;
 use strata_components::header::{
     self, Header, HeaderLabels, WindowAction, WindowButtons, WindowChrome,
@@ -172,7 +172,6 @@ pub fn bar<S: 'static>(
     if volumes {
         bar = bar.action(
             header::action(look, IconName::Drive, "Mounted volumes")
-                .expanded(w.volumes_open)
                 .on_press(move |s: &mut S| {
                     at(s).volumes_open = true;
                     (hooks.on_volumes)(s);
@@ -204,12 +203,15 @@ fn readout(w: &ShellWindow, look: &Look) -> El {
     };
     let d = &w.desktop;
     let o = &w.overrides;
+    // The values after "·" are read from the look itself, so a script sees whether a change
+    // reached it, not only that the host heard of one.
     let overrides = match (o.present, o.problems) {
         (false, _) => "Overrides: no file".to_owned(),
         (true, 0) => "Overrides: applied".to_owned(),
         (true, 1) => "Overrides: applied, 1 row with a problem".to_owned(),
         (true, n) => format!("Overrides: applied, {n} rows with a problem"),
     };
+    let overrides = format!("{overrides} · bar inset {} pt", look.frame.inset);
     let reloads = match o.reloads {
         1 => "Overrides reloaded 1 time".to_owned(),
         n => format!("Overrides reloaded {n} times"),
@@ -219,7 +221,10 @@ fn readout(w: &ShellWindow, look: &Look) -> El {
         .gap(look.space.xxs)
         .child(line(
             "x1-text-scale",
-            format!("Text scale {}", d.text_scale),
+            format!(
+                "Text scale {} · interface text {} pt",
+                d.text_scale, k.ty.ui.size
+            ),
         ))
         .child(line(
             "x1-double-click",
@@ -316,9 +321,8 @@ fn volumes_dialog<S: 'static>(
 }
 
 fn dialog_text(look: &Look, key: &str, content: String) -> El {
-    el().key(key.to_owned()).child(
-        text(content)
-            .font(look.kit.ty.ui)
-            .color(look.kit.c.text_muted),
-    )
+    text(content)
+        .key(key.to_owned())
+        .font(look.kit.ty.ui)
+        .color(look.kit.c.text_muted)
 }

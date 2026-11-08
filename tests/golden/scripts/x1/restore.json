@@ -61,15 +61,11 @@
                     {
                       "actions": [
                         "click",
-                        "focus",
-                        "expand"
+                        "focus"
                       ],
                       "key": "x1-mounts",
                       "name": "Mounted volumes",
-                      "role": "button",
-                      "states": [
-                        "collapsed"
-                      ]
+                      "role": "button"
                     },
                     {
                       "actions": [
@@ -111,7 +107,7 @@
                       "children": [
                         {
                           "key": "x1-text-scale",
-                          "name": "Text scale 1",
+                          "name": "Text scale 1 · interface text 13 pt",
                           "role": "label"
                         },
                         {
@@ -126,7 +122,7 @@
                         },
                         {
                           "key": "x1-overrides",
-                          "name": "Overrides: applied",
+                          "name": "Overrides: applied · bar inset 3 pt",
                           "role": "label"
                         },
                         {
@@ -148,7 +144,7 @@
                   "role": "group"
                 }
               ],
-              "key": "window-frame",
+              "key": "x1-frame",
               "role": "group"
             }
           ],

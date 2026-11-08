@@ -18,11 +18,6 @@
       "t": 0.4,
       "type": "key",
       "name": "3"
-    },
-    {
-      "t": 0.5,
-      "type": "key",
-      "name": "3"
     }
   ],
   "expect": [
@@ -36,8 +31,7 @@
     },
     {
       "key": "x1-header-close",
-      "role": "button",
-      "name": "Close window"
+      "absent": true
     }
   ]
 }

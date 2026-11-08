@@ -11,7 +11,7 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | W2b | merged | Look::fallback = Strata defaults via K2; slot tokens moved off w2-tokens goldens to w2-slots review scene; confirms row.sidebar 24 / row.palette 53 | 8c12ef3 |
 | W1d | merged | contract changes for C1c: UniformRows::page_step = rows that fit minus one (meaning changed, 10->9); Selection::toggle_in_run for Space inside v/V | 21f28e7 |
 | C1f | ready | contract addition for C4: Lines spans (group-header lines); also C1e round-3 SF1 + nits | |
-| W2c | coding (in K1 worktree, branch feat/w2c-look-fills) | contract additions for K1: Look::fill {muted, highlight}; LookParams keeps glow on/animations; no golden moves | |
+| W2c | review 1 (in K1 worktree, branch feat/w2c-look-fills) | contract additions for K1: Look::fill {muted, highlight}; LookParams keeps glow on/animations; no golden moves | |
 | K1b | waiting (after C10a, K1) | syntect Theme from strata-kit SCOPES; replaces C10a interim theme_from_look | |
 | G1 | merged | owner request: index is rune-kit Buttons grouped by lane; markers from registry (has golden scenes); index goldens hide markers, review scene shows them | 9b4bf5c |
 | W2 | merged | 1 review round + fixes; token-name review by K1/K2/C1e owners pending; PNG goldens on NVIDIA | 341e8cb |
@@ -38,7 +38,7 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | C7 | ready | | |
 | C8 | merged | 2 review rounds; own list on SidebarRow+Reorder; keyboard pin reorder left out (no bullet); hover-time folder check needs X2 binder; Rune drafts U18-U23; PNG goldens on NVIDIA | 6277a99 |
 | C9 | merged | 3 review rounds; own split + DrawerState; HostedPreview trait; focus via focus_return stubs (Rune Tx::focus draft); PNG goldens on NVIDIA | bad5d4c |
-| K1 | coding (on W2c) | catalogue copied from Strata (Tinted Theming MIT + LGSE MIT notices); toml dep; Look::fallback stays neutral; syntect theme split to K1b | |
+| K1 | review 1 (on W2c) | root typos.toml exception for a catalogue theme name (sanctioned); catalogue copied from Strata (Tinted Theming MIT + LGSE MIT notices); toml dep; Look::fallback stays neutral; syntect theme split to K1b | |
 | K2 | merged | 1 review round + fixes; Strata values at upstream/main 35ee677ab; font list arrives as data (Rune #114/U16); Switch/Button sizes are rune-kit gaps | db41ea7 |
 | K3 | ready | | |
 | K4 | ready | | |

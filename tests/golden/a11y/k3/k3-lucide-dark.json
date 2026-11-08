@@ -257,6 +257,10 @@
               "role": "label"
             },
             {
+              "name": "kit-circle-question-mark",
+              "role": "label"
+            },
+            {
               "name": "kit-clipboard",
               "role": "label"
             },
@@ -266,10 +270,6 @@
             },
             {
               "name": "kit-grip-vertical",
-              "role": "label"
-            },
-            {
-              "name": "kit-help",
               "role": "label"
             },
             {

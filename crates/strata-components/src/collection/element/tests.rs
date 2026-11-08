@@ -55,6 +55,8 @@ struct Host {
     dropped: Vec<Option<EntryId>>,
     /// The groups the collection draws in (none by default).
     groups: Groups,
+    /// What `on_press` and a recording controller heard, in order.
+    order: Rc<RefCell<Vec<String>>>,
 }
 
 impl Host {
@@ -80,6 +82,7 @@ impl Host {
             drops: false,
             dropped: Vec::new(),
             groups: Groups::default(),
+            order: Rc::default(),
         }
     }
 }
@@ -159,6 +162,11 @@ fn collection(s: &Host) -> Collection<Host> {
     .on_cursor(|s: &mut Host, id, _| s.cursors.push(id))
     .on_selection(|s: &mut Host, _| s.selections += 1)
     .groups(|s: &Host| &s.groups)
+    .on_press(|s: &mut Host, input, _| {
+        s.order
+            .borrow_mut()
+            .push(format!("press {:?} {:?}", input.button, input.hit.index));
+    })
     .on_intent(|s: &mut Host, intent, _| {
         s.intents.push(format!("{intent:?}"));
         s.last_intent = Some(intent);
@@ -2405,4 +2413,53 @@ fn a_drop_over_the_stuck_header_goes_to_the_folder_shown() {
     rt.drop_files(vec!["/tmp/a.txt".into()], Some((at.0 + 1.0, at.1)));
     rt.frame(1.0 / 60.0);
     assert_eq!(rt.state.dropped, [None, Some(id(10))]);
+}
+
+/// Records each press it hears in the host's order log, and takes it, changing nothing.
+struct Hears(Rc<RefCell<Vec<String>>>);
+
+impl PointerController for Hears {
+    fn pointer(&mut self, input: &PointerInput, _cx: &mut Ctx<'_>) -> Flow {
+        if input.phase == PointerPhase::Down {
+            self.0.borrow_mut().push("controller".to_owned());
+        }
+        Flow::Handled
+    }
+}
+
+#[test]
+fn every_press_reaches_on_press_before_the_controllers() {
+    let mut host = Host::new(5);
+    host.parts = true;
+    host.coll.controllers.pointer = Some(Box::new(Hears(host.order.clone())));
+    let mut rt = runtime(host);
+    // Ctrl on the empty space below the rows: nothing changes.
+    let vp = rt.state.coll.viewport();
+    rt.physical_input(rune::PhysicalInput::Modifiers(Mods {
+        ctrl: true,
+        ..Mods::default()
+    }));
+    click_at(&mut rt, vp.x + 40.0, vp.y + vp.h - 10.0);
+    rt.physical_input(rune::PhysicalInput::Modifiers(Mods::default()));
+    let [x, y, w, h] = element(&rt, "row-2").unwrap().visible;
+    rt.secondary_down(x + w / 2.0, y + h / 2.0);
+    rt.secondary_up(x + w / 2.0, y + h / 2.0);
+    rt.frame(1.0 / 60.0);
+    rt.button_down(x + w / 2.0, y + h / 2.0, rune::PointerButton::Middle);
+    rt.button_up(x + w / 2.0, y + h / 2.0, rune::PointerButton::Middle);
+    rt.frame(1.0 / 60.0);
+    // The part above the viewport isn't the collection's.
+    click(&mut rt, "head");
+    assert!(rt.state.coll.selection.is_empty());
+    assert_eq!(
+        *rt.state.order.borrow(),
+        [
+            "press Primary None",
+            "controller",
+            "press Secondary Some(2)",
+            "controller",
+            "press Middle Some(2)",
+            "controller",
+        ]
+    );
 }

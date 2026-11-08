@@ -167,6 +167,7 @@ type VisibleFn<S> = Rc<dyn Fn(&mut S, Range<usize>) -> bool>;
 type AnnounceFn<S> = Rc<dyn Fn(&S, &Announcement) -> String>;
 type GroupsFn<S> = Rc<dyn Fn(&S) -> &Groups>;
 type GroupStyleFn = Rc<dyn Fn(&Look) -> GroupStyle>;
+type PressFn<S> = Rc<dyn Fn(&mut S, &PointerInput, &mut Tx)>;
 
 /// What [`Collection`] was built with, shared by its rows and handlers.
 pub(crate) struct Config<S> {
@@ -196,6 +197,7 @@ pub(crate) struct Config<S> {
     overlay: Option<PartFn<S>>,
     empty: Option<PartFn<S>>,
     on_intent: Option<IntentFn<S>>,
+    on_press: Option<PressFn<S>>,
     on_cursor: Option<CursorFn<S>>,
     on_selection: Option<SelectionFn<S>>,
     on_visible: Option<VisibleFn<S>>,
@@ -269,6 +271,7 @@ impl<S: 'static> Collection<S> {
                 overlay: None,
                 empty: None,
                 on_intent: None,
+                on_press: None,
                 on_cursor: None,
                 on_selection: None,
                 on_visible: None,
@@ -424,6 +427,16 @@ impl<S: 'static> Collection<S> {
     /// Hears the controllers' intents (open, rename, drag, context menu).
     pub fn on_intent(mut self, f: impl Fn(&mut S, Intent, &mut Tx) + 'static) -> Self {
         self.cfg.on_intent = Some(Rc::new(f));
+        self
+    }
+
+    /// Hears every press the collection takes, before its controllers, whether or not anything
+    /// changes: primary and middle presses through its drag handler, secondary ones through
+    /// its menu press, inside the viewport (a header line and the stuck header included, not
+    /// a part above it). Columns (C2) cancels a slow-click rename pending in another column
+    /// here, as Strata's `ViewState::cancel_click_rename` does.
+    pub fn on_press(mut self, f: impl Fn(&mut S, &PointerInput, &mut Tx) + 'static) -> Self {
+        self.cfg.on_press = Some(Rc::new(f));
         self
     }
 

@@ -348,6 +348,11 @@ pub(super) fn on_drag<S: 'static>(cfg: &Rc<Config<S>>, s: &mut S, d: &mut Drag, 
         cancelled: d.cancelled(),
         now: cfg.now(s),
     };
+    if phase == PointerPhase::Down
+        && let Some(f) = &cfg.on_press
+    {
+        f(s, &input, tx);
+    }
     let shows = route_pointer(cfg, s, tx, &input);
     // A move that changed nothing the view reads commits nothing, an open band's included: a
     // marquee that redraws says so with `Ctx::repaint`.
@@ -383,6 +388,9 @@ pub(super) fn on_secondary<S: 'static>(
         cancelled: false,
         now: cfg.now(s),
     };
+    if let Some(f) = &cfg.on_press {
+        f(s, &input, tx);
+    }
     route_pointer(cfg, s, tx, &input);
 }
 

@@ -18,7 +18,7 @@
                 },
                 {
                   "key": "c4-intent",
-                  "name": "Dragging 1 items",
+                  "name": "",
                   "role": "label"
                 },
                 {
@@ -48,7 +48,7 @@
                 },
                 {
                   "key": "c4-widths",
-                  "name": "Widths: default",
+                  "name": "Widths: size 130",
                   "role": "label"
                 },
                 {
@@ -64,7 +64,6 @@
                         "context-menu",
                         "scroll-into-view"
                       ],
-                      "activeDescendant": "row-8",
                       "children": [
                         {
                           "actions": [
@@ -396,10 +395,7 @@
                                   "key": "row-8",
                                   "name": "backup.tar.gz",
                                   "position": 4,
-                                  "role": "row",
-                                  "states": [
-                                    "selected"
-                                  ]
+                                  "role": "row"
                                 },
                                 {
                                   "actions": [

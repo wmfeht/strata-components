@@ -18,7 +18,7 @@
                 },
                 {
                   "key": "c4-intent",
-                  "name": "",
+                  "name": "Dragging 3 items",
                   "role": "label"
                 },
                 {
@@ -64,7 +64,7 @@
                         "context-menu",
                         "scroll-into-view"
                       ],
-                      "activeDescendant": "row-3",
+                      "activeDescendant": "row-8",
                       "children": [
                         {
                           "actions": [
@@ -190,10 +190,7 @@
                                   "key": "row-3",
                                   "name": "Music",
                                   "position": 1,
-                                  "role": "row",
-                                  "states": [
-                                    "selected"
-                                  ]
+                                  "role": "row"
                                 },
                                 {
                                   "actions": [
@@ -228,10 +225,7 @@
                                   "key": "row-1",
                                   "name": "Projects",
                                   "position": 2,
-                                  "role": "row",
-                                  "states": [
-                                    "selected"
-                                  ]
+                                  "role": "row"
                                 },
                                 {
                                   "actions": [
@@ -266,10 +260,7 @@
                                   "key": "row-2",
                                   "name": "Receipts",
                                   "position": 3,
-                                  "role": "row",
-                                  "states": [
-                                    "selected"
-                                  ]
+                                  "role": "row"
                                 },
                                 {
                                   "actions": [
@@ -342,7 +333,10 @@
                                   "key": "row-5",
                                   "name": "budget.ods",
                                   "position": 5,
-                                  "role": "row"
+                                  "role": "row",
+                                  "states": [
+                                    "selected"
+                                  ]
                                 },
                                 {
                                   "actions": [
@@ -377,7 +371,10 @@
                                   "key": "row-7",
                                   "name": "holiday.jpg",
                                   "position": 6,
-                                  "role": "row"
+                                  "role": "row",
+                                  "states": [
+                                    "selected"
+                                  ]
                                 },
                                 {
                                   "actions": [
@@ -412,7 +409,10 @@
                                   "key": "row-9",
                                   "name": "letter.odt",
                                   "position": 7,
-                                  "role": "row"
+                                  "role": "row",
+                                  "states": [
+                                    "selected"
+                                  ]
                                 },
                                 {
                                   "actions": [

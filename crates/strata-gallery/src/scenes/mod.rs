@@ -47,6 +47,7 @@ pub mod k3;
 pub mod k4;
 pub mod w1;
 pub mod w2;
+pub mod x1;
 
 /// One gallery page.
 pub struct Page {
@@ -405,6 +406,13 @@ pub const PAGES: &[Page] = &[
         "C26",
         "MountPrompts",
         "phase-2-composites/C26-mount-prompts.md"
+    ),
+    page!(
+        x1,
+        Chrome,
+        "X1",
+        "Shell demo",
+        "phase-2-composites/X1-shell-demo.md"
     ),
 ];
 

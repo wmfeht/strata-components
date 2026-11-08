@@ -34,5 +34,5 @@ macro_rules! pages {
 
 pages!(
     gallery, w1, w2, k1, k2, k3, k4, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c10a, c11, c12, c13,
-    c14a, c14b, c15, c16, c17, c18, c19, c20a, c20b, c20c, c20d, c21, c22, c23, c24, c25, c26,
+    c14a, c14b, c15, c16, c17, c18, c19, c20a, c20b, c20c, c20d, c21, c22, c23, c24, c25, c26, x1,
 );

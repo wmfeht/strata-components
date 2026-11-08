@@ -81,6 +81,7 @@ pub struct Gallery {
     pub c24: scenes::c24::Demo,
     pub c25: scenes::c25::Demo,
     pub c26: scenes::c26::Demo,
+    pub x1: scenes::x1::Demo,
 }
 
 impl Gallery {

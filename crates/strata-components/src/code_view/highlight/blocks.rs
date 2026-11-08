@@ -11,11 +11,13 @@
 //! last two builds (between bumps) is on screen, or was a moment ago, and is never evicted;
 //! the others go, least recently asked first, down to [`CACHE_BYTES`]. A miss never evicts
 //! a block the current build may still ask for.
+//!
+//! Blocks are keyed by a hash with the pool's own random key. Two blocks with one key still
+//! take turns: one asked for since the last bump keeps the key, and the other draws plain.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
+use std::hash::{BuildHasher, RandomState};
 use std::ops::Range;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -98,12 +100,11 @@ struct Blocks {
     palette: Vec<Option<Color>>,
     epoch: u64,
     wait: Option<Duration>,
-}
-
-fn key_of(lang: &str, code: &str) -> u64 {
-    let mut h = DefaultHasher::new();
-    (lang, code).hash(&mut h);
-    h.finish()
+    /// The pool's own random hash key, so no document can be crafted to collide its blocks.
+    hasher: RandomState,
+    /// Tests force keys (to collide them) with this.
+    #[cfg(test)]
+    key_fn: Option<fn(&str, &str) -> u64>,
 }
 
 impl CodeBlocks {
@@ -126,6 +127,9 @@ impl CodeBlocks {
                 palette: Vec::new(),
                 epoch: 0,
                 wait: None,
+                hasher: RandomState::new(),
+                #[cfg(test)]
+                key_fn: None,
             })),
         }
     }
@@ -153,6 +157,12 @@ impl CodeBlocks {
         self.state.borrow_mut().highlight(lang, code)
     }
 
+    /// Keys blocks with `f` instead of the hash, so a test can make two blocks share a key.
+    #[cfg(test)]
+    pub(crate) fn key_with(&self, f: fn(&str, &str) -> u64) {
+        self.state.borrow_mut().key_fn = Some(f);
+    }
+
     #[cfg(test)]
     pub(crate) fn cached_bytes(&self) -> usize {
         self.state.borrow().bytes()
@@ -164,7 +174,7 @@ impl CodeBlocks {
         let s = self.state.borrow();
         let code = &code[..coloured_len(code)];
         s.entries
-            .get(&key_of(lang, code))
+            .get(&s.key(lang, code))
             .is_some_and(|e| *e.code == *code && e.tokens.is_some())
     }
 
@@ -226,6 +236,14 @@ impl CodeBlocks {
 }
 
 impl Blocks {
+    fn key(&self, lang: &str, code: &str) -> u64 {
+        #[cfg(test)]
+        if let Some(f) = self.key_fn {
+            return f(lang, code);
+        }
+        self.hasher.hash_one((lang, code))
+    }
+
     fn pending(&self) -> bool {
         self.tx.is_some() && self.entries.values().any(|e| e.tokens.is_none())
     }
@@ -272,7 +290,7 @@ impl Blocks {
             return Some(Vec::new());
         }
         self.tick += 1;
-        let key = key_of(lang, code);
+        let key = self.key(lang, code);
         match self.entries.get_mut(&key) {
             Some(e) if *e.lang == *lang && *e.code == *code => e.used = self.tick,
             _ => {
@@ -298,9 +316,20 @@ impl Blocks {
 
     /// Asks the thread for a block and keeps a pending entry. False, and nothing asked, when
     /// the block would take the cache past [`CACHE_CEILING`] even without the blocks not
-    /// asked for since the last bump, or there is no thread: it is then plain.
+    /// asked for since the last bump, when another block holds its key and was asked for since
+    /// then, or there is no thread: it is then plain.
     fn request(&mut self, key: u64, lang: &str, code: &str) -> bool {
-        // A hash collision replaces the other block: count only the one kept, and drop its job.
+        // A hash collision. The other block, if the current build asked for it, keeps the key
+        // and this one draws plain: replacing it would ask again on every landing, and two
+        // such blocks on screen would never come to rest. Otherwise it gives way: count only
+        // the one kept, and drop its job.
+        if self
+            .entries
+            .get(&key)
+            .is_some_and(|e| e.used > self.build_start)
+        {
+            return false;
+        }
         if let Some(old) = self.entries.remove(&key) {
             self.bytes = self.bytes.saturating_sub(old.code.len());
             if old.tokens.is_none() {

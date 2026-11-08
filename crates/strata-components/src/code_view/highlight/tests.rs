@@ -1881,3 +1881,62 @@ fn a_failed_text_is_opened_again_on_the_next_edit() {
     );
     assert!(doc.settle(Duration::ZERO));
 }
+
+/// Every block under one key: what a crafted document gets against a fixed hash key.
+fn one_key(_: &str, _: &str) -> u64 {
+    7
+}
+
+#[test]
+fn two_blocks_with_one_key_on_screen_come_to_rest() {
+    // Review 5, SF1: each asked for the other's entry, so every landing replaced the other
+    // and asked again, and a host rebuilding on `poll` never came to rest.
+    let mut pump = Pump::new(light());
+    let mut blocks = pump.blocks();
+    blocks.key_with(one_key);
+    let codes = ["fn a() {}\n".to_string(), "fn b() {}\n".to_string()];
+    let (builds, _) = build_until_rest(&mut pump, &mut blocks, &[&codes]);
+    assert!(builds <= 3, "builds until rest: {builds}");
+    assert!(
+        pump.blocks_asked <= 2,
+        "blocks asked: {}",
+        pump.blocks_asked
+    );
+    // The first is coloured; the one that lost the key draws plain rather than pending.
+    assert!(blocks.has_landed("rust", &codes[0]));
+    assert_eq!(blocks.highlight(Some("rust"), &codes[1]), Some(Vec::new()));
+}
+
+/// Blocks keyed by their first byte, so `a…` blocks share a key and `c…` ones another.
+fn first_byte_key(_: &str, code: &str) -> u64 {
+    u64::from(code.as_bytes()[0])
+}
+
+#[test]
+fn a_reply_for_a_block_that_lost_its_key_is_ignored() {
+    // Review 5, SF4: the reply carries the code's `Arc`, which tells a stale reply apart.
+    let mut pump = Pump::new(light());
+    let mut blocks = pump.blocks();
+    blocks.key_with(first_byte_key);
+    let (a, b, c) = ("a_one(1);\n", "a_two(\"s\");\n", "c();\n");
+    // One build asks for `c` and `a`; `c` lands and bumps the epoch, then `a` finishes too,
+    // its reply still on the channel.
+    blocks.highlight(Some("rust"), c);
+    blocks.highlight(Some("rust"), a);
+    pump.requests();
+    pump.step();
+    assert!(blocks.poll(), "c landed");
+    pump.step();
+    // The next build asks for `b` only: `a` wasn't asked since the bump, so `b` takes its key.
+    assert_eq!(blocks.highlight(Some("rust"), b), None);
+    blocks.poll();
+    assert_eq!(
+        blocks.highlight(Some("rust"), b),
+        None,
+        "b took a's colours from a's late reply"
+    );
+    pump.run();
+    blocks.poll();
+    let got = blocks.highlight(Some("rust"), b).expect("b landed");
+    assert_eq!(highlight_runs(&got), block_reference("rust", b, &light()));
+}

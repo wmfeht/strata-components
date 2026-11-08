@@ -21,11 +21,14 @@ pub(super) const fn index(name: IconName) -> usize {
         IconName::Symlink => i::STRATA_KIT_LINK,
         IconName::Lock => i::STRATA_LOCK,
         IconName::Archive => i::STRATA_FILE_ARCHIVE,
+        // Strata draws a volume's current state, not the action: C8's Unlock action (on a
+        // locked volume) shows `Lock`, and its Lock action `Unlock`, as its Unpin shows the pin.
         IconName::Unlock => i::STRATA_LOCK_OPEN,
 
         // Places.
         IconName::Home => i::STRATA_HOUSE,
-        IconName::Desktop => i::STRATA_MONITOR,
+        // Strata's Desktop place is a plain folder (`src/ui/window/places.rs`).
+        IconName::Desktop => i::STRATA_FOLDER,
         IconName::Documents => i::STRATA_FILE_TEXT,
         IconName::Downloads => i::STRATA_DOWNLOAD,
         IconName::Music => i::STRATA_MUSIC_2,
@@ -42,7 +45,8 @@ pub(super) const fn index(name: IconName) -> usize {
         IconName::Phone => i::STRATA_SMARTPHONE,
         IconName::Eject => i::STRATA_EJECT,
 
-        // Pins and the trash: Strata's Unpin shows the pin, and its trash has one icon.
+        // Pins and the trash: Strata's Unpin shows the pin (the current state), and its trash
+        // has one icon.
         IconName::Pin => i::STRATA_PIN,
         IconName::Unpin => i::STRATA_PIN,
         IconName::Trash => i::STRATA_TRASH,
@@ -77,8 +81,9 @@ pub(super) const fn index(name: IconName) -> usize {
         IconName::Rename => i::STRATA_PENCIL,
         IconName::Open => i::STRATA_EXTERNAL_LINK,
         IconName::Wrap => i::STRATA_WRAP_TEXT,
-        IconName::Source => i::STRATA_CODE_XML,
-        IconName::Rendered => i::STRATA_EYE,
+        // C9's toggle, as Strata's `src/ui/preview/document.rs` draws it.
+        IconName::Source => i::STRATA_FILE_CODE,
+        IconName::Rendered => i::STRATA_FILE_TEXT,
         IconName::EyeOff => i::STRATA_EYE_OFF,
 
         // Views.
@@ -86,14 +91,17 @@ pub(super) const fn index(name: IconName) -> usize {
         IconName::ViewColumns => i::STRATA_COLUMNS,
         IconName::ViewIcons => i::STRATA_ICONS,
         IconName::Sidebar => i::STRATA_PANEL_LEFT_SYMBOLIC,
-        IconName::SortAscending => i::STRATA_ARROW_UP_NARROW_WIDE,
-        IconName::SortDescending => i::STRATA_ARROW_DOWN_WIDE_NARROW,
+        // List headings, as Strata's `src/ui/browser_modes/list_headings.rs` draws them.
+        IconName::SortAscending => i::STRATA_ARROW_UP,
+        IconName::SortDescending => i::STRATA_ARROW_DOWN,
 
         // Status.
         IconName::Info => i::STRATA_INFO,
         IconName::Warning => i::STRATA_TRIANGLE_ALERT,
-        IconName::Error => i::STRATA_CIRCLE_X,
-        IconName::Success => i::STRATA_CIRCLE_CHECK,
+        // Strata's dialogs (C15, `src/ui/modal/messages.rs`) and jobs (C16, `src/ui/jobs.rs`).
+        // Its circled check and cross are Settings-row status icons, not these.
+        IconName::Error => i::STRATA_X,
+        IconName::Success => i::STRATA_CHECK,
         IconName::Keyboard => i::STRATA_KEYBOARD,
         IconName::Help => i::STRATA_KIT_HELP,
         IconName::Clipboard => i::STRATA_KIT_CLIPBOARD,

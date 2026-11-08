@@ -76,7 +76,11 @@ mod k4 {
                 // What the stylesheet migrated to is what the page draws with.
                 let m = g.k4.migration.as_ref().expect("a migration scene");
                 assert_eq!(g.k4.overrides, Overrides::parse(&m.toml), "{name}");
-                assert_eq!(slots::collection::row_inset(&g.look), 12.0, "{name}");
+                assert_eq!(
+                    slots::sidebar::selected_fill(&g.look),
+                    hex("#ff9e6440"),
+                    "{name}"
+                );
                 assert_eq!(slots::sidebar::selected_icon(&g.look), hex("#ff9e64"));
             }
         }

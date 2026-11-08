@@ -393,7 +393,7 @@
                   "actions": [
                     "scroll-into-view"
                   ],
-                  "name": "CONVERTED: 5",
+                  "name": "CONVERTED: 2",
                   "role": "label"
                 },
                 {
@@ -435,7 +435,7 @@
                   "actions": [
                     "scroll-into-view"
                   ],
-                  "name": "[collection.row]",
+                  "name": "[sidebar.selected]",
                   "role": "label"
                 },
                 {
@@ -449,7 +449,7 @@
                   "actions": [
                     "scroll-into-view"
                   ],
-                  "name": "inset = 12 # style.css line 3",
+                  "name": "fill = \"#ff9e6440\" # style.css line 13",
                   "role": "label"
                 },
                 {
@@ -463,62 +463,6 @@
                   "actions": [
                     "scroll-into-view"
                   ],
-                  "name": "radius = 10 # style.css line 4",
-                  "role": "label"
-                },
-                {
-                  "actions": [
-                    "scroll-into-view"
-                  ],
-                  "name": "6",
-                  "role": "label"
-                },
-                {
-                  "actions": [
-                    "scroll-into-view"
-                  ],
-                  "name": "",
-                  "role": "label"
-                },
-                {
-                  "actions": [
-                    "scroll-into-view"
-                  ],
-                  "name": "7",
-                  "role": "label"
-                },
-                {
-                  "actions": [
-                    "scroll-into-view"
-                  ],
-                  "name": "[sidebar.selected]",
-                  "role": "label"
-                },
-                {
-                  "actions": [
-                    "scroll-into-view"
-                  ],
-                  "name": "8",
-                  "role": "label"
-                },
-                {
-                  "actions": [
-                    "scroll-into-view"
-                  ],
-                  "name": "fill = \"#ff9e6440\" # style.css line 13",
-                  "role": "label"
-                },
-                {
-                  "actions": [
-                    "scroll-into-view"
-                  ],
-                  "name": "9",
-                  "role": "label"
-                },
-                {
-                  "actions": [
-                    "scroll-into-view"
-                  ],
                   "name": "icon = \"#ff9e64\" # style.css line 18",
                   "role": "label"
                 },
@@ -526,56 +470,21 @@
                   "actions": [
                     "scroll-into-view"
                   ],
-                  "name": "10",
+                  "name": "NOT CONVERTED: 7",
                   "role": "label"
                 },
                 {
                   "actions": [
                     "scroll-into-view"
                   ],
-                  "name": "",
+                  "name": "line 3, column 3: `.file-list row` { margin: 1px 12px }: its token also styles elements this selector doesn't",
                   "role": "label"
                 },
                 {
                   "actions": [
                     "scroll-into-view"
                   ],
-                  "name": "11",
-                  "role": "label"
-                },
-                {
-                  "actions": [
-                    "scroll-into-view"
-                  ],
-                  "name": "[sidebar.hover]",
-                  "role": "label"
-                },
-                {
-                  "actions": [
-                    "scroll-into-view"
-                  ],
-                  "name": "12",
-                  "role": "label"
-                },
-                {
-                  "actions": [
-                    "scroll-into-view"
-                  ],
-                  "name": "fill = \"alpha(@color.bg_accent, 0.15)\" # style.css line 9",
-                  "role": "label"
-                },
-                {
-                  "actions": [
-                    "scroll-into-view"
-                  ],
-                  "name": "NOT CONVERTED: 5",
-                  "role": "label"
-                },
-                {
-                  "actions": [
-                    "scroll-into-view"
-                  ],
-                  "name": "line 3, column 3: `.file-list row` { margin: 1px 12px }: the top and bottom margins have no token; the sides converted",
+                  "name": "line 4, column 3: `.file-list row` { border-radius: 10px }: its token also styles elements this selector doesn't",
                   "role": "label"
                 },
                 {
@@ -583,6 +492,13 @@
                     "scroll-into-view"
                   ],
                   "name": "line 8, column 1: `.sidebar-device:hover`: no token stands for this selector",
+                  "role": "label"
+                },
+                {
+                  "actions": [
+                    "scroll-into-view"
+                  ],
+                  "name": "line 9, column 3: `.sidebar-row:hover` { background: alpha(@strata_accent, 0.15) }: its token also styles elements this selector doesn't",
                   "role": "label"
                 },
                 {
@@ -610,7 +526,7 @@
                   "actions": [
                     "scroll-into-view"
                   ],
-                  "name": "5 ROWS APPLY · 0 PROBLEMS",
+                  "name": "2 ROWS APPLY · 0 PROBLEMS",
                   "role": "label"
                 }
               ],
@@ -878,90 +794,6 @@
                         "scroll-into-view"
                       ],
                       "name": "SET FOR THIS APPEARANCE: THEME → OVERRIDE",
-                      "role": "label"
-                    },
-                    {
-                      "actions": [
-                        "scroll-into-view"
-                      ],
-                      "name": "collection.row.inset",
-                      "role": "label"
-                    },
-                    {
-                      "actions": [
-                        "scroll-into-view"
-                      ],
-                      "name": "5",
-                      "role": "label"
-                    },
-                    {
-                      "actions": [
-                        "scroll-into-view"
-                      ],
-                      "name": "→",
-                      "role": "label"
-                    },
-                    {
-                      "actions": [
-                        "scroll-into-view"
-                      ],
-                      "name": "12",
-                      "role": "label"
-                    },
-                    {
-                      "actions": [
-                        "scroll-into-view"
-                      ],
-                      "name": "collection.row.radius",
-                      "role": "label"
-                    },
-                    {
-                      "actions": [
-                        "scroll-into-view"
-                      ],
-                      "name": "3.6",
-                      "role": "label"
-                    },
-                    {
-                      "actions": [
-                        "scroll-into-view"
-                      ],
-                      "name": "→",
-                      "role": "label"
-                    },
-                    {
-                      "actions": [
-                        "scroll-into-view"
-                      ],
-                      "name": "10",
-                      "role": "label"
-                    },
-                    {
-                      "actions": [
-                        "scroll-into-view"
-                      ],
-                      "name": "sidebar.hover.fill",
-                      "role": "label"
-                    },
-                    {
-                      "actions": [
-                        "scroll-into-view"
-                      ],
-                      "name": "#1f2d381c",
-                      "role": "label"
-                    },
-                    {
-                      "actions": [
-                        "scroll-into-view"
-                      ],
-                      "name": "→",
-                      "role": "label"
-                    },
-                    {
-                      "actions": [
-                        "scroll-into-view"
-                      ],
-                      "name": "#007f9d26",
                       "role": "label"
                     },
                     {

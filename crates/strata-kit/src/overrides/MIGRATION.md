@@ -43,14 +43,19 @@ On first launch, Strata converts what of an existing `style.css` it can into
 `overrides.toml`, and shows the rules it couldn't convert once. It never changes or deletes
 `style.css`.
 
-A rule converts only where a token stands for exactly what it styled: plain `px` lengths and
-colours (literal ones, Strata's `@strata_*` colours and `alpha()` of either, which keep
-following the theme) on the file rows' margins and corner radius (`.file-list row`), and the
-sidebar's hover and current-row fills and current-row icon (`.sidebar-row:hover`,
-`.sidebar-row.active`, `.sidebar-row.active image`). Everything else stays in the notice,
-with its line: other selectors (GTK class names were never a stable interface), relative
-units, `shade()` and `mix()`, `!important`, at-rules, and `@define-color` (to change a theme colour, make a custom
-theme).
+A rule converts only where a token stands for exactly what it styled: the current sidebar
+row's fill and icon colour (`.sidebar-row.active` and `.sidebar-row.active image`), from a
+literal colour, one of Strata's `@strata_*` colours or `alpha()` of either (those keep
+following the theme). As in CSS, a later declaration wins: if it can't convert, the earlier
+one is dropped too. Everything else stays in the notice, with its line:
+
+- rules whose replacement would style more than the rule did: the file rows' margins and
+  radius (`.file-list row` styled Miller columns, folder peek and inline search, where the
+  row tokens style every view) and the sidebar's hover fill (`.sidebar-row:hover`; the token
+  also fills the section headings);
+- other selectors (GTK class names were never a stable interface), lengths, `shade()` and
+  `mix()`, `!important`, at-rules, and `@define-color` (to change a theme colour, make a
+  custom theme).
 
 ## Settings that are gone
 

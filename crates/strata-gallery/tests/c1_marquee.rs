@@ -2,7 +2,17 @@
 //! a drag) and what no golden shows (an open band's moves and auto-scroll run no view). A test
 //! stand-in for C1b's pointer intent starts the band past the drag threshold, as C1b hands it
 //! over, so these tests don't depend on C1b. Each test names the bullets it checks; the scripts
-//! in `tests/scripts/c1/marquee-*.json` check the rest.
+//! in `tests/scripts/c1/marquee-*.json` check the rest, and two tests here run them through the
+//! gallery binary: one for Rune's perf warnings (debug builds), one under
+//! `RUNE_COMMIT_BUDGET_MS=8` (`--profile perf`). Those two need the page's pointer controller
+//! (C1b) to start the band.
+
+#[expect(
+    dead_code,
+    reason = "the marquee tests use only the gallery command and the scripts folder"
+)]
+#[path = "goldens/support.rs"]
+mod support;
 
 mod c1 {
     mod marquee {
@@ -12,7 +22,10 @@ mod c1 {
         };
         use strata_components::collection::marquee::view::KEY as BAND;
         use strata_components::contract::{EntryId, EntrySource, Point};
+        use strata_gallery::scenes::c1::{WARMED, WARMUP};
         use strata_gallery::{Gallery, scenes};
+
+        use crate::support;
 
         const FRAME: f64 = 1.0 / 60.0;
 
@@ -208,6 +221,89 @@ mod c1 {
                 let last = rt.state.c1.listing.len();
                 assert!(n > 30 && n < last);
             }
+        }
+
+        /// Runs script `name` from `tests/scripts/c1/` through the gallery binary with `env`;
+        /// its stderr.
+        fn gallery_run(name: &str, env: &[(&str, &str)]) -> String {
+            let script = support::scripts_dir("c1").join(format!("{name}.json"));
+            let spec: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(&script).expect("the script"))
+                    .expect("JSON");
+            let dir = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("c1-marquee");
+            std::fs::create_dir_all(&dir).expect("a scratch folder");
+            let events = dir.join(format!("{name}-events.json"));
+            let body = serde_json::json!({ "events": spec["events"] }).to_string();
+            std::fs::write(&events, body).expect("the events");
+            let mut cmd = support::gallery();
+            cmd.env_remove("RUNE_PERF_WARN")
+                .env_remove("RUNE_COMMIT_BUDGET_MS");
+            for (k, v) in env {
+                cmd.env(k, v);
+            }
+            cmd.arg("--scene")
+                .arg(spec["scene"].as_str().expect("a scene"))
+                .arg("--script")
+                .arg(&events)
+                .arg("--tree")
+                .arg(dir.join(format!("{name}-tree.json")));
+            support::run(cmd).unwrap_or_else(|e| panic!("{e}"))
+        }
+
+        /// Rune's debug builds warn, on stderr, when one source commits through most of a
+        /// scroll, when an app steps its own glide with instant scrolls, and when a resting
+        /// window keeps waking. None of them may fire for a band: dragged, held at the edge for
+        /// ten seconds over 100,000 rows, brought back, or wheeled.
+        #[test]
+        #[cfg_attr(not(debug_assertions), ignore = "Rune's perf warnings are debug-only")]
+        fn the_marquee_scripts_keep_runes_perf_warnings_silent() {
+            // browser/selection/marquee: Holding the pointer near a viewport edge scrolls the listing and extends the selection each frame.
+            // browser/selection/marquee: Wheel scrolling during a held marquee extends the selection without moving the anchor.
+            for name in [
+                "marquee-drag",
+                "marquee-edge-scroll",
+                "marquee-return",
+                "marquee-wheel",
+            ] {
+                let stderr = gallery_run(name, &[]);
+                let warnings: Vec<&str> = stderr
+                    .lines()
+                    .filter(|l| l.contains("RUNE_PERF_WARN=0 silences"))
+                    .collect();
+                assert!(
+                    warnings.is_empty(),
+                    "{name}: Rune's perf warnings:\n{}",
+                    warnings.join("\n")
+                );
+            }
+        }
+
+        /// The edge auto-scroll over 100,000 rows under `RUNE_COMMIT_BUDGET_MS=8`: no commit
+        /// over 8 ms once the scene is mounted. The page waits out Rune's one-line-a-second
+        /// limit after the mount (U-C1e-5), as C1e's scroll budget does.
+        ///
+        /// It times release-build commits, so it runs only in an optimized build:
+        /// `cargo test --profile perf -p strata-gallery --test c1_marquee budget`.
+        #[test]
+        #[cfg_attr(debug_assertions, ignore = "perf: run with --profile perf")]
+        fn edge_auto_scroll_over_a_hundred_thousand_rows_stays_under_the_commit_budget() {
+            let stderr = gallery_run(
+                "marquee-edge-scroll",
+                &[("RUNE_COMMIT_BUDGET_MS", "8"), (WARMUP, "1")],
+            );
+            let after = stderr
+                .split_once(WARMED)
+                .map(|(_, after)| after)
+                .unwrap_or_else(|| panic!("the page never warmed up:\n{stderr}"));
+            let over: Vec<&str> = after
+                .lines()
+                .filter(|l| l.starts_with("rune: commit took"))
+                .collect();
+            assert!(
+                over.is_empty(),
+                "commits over budget while the band auto-scrolls:\n{}",
+                over.join("\n")
+            );
         }
     }
 }

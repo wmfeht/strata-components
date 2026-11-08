@@ -10,7 +10,7 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | W1c | merged | contract additions for C1e: collection slot; geometry docs no longer rely on on_drag | 0b52156 |
 | W2b | merged | Look::fallback = Strata defaults via K2; slot tokens moved off w2-tokens goldens to w2-slots review scene; confirms row.sidebar 24 / row.palette 53 | 8c12ef3 |
 | W1d | merged | contract changes for C1c: UniformRows::page_step = rows that fit minus one (meaning changed, 10->9); Selection::toggle_in_run for Space inside v/V | 21f28e7 |
-| C1f | ready | contract addition for C4: Lines spans (group-header lines); also C1e round-3 SF1 + nits | |
+| C1f | planning | contract addition for C4: Lines spans (group-header lines); also C1e round-3 SF1 + nits | |
 | W2c | merged | 1 review round, no blockers; contract additions for K1: Look::fill {muted, highlight}; LookParams keeps glow on/animations; no golden moves | 07eb69c |
 | K1b | waiting (after C10a) | syntect Theme from strata-kit SCOPES; replaces C10a interim theme_from_look; carries K1 should-fixes: kit.alpha(c, c.a*x) for translucent theme colours + test; port Strata's extreme-palette Contrast test; theme::switch honours look.animations; Role::Error drops danger background (note) | |
 | G1 | merged | owner request: index is rune-kit Buttons grouped by lane; markers from registry (has golden scenes); index goldens hide markers, review scene shows them | 9b4bf5c |
@@ -57,8 +57,8 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | C17 | ready | | |
 | C18 | ready | | |
 | C19 | ready | | |
-| C1b | fixing round 1 (B1 Alt+Ctrl/Shift band baseline; B2 bullet claims) | settings via Ctx::settings (shared handle dropped); no rename timeout (Strata); modifier bullets in-process (Rune draft U-C1b-1) | |
-| C1c | fixing round 1 (B1 Ctrl+Left/Right edge intent; B2 vacuous column checks -> C2) | default + 10xer maps; layout-aware chord workaround (U-C1c-1) | |
+| C1b | review 2 (round 1 fixed: ec8ff5d) | settings via Ctx::settings (shared handle dropped); no rename timeout (Strata); modifier bullets in-process (Rune draft U-C1b-1) | |
+| C1c | review 2 (round 1 fixed: b4f8f85; focused-column bullets -> C2) | default + 10xer maps; layout-aware chord workaround (U-C1c-1) | |
 | C1d | coding (machine done, 17 tests; adapter waits on C1e + C1b adapter) | ~10 Hz apply while auto-scrolling keeps perf meter silent (deviation) | |
 | C1e | merged | 3 review rounds; all controller seam requests in; scroll p95 0.59 ms vs Table 0.88; S14 sticky group lines deferred to contract WP C1f before C4; round-3 should-fix SF1 (grid restore before first layout) + nits (KeyboardMode commits unchanged, read_only/roles not in row memo) carried to C1f | 8ea925e |
 | C26 | waiting | | |

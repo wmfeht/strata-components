@@ -168,14 +168,23 @@ fn an_empty_collection_hits_nothing() {
 }
 
 #[test]
-fn a_page_is_the_whole_rows_that_fit_and_never_zero() {
-    assert_eq!(rows().page_step(), 10);
+fn a_page_is_the_whole_rows_that_fit_minus_one_and_never_zero() {
+    assert_eq!(rows().page_step(), 9);
     assert_eq!(
         UniformRows::new(50, H, 400.0)
             .viewport_height(250.0)
             .page_step(),
-        10
+        9
     );
+    for (height, step) in [(H, 1), (2.0 * H, 1), (3.0 * H, 2)] {
+        assert_eq!(
+            UniformRows::new(50, H, 400.0)
+                .viewport_height(height)
+                .page_step(),
+            step,
+            "a viewport of {height} points"
+        );
+    }
     assert_eq!(
         UniformRows::new(50, H, 400.0)
             .viewport_height(10.0)

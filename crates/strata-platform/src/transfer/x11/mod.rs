@@ -44,7 +44,8 @@ x11rb::atom_manager! {
         INCR,
         ATOM,
         INTEGER,
-        TRANSFER_TIME: b"_STRATA_TRANSFER_TIME",
+        // Our own window's properties: neutral names, as the crate's API carries no app names.
+        TRANSFER_TIME: b"_TRANSFER_SUBSTRATE_TIME",
     }
 }
 
@@ -63,7 +64,7 @@ enum Cmd {
         owner: Window,
         mime: String,
         limits: ReadLimits,
-        done: Done,
+        done: Reply,
     },
     /// A lazy writer finished on a worker: answer the request that asked for it.
     Ready {
@@ -71,6 +72,37 @@ enum Cmd {
         bytes: Option<Arc<[u8]>>,
     },
     Quit,
+}
+
+/// A read's answer, sent once. Dropped unsent (a command the actor never took, a read it
+/// abandoned when it stopped) it answers [`ReadError::Shutdown`], so no reader waits forever.
+pub(super) struct Reply(Option<Done>);
+
+impl Reply {
+    fn new(done: Done) -> Reply {
+        Reply(Some(done))
+    }
+
+    pub(super) fn send(mut self, result: Result<Vec<u8>, ReadError>) {
+        if let Some(done) = self.0.take() {
+            done(result);
+        }
+    }
+}
+
+impl Drop for Reply {
+    fn drop(&mut self) {
+        if let Some(done) = self.0.take() {
+            done(Err(ReadError::Shutdown));
+        }
+    }
+}
+
+/// Every command still queued when the actor stops: their reads answer Shutdown.
+fn refuse_all(rx: &Receiver<Cmd>) {
+    while let Ok(cmd) = rx.try_recv() {
+        drop(cmd);
+    }
 }
 
 /// What other threads may ask without a round trip to the actor.
@@ -245,11 +277,10 @@ impl ReadOffer for XOffer {
             owner: self.owner,
             mime: mime.to_owned(),
             limits,
-            done,
+            done: Reply::new(done),
         };
-        if let Err(Cmd::Read { done, .. }) = self.mailbox.post(cmd) {
-            done(Err(ReadError::Shutdown));
-        }
+        // A gone actor drops the command, and its reply answers Shutdown.
+        let _ = self.mailbox.post(cmd);
     }
 }
 
@@ -280,7 +311,15 @@ struct Actor {
 }
 
 impl Actor {
+    /// Serves until told to quit or the connection fails, then answers every read still
+    /// queued. The receiver drops on return, which discards (and so answers) any command sent
+    /// after.
     fn run(&mut self, rx: Receiver<Cmd>, wake: OwnedFd) {
+        self.serve(&rx, wake);
+        refuse_all(&rx);
+    }
+
+    fn serve(&mut self, rx: &Receiver<Cmd>, wake: OwnedFd) {
         let mut wake = File::from(wake);
         for selection in [Selection::Clipboard, Selection::Primary] {
             self.check_owner(selection);
@@ -407,7 +446,7 @@ impl Actor {
         }
         let n = self.next_prop;
         self.next_prop += 1;
-        self.atom(&format!("_STRATA_TRANSFER_{n}"))
+        self.atom(&format!("_TRANSFER_SUBSTRATE_{n}"))
     }
 
     fn next_deadline(&self) -> Option<Instant> {
@@ -418,3 +457,6 @@ impl Actor {
             .min()
     }
 }
+
+#[cfg(test)]
+mod tests;

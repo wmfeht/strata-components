@@ -17,8 +17,8 @@ use x11rb::{CURRENT_TIME, NONE};
 
 use super::super::data::{ReadLimits, SourceSpec, WRITE_IDLE};
 use super::super::error::ReadError;
-use super::super::event::{Done, Event, Selection, SelectionOffer, SourceId};
-use super::{Actor, Cmd, XOffer, lock};
+use super::super::event::{Event, Selection, SelectionOffer, SourceId};
+use super::{Actor, Cmd, Reply, XOffer, lock};
 
 /// A selection we hold.
 pub(super) struct Owned {
@@ -63,7 +63,7 @@ impl Outgoing {
 
 pub(super) enum Then {
     /// An app's read.
-    User(Done),
+    User(Reply),
     /// The `TARGETS` of a new owner, to announce its offer.
     Targets(Window),
 }
@@ -79,7 +79,7 @@ pub(super) struct Wanted {
 impl Wanted {
     pub(super) fn fail(self, e: ReadError) {
         if let Then::User(done) = self.then {
-            done(Err(e));
+            done.send(Err(e));
         }
     }
 }
@@ -92,6 +92,8 @@ pub(super) struct Incoming {
     incr: bool,
     buf: Vec<u8>,
     deadline: Instant,
+    /// The type and format the data last came in, which `TARGETS` must have right.
+    got: (Atom, u8),
 }
 
 impl Incoming {
@@ -135,10 +137,10 @@ impl Actor {
                 done,
             } => {
                 if self.owner_of.get(&selection) != Some(&owner) {
-                    return done(Err(ReadError::Gone));
+                    return done.send(Err(ReadError::Gone));
                 }
                 let Some(target) = self.atom(&mime) else {
-                    return done(Err(ReadError::Io("couldn't intern the type".into())));
+                    return done.send(Err(ReadError::Io("couldn't intern the type".into())));
                 };
                 self.start_read(Wanted {
                     selection,
@@ -314,6 +316,7 @@ impl Actor {
             incr: false,
             buf: Vec::new(),
             deadline,
+            got: (NONE, 0),
         });
     }
 
@@ -345,15 +348,16 @@ impl Actor {
         let property = self.incoming[i].property;
         let max = self.incoming[i].want.limits.max_bytes;
         match self.take_property(property, max) {
-            Ok((ty, _size)) if ty == self.atoms.INCR => {
+            Ok((ty, _, _size)) if ty == self.atoms.INCR => {
                 // The property held the size; deleting it (done) asks for the first chunk.
                 let read = &mut self.incoming[i];
                 read.incr = true;
                 read.deadline = Instant::now() + read.want.limits.idle;
             }
-            Ok((_, data)) => {
-                let read = self.incoming.swap_remove(i);
+            Ok((ty, format, data)) => {
+                let mut read = self.incoming.swap_remove(i);
                 self.free_props.push(read.property);
+                read.got = (ty, format);
                 self.finish(read, Ok(data));
             }
             Err(e) => {
@@ -372,14 +376,15 @@ impl Actor {
             .max_bytes
             .saturating_sub(self.incoming[i].buf.len());
         match self.take_property(property, left) {
-            Ok((_, chunk)) if chunk.is_empty() => {
+            Ok((_, _, chunk)) if chunk.is_empty() => {
                 let mut read = self.incoming.swap_remove(i);
                 self.free_props.push(read.property);
                 let buf = std::mem::take(&mut read.buf);
                 self.finish(read, Ok(buf));
             }
-            Ok((_, chunk)) => {
+            Ok((ty, format, chunk)) => {
                 let read = &mut self.incoming[i];
+                read.got = (ty, format);
                 read.buf.extend_from_slice(&chunk);
                 read.deadline = Instant::now() + read.want.limits.idle;
             }
@@ -391,8 +396,12 @@ impl Actor {
         }
     }
 
-    /// Reads a whole property of our window and deletes it: its type and bytes.
-    fn take_property(&mut self, property: Atom, max: usize) -> Result<(Atom, Vec<u8>), ReadError> {
+    /// Reads a whole property of our window and deletes it: its type, format and bytes.
+    fn take_property(
+        &mut self,
+        property: Atom,
+        max: usize,
+    ) -> Result<(Atom, u8, Vec<u8>), ReadError> {
         let mut data = Vec::new();
         let mut offset = 0u32;
         let ty = loop {
@@ -408,24 +417,28 @@ impl Actor {
                 return Err(ReadError::TooLarge);
             }
             if reply.bytes_after == 0 {
-                break reply.type_;
+                break (reply.type_, reply.format);
             }
             // Offsets count 32-bit units.
             offset += (reply.value.len() / 4) as u32;
         };
         let _ = self.conn.delete_property(self.win, property);
-        Ok((ty, data))
+        Ok((ty.0, ty.1, data))
     }
 
     fn finish(&mut self, read: Incoming, result: Result<Vec<u8>, ReadError>) {
         match read.want.then {
-            Then::User(done) => done(result),
+            Then::User(done) => done.send(result),
             Then::Targets(owner) => {
                 // Only the owner we asked still counts; a newer one has its own request.
                 if self.owner_of.get(&read.want.selection) != Some(&owner) {
                     return self.pump();
                 }
-                let bytes = result.unwrap_or_default();
+                // ICCCM: TARGETS is a list of atoms, format 32. Anything else lists nothing.
+                let (ty, format) = read.got;
+                let well_formed =
+                    format == 32 && (ty == self.atoms.ATOM || ty == self.atoms.TARGETS);
+                let bytes = result.ok().filter(|_| well_formed).unwrap_or_default();
                 let atoms: Vec<Atom> = bytes
                     .as_chunks::<4>()
                     .0
@@ -477,6 +490,10 @@ impl Actor {
         let Some(owned) = self.owned.get(&r.selection).filter(|_| r.owner == self.win) else {
             return self.notify(&req, NONE);
         };
+        // ICCCM 2.2: refuse a request made before we took the selection.
+        if r.time != CURRENT_TIME && r.time < owned.time {
+            return self.notify(&req, NONE);
+        }
         if r.target == self.atoms.TARGETS {
             let mimes: Vec<String> = owned.spec.mimes().map(str::to_owned).collect();
             let mut list = vec![self.atoms.TARGETS, self.atoms.TIMESTAMP];

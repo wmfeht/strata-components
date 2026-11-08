@@ -12,7 +12,7 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | W1d | merged | contract changes for C1c: UniformRows::page_step = rows that fit minus one (meaning changed, 10->9); Selection::toggle_in_run for Space inside v/V | 21f28e7 |
 | C1f | merged | 2 review rounds; groups via CollectionState::set_groups (call before enter/sync; wrong order fails silently: doc nit open); coded a4a0cb5; stuck label built: 1 view run per group crossed, Rune draft U-C1f-6; Groups + stuck overlay header; on_press hook; C1e carry-overs; header = row height, page step leaves a row: deviations; contract addition for C4: Lines spans (group-header lines); also C1e round-3 SF1 + nits | 99f4863 |
 | W2c | merged | 1 review round, no blockers; contract additions for K1: Look::fill {muted, highlight}; LookParams keeps glow on/animations; no golden moves | 07eb69c |
-| K1b | waiting (after C10a) | syntect Theme from strata-kit SCOPES; replaces C10a interim theme_from_look; carries K1 should-fixes: kit.alpha(c, c.a*x) for translucent theme colours + test; port Strata's extreme-palette Contrast test; theme::switch honours look.animations; Role::Error drops danger background (note) | |
+| K1b | ready | syntect Theme from strata-kit SCOPES; replaces C10a interim theme_from_look; carries K1 should-fixes: kit.alpha(c, c.a*x) for translucent theme colours + test; port Strata's extreme-palette Contrast test; theme::switch honours look.animations; Role::Error drops danger background (note) | |
 | W2d | ready (small contract follow-ups from K3 and C25) | also look.thumbnails classes 32 and 64 (C25: streamed Pixels have no mips); IconName additions/rulings: ClosePanel (panel-right-close) for C9 drawer close; an arrow-down name for C9 find next (and use Up/arrow-up for prev); ruling on device icons (Usb/Optical/Phone vs Strata drawing every device as a drive); Computer vs root crumb; then C9 adopts | |
 | G1 | merged | owner request: index is rune-kit Buttons grouped by lane; markers from registry (has golden scenes); index goldens hide markers, review scene shows them | 9b4bf5c |
 | W2 | merged | 1 review round + fixes; token-name review by K1/K2/C1e owners pending; PNG goldens on NVIDIA | 341e8cb |
@@ -22,7 +22,7 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | S3 | merged | sway Wayland/X11 measured; Hyprland/GNOME/KDE/Firefox hand test pending (QEMU Tier B not run); 3 owner decisions | f5682e4 |
 | S4 | merged | owner: onig + dedicated highlighter thread, N=64, RUSTSEC ignore, WTFPL ok; 3 review rounds + 1 owner-allowed fix round; plan §4 C10/C10a doc edits are owner items | 183f7e2 |
 | S5 | merged | 2 review rounds; 16 Rune issue drafts (U1-U17, U4 withdrawn) await owner filing; crate name taken -> owner; release.yml verified locally only (GitHub run pending) | 85ca12b |
-| C10a | review 5 (final; OWNER allowed a 5th round; round 5 fixed review 4's B1: a build starts at an epoch bump, trim spares the last two builds, abandoned jobs dropped; a host that never polls caps at the 16 MiB ceiling) | gallery rune-kit markdown feature, Vim modelines, editor goldens; perf p95 2.4-6.98 ms; C11 gets no colour past 32 KiB of a block | |
+| C10a | merged | 5 review rounds (OWNER allowed a 4th and a 5th); blocks cut at 32 KiB like rune-kit markdown, so C11 gets no colour past 32 KiB of a block; a block-cache build starts at an epoch bump; C11 MUST take SF1 (two blocks with one hash key never rest: DefaultHasher has a fixed key, so a crafted Markdown file can loop; refuse to replace an entry asked this build, or key by content) and SF5 (eviction and misses quadratic on the UI thread: 15k blocks trim 296 ms); also open: SF2 three or more polls per build over 4 MiB thrash (document or fix in bump), SF3/SF4 tests for the last-two-builds rule and the reply Arc check, SF6 per-entry overhead uncounted, memo note; gallery rune-kit markdown feature, Vim modelines, editor goldens; perf p95 2.4-6.98 ms; C11 gets no colour past 32 KiB of a block | 55d9e20 |
 | C14a | merged | 3 review rounds; Ctrl+wheel follows Rune's dy sign, on_magnify macOS only; scale-only change resynced via rescale child (Rune draft); script runner passes --scale 2 (sanctioned); round-3 should-fix (rescale key by target scale) carried to C14b; image zoom/pan is new vs Strata (plan asks for it): deliberate change for owner; pixels set without view commits (probed) | 86a335e |
 | C15 | merged | built on Rune primitives (deviation from WP doc); 6 bullets Strata policy, O6/F13/K6 partial gaps (Rune drafts); PNG goldens on NVIDIA | b38d879 |
 | C1a | merged | 2 review rounds; select_all 149 us / Shift range 148 us at 100k (release, local only); hosts call before_removal + sync | b8c3b8c |
@@ -50,8 +50,8 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | P7 | ready | | |
 | P8 | merged | 3 review rounds; U-P8-1 text in S5 appendix; 11 unit + 17 session tests incl. GLib interop; open should-fixes: refuse delivery once release starts (launch in the ReleaseName gap), release() wait to cover the drain (2x bus_timeout), held-launch test assert < 2 s; hand tests pending (Hyprland, GNOME, KDE, X11 focus; GTK Strata interop); GApplication-compatible protocol; opt-in FileManager1 Reveal in the shim (deviation from WP doc: policy stays in Strata); zbus 6 + tokio deps (already locked); zbus types exposed (major bump = minor release) | 5c2b38a |
 | P9 | merged | 1 review round + fixes; ci.yml gains libglib2.0-dev (approved exception); example compiled, not run; no desktop hand test | 54786b4 |
-| C10b | waiting | | |
-| C11 | waiting | | |
+| C10b | ready | | |
+| C11 | ready | | |
 | C12 | ready | | |
 | C13 | ready | | |
 | C16 | ready | | |

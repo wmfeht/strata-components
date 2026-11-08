@@ -52,8 +52,13 @@ pub(crate) enum Reply {
     Settled { generation: u64, from: usize },
     /// The document has no work left after request `seq`.
     Idle { seq: u64 },
-    /// A code block's runs, with byte ranges into the whole block.
-    Block { key: u64, tokens: Vec<Token> },
+    /// A code block's runs, with byte ranges into the whole block. `code` is the block as
+    /// asked, so a reply for a block since replaced under the same key is told apart.
+    Block {
+        key: u64,
+        code: Arc<str>,
+        tokens: Vec<Token>,
+    },
     /// Highlighting failed (a grammar error or a panic): draw the text plain.
     Failed,
 }
@@ -710,9 +715,16 @@ impl Engine {
             }),
             None => p.outbox.push(Reply::Block {
                 key,
+                code,
                 tokens: Vec::new(),
             }),
         }
+    }
+
+    /// Drops the queued jobs of blocks the pool's cache no longer holds.
+    pub(crate) fn forget(&mut self, pool: u64, keys: &[u64]) {
+        self.blocks
+            .retain(|b| b.pool != pool || !keys.contains(&b.key));
     }
 
     /// Re-colours every document and pool from its classes, with no re-parse.
@@ -834,6 +846,7 @@ impl Engine {
         }
         pool.outbox.push(Reply::Block {
             key: job.key,
+            code: job.lines.text,
             tokens: job.tokens,
         });
     }
@@ -917,15 +930,16 @@ impl Engine {
                 job.pool,
                 Reply::Block {
                     key: job.key,
+                    code: job.lines.text,
                     tokens: Vec::new(),
                 },
             ));
         }
         for (&id, pool) in &mut self.pools {
             for reply in pool.outbox.drain(..) {
-                if let Reply::Block { key, .. } = reply {
+                if let Reply::Block { key, code, .. } = reply {
                     let tokens = Vec::new();
-                    self.out.push((id, Reply::Block { key, tokens }));
+                    self.out.push((id, Reply::Block { key, code, tokens }));
                 }
             }
         }
@@ -940,6 +954,16 @@ impl Engine {
     pub(crate) fn take_out(&mut self) -> Vec<(u64, Reply)> {
         self.collect();
         std::mem::take(&mut self.out)
+    }
+
+    /// The keys of `pool`'s block jobs still queued.
+    #[cfg(test)]
+    pub(crate) fn queued_blocks(&self, pool: u64) -> Vec<u64> {
+        self.blocks
+            .iter()
+            .filter(|b| b.pool == pool)
+            .map(|b| b.key)
+            .collect()
     }
 
     #[cfg(test)]

@@ -159,14 +159,15 @@ impl Pump {
     }
 
     /// Everything queued, to the end of every pass.
+    /// Everything queued, to the end of every pass. Requests only come from the test
+    /// thread, so none arrives while a step runs.
     fn run(&mut self) {
         loop {
             self.requests();
-            if !self.step() && self.rx.try_recv().is_err() {
+            if !self.step() {
                 break;
             }
         }
-        self.requests();
     }
 
     fn parsed(&self, doc: &CodeDoc) -> u64 {
@@ -1566,43 +1567,52 @@ fn big_block(i: usize) -> String {
 }
 
 #[test]
-fn the_block_cache_stays_bounded_when_the_host_never_polls() {
-    // Asked one by one, a build each (`markdown()`), with no poll in between.
+fn the_block_cache_trims_to_its_cap_at_each_poll_and_stays_under_its_ceiling_without() {
+    const CAP: usize = 4 << 20;
+    const CEILING: usize = 16 << 20;
+    // A build per block, each landing polled: the cache trims to the cap.
+    let mut pump = Pump::new(light());
+    let mut blocks = pump.blocks();
+    for i in 0..400 {
+        blocks.markdown().highlight(Some("rust"), &big_block(i));
+        pump.run();
+        blocks.poll();
+    }
+    assert!(
+        blocks.cached_bytes() <= CAP,
+        "{} bytes",
+        blocks.cached_bytes()
+    );
+    // A host that asks and never polls: no trims, but the ceiling holds, and blocks past it
+    // are plain rather than pending.
     let mut pump = Pump::new(light());
     let blocks = pump.blocks();
-    for i in 0..400 {
+    for i in 0..1200 {
         blocks.markdown().highlight(Some("rust"), &big_block(i));
         pump.run();
     }
     assert!(
-        blocks.cached_bytes() <= 4 << 20,
+        blocks.cached_bytes() <= CEILING,
         "{} bytes",
         blocks.cached_bytes()
     );
-    // A host that only asks, never builds or polls, still stops at the ceiling.
-    let mut pump = Pump::new(light());
-    let blocks = pump.blocks();
-    for i in 0..1200 {
-        blocks.highlight(Some("rust"), &big_block(i));
-        pump.run();
-    }
-    assert!(
-        blocks.cached_bytes() <= 16 << 20,
-        "{} bytes",
-        blocks.cached_bytes()
+    assert_eq!(
+        blocks.highlight(Some("rust"), &big_block(5000)),
+        Some(Vec::new())
     );
 }
 
 #[test]
-fn the_block_cache_stays_bounded_when_misses_wait() {
+fn the_block_cache_stays_under_its_ceiling_when_misses_wait() {
+    // Waiting hosts (headless runs, goldens) never poll, so never trim.
     let h = Highlighter::new(light());
     let mut blocks = h.blocks();
     blocks.wait_on_miss(Some(WAIT));
-    for i in 0..400 {
+    for i in 0..1200 {
         assert!(blocks.highlight(Some("rust"), &big_block(i)).is_some());
     }
     assert!(
-        blocks.cached_bytes() <= 4 << 20,
+        blocks.cached_bytes() <= 16 << 20,
         "{} bytes",
         blocks.cached_bytes()
     );
@@ -1652,7 +1662,7 @@ fn a_build_over_the_ceiling_comes_to_rest() {
 }
 
 #[test]
-fn a_block_over_the_ceiling_is_coloured_up_to_the_cut_and_asked_once() {
+fn a_block_is_coloured_up_to_the_32_kib_cut_and_asked_once() {
     // C11 calls `highlight` directly, with no cut of its own.
     let mut pump = Pump::new(light());
     let mut blocks = pump.blocks();
@@ -1677,6 +1687,151 @@ fn a_block_over_the_ceiling_is_coloured_up_to_the_cut_and_asked_once() {
         "colours stop at the 32 KiB cut"
     );
     assert!(blocks.cached_bytes() <= cut);
+}
+
+/// A block of about 30 KB, under rune-kit's 32 KiB cut: a comment line the thread colours,
+/// then one line past the long-line cap, which it skips, so the tests stay quick.
+fn view_block(tag: &str, i: usize) -> String {
+    format!("// {tag} {i}\n{}\n", "q".repeat(30_000))
+}
+
+/// One view's build through rune-kit's own hook and its cache: how many blocks drew plain.
+fn build_view(blocks: &CodeBlocks, codes: &[String]) -> usize {
+    let hook = blocks.markdown();
+    codes
+        .iter()
+        .filter(|c| hook.highlight(Some("rust"), c).is_empty())
+        .count()
+}
+
+/// Builds `views` each frame, as a host does, until `poll` has nothing new. The number of
+/// builds and the blocks that drew plain in the last one.
+fn build_until_rest(
+    pump: &mut Pump,
+    blocks: &mut CodeBlocks,
+    views: &[&[String]],
+) -> (usize, usize) {
+    for build in 1..=8 {
+        let plain = views.iter().map(|v| build_view(blocks, v)).sum();
+        pump.run();
+        if !blocks.poll() {
+            return (build, plain);
+        }
+    }
+    (usize::MAX, usize::MAX)
+}
+
+#[test]
+fn two_markdown_views_on_one_pool_over_the_cache_come_to_rest() {
+    // Two views, each with its own hook from `markdown()`, 3 MB each: 6 MB on screen.
+    let mut pump = Pump::new(light());
+    let mut blocks = pump.blocks();
+    let a: Vec<String> = (0..100).map(|i| view_block("a", i)).collect();
+    let b: Vec<String> = (0..100).map(|i| view_block("b", i)).collect();
+    let (builds, plain) = build_until_rest(&mut pump, &mut blocks, &[&a, &b]);
+    assert!(builds <= 3, "builds until rest: {builds}");
+    assert_eq!(plain, 0, "blocks still plain at rest");
+    assert_eq!(pump.blocks_asked, 200, "each block asked for once");
+}
+
+#[test]
+fn an_edit_to_one_block_of_a_large_document_asks_for_that_block_only() {
+    let mut pump = Pump::new(light());
+    let mut blocks = pump.blocks();
+    let mut doc: Vec<String> = (0..200).map(|i| view_block("d", i)).collect();
+    let (builds, _) = build_until_rest(&mut pump, &mut blocks, &[&doc]);
+    assert!(builds <= 3);
+    let asked = pump.blocks_asked;
+    for _keystroke in 0..3 {
+        doc[0].push_str("let y = 2;\n");
+        for _build in 0..3 {
+            // In document order, as `Markdown` asks: the edited block first.
+            let hook = blocks.markdown();
+            hook.highlight(Some("rust"), &doc[0]);
+            let plain = doc[1..]
+                .iter()
+                .filter(|c| hook.highlight(Some("rust"), c).is_empty())
+                .count();
+            assert_eq!(plain, 0, "the other blocks stay coloured");
+            pump.run();
+            if !blocks.poll() {
+                break;
+            }
+        }
+    }
+    assert_eq!(
+        pump.blocks_asked - asked,
+        3,
+        "one block asked per keystroke"
+    );
+}
+
+#[test]
+fn switching_back_to_a_large_document_keeps_its_blocks_until_asked() {
+    let mut pump = Pump::new(light());
+    let mut blocks = pump.blocks();
+    let x: Vec<String> = (0..200).map(|i| view_block("x", i)).collect();
+    let y: Vec<String> = (0..10).map(|i| view_block("y", i)).collect();
+    build_until_rest(&mut pump, &mut blocks, &[&x]);
+    build_until_rest(&mut pump, &mut blocks, &[&y]);
+    let cached = x.iter().filter(|c| blocks.has_landed("rust", c)).count();
+    let asked = pump.blocks_asked;
+    let (builds, plain) = build_until_rest(&mut pump, &mut blocks, &[&x]);
+    assert!(builds <= 3 && plain == 0, "builds {builds}, plain {plain}");
+    assert_eq!(
+        pump.blocks_asked - asked,
+        200 - cached,
+        "a cached block was asked for again"
+    );
+}
+
+#[test]
+fn the_thread_drops_block_jobs_the_cache_has_dropped() {
+    let mut pump = Pump::new(light());
+    let mut blocks = pump.blocks();
+    let pool = blocks.pool_id();
+    let small = |i: usize| format!("fn s{i}() {{}}\n");
+    // Two small blocks, then a 4.5 MB document, all still queued.
+    blocks.highlight(Some("rust"), &small(1));
+    blocks.highlight(Some("rust"), &small(2));
+    let doc: Vec<String> = (0..150).map(|i| view_block("d", i)).collect();
+    for c in &doc {
+        blocks.highlight(Some("rust"), c);
+    }
+    // The host moves on: a small block lands, then another, with new small blocks asked.
+    for i in 3..6 {
+        pump.requests();
+        pump.step();
+        blocks.poll();
+        blocks.highlight(Some("rust"), &small(i));
+        pump.requests();
+        let pending = blocks.pending_keys();
+        let queued = pump.worker.engine.queued_blocks(pool);
+        let stray = queued.iter().filter(|k| !pending.contains(k)).count();
+        assert_eq!(
+            stray, 0,
+            "{stray} jobs for blocks the cache dropped are still queued"
+        );
+    }
+}
+
+#[test]
+fn a_theme_that_lands_during_a_wait_reaches_runes_cache() {
+    // Headless runs wait on misses and never poll: a theme switch landing during a wait must
+    // still change the hook's key, or rune-kit keeps the old theme's answers.
+    let h = Highlighter::new(light());
+    let mut blocks = h.blocks();
+    blocks.wait_on_miss(Some(WAIT));
+    let before = blocks.markdown().highlight(Some("rust"), BLOCK);
+    assert!(!before.is_empty());
+    h.set_theme(dark());
+    blocks.markdown().highlight(Some("rust"), "fn other() {}");
+    let after = blocks.markdown().highlight(Some("rust"), BLOCK);
+    assert_ne!(
+        highlight_runs(&before),
+        highlight_runs(&after),
+        "the old theme's colours"
+    );
 }
 
 #[test]

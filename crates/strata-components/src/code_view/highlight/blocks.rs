@@ -5,6 +5,12 @@
 //! highlighter, language and code. A block's first call misses: it asks the thread and
 //! answers plain. When the colours land, [`CodeBlocks::poll`] bumps an epoch that is part of
 //! the hook's cache key, so the next build asks again and gets them.
+//!
+//! An epoch bump is also where the cache trims: after one, the host builds again and every
+//! block on screen is asked for, through any number of hooks. So a block asked for in the
+//! last two builds (between bumps) is on screen, or was a moment ago, and is never evicted;
+//! the others go, least recently asked first, down to [`CACHE_BYTES`]. A miss never evicts
+//! a block the current build may still ask for.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -23,15 +29,20 @@ use super::engine::{Reply, Token};
 use super::spans;
 use super::worker::Request;
 
-/// Highlighted blocks kept, in bytes of code, before the least recently asked go. Blocks asked
-/// for in the current build (since the last poll, `markdown()` or wait) are never evicted:
-/// the cap stretches to fit one build, so a large document can't evict what it is drawing
-/// and ask again.
+/// The cache trims to this many bytes of code at each epoch bump, sparing the blocks asked for
+/// in the last two builds: the cap stretches to fit what is on screen, so a large document
+/// (or two views of one pool) can't evict what it is drawing and ask for it again.
 const CACHE_BYTES: usize = 4 << 20;
 
-/// How far the cap stretches for one build (512 blocks at the 32 KiB cut). A block that would
-/// take the current build past it answers plain and is never asked for, so nothing lands,
-/// nothing wakes the host, and memory stays bounded.
+/// How far the cap stretches (512 blocks at the 32 KiB cut). A miss past it first evicts
+/// blocks not asked for since the last bump; a block that would still take the cache past it
+/// answers plain and is never asked for, so nothing lands, nothing wakes the host, and memory
+/// stays bounded. A host that never polls (one that waits on misses) never trims, so its
+/// cache grows to here.
+///
+/// Both bounds count code bytes. Each landed block also keeps its runs, 12 bytes each: about
+/// one run per 5 to 8 bytes of typical code, so 2 to 3 times the code, and at worst (a run per
+/// byte) 13 times. rune-kit's hook keeps its own cache besides, within its own budget.
 const CACHE_CEILING: usize = 4 * CACHE_BYTES;
 
 /// A block colours up to its last line end within this many bytes, rune-kit's cut for an
@@ -63,7 +74,9 @@ pub struct CodeBlocks {
 
 struct Entry {
     lang: Box<str>,
-    code: Box<str>,
+    /// The code as sent to the thread: its reply carries the same `Arc`, so a reply for a
+    /// block since replaced under the same key is told apart.
+    code: Arc<str>,
     /// `None` while the thread works on it.
     tokens: Option<Rc<[Token]>>,
     /// When it was last asked for, in [`Blocks::tick`]s.
@@ -78,8 +91,10 @@ struct Blocks {
     bytes: usize,
     /// Counts `highlight` calls.
     tick: u64,
-    /// The tick of the last poll: entries used after it belong to the current build.
-    polled: u64,
+    /// The tick at the last epoch bump: blocks asked for after it belong to the current build.
+    build_start: u64,
+    /// The tick at the bump before: blocks asked for after it were in the last two builds.
+    prev_start: u64,
     palette: Vec<Option<Color>>,
     epoch: u64,
     wait: Option<Duration>,
@@ -106,7 +121,8 @@ impl CodeBlocks {
                 entries: HashMap::new(),
                 bytes: 0,
                 tick: 0,
-                polled: 0,
+                build_start: 0,
+                prev_start: 0,
                 palette: Vec::new(),
                 epoch: 0,
                 wait: None,
@@ -118,9 +134,7 @@ impl CodeBlocks {
     /// builds: its cache key changes when colours land or the theme changes.
     pub fn markdown(&self) -> rune_kit::syntax::Highlighter {
         let (id, epoch) = {
-            let mut s = self.state.borrow_mut();
-            // A new build: blocks asked before it may go.
-            s.polled = s.tick;
+            let s = self.state.borrow();
             (s.id, s.epoch)
         };
         let state = self.state.clone();
@@ -144,16 +158,42 @@ impl CodeBlocks {
         self.state.borrow().bytes()
     }
 
-    /// Takes the blocks that have landed. True when colours changed, so the host rebuilds.
+    /// Whether `code`'s colours (cut as `highlight` cuts) are cached and landed.
+    #[cfg(test)]
+    pub(crate) fn has_landed(&self, lang: &str, code: &str) -> bool {
+        let s = self.state.borrow();
+        let code = &code[..coloured_len(code)];
+        s.entries
+            .get(&key_of(lang, code))
+            .is_some_and(|e| *e.code == *code && e.tokens.is_some())
+    }
+
+    /// The keys of the blocks asked for that haven't landed.
+    #[cfg(test)]
+    pub(crate) fn pending_keys(&self) -> Vec<u64> {
+        let s = self.state.borrow();
+        s.entries
+            .iter()
+            .filter(|(_, e)| e.tokens.is_none())
+            .map(|(&k, _)| k)
+            .collect()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn pool_id(&self) -> u64 {
+        self.state.borrow().id
+    }
+
+    /// Takes the blocks that have landed. True when colours changed: the host builds again,
+    /// asking for every block on screen (the next `markdown()` hook has a new cache key).
     pub fn poll(&mut self) -> bool {
         let mut s = self.state.borrow_mut();
-        s.polled = s.tick;
         let mut changed = false;
         while let Ok(reply) = s.rx.try_recv() {
             changed |= s.apply(reply);
         }
         if changed {
-            s.epoch += 1;
+            s.bump();
         }
         changed
     }
@@ -170,7 +210,6 @@ impl CodeBlocks {
     pub fn settle(&mut self, timeout: Duration) -> bool {
         let deadline = Instant::now() + timeout;
         let mut s = self.state.borrow_mut();
-        s.polled = s.tick;
         let mut changed = false;
         while s.pending() {
             let left = deadline.saturating_duration_since(Instant::now());
@@ -180,7 +219,7 @@ impl CodeBlocks {
             }
         }
         if changed {
-            s.epoch += 1;
+            s.bump();
         }
         !s.pending()
     }
@@ -191,6 +230,16 @@ impl Blocks {
         self.tx.is_some() && self.entries.values().any(|e| e.tokens.is_none())
     }
 
+    /// A new epoch: the next build asks for every block on screen. Trims the cache to
+    /// [`CACHE_BYTES`], sparing the blocks asked for in the last two builds.
+    fn bump(&mut self) {
+        self.epoch += 1;
+        let spare_after = self.prev_start;
+        self.evict(CACHE_BYTES, 0, spare_after);
+        self.prev_start = self.build_start;
+        self.build_start = self.tick;
+    }
+
     fn apply(&mut self, reply: Reply) -> bool {
         match reply {
             Reply::Palette { from, colors } => {
@@ -198,12 +247,12 @@ impl Blocks {
                 self.palette.extend(colors);
                 true
             }
-            Reply::Block { key, tokens } => match self.entries.get_mut(&key) {
-                Some(e) => {
+            Reply::Block { key, code, tokens } => match self.entries.get_mut(&key) {
+                Some(e) if Arc::ptr_eq(&e.code, &code) => {
                     e.tokens = Some(tokens.into());
                     true
                 }
-                None => false,
+                _ => false,
             },
             _ => false,
         }
@@ -248,56 +297,83 @@ impl Blocks {
     }
 
     /// Asks the thread for a block and keeps a pending entry. False, and nothing asked, when
-    /// the block would take the current build past [`CACHE_CEILING`] or there is no thread:
-    /// it is then plain.
+    /// the block would take the cache past [`CACHE_CEILING`] even without the blocks not
+    /// asked for since the last bump, or there is no thread: it is then plain.
     fn request(&mut self, key: u64, lang: &str, code: &str) -> bool {
-        // A hash collision replaces the other block: count only the one kept.
+        // A hash collision replaces the other block: count only the one kept, and drop its job.
         if let Some(old) = self.entries.remove(&key) {
             self.bytes = self.bytes.saturating_sub(old.code.len());
+            if old.tokens.is_none() {
+                self.forget(vec![key]);
+            }
         }
-        self.evict(code.len());
-        if self.bytes + code.len() > CACHE_CEILING {
+        let current: usize = self
+            .entries
+            .values()
+            .filter(|e| e.used > self.build_start)
+            .map(|e| e.code.len())
+            .sum();
+        if current + code.len() > CACHE_CEILING {
             return false;
         }
+        self.evict(CACHE_CEILING, code.len(), self.build_start);
         let Some(tx) = &self.tx else {
             return false;
         };
+        let code: Arc<str> = Arc::from(code);
         let sent = tx.send(Request::Block {
             pool: self.id,
             key,
             lang: lang.into(),
-            code: Arc::from(code),
+            code: code.clone(),
         });
         if sent.is_err() {
             // The thread is gone: every block is plain from now on.
             self.tx = None;
             return false;
         }
+        self.bytes += code.len();
         let entry = Entry {
             lang: lang.into(),
-            code: code.into(),
+            code,
             tokens: None,
             used: self.tick,
         };
         self.entries.insert(key, entry);
-        self.bytes += code.len();
         true
     }
 
-    /// Drops the least recently asked blocks until `extra` more bytes fit under
-    /// [`CACHE_BYTES`], never one of the current build's.
-    fn evict(&mut self, extra: usize) {
-        while self.bytes + extra > CACHE_BYTES {
+    /// Drops the least recently asked blocks asked for at or before tick `spare_after` until
+    /// `extra` more bytes fit under `limit`. The thread drops the jobs of those still pending.
+    fn evict(&mut self, limit: usize, extra: usize, spare_after: u64) {
+        let mut forgotten = Vec::new();
+        while self.bytes + extra > limit {
             let oldest = self
                 .entries
                 .iter()
-                .filter(|(_, e)| e.used <= self.polled)
+                .filter(|(_, e)| e.used <= spare_after)
                 .min_by_key(|(_, e)| e.used)
                 .map(|(&k, _)| k);
             let Some(key) = oldest else { break };
             if let Some(e) = self.entries.remove(&key) {
                 self.bytes = self.bytes.saturating_sub(e.code.len());
+                if e.tokens.is_none() {
+                    forgotten.push(key);
+                }
             }
+        }
+        if !forgotten.is_empty() {
+            self.forget(forgotten);
+        }
+    }
+
+    /// Tells the thread to drop the jobs of blocks no longer wanted.
+    fn forget(&mut self, keys: Vec<u64>) {
+        if let Some(tx) = &self.tx {
+            let _ = tx.send(Request::Forget {
+                pool: self.id,
+                keys,
+            });
         }
     }
 
@@ -307,14 +383,18 @@ impl Blocks {
             let left = deadline.saturating_duration_since(Instant::now());
             match self.rx.recv_timeout(left) {
                 Ok(reply) => {
+                    // A new theme (a palette replacing colours already given) must reach
+                    // rune-kit's cache too: bump the epoch, as `poll` would.
+                    let theme =
+                        matches!(&reply, Reply::Palette { from, .. } if *from < self.palette.len());
                     self.apply(reply);
+                    if theme {
+                        self.bump();
+                    }
                 }
                 Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected) => break,
             }
         }
-        // A host that waits on misses (headless, goldens) never polls: its waits mark the
-        // builds. rune-kit keeps its own copy of what this build was given.
-        self.polled = self.tick;
     }
 
     #[cfg(test)]

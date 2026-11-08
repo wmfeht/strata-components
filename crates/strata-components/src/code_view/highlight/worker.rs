@@ -49,6 +49,11 @@ pub(crate) enum Request {
         lang: Box<str>,
         code: Arc<str>,
     },
+    /// The pool's cache dropped these blocks: drop their jobs.
+    Forget {
+        pool: u64,
+        keys: Vec<u64>,
+    },
     /// Closes a document or a block pool.
     Close {
         id: u64,
@@ -106,6 +111,7 @@ impl Worker {
                 lang,
                 code,
             } => e.block(pool, key, &lang, code),
+            Request::Forget { pool, keys } => e.forget(pool, &keys),
             Request::Close { id } => {
                 self.replies.remove(&id);
                 e.close(id);

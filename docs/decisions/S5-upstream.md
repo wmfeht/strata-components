@@ -17,7 +17,7 @@
   | --- | --- | --- | --- |
   | P1 `dnd` | Shim here, on P0 | [U1](#u1), [U2](#u2), [U9](#u9), [U10](#u10); upstream [#171](https://github.com/anomalyco/rune/issues/171) | libwayland ≥ 1.23. Wayland drag and drop is unsupported on Ubuntu 24.04 (S2 owner question 1). The capture workaround stays until U10. |
   | P2 `clipboard` | Shim here | [U5](#u5), [U9](#u9) | data-control on its own connection; `wl_data_device` fallback on mutter |
-  | P3 `csd` | Shim here, in part | [U6](#u6), [U7](#u7), [U8](#u8), [U9](#u9); upstream [#145](https://github.com/anomalyco/rune/issues/145) | The platform-neutral part now. The native frame stays on Wayland until U6–U8. X11 borderless only if the mutter/KWin hand test passes. Rests on S1 owner question 1. |
+  | P3 `csd` | Shim here, in part | [U6](#u6), [U7](#u7), [U8](#u8), [U9](#u9); upstream [#145](https://github.com/anomalyco/rune/issues/145) | The platform-neutral part now. The native frame stays on Wayland until U6–U8. X11 borderless only if the mutter/KWin hand test passes. Rests on S1 owner question 1. **Superseded by the owner's P3 decision:** `Policy::Auto` is borderless on Wayland and X11, with no Wayland resize, minimise or window menu until U6–U8; the mutter/KWin hand test no longer gates X11. |
   | P4 `foreign-parent` | Shim here | [U11](#u11), [U9](#u9) | Parentless on libwayland 1.22 (S3 decision 1) |
   | P5 `settings` | Shim here, over the Settings portal with zbus | [U12](#u12), [U13](#u13) | — |
 
@@ -484,6 +484,11 @@ API reports the maximised state either: there's only `Tx::toggle_maximized`, and
 
 **Meanwhile** we keep the native frame on Wayland. On X11 we send `_NET_WM_MOVERESIZE` from a
 second connection, which can't release winit's grab (U9's link).
+
+> Not part of the issue body. **Superseded by the owner's P3 decision:** P3 doesn't keep the
+> native frame on Wayland. `Policy::Auto` is borderless on Wayland and X11, and a borderless
+> Wayland window has no edge resize, minimise or window menu until U6–U8. Before filing, change
+> the "Meanwhile" line above to say so.
 
 ### U7
 

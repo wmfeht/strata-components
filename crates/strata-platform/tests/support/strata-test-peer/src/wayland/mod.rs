@@ -14,7 +14,7 @@ use std::os::fd::AsFd;
 use std::sync::mpsc::{Receiver, channel};
 
 use strata_test_peer::protocol::{
-    Backend, Command, Event, Exported, Mapped, Request, Selection, Via,
+    ActivationToken, Backend, Command, Event, Exported, Mapped, Request, Selection, Via,
 };
 use wayland_client::backend::ObjectId;
 use wayland_client::globals::{GlobalList, GlobalListContents, registry_queue_init};
@@ -33,6 +33,10 @@ use wayland_client::protocol::{
     wl_surface::WlSurface,
 };
 use wayland_client::{Connection, Dispatch, Proxy, QueueHandle, WEnum, delegate_noop};
+use wayland_protocols::xdg::activation::v1::client::{
+    xdg_activation_token_v1::{self, XdgActivationTokenV1},
+    xdg_activation_v1::XdgActivationV1,
+};
 use wayland_protocols::xdg::foreign::zv2::client::{
     zxdg_exported_v2::{self, ZxdgExportedV2},
     zxdg_exporter_v2::ZxdgExporterV2,
@@ -140,6 +144,7 @@ pub struct St {
     dc: Option<DataControl>,
     exporter: Option<ZxdgExporterV2>,
     exported: Vec<ZxdgExportedV2>,
+    activation: Option<XdgActivationV1>,
     input: Input,
     pointer: Option<WlPointer>,
     keyboard: Option<WlKeyboard>,
@@ -184,6 +189,7 @@ impl St {
             dc,
             exporter: globals.bind(qh, 1..=1, ()).ok(),
             exported: Vec::new(),
+            activation: globals.bind(qh, 1..=1, ()).ok(),
             pointer: None,
             keyboard: None,
             window: None,
@@ -278,6 +284,7 @@ impl St {
             }
             Command::DropProxy => Err("XdndProxy is X11's; a Wayland peer has none".into()),
             Command::Export => self.export(id),
+            Command::ActivationToken => self.activation_token(id),
         };
         if let Err(e) = result {
             out::reply(id, Err(e));
@@ -360,6 +367,26 @@ impl St {
         Ok(())
     }
 
+    /// Asks for an activation token as a launcher does: with the serial of the input that
+    /// triggered the launch, the seat and the peer's focused surface. The reply comes with
+    /// the token's `done` event.
+    fn activation_token(&mut self, id: u64) -> Result<(), String> {
+        let activation = self
+            .activation
+            .as_ref()
+            .ok_or("the compositor has no xdg_activation_v1")?;
+        let surface = self.surface().ok_or("map the peer's window first")?;
+        let serial = self
+            .press_serial
+            .or(self.focus_serial)
+            .ok_or("the peer's window has neither keyboard focus nor a press")?;
+        let token = activation.get_activation_token(&self.qh, id);
+        token.set_serial(serial, &self.seat);
+        token.set_surface(surface);
+        token.commit();
+        Ok(())
+    }
+
     /// Replies to each `selection-set` whose offer the peer now sees as current.
     fn settle_pending(&mut self) {
         let mut sets = std::mem::take(&mut self.pending_sets);
@@ -398,6 +425,7 @@ delegate_noop!(St: ignore WlShmPool);
 delegate_noop!(St: ignore WlSurface);
 delegate_noop!(St: ignore WlDataDeviceManager);
 delegate_noop!(St: ignore ZxdgExporterV2);
+delegate_noop!(St: ignore XdgActivationV1);
 
 /// Each draw makes a buffer; the compositor releases it once a newer one replaces it.
 impl Dispatch<WlBuffer, ()> for St {
@@ -569,6 +597,22 @@ impl Dispatch<XdgToplevel, ()> for St {
             && let Some(w) = st.window.as_mut()
         {
             w.size = (width, height);
+        }
+    }
+}
+
+impl Dispatch<XdgActivationTokenV1, u64> for St {
+    fn event(
+        _: &mut Self,
+        token: &XdgActivationTokenV1,
+        event: xdg_activation_token_v1::Event,
+        id: &u64,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let xdg_activation_token_v1::Event::Done { token: value } = event {
+            token.destroy();
+            out::value(*id, ActivationToken { token: value });
         }
     }
 }

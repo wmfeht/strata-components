@@ -8,8 +8,8 @@ use std::time::{Duration, Instant};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use strata_test_peer::protocol::{
-    Action, Button, Command, Event, Exported, Mapped, Message, Offer, Received, Request, Selection,
-    Targets, Via,
+    Action, ActivationToken, Button, Command, Event, Exported, Mapped, Message, Offer, Received,
+    Request, Selection, Targets, Via,
 };
 
 use super::{Display, Proc, Session};
@@ -152,6 +152,12 @@ impl Peer {
             width: 300,
             height: 200,
         })
+    }
+
+    /// Wayland: an `xdg_activation_v1` token for the peer's focused window (P8).
+    pub fn activation_token(&self) -> String {
+        self.request_as::<ActivationToken>(Command::ActivationToken)
+            .token
     }
 
     /// `wayland:<handle>` or `x11:<xid>`.

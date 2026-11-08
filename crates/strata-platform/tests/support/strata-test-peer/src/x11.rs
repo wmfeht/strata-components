@@ -440,6 +440,9 @@ impl X {
                 Ok(())
             }
             Command::DropProxy => self.drop_proxy().map(|()| out::ok(id)),
+            Command::ActivationToken => {
+                Err("xdg_activation_v1 is Wayland's; an X11 peer has no token".into())
+            }
             Command::Export => {
                 out::value(
                     id,

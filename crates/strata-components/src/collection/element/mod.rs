@@ -61,6 +61,11 @@
 //!   the same whether or not the collection has focus (Strata dims it when unfocused), and the
 //!   cursor outline follows keyboard mode (the last input that moved the cursor was a key)
 //!   instead of keyboard focus.
+//! - **Collections keyed by their host are no focus stops** ([`Collection::keys_by_host`],
+//!   C2). Their container isn't focusable, has no key handler and names no active descendant;
+//!   a press in one focuses the nearest ancestor with a key handler, which routes keys to the
+//!   collection it picks ([`Collection::key`]) and names that collection's cursor row
+//!   ([`Collection::cursor_path`]). Columns is one Tab stop this way, as in Strata.
 //! - **Selection fill.** Selected rows use rune-kit's table selection colour
 //!   (`TableStyle::from_kit(kit).selected`), hover Kit's `c.hover`, the cursor outline
 //!   `c.border_focus` and a drop target or Enter target `c.text_accent`.
@@ -179,7 +184,7 @@ use std::borrow::Cow;
 use std::ops::Range;
 use std::rc::Rc;
 
-use rune::{El, GrowthSpec, Live, PointerButton, ScrollPos, ScrollSpec, Tx, col, text};
+use rune::{El, GrowthSpec, KeyEvent, Live, PointerButton, ScrollPos, ScrollSpec, Tx, col, text};
 use strata_kit::look::Look;
 
 pub use a11y::{Announcement, Roles, default_announcement};
@@ -256,6 +261,7 @@ pub(crate) struct Config<S> {
     on_visible: Option<VisibleFn<S>>,
     announce: Option<AnnounceFn<S>>,
     on_scroll: Option<ScrollFn>,
+    keys_by_host: bool,
 }
 
 impl<S> Config<S> {
@@ -332,6 +338,7 @@ impl<S: 'static> Collection<S> {
                 on_visible: None,
                 announce: None,
                 on_scroll: None,
+                keys_by_host: false,
             },
         }
     }
@@ -497,6 +504,19 @@ impl<S: 'static> Collection<S> {
         self
     }
 
+    /// Keys reach this collection from the host, not from Rune's focus: the collection is no
+    /// focus stop (its container isn't focusable and has no key handler), and names no active
+    /// descendant. An ancestor that is the focus stop routes each key to it with
+    /// [`Collection::key`] and names the cursor's row as its own active descendant
+    /// ([`Collection::cursor_path`]). A press in it focuses that ancestor, the nearest one with
+    /// a key handler. Columns (C2) builds every column this way, so the whole strip is one Tab
+    /// stop, as in Strata, and the strip sends each key to the column that holds the cursor:
+    /// Rune can't move focus between elements from code at the pinned rev.
+    pub fn keys_by_host(mut self) -> Self {
+        self.cfg.keys_by_host = true;
+        self
+    }
+
     /// Hears the controllers' intents (open, rename, drag, context menu).
     pub fn on_intent(mut self, f: impl Fn(&mut S, Intent, &mut Tx) + 'static) -> Self {
         self.cfg.on_intent = Some(Rc::new(f));
@@ -551,6 +571,32 @@ impl<S: 'static> Collection<S> {
     pub fn tick(self, s: &mut S, tx: &mut Tx) -> bool {
         let cfg = Rc::new(self.cfg);
         route::tick(&cfg, s, tx)
+    }
+
+    /// Handles a key as the collection's own key handler would: the keyboard controller hears
+    /// it, through the same routing a focused collection's keys take. For a collection built
+    /// with [`Collection::keys_by_host`], from the focus stop's `on_key`, with the key's own
+    /// transaction (so layout-aware chords still match). True when a controller took the key;
+    /// the caller then says so to Rune.
+    pub fn key(self, s: &mut S, event: &KeyEvent, tx: &mut Tx) -> bool {
+        let cfg = Rc::new(self.cfg);
+        route::on_key(&cfg, s, event, tx)
+    }
+
+    /// The key path of the cursor's row (or cell), under this collection's key, as its
+    /// container names it its active descendant: for the focus stop of a collection built with
+    /// [`Collection::keys_by_host`]. `None` with no cursor. The path starts at the collection's
+    /// key, so the focus stop names it from above (a key path's leading keys are the nearest
+    /// keyed ancestors of the rest).
+    pub fn cursor_path(&self, s: &S) -> Option<String> {
+        let (src, st) = (self.cfg.get)(s);
+        let index = st.selection.cursor_index(src)?;
+        Some(keys::entry_path(
+            &self.cfg.key,
+            src,
+            index,
+            st.per_line.get().max(1),
+        ))
     }
 
     /// Works the entries per line out again from the lines' rule as it stands now: call it
@@ -702,7 +748,6 @@ impl<S: 'static> Collection<S> {
         let mut root = col()
             .key(cfg.key.to_string())
             .role(cfg.roles.container)
-            .focusable(true)
             .w_full()
             .h_full()
             .min_h(0.0)
@@ -712,14 +757,20 @@ impl<S: 'static> Collection<S> {
             .on_secondary_press_local(move |s: &mut S, e, tx| {
                 route::on_secondary(&secondary_cfg, s, e, tx)
             })
-            .on_key(move |s: &mut S, e, tx| route::on_key(&key_cfg, s, e, tx))
             .on_pointer_move_local(move |s: &mut S, _, tx| {
                 route::on_pointer_move(&move_cfg, s, tx)
             });
+        if !cfg.keys_by_host {
+            root = root
+                .focusable(true)
+                .on_key(move |s: &mut S, e, tx| route::on_key(&key_cfg, s, e, tx));
+        }
         if let Some(name) = &cfg.name {
             root = root.label(name.clone());
         }
-        if let Some(index) = st.selection.cursor_index(src) {
+        if !cfg.keys_by_host
+            && let Some(index) = st.selection.cursor_index(src)
+        {
             // A path under this collection, so a second collection showing the same folder
             // (another pane) can't answer for it.
             root = root.active_descendant(keys::entry_path(&cfg.key, src, index, per));

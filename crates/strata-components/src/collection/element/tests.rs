@@ -2695,3 +2695,113 @@ fn a_press_while_the_stuck_header_hides_is_on_the_row_drawn_there() {
     click_at(&mut rt, vp.x + 40.0, vp.y + h / 2.0);
     assert_eq!(rt.state.coll.selection.cursor(), Some(id(503)));
 }
+
+// Keys from the host (C2's request E1).
+
+/// Two collections keyed by their host under one focus stop that routes keys to the active one.
+struct Strip {
+    src: FastSource,
+    colls: Vec<CollectionState>,
+    look: Look,
+    active: usize,
+}
+
+fn strip_pane(i: usize) -> Collection<Strip> {
+    Collection::new(
+        ["a", "b"][i],
+        move |s: &Strip| (&s.src, &s.colls[i]),
+        move |s: &mut Strip| (&s.src, &mut s.colls[i]),
+        |s: &Strip| &s.look,
+        |_: &Strip| 1,
+    )
+    .keys_by_host()
+}
+
+fn strip_view(s: &Strip, _: &mut Cx<Strip>) -> El {
+    let mut strip = rune::row()
+        .key("strip")
+        .role("group")
+        .focusable(true)
+        .size(W, H)
+        .on_key(|s: &mut Strip, e, tx| strip_pane(s.active).key(s, e, tx))
+        .child(col().w(W / 2.0).h_full().child(strip_pane(0).build(s)))
+        .child(col().w(W / 2.0).h_full().child(strip_pane(1).build(s)));
+    if let Some(path) = strip_pane(s.active).cursor_path(s) {
+        strip = strip.active_descendant(path);
+    }
+    strip
+}
+
+fn strip(n: usize) -> Runtime<Strip> {
+    let mut colls = vec![CollectionState::new(), CollectionState::new()];
+    for c in &mut colls {
+        c.controllers.keyboard = Some(Box::new(Keys));
+    }
+    let state = Strip {
+        src: FastSource::new(n),
+        colls,
+        look: Look::fallback(false),
+        active: 1,
+    };
+    let mut rt = Runtime::new(state, strip_view, (W, H), Env::new(false, 1.0));
+    rt.frame(0.0);
+    for _ in 0..10 {
+        rt.frame(1.0 / 60.0);
+    }
+    rt
+}
+
+/// E1: collections keyed by their host are no focus stops: a press in one focuses the host's
+/// stop, which hands the key to the collection it picks; the stop names the cursor's row.
+#[test]
+fn a_collection_keyed_by_its_host_takes_keys_through_the_host() {
+    let mut rt = strip(20);
+    let lists: Vec<_> = rt
+        .elements()
+        .into_iter()
+        .filter(|e| e.role == "listbox")
+        .collect();
+    assert_eq!(lists.len(), 2);
+    assert!(
+        lists.iter().all(|e| !e.focusable),
+        "the collections aren't focus stops"
+    );
+    let [x, y, w, h] = element_in(&rt, "a", "row-3").unwrap().visible;
+    rt.pointer_down(x + w / 2.0, y + h / 2.0);
+    rt.pointer_up(x + w / 2.0, y + h / 2.0);
+    rt.frame(1.0 / 60.0);
+    let focused: Vec<_> = rt
+        .elements()
+        .into_iter()
+        .filter(|e| e.focused)
+        .filter_map(|e| e.key)
+        .collect();
+    assert_eq!(focused, ["strip"], "a press focuses the host's stop");
+    assert_eq!(rt.state.colls[0].selection.cursor(), Some(id(3)));
+    // The host routes End to b, not to a, which the press was in.
+    rt.key(KeyEvent {
+        key: Key::End,
+        mods: Mods::default(),
+    });
+    rt.frame(1.0 / 60.0);
+    assert_eq!(rt.state.colls[1].selection.cursor(), Some(id(19)));
+    assert_eq!(rt.state.colls[0].selection.cursor(), Some(id(3)));
+    let strip = a11y_node(&rt, "strip").unwrap();
+    assert!(strip.contains(r#""activeDescendant":"row-19""#), "{strip}");
+    for scope in ["a", "b"] {
+        let node = a11y_node(&rt, scope).unwrap();
+        assert!(!node.contains("activeDescendant"), "{scope}: {node}");
+    }
+    // A key no controller takes isn't taken.
+    let taken = rt.update_if(|s, tx| {
+        strip_pane(1).key(
+            s,
+            &KeyEvent {
+                key: Key::Home,
+                mods: Mods::default(),
+            },
+            tx,
+        )
+    });
+    assert!(!taken);
+}

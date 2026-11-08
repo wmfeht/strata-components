@@ -42,12 +42,12 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | K2 | merged | 1 review round + fixes; Strata values at upstream/main 35ee677ab; font list arrives as data (Rune #114/U16); Switch/Button sizes are rune-kit gaps | db41ea7 |
 | K3 | planning | | |
 | K4 | ready | | |
-| P0 | fixing round 2 (B2 Ask-drop settle allows a fatal finish; B3 dead connection spins the reader silently; round 3 review is last; Platform CI on ubuntu-26.04, unverified on GitHub) | owner: S2 Q1 = a (degrade on libwayland 1.22; own-connection data-control route); owner: move Platform CI to libwayland >= 1.23 in P0 (unverified until a push); S2 Q2/Q3 deferred to P1 | |
+| P0 | review 3 (final; round 2 fixed: 7fe2af3; x11rb moved to a shared block; Platform CI on ubuntu-26.04, unverified on GitHub) | owner: S2 Q1 = a (degrade on libwayland 1.22; own-connection data-control route); owner: move Platform CI to libwayland >= 1.23 in P0 (unverified until a push); S2 Q2/Q3 deferred to P1 | |
 | P3 | merged | 2 review rounds, no blockers; owner: borderless on Wayland now with NO edge resize until Rune U6, no minimise (U7) or window menu (U8); X11 borderless under Auto via shim (mutter/KWin hand test pending); no in-app resize; corners Cursor::Move; header component folded into X1; Done-when narrowed (deliberate parity regressions recorded); open should-fixes: Watcher::drop joins even when the fd dup fails (UI hang on EMFILE: detach instead), resize test asserts sway's rect not X geometry; hand tests pending (Hyprland, GNOME, KDE, mutter/KWin X11) | 23d95af |
-| P5 | fixing round 1 (B1 signal burst during ReadAll stalls the read and loses values; ruling: a key a restarted portal lacks resets to default) | zbus 6 portal reader (bare workspace deps shared with P8); reads 4 extra keys (drag threshold, recent files, blink timeout, reduced motion); no GSettings/XSETTINGS/kdeglobals fallback (X11 without portal gets defaults); GTK-only text-scaling bullets proposed N/A (owner) | |
+| P5 | review 2 (round 1 fixed: 53dd2e4; ruling: a key a restarted portal lacks resets to default; covered window: state current, view waits for uncover, #139) | zbus 6 portal reader (bare workspace deps shared with P8); reads 4 extra keys (drag threshold, recent files, blink timeout, reduced motion); no GSettings/XSETTINGS/kdeglobals fallback (X11 without portal gets defaults); GTK-only text-scaling bullets proposed N/A (owner) | |
 | P6 | ready | | |
 | P7 | ready | | |
-| P8 | fixing round 1 (no blockers; taking should-fixes: FileManager1 failure keeps primary, U-P8-1 text into S5, retry test, token path; 11 unit + 17 session tests incl. GLib interop) | GApplication-compatible protocol; opt-in FileManager1 Reveal in the shim (deviation from WP doc: policy stays in Strata); zbus 6 + tokio deps (already locked); zbus types exposed (major bump = minor release) | |
+| P8 | review 2 (round 1 fixed: 0ec3dcb; U-P8-1 text in S5 appendix; 11 unit + 17 session tests incl. GLib interop) | GApplication-compatible protocol; opt-in FileManager1 Reveal in the shim (deviation from WP doc: policy stays in Strata); zbus 6 + tokio deps (already locked); zbus types exposed (major bump = minor release) | |
 | P9 | merged | 1 review round + fixes; ci.yml gains libglib2.0-dev (approved exception); example compiled, not run; no desktop hand test | 54786b4 |
 | C10b | waiting | | |
 | C11 | waiting | | |
@@ -67,9 +67,9 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | P4 | waiting | | |
 | X1 | waiting | | |
 | C14b | ready | carries C14a round-3 should-fix: key the rescale child by target scale (`{key}-rescale-{scale bits}`) + regression test (2x, one frame, 1x) | |
-| C2 | ready | | |
-| C3 | ready | | |
-| C4 | ready | | |
+| C2 | waiting (C24) | | |
+| C3 | waiting (C25) | | |
+| C4 | planning | | |
 | X3 | waiting | | |
 | C20d | waiting | | |
 | X2 | waiting | from C1f: drop-by-point routing in row.rs has no test that fails without it; the system binder (never sends on_move) must test it | |

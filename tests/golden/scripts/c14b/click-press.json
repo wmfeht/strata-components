@@ -30,10 +30,7 @@
                   ],
                   "key": "files",
                   "name": "Files",
-                  "role": "list-box",
-                  "states": [
-                    "focused"
-                  ]
+                  "role": "list-box"
                 }
               ],
               "key": "preview-files",
@@ -230,7 +227,10 @@
                               ],
                               "key": "c14b-archive",
                               "name": "Archive contents",
-                              "role": "list-box"
+                              "role": "list-box",
+                              "states": [
+                                "focused"
+                              ]
                             }
                           ],
                           "key": "c14b-archive-preview",

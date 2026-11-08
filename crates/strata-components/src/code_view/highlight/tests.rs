@@ -1981,3 +1981,46 @@ fn three_polls_between_builds_over_the_cap_come_to_rest() {
     assert!(rested, "never came to rest in {builds} builds");
     assert_eq!(pump.blocks_asked, 200, "each block asked for once");
 }
+
+#[test]
+fn two_polls_between_builds_over_the_cap_come_to_rest() {
+    // Review 5, SF3: the last-two-builds rule holds with two polls per build.
+    let mut pump = Pump::new(light());
+    let mut blocks = pump.blocks();
+    let view: Vec<String> = (0..200).map(|i| view_block("a", i)).collect();
+    let (builds, rested) = build_polling(&mut pump, &mut blocks, &view, 2, 300);
+    assert!(rested, "never came to rest in {builds} builds");
+    assert_eq!(pump.blocks_asked, 200, "each block asked for once");
+}
+
+#[test]
+fn a_block_from_the_last_build_outlives_one_trim() {
+    // Review 5, SF3: a block asked for in either of the last two builds is never trimmed,
+    // so a document left for one build keeps its colours; the next trim takes it.
+    let mut pump = Pump::new(light());
+    let mut blocks = pump.blocks();
+    let x: Vec<String> = (0..160).map(|i| view_block("x", i)).collect();
+    let small = |i: usize| vec![format!("fn s{i}() {{}}\n")];
+    build_view(&blocks, &x);
+    pump.run();
+    assert!(blocks.poll());
+    // A build of something else, landing: x was asked for in the build before, so it stays.
+    build_view(&blocks, &small(1));
+    pump.run();
+    assert!(blocks.poll());
+    assert!(
+        x.iter().all(|c| blocks.has_landed("rust", c)),
+        "x was trimmed one build after it was on screen"
+    );
+    // Another: x is two builds back now, and the trim takes it down to the cap.
+    build_view(&blocks, &small(2));
+    pump.run();
+    assert!(blocks.poll());
+    let kept = x.iter().filter(|c| blocks.has_landed("rust", c)).count();
+    assert!(kept < x.len(), "x outlived its two builds: {kept} kept");
+    assert!(
+        blocks.cached_bytes() <= 4 << 20,
+        "{} bytes",
+        blocks.cached_bytes()
+    );
+}

@@ -33,6 +33,8 @@ pub struct DrawerState {
     /// that is needed again after it ran mounts afresh and runs again.
     pub(super) marks: u32,
     pub(super) hint: bool,
+    /// The host lights the divider's line, as hover does (`DrawerState::light_line`).
+    pub(super) lit: bool,
     pub(super) suspended: bool,
     pub(super) focus_content: u32,
     pub(super) focus_files: u32,
@@ -125,6 +127,19 @@ impl DrawerState {
         let mut anim: Anim = Curve::tween(SLIDE_SECONDS, Easing::EASE_IN_OUT).into();
         anim.velocity = Velocity::Zero;
         tx.motion_curve(anim);
+    }
+
+    /// Lights the divider's line as hovering it does, or stops: C2 lights it while the pointer
+    /// is over the edge of the column that meets the preview (`browser/view-modes/columns`:
+    /// "Hovering the edge of the column that meets the preview also lights the preview divider
+    /// line"). The grip's tint and the caption stay the divider's own hover's.
+    pub fn light_line(&mut self, on: bool) {
+        self.lit = on;
+    }
+
+    /// Whether the host lights the divider's line ([`DrawerState::light_line`]).
+    pub fn line_lit(&self) -> bool {
+        self.lit
     }
 
     /// Whether Columns keeps the slot while the preview is closed.

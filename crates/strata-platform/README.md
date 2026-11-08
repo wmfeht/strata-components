@@ -15,8 +15,8 @@ rename, if any, happens before the first release tag.
 
 ## Features
 
-None is on by default. `glib-bridge`, `csd` and `single-instance` are implemented; the other modules
-are placeholders until their work packages land. "Issue" is the upstream ask, drafted in
+None is on by default. `glib-bridge`, `csd`, `settings` and `single-instance` are implemented; the
+other modules are placeholders until their work packages land. "Issue" is the upstream ask, drafted in
 [`docs/decisions/S5-upstream.md`](../../docs/decisions/S5-upstream.md#draft-index), with its link
 once filed.
 
@@ -26,7 +26,7 @@ once filed.
 | `clipboard` | `clipboard` | Custom MIME types, several forms in one write, typed reads, and a notice when another app takes the clipboard | [U5](../../docs/decisions/S5-upstream.md#u5), [U9](../../docs/decisions/S5-upstream.md#u9) |
 | `csd` | `csd` | Interactive resize, minimise and the window menu for a borderless window, and its maximised state. Implemented: borderless windows on Wayland and X11, a header that moves the window, and window buttons routed to Rune or the window manager. X11 resizes from the edges and has minimise and the window menu through its own connection (mutter and KWin untested). Wayland has no edge resize, minimise or window menu until Rune ships them. | [U6](../../docs/decisions/S5-upstream.md#u6), [U7](../../docs/decisions/S5-upstream.md#u7), [U8](../../docs/decisions/S5-upstream.md#u8), [U9](../../docs/decisions/S5-upstream.md#u9); upstream [#145](https://github.com/anomalyco/rune/issues/145) |
 | `foreign-parent` | `foreign_parent` | Making a window transient for another app's window | [U11](../../docs/decisions/S5-upstream.md#u11), [U9](../../docs/decisions/S5-upstream.md#u9) |
-| `settings` | `settings` | Settings portal keys beyond `color-scheme`, and the desktop's double-click interval | [U12](../../docs/decisions/S5-upstream.md#u12), [U13](../../docs/decisions/S5-upstream.md#u13) |
+| `settings` | `settings` | Settings portal keys beyond `color-scheme`, and the desktop's double-click interval. Implemented: the text scale, double-click interval, drag threshold, caret blink, animations switch, `reduced-motion` and recent-files switch from the Settings portal, with their changes on Rune's loop. Rune's own double press keeps its fixed 0.5 s. The portal is the only source: a session without one gets the defaults. | [U12](../../docs/decisions/S5-upstream.md#u12), [U13](../../docs/decisions/S5-upstream.md#u13) |
 | `icon-theme` | `icon_theme` | Freedesktop icon theme lookup | None proposed |
 | `media-audio` | `media` | An audio sink with a playback clock | Related: upstream [#30](https://github.com/anomalyco/rune/issues/30) |
 | `single-instance` | `single_instance` | Single instance on Linux: Rune starts every launch as a new process. Implemented: one primary per app id on the session bus, with a later launch's arguments, working directory and activation token forwarded over GApplication's wire protocol, `org.freedesktop.Application`, and an opt-in `org.freedesktop.FileManager1`. On X11, focusing a window already open ignores the startup id. | Upstream [#22](https://github.com/anomalyco/rune/issues/22); [U-P8-1](../../docs/decisions/S5-upstream.md#u-p8-1) |

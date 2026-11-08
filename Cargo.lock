@@ -3013,6 +3013,7 @@ name = "strata-platform"
 version = "0.0.1"
 dependencies = [
  "futures-channel",
+ "futures-util",
  "gio",
  "glib",
  "rune",

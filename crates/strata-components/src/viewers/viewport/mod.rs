@@ -23,9 +23,10 @@
 //! - **Modes** ([`Mode`]): Fit, ScaleDown (fit, never enlarged), Fill, Actual (1:1) and Free.
 //!   Fit, ScaleDown and Fill follow the frame as it resizes. A level is device pixels per
 //!   content pixel, so 1:1 is pixel for pixel at any display scale.
-//! - **Zoom** with Ctrl+wheel and pinch, about the pointer; `+` and `-` step through
-//!   [`ViewportState::steps`] about the centre, and `0` or Ctrl+0 resets to the default mode.
-//!   Each change of level sends a [`ZoomReport`] to [`Viewport::on_zoom`].
+//! - **Zoom** with Ctrl+wheel (a wheel turned away zooms in) and, on macOS, the trackpad pinch,
+//!   about the pointer; `+` and `-` step through [`ViewportState::steps`] about the centre, and
+//!   `0` or Ctrl+0 resets to the default mode. Each change of level the viewport makes sends a
+//!   [`ZoomReport`] to [`Viewport::on_zoom`]; [`ViewportState`]'s methods return theirs.
 //! - **Pan** by drag, by the wheel, and by the arrow keys, only along an axis the content
 //!   overflows, held at the content's edges. An axis that fits stays centred.
 //! - **Checkerboard** behind transparent content ([`Viewport::transparent`]), from Kit tokens.
@@ -80,9 +81,12 @@
 //!   package ("Orbit by drag sends a camera intent") conflicts with that; it's C14b's to
 //!   resolve.
 //! - **C13**: the video surface (Fixed, opaque), with the host updating its `Pixels` in place.
+//!   P7 delivers square-pixel frames: an anamorphic video's are already scaled to its display
+//!   aspect, so its content size is the frames' size and the viewport never corrects the aspect.
 //! - **C12**: its page column scrolls in its own scroll view (Rune virtual rows mount from the
-//!   scroll offset, so a live pan can't move them). It reuses [`zoom`] (the factors,
-//!   [`ZoomLimits`], [`ZoomReport`], [`ctrl_zero_key`]) and [`checkerboard`].
+//!   scroll offset, so a live pan can't move them). It reuses [`zoom`]'s factors,
+//!   [`ZoomLimits`], [`zoom::zoom_about_scroll`] and [`ctrl_zero_key`], and [`checkerboard`],
+//!   with a level basis of its own: [`zoom`]'s docs give the mapping.
 //!
 //! # Tests
 //!
@@ -99,10 +103,18 @@
 //!   `ImageCache` for stills, which does.
 //! - An image over 8192 pixels on a side doesn't draw: the host downsamples it, and keeps the
 //!   content size at the original's so 1:1 still means the original's pixels.
-//! - In a Linux or Windows window, Rune turns any Ctrl+wheel over an `on_magnify` handler into a
-//!   pinch with no modifiers, so Ctrl+Shift+wheel can't be told from a pinch, and a declined
-//!   pinch doesn't fall back to the wheel. Headless runs send Ctrl+wheel to `on_wheel` instead.
-//!   The viewport zooms on both paths; Fixed attaches neither.
+//! - Off macOS, a Rune window turns any Ctrl+wheel over an `on_magnify` handler into a pinch:
+//!   with no modifiers (Ctrl+Shift+wheel can't be told from a pinch), with no fallback to the
+//!   wheel when the pinch is declined, and with the zoom inverted (`MagnifyEvent::new(-dy /
+//!   200)`, so a wheel turned away zooms out; Rune draft "Ctrl+wheel turned into a pinch zooms
+//!   the wrong way", draft, not filed, in C14a's report). So the viewport attaches `on_magnify`
+//!   only on macOS, where pinches arrive as pinches, and hears Ctrl+wheel in `on_wheel` with its
+//!   modifiers everywhere else, in a window and headless alike.
+//!
+//!   The catch: Rune converts the Ctrl+wheel for any `on_magnify` under the pointer, ancestors
+//!   included. A host that puts `on_magnify` on an element around a Full viewport (a canvas, a
+//!   window-wide zoom) takes Ctrl+wheel from it off macOS: the ancestor hears an inverted pinch
+//!   and the viewport hears nothing. Keep `on_magnify` off a Full viewport's ancestors there.
 //! - There is no repeating pattern fill; the checkerboard is a shape of squares.
 //!
 //! # Open items
@@ -123,6 +135,7 @@ use rune::{Cursor, Cx, Drag, El, KeyEvent, MagnifyEvent, Pixels, SurfaceFit, Tx,
 use strata_kit::look::Look;
 
 use crate::contract::{Dnd, DragSource};
+use crate::dialog::FOCUS_RING_WIDTH;
 
 pub use checker::checkerboard;
 pub use state::ViewportState;
@@ -337,6 +350,8 @@ impl<'a, S: 'static> Viewport<'a, S> {
             .min_h(0.0)
             .clip_soft(0.0)
             .instant_changes()
+            // Centres the stand-in drawn before the first layout; the rest is pinned.
+            .center()
             .role("image");
         if let Some(label) = label {
             frame = frame.label(label);
@@ -344,7 +359,14 @@ impl<'a, S: 'static> Viewport<'a, S> {
         {
             let on_zoom = on_zoom.clone();
             frame = frame.on_layout_tx(move |s: &mut S, r: [f32; 4], tx: &mut Tx| {
-                let report = access(s).set_frame([r[2], r[3]], scale);
+                let st = access(s);
+                let size = [r[2], r[3]];
+                if st.frame() == Some(size) && st.scale() == scale {
+                    // Only moved (a scroll or a sibling around it): nothing the view reads.
+                    tx.live_only();
+                    return;
+                }
+                let report = st.set_frame(size, scale);
                 emit(&on_zoom, s, report, tx);
             });
         }
@@ -396,16 +418,19 @@ impl<'a, S: 'static> Viewport<'a, S> {
                 }
             }
             // Before the first layout: the fit the first layout will land on, so the first
-            // frame isn't blank.
-            None if st.mode() == Mode::Fit && st.content().is_some() => {
-                if let Some(px) = pixels {
-                    frame = frame.child(
-                        el().key(format!("{key}-content"))
-                            .role("presentation")
-                            .w_full()
-                            .h_full()
-                            .pixels_fit(px, SurfaceFit::Fit),
-                    );
+            // frame isn't blank. ScaleDown is the same fit, held to 1:1.
+            None if matches!(st.mode(), Mode::Fit | Mode::ScaleDown) => {
+                if let (Some(px), Some(content)) = (pixels, st.content()) {
+                    let mut stand_in = el()
+                        .key(format!("{key}-content"))
+                        .role("presentation")
+                        .w_full()
+                        .h_full()
+                        .pixels_fit(px, SurfaceFit::Fit);
+                    if st.mode() == Mode::ScaleDown {
+                        stand_in = stand_in.max_w(content[0] / scale).max_h(content[1] / scale);
+                    }
+                    frame = frame.child(stand_in);
                 }
             }
             None => {}
@@ -426,7 +451,8 @@ impl<'a, S: 'static> Viewport<'a, S> {
         }
         frame = frame
             .focusable(true)
-            .focus_ring(2.0, -2.0, look.kit.c.border_focus)
+            // Inside the edge: a drawer's slot clips anything outside the viewport.
+            .focus_ring(FOCUS_RING_WIDTH, -FOCUS_RING_WIDTH, look.kit.c.border_focus)
             .on_key(key_handler(
                 access,
                 on_zoom.clone(),
@@ -434,8 +460,12 @@ impl<'a, S: 'static> Viewport<'a, S> {
                 scale,
                 look.space.xxl,
             ))
-            .on_wheel(wheel_handler(access, on_zoom.clone(), scale))
-            .on_magnify(magnify_handler(access, on_zoom, scale));
+            .on_wheel(wheel_handler(access, on_zoom.clone(), scale));
+        // Off macOS a pinch arrives as Ctrl+wheel, which `on_wheel` hears with its modifiers; an
+        // `on_magnify` there would make Rune turn it into an inverted pinch (module docs).
+        if cfg!(target_os = "macos") {
+            frame = frame.on_magnify(magnify_handler(access, on_zoom, scale));
+        }
         if pans {
             frame =
                 frame
@@ -465,10 +495,16 @@ fn key_handler<S: 'static>(
     move |s: &mut S, e: &KeyEvent, tx: &mut Tx| {
         let Some(k) = keys(e) else { return false };
         let st = access(s);
-        st.set_scale(scale);
+        let rescaled = st.sync_scale(scale);
         if st.level().is_none() {
             return false;
         }
+        // A new scale changed the level: this event commits, whatever it does next.
+        let rescaled = rescaled.is_some_and(|r| {
+            emit(&on_zoom, s, Some(r), tx);
+            true
+        });
+        let st = access(s);
         let report = match k {
             ZoomKey::In => st.zoom_step(1),
             ZoomKey::Out => st.zoom_step(-1),
@@ -477,11 +513,13 @@ fn key_handler<S: 'static>(
                 let o = st.overflow();
                 let along = |on: bool, dir: i8| if on { -f32::from(dir) * step } else { 0.0 };
                 let d = [along(o[0], x), along(o[1], y)];
-                if d == [0.0, 0.0] {
+                // At the edge already, the key passes on (to the listing, say).
+                if !st.pan_by(d) {
                     return false;
                 }
-                st.pan_by(d);
-                tx.live_only();
+                if !rescaled {
+                    tx.live_only();
+                }
                 return true;
             }
         };
@@ -497,10 +535,16 @@ fn wheel_handler<S: 'static>(
 ) -> impl Fn(&mut S, WheelEvent, &mut Tx) -> bool + 'static {
     move |s: &mut S, e: WheelEvent, tx: &mut Tx| {
         let st = access(s);
-        st.set_scale(scale);
+        let rescaled = st.sync_scale(scale);
         if st.level().is_none() {
             return false;
         }
+        // A new scale changed the level: this event commits, whatever it does next.
+        let rescaled = rescaled.is_some_and(|r| {
+            emit(&on_zoom, s, Some(r), tx);
+            true
+        });
+        let st = access(s);
         if e.mods.ctrl {
             // Ctrl+Shift+wheel is Strata's thumbnail size; Ctrl+Alt is nobody's here.
             if e.mods.shift || e.mods.alt {
@@ -517,7 +561,9 @@ fn wheel_handler<S: 'static>(
             return false;
         }
         st.pan_by(d);
-        tx.live_only();
+        if !rescaled {
+            tx.live_only();
+        }
         true
     }
 }
@@ -529,10 +575,12 @@ fn magnify_handler<S: 'static>(
 ) -> impl Fn(&mut S, MagnifyEvent, &mut Tx) -> bool + 'static {
     move |s: &mut S, e: MagnifyEvent, tx: &mut Tx| {
         let st = access(s);
-        st.set_scale(scale);
+        let rescaled = st.sync_scale(scale);
         if st.level().is_none() {
             return false;
         }
+        emit(&on_zoom, s, rescaled, tx);
+        let st = access(s);
         let report = st.zoom_by(zoom::magnify_factor(e.delta), Some([e.x, e.y]));
         emit(&on_zoom, s, report, tx);
         true

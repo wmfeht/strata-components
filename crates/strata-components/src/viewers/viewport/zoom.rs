@@ -1,50 +1,72 @@
 //! The zoom model as plain math: levels, steps, limits, the wheel and pinch factors, zooming
 //! about a point, pan clamps, the zoom report and the zoom keys.
 //!
-//! [`Viewport`](super::Viewport) runs on these, and C12's page column reuses them with its own
-//! scroll view: a virtual column can't sit under the viewport's live pan, because Rune mounts
-//! virtual rows from the scroll offset. C12 picks its own basis (a level of 1 is the fitted
-//! width there, limited to 1–4) and its own wheel speed, and keeps the rest:
+//! [`Viewport`](super::Viewport) runs on these. C12's page column reuses the factors, the
+//! limits, [`zoom_about_scroll`], the keys and the checkerboard with its own scroll view: a
+//! virtual column can't sit under the viewport's live pan, because Rune mounts virtual rows from
+//! the scroll offset.
+//!
+//! # C12's mapping
+//!
+//! C12's level has another basis: 1 is the pages' fitted width (the pane's width, at most
+//! 1280 points), limited to 1–4, and a page's content is the page as rendered at that width's
+//! render cap. So C12 doesn't use [`mode_level`] or [`ZoomReport`] (whose level is device
+//! pixels per content pixel); it asks the renderer for `fitted width × level` device pixels per
+//! visible page itself. Zooming about the pointer moves the scroll offset by
+//! [`zoom_about_scroll`]: `offset' = (offset + anchor) × k − anchor`.
 //!
 //! ```ignore
 //! let limits = ZoomLimits::new(1.0, 4.0);
-//! // Strata's PDF zoom: e^0.14 a notch, and a notch is 40 points.
+//! // Strata's PDF zoom: e^0.14 a notch, and a notch is 40 points. Wheel away (dy > 0) zooms in.
 //! let next = limits.clamp(s.pdf.level * wheel_factor_per(e.dy, 0.14 / 40.0));
+//! let k = next / s.pdf.level;
+//! let y = zoom_about_scroll(s.pdf.offset_y, e.y - s.pdf.viewport_top, k);
 //! if let Some(ZoomKey::Reset) = ctrl_zero_key(&key) { /* back to fitted width, consumed */ }
 //! ```
 //!
-//! # Units
+//! # Units and signs
 //!
 //! A *level* is device pixels per content pixel: 1 is 1:1, where each content pixel covers one
 //! device pixel, whatever the display scale. Content sizes are in content pixels (an image's
 //! own size, which isn't the size of the `Pixels` that draws it). Frame sizes, pans and points
 //! are in layout points.
+//!
+//! Wheel deltas follow Rune's `WheelEvent`: positive `dy` moves content down, which is a wheel
+//! turned away from the user (scrolling up). Ctrl with it zooms in, as in browsers and in
+//! Strata's PDF preview.
 
 use rune::{Key, KeyEvent};
 use strata_kit::look::Ladder;
 
-/// Points of Ctrl+wheel per unit of magnification: Rune's own, where a trackpad pinch arrives
-/// as Ctrl+wheel (Linux, Windows and the web), so a Ctrl+wheel the viewport hears itself and
-/// one Rune turned into a pinch zoom alike.
+/// Points of Ctrl+wheel per unit of magnification, as Rune converts a Ctrl+wheel into a pinch
+/// where a trackpad pinch arrives that way (Windows, Linux and the web): one 40-point notch is
+/// a factor of about 1.22.
 pub const PINCH_WHEEL: f32 = 200.0;
 
-/// The zoom factor for a Ctrl+wheel of `dy` points: `e^(-dy / 200)`. One 40-point mouse notch
-/// is about 1.22×, and a notch back returns to the same level.
+/// The zoom factor for a Ctrl+wheel of `dy` points: `e^(dy / 200)`. A notch turned away from
+/// the user (`dy` = 40) zooms in about 1.22×, and a notch back returns to the same level.
 pub fn wheel_factor(dy: f32) -> f32 {
     wheel_factor_per(dy, 1.0 / PINCH_WHEEL)
 }
 
 /// The zoom factor for a Ctrl+wheel of `dy` points at `per_point` (natural log of the factor
-/// per point): `e^(-dy × per_point)`.
+/// per point): `e^(dy × per_point)`, so `dy` > 0 (a wheel turned away) zooms in.
 pub fn wheel_factor_per(dy: f32, per_point: f32) -> f32 {
-    (-dy * per_point).exp()
+    (dy * per_point).exp()
 }
 
-/// The zoom factor for a pinch of `delta` (Rune's `MagnifyEvent::delta`): `e^delta`, which
-/// matches [`wheel_factor`] for a pinch Rune made from Ctrl+wheel and is symmetric, so pinching
-/// out and back lands where it started.
+/// The zoom factor for a pinch of `delta` (Rune's `MagnifyEvent::delta`, positive spreading the
+/// fingers): `e^delta`, symmetric, so pinching out and back lands where it started.
 pub fn magnify_factor(delta: f32) -> f32 {
     delta.exp()
+}
+
+/// The scroll offset that keeps the content under `anchor` there when the content grows by
+/// `k`: `offset' = (offset + anchor) × k − anchor`, on one axis. `anchor` is the pointer's
+/// distance from the scroll viewport's leading edge; `offset` is the viewport's scroll offset.
+/// For a scrolling column (C12's pages), where [`zoom_about`] is for the viewport's centred pan.
+pub fn zoom_about_scroll(offset: f32, anchor: f32, k: f32) -> f32 {
+    (offset + anchor) * k - anchor
 }
 
 /// Strata's zoom steps for `+` and `-`: from 10 % to 3200 %, with 100 % (1:1) the default.
@@ -95,10 +117,10 @@ impl ZoomLimits {
         level.clamp(self.min, self.max)
     }
 
-    /// These limits, with `min` lowered to `floor` when that is smaller: a viewport always lets
-    /// the user zoom out to fit a content larger than the limits allow.
-    pub fn lowered_to(&self, floor: f32) -> ZoomLimits {
-        ZoomLimits::new(self.min.min(floor), self.max)
+    /// These limits, widened to take in `level`: a viewport always reaches fit, for a content
+    /// larger or smaller than the limits allow.
+    pub fn widened_to(&self, level: f32) -> ZoomLimits {
+        ZoomLimits::new(self.min.min(level), self.max.max(level))
     }
 }
 
@@ -185,10 +207,11 @@ pub fn zoom_about(pan: [f32; 2], about: [f32; 2], k: f32) -> [f32; 2] {
 }
 
 /// What changed when the level did: where the content now draws, so a host can render it
-/// again at the new scale (C12's pages, an SVG rasterised for its size, a downsampled photo).
+/// again at the new scale (an SVG rasterised for its size, a downsampled photo).
 ///
-/// The viewport sends one on every change of level: Ctrl+wheel, pinch, the keys, a mode change,
-/// and a resize in a mode that follows the frame. Debounce in the host.
+/// The viewport sends one on every change of level: Ctrl+wheel, pinch, the keys, and a resize
+/// in a mode that follows the frame. [`ViewportState`](super::ViewportState)'s own methods
+/// return theirs to the host instead. Debounce in the host.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ZoomReport {
     /// Device pixels per content pixel.

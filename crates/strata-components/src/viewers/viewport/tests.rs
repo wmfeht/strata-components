@@ -6,8 +6,8 @@ use rune::{
 use strata_kit::look::Look;
 
 use super::zoom::{
-    Mode, ZoomKey, ZoomLimits, ZoomReport, clamp_pan, ctrl_zero_key, magnify_factor, mode_level,
-    wheel_factor, zoom_key,
+    Mode, ZoomKey, ZoomLimits, ZoomReport, ctrl_zero_key, magnify_factor, mode_level, wheel_factor,
+    zoom_about_scroll, zoom_key,
 };
 use super::{Interaction, PanDrag, Viewport, ViewportState};
 use crate::contract::{Dnd, DragSource};
@@ -64,23 +64,23 @@ fn scale_down_never_enlarges() {
 }
 
 #[test]
-fn a_pan_stays_inside_the_overflow_and_a_fitting_axis_stays_centred() {
-    // 800 wide in a 400 frame: 200 of reach each way. 200 tall in 300: no reach.
-    let pan = clamp_pan([-900.0, 40.0], [800.0, 200.0], [400.0, 300.0]);
-    assert_eq!(pan, [-200.0, 0.0]);
+fn a_wheel_turned_away_zooms_in_and_a_notch_back_returns() {
+    // Rune's `WheelEvent::dy` is positive when content moves down: a wheel turned away from the
+    // user, which zooms in, as in browsers and Strata's PDF preview.
+    assert!(
+        wheel_factor(40.0) > 1.0,
+        "a wheel turned away (dy > 0) zooms in"
+    );
+    assert!(near(wheel_factor(40.0) * wheel_factor(-40.0), 1.0));
+    assert!(near(magnify_factor(0.2) * magnify_factor(-0.2), 1.0));
 }
 
 #[test]
-fn a_wheel_notch_and_back_returns_to_the_same_level() {
-    assert!(near(wheel_factor(-40.0) * wheel_factor(40.0), 1.0));
-    assert!(
-        wheel_factor(-40.0) > 1.0,
-        "a wheel away from the user zooms in"
-    );
-    assert!(
-        near(magnify_factor(0.2), wheel_factor(-40.0)),
-        "a pinch Rune made from Ctrl+wheel matches"
-    );
+fn zooming_a_scrolled_column_keeps_the_anchor_in_place() {
+    // A column scrolled 100 down, the pointer 50 below its top: the content point under the
+    // pointer is 150 in. Doubled, it is 300 in, so the column scrolls to 250.
+    assert!(near(zoom_about_scroll(100.0, 50.0, 2.0), 250.0));
+    assert!(near(zoom_about_scroll(250.0, 50.0, 0.5), 100.0));
 }
 
 #[test]
@@ -214,6 +214,33 @@ fn zooming_out_past_fit_stops_at_the_lower_limit_or_fit() {
 }
 
 #[test]
+fn minus_at_a_huge_images_fit_does_nothing() {
+    let mut huge = ViewportState::default();
+    huge.set_content(Some([40000.0, 10000.0]));
+    huge.set_frame([400.0, 300.0], 1.0);
+    let fit = huge.level().expect("level");
+    // Fit (0.01) is below the first step (0.1): `-` must not jump up to it.
+    assert_eq!(huge.zoom_step(-1), None);
+    assert!(near(huge.level().expect("level"), fit));
+    assert!(huge.zoom_step(1).expect("in").level > fit);
+}
+
+#[test]
+fn plus_and_ctrl_wheel_at_a_tiny_images_fit_do_nothing() {
+    let mut tiny = ViewportState::default();
+    tiny.set_content(Some([8.0, 8.0]));
+    tiny.set_frame([400.0, 300.0], 1.0);
+    let fit = tiny.level().expect("level");
+    // Fit (37.5) is above the last step (32): zooming in must not drop to it.
+    assert!(fit > 32.0);
+    assert_eq!(tiny.zoom_step(1), None);
+    assert_eq!(tiny.zoom_by(wheel_factor(40.0), None), None);
+    assert!(near(tiny.level().expect("level"), fit));
+    assert!(near(tiny.range().expect("range").max, fit));
+    assert!(tiny.zoom_step(-1).expect("out").level < fit);
+}
+
+#[test]
 fn steps_go_to_the_next_step_from_between_steps_and_stop_at_the_ends() {
     let mut st = laid_out(Mode::Fit);
     assert!(near(st.zoom_step(1).expect("in").level, 1.0 / 3.0));
@@ -279,10 +306,20 @@ fn new_content_starts_over_and_the_same_size_keeps_the_zoom() {
     let mut st = laid_out(Mode::Fit);
     st.zoom_to(2.0, None);
     st.pan_by([-100.0, 0.0]);
-    st.set_content(Some([1600.0, 1000.0]));
+    assert_eq!(st.set_content(Some([1600.0, 1000.0])), None);
     assert_eq!((st.mode(), st.pan()), (Mode::Free, [-100.0, 0.0]));
-    st.set_content(Some([800.0, 800.0]));
+    // A new size refits, and reports it for the host to forward: no layout will.
+    let report = st.set_content(Some([800.0, 800.0])).expect("a new level");
     assert_eq!((st.mode(), st.pan()), (Mode::Fit, [0.0, 0.0]));
+    assert!(near(report.level, 300.0 / 800.0));
+    assert_eq!(report.content, [800.0, 800.0]);
+}
+
+#[test]
+fn new_content_before_the_first_layout_leaves_the_report_to_it() {
+    let mut st = ViewportState::default();
+    assert_eq!(st.set_content(Some([800.0, 800.0])), None);
+    assert!(st.set_frame([400.0, 300.0], 1.0).is_some());
 }
 
 #[test]
@@ -344,6 +381,8 @@ fn view(s: &App, cx: &mut Cx<App>) -> El {
         .size(400.0, 300.0)
         .on_press(|s: &mut App| s.outer_presses += 1)
         .child(viewport.build(&s.look, cx));
+    // In a window off macOS, this `on_magnify` around a Full viewport would take its Ctrl+wheel
+    // (module docs); headless, Ctrl+wheel always goes to `on_wheel`.
     el().key("root")
         .size(400.0, 300.0)
         .on_wheel(|s: &mut App, _e, _tx| {
@@ -497,7 +536,7 @@ fn a_plain_wheel_with_nothing_to_pan_scrolls_on() {
 #[test]
 fn a_fixed_viewport_leaves_ctrl_wheel_and_pinches_to_the_app() {
     let mut rt = runtime(Interaction::Fixed, false);
-    rt.wheel_event(WheelEvent::new(0.0, -40.0).at(200.0, 150.0).mods(ctrl()));
+    rt.wheel_event(WheelEvent::new(0.0, 40.0).at(200.0, 150.0).mods(ctrl()));
     rt.magnify_event(MagnifyEvent::new(0.2).at(200.0, 150.0));
     settle(&mut rt);
     assert_eq!((rt.state.outer_wheels, rt.state.outer_pinches), (1, 1));
@@ -508,20 +547,35 @@ fn a_fixed_viewport_leaves_ctrl_wheel_and_pinches_to_the_app() {
 }
 
 #[test]
-fn a_full_viewport_takes_ctrl_wheel_and_pinches() {
+fn ctrl_wheel_turned_away_zooms_in() {
     let mut rt = runtime(Interaction::Full, false);
-    rt.wheel_event(WheelEvent::new(0.0, -40.0).at(200.0, 150.0).mods(ctrl()));
-    rt.magnify_event(MagnifyEvent::new(0.2).at(200.0, 150.0));
+    rt.wheel_event(WheelEvent::new(0.0, 40.0).at(200.0, 150.0).mods(ctrl()));
     settle(&mut rt);
-    assert_eq!((rt.state.outer_wheels, rt.state.outer_pinches), (0, 0));
+    assert_eq!(rt.state.outer_wheels, 0);
     let level = rt.state.view.level().expect("level");
-    assert!(
-        near(level, 0.25 * wheel_factor(-40.0) * magnify_factor(0.2)),
-        "{level}"
-    );
-    assert_eq!(rt.state.reports.len(), 3, "the fit, then each zoom");
+    assert!(level > 0.25, "zoomed in: {level}");
+    assert!(near(level, 0.25 * wheel_factor(40.0)), "{level}");
+    assert_eq!(rt.state.reports.len(), 2, "the fit, then the zoom");
 }
 
+#[test]
+fn a_pinch_zooms_on_macos_and_reaches_the_app_elsewhere() {
+    let mut rt = runtime(Interaction::Full, false);
+    rt.magnify_event(MagnifyEvent::new(0.2).at(200.0, 150.0));
+    settle(&mut rt);
+    let level = rt.state.view.level().expect("level");
+    if cfg!(target_os = "macos") {
+        assert!(near(level, 0.25 * magnify_factor(0.2)), "{level}");
+        assert_eq!(rt.state.outer_pinches, 0);
+    } else {
+        // Off macOS a pinch arrives as Ctrl+wheel, so the viewport has no `on_magnify`.
+        assert!(near(level, 0.25));
+        assert_eq!(rt.state.outer_pinches, 1);
+    }
+}
+
+/// Holds off macOS in a window too: the viewport attaches no `on_magnify` there, so Rune
+/// doesn't turn the Ctrl+wheel into a pinch, and `on_wheel` sees Shift.
 #[test]
 fn ctrl_shift_wheel_is_left_to_the_app() {
     let mut rt = runtime(Interaction::Full, false);
@@ -529,9 +583,123 @@ fn ctrl_shift_wheel_is_left_to_the_app() {
         shift: true,
         ..ctrl()
     };
-    rt.wheel_event(WheelEvent::new(0.0, -40.0).at(200.0, 150.0).mods(mods));
+    rt.wheel_event(WheelEvent::new(0.0, 40.0).at(200.0, 150.0).mods(mods));
     settle(&mut rt);
     assert_eq!(rt.state.outer_wheels, 1);
+}
+
+#[test]
+fn a_new_display_scale_rescales_before_a_zoom() {
+    let mut rt = runtime(Interaction::Full, false);
+    // The window moves to a 2× display: the same frame now fits at twice the level.
+    rt.set_viewport((400.0, 300.0), 2.0);
+    settle(&mut rt);
+    rt.wheel_event(WheelEvent::new(0.0, 40.0).at(200.0, 150.0).mods(ctrl()));
+    settle(&mut rt);
+    let levels: Vec<f32> = rt.state.reports.iter().map(|r| r.level).collect();
+    let last = *levels.last().expect("reports");
+    assert!(near(last, 0.5 * wheel_factor(40.0)), "{levels:?}");
+    assert!(
+        levels.iter().any(|&l| near(l, 0.5)),
+        "the new fit is reported: {levels:?}"
+    );
+}
+
+#[test]
+fn pans_pass_rune_s_live_only_check() {
+    let mut rt = runtime(Interaction::Full, false);
+    rt.update(|s, _| {
+        s.view.zoom_to(1.0, None);
+    });
+    settle(&mut rt);
+    // Each step is held past the check's quarter second, so Rune re-runs the view after each
+    // live-only event and compares it with what's on screen.
+    rt.pointer_move(200.0, 150.0);
+    rt.pointer_down(200.0, 150.0);
+    settle(&mut rt);
+    for i in 1..=5 {
+        rt.pointer_move(200.0 - 12.0 * i as f32, 150.0);
+        settle(&mut rt);
+    }
+    rt.pointer_up(140.0, 150.0);
+    settle(&mut rt);
+    rt.wheel_event(WheelEvent::new(-20.0, 0.0).at(200.0, 150.0));
+    settle(&mut rt);
+    rt.key(KeyEvent {
+        key: Key::Left,
+        mods: Mods::default(),
+    });
+    settle(&mut rt);
+    assert_eq!(rt.state.view.pan(), [-60.0 - 20.0 + 24.0, 0.0]);
+    assert_eq!(rt.live_only_warnings(), &[] as &[String]);
+}
+
+thread_local! {
+    static SCROLL_VIEWS: Cell<u32> = const { Cell::new(0) };
+}
+
+/// The viewport in a scroll view, under a tall tail.
+fn scroll_view(s: &App, cx: &mut Cx<App>) -> El {
+    SCROLL_VIEWS.with(|v| v.set(v.get() + 1));
+    let viewport = Viewport::new(&s.view, |s: &mut App| &mut s.view)
+        .key("vp")
+        .pixels(&s.pixels)
+        .build(&s.look, cx);
+    rune::col()
+        .key("root")
+        .size(400.0, 300.0)
+        .scroll(rune::ScrollSpec {
+            stick_bottom: false,
+        })
+        .child(
+            rune::col()
+                .key("stack")
+                .w_full()
+                .child(el().key("box").w_full().h(300.0).child(viewport))
+                .child(el().key("tail").w_full().h(900.0)),
+        )
+}
+
+#[test]
+fn scrolling_past_a_viewport_runs_no_view() {
+    let pixels = Pixels::new();
+    pixels.set(16, 10, vec![200; 16 * 10 * 4]);
+    let mut view = ViewportState::default();
+    view.set_content(Some([1600.0, 1000.0]));
+    let app = App {
+        view,
+        pixels,
+        look: Look::fallback(false),
+        interaction: Interaction::Full,
+        drag_source: false,
+        outer_presses: 0,
+        reports: Vec::new(),
+        outer_wheels: 0,
+        outer_pinches: 0,
+    };
+    let mut rt = Runtime::new(app, scroll_view, (400.0, 300.0), Env::new(false, 1.0));
+    rt.check_live_only(false);
+    settle(&mut rt);
+    let before = SCROLL_VIEWS.with(Cell::get);
+    // The viewport moves with the scroll, so its layout handler hears every step, but its size
+    // stays: nothing the view reads changes.
+    rt.pointer_move(200.0, 150.0);
+    for _ in 0..10 {
+        rt.wheel_event(WheelEvent::new(0.0, -20.0).at(200.0, 150.0));
+        rt.frame(DT);
+    }
+    settle(&mut rt);
+    for e in rt.elements() {
+        eprintln!("DBG {:?} {:?} {:?}", e.key, e.rect, e.target);
+    }
+    let frame = rt
+        .elements()
+        .into_iter()
+        .find(|e| e.key.as_deref() == Some("vp"))
+        .expect("the viewport")
+        .rect;
+    assert!(frame[1] < 0.0, "the viewport scrolled up: {frame:?}");
+    assert_eq!(SCROLL_VIEWS.with(Cell::get), before);
 }
 
 #[test]

@@ -73,8 +73,14 @@ impl Demo {
             ..Demo::default()
         };
         self.pixels.set(size[0], size[1], rgba);
-        self.view
-            .set_content(Some([size[0] as f32, size[1] as f32]));
+        // Before the first layout this reports nothing; the first layout does, via `on_zoom`.
+        if let Some(r) = self
+            .view
+            .set_content(Some([size[0] as f32, size[1] as f32]))
+        {
+            self.last = Some(r);
+            self.reports += 1;
+        }
     }
 }
 
@@ -158,7 +164,7 @@ pub fn view(g: &Gallery, cx: &mut Cx<Gallery>) -> El {
     }
     if d.content == Content::Photo {
         let (size, color) = (look.icon_size.sm, k.c.text_accent);
-        let ring = k.c.bg_base;
+        let (ring, ring_width) = (k.c.bg_base, look.space.xxs);
         viewport = viewport.overlay(move |map| {
             let [x, y] = map.point(MARKER);
             el().w_full().h_full().child(
@@ -169,18 +175,21 @@ pub fn view(g: &Gallery, cx: &mut Cx<Gallery>) -> El {
                     .size(size, size)
                     .radius(size / 2.0)
                     .fill(color)
-                    .border(2.0, ring),
+                    .border(ring_width, ring),
             )
         });
     }
     let status = match d.last {
         Some(r) => {
             let [w, h] = r.wanted_px(8192);
+            let reports = match d.reports {
+                1 => "1 report".to_owned(),
+                n => format!("{n} reports"),
+            };
             format!(
-                "{:?} · {:.0}% · {} reports · render at {w} × {h} px",
+                "{:?} · {:.0}% · {reports} · render at {w} × {h} px",
                 r.mode,
                 r.level * 100.0,
-                d.reports
             )
         }
         None => "No zoom report yet".to_owned(),

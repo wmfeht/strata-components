@@ -90,8 +90,8 @@ impl ViewportState {
         self
     }
 
-    /// The range of levels (the steps' range unless set). The lower limit drops to fit when the
-    /// content is larger than it allows.
+    /// The range of levels (the steps' range unless set). It widens to take in fit when the
+    /// content is larger or smaller than the limits allow.
     pub fn with_limits(mut self, limits: ZoomLimits) -> ViewportState {
         self.limits = limits;
         self
@@ -100,15 +100,23 @@ impl ViewportState {
     /// The content's own size in content pixels (an image's width and height), or `None` while
     /// there is none. A different size starts over in the default mode, centred; the same size
     /// keeps the zoom, as when a video's next frame or a page's sharper render arrives.
-    pub fn set_content(&mut self, size: Option<[f32; 2]>) {
+    ///
+    /// A new size changes the level, and the host calls this outside the viewport's handlers, so
+    /// the report comes back here: forward it to whatever the host's `on_zoom` does. (The
+    /// viewport can't send it from its next layout: the frame keeps its size, so no layout
+    /// fires.) Before the first layout there is no level yet and this returns `None`; the first
+    /// layout then reports through `on_zoom`.
+    pub fn set_content(&mut self, size: Option<[f32; 2]>) -> Option<ZoomReport> {
         let size =
             size.filter(|s| s[0] > 0.0 && s[1] > 0.0 && s[0].is_finite() && s[1].is_finite());
-        if size != self.content {
-            self.content = size;
-            self.mode = self.default_mode;
-            self.set_pan([0.0, 0.0]);
-            self.reported = None;
+        if size == self.content {
+            return None;
         }
+        self.content = size;
+        self.mode = self.default_mode;
+        self.set_pan([0.0, 0.0]);
+        self.reported = None;
+        self.changed()
     }
 
     pub fn content(&self) -> Option<[f32; 2]> {
@@ -205,17 +213,25 @@ impl ViewportState {
         self.set_mode(self.default_mode)
     }
 
-    /// The lowest and highest levels the zoom reaches now: the limits, with the floor lowered
-    /// to fit.
+    /// The lowest and highest levels the zoom reaches now: the limits, widened to take in fit,
+    /// so a content far larger or smaller than the limits allow can still be fitted and zoomed
+    /// back to fit.
     pub fn range(&self) -> Option<ZoomLimits> {
         let fit = mode_level(Mode::Fit, self.frame?, self.content?, self.scale, 1.0);
-        Some(self.limits.lowered_to(fit))
+        Some(self.limits.widened_to(fit))
     }
 
-    /// Zooms `delta` steps, about the frame's centre.
+    /// Zooms `delta` steps, about the frame's centre. A step never goes the wrong way: from a
+    /// level outside the steps (a huge image's fit below the first step, a tiny one's above the
+    /// last), `-` and `+` do nothing rather than jump to the nearest end.
     pub fn zoom_step(&mut self, delta: i32) -> Option<ZoomReport> {
         let now = self.level()?;
         let next = self.steps.step(now, delta);
+        let next = if delta > 0 {
+            next.max(now)
+        } else {
+            next.min(now)
+        };
         self.zoom_to(next, None)
     }
 
@@ -262,7 +278,21 @@ impl ViewportState {
         self.changed()
     }
 
-    pub(super) fn set_scale(&mut self, scale: f32) {
+    /// Brings the display scale up to `scale`, the one a handler's view drew at, before the
+    /// handler works on the level: a window moved to a display of another scale changes the
+    /// level of every mode but Free. With the frame known it goes through
+    /// [`ViewportState::set_frame`], so the pan holds at the new edges and a change is reported.
+    pub(super) fn sync_scale(&mut self, scale: f32) -> Option<ZoomReport> {
+        match self.frame {
+            Some(frame) if scale != self.scale => self.set_frame(frame, scale),
+            _ => {
+                self.set_scale(scale);
+                None
+            }
+        }
+    }
+
+    fn set_scale(&mut self, scale: f32) {
         if scale.is_finite() && scale > 0.0 {
             self.scale = scale;
         }

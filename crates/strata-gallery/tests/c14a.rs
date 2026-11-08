@@ -108,9 +108,10 @@ mod c14a {
         let fit = level(&rt);
         let p = [300.0, 250.0];
         let before = under(&rt, p);
-        rt.wheel_event(WheelEvent::new(0.0, -40.0).at(p[0], p[1]).mods(ctrl()));
+        rt.wheel_event(WheelEvent::new(0.0, 40.0).at(p[0], p[1]).mods(ctrl()));
         settle(&mut rt);
-        assert!(near(level(&rt), fit * wheel_factor(-40.0)));
+        assert!(near(level(&rt), fit * wheel_factor(40.0)));
+        assert!(level(&rt) > fit, "a wheel turned away zooms in");
         assert_eq!(rt.state.c14a.view.mode(), Mode::Free);
         assert!(
             near2(under(&rt, p), before),
@@ -121,16 +122,22 @@ mod c14a {
         assert_eq!(rt.state.c14a.reports, 2, "the fit, then the zoom");
     }
 
+    /// A pinch zooms about the pointer on macOS. Elsewhere it arrives as Ctrl+wheel (the test
+    /// above), and the viewport has no pinch handler.
     #[test]
-    fn a_pinch_zooms_about_the_pointer() {
+    fn a_pinch_zooms_about_the_pointer_on_macos() {
         let mut rt = scene("c14a-fit-light");
         let fit = level(&rt);
         let p = [700.0, 420.0];
         let before = under(&rt, p);
-        rt.magnify_event(MagnifyEvent::new(0.5).at(p[0], p[1]));
-        settle(&mut rt);
-        rt.magnify_event(MagnifyEvent::new(0.5).at(p[0], p[1]));
-        settle(&mut rt);
+        for _ in 0..2 {
+            rt.magnify_event(MagnifyEvent::new(0.5).at(p[0], p[1]));
+            settle(&mut rt);
+        }
+        if !cfg!(target_os = "macos") {
+            assert!(near(level(&rt), fit), "no pinch handler off macOS");
+            return;
+        }
         assert!(near(level(&rt), fit * 1.0f32.exp()));
         assert!(near2(under(&rt, p), before));
         // Pinching back in the same steps returns to fit.
@@ -157,7 +164,7 @@ mod c14a {
             "the new fit is reported"
         );
 
-        rt.wheel_event(WheelEvent::new(0.0, -200.0).at(240.0, 300.0).mods(ctrl()));
+        rt.wheel_event(WheelEvent::new(0.0, 200.0).at(240.0, 300.0).mods(ctrl()));
         settle(&mut rt);
         let zoomed = level(&rt);
         rt.set_viewport((960.0, 640.0), 1.0);
@@ -267,6 +274,19 @@ mod c14a {
         );
         assert_eq!(rt.state.c14a.passed, 0);
 
+        // At an edge, an arrow that would move nothing passes on too.
+        let left = rt.state.c14a.view.pan()[0];
+        for _ in 0..40 {
+            key(&mut rt, Key::Right, Mods::default());
+        }
+        let edge = rt.state.c14a.view.pan()[0];
+        assert!(edge < left);
+        let passed = rt.state.c14a.passed;
+        assert!(passed > 0, "the arrows past the edge passed on");
+        key(&mut rt, Key::Right, Mods::default());
+        assert_eq!(rt.state.c14a.view.pan()[0], edge);
+        assert_eq!(rt.state.c14a.passed, passed + 1);
+
         let mut rt = scene("c14a-fit-light");
         focus(&mut rt);
         key(&mut rt, Key::Right, Mods::default());
@@ -279,7 +299,7 @@ mod c14a {
     fn a_video_frame_takes_no_zoom_or_keys() {
         let mut rt = scene("c14a-stream-light");
         let fit = level(&rt);
-        rt.wheel_event(WheelEvent::new(0.0, -40.0).at(480.0, 320.0).mods(ctrl()));
+        rt.wheel_event(WheelEvent::new(0.0, 40.0).at(480.0, 320.0).mods(ctrl()));
         rt.magnify_event(MagnifyEvent::new(0.5).at(480.0, 320.0));
         settle(&mut rt);
         assert!(near(level(&rt), fit));

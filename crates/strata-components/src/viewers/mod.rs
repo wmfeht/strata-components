@@ -42,6 +42,12 @@
 //!   with its badges".
 //! - **Badges aren't live regions**: rune-kit's `Badge` is one; Strata's are plain labels
 //!   ([`layout`]).
+//! - **Left at the archive's root is taken** when the host hears it ([`archive::ArchiveView::on_leave`]):
+//!   Strata's tree passes it on, and its listing takes focus back. Here the host moves focus in
+//!   `on_leave`; with no `on_leave`, the key goes on as in Strata.
+//! - **The password error is announced, not described**: a polite live region, with the field
+//!   marked invalid (draft R-C14b-3).
+//! - **Archive file sizes aren't read** by assistive technology ([`archive`], a C1e follow-up).
 //!
 //! # Rune drafts (not filed)
 //!
@@ -55,6 +61,13 @@
 //!   rev (Default, Pointer, Text, Grab, Grabbing, NotAllowed, Move, the resize cursors,
 //!   Crosshair, Hidden, Image), so the default arrow stands in. Repro: none needed; the enum
 //!   lists them. Ask: `Cursor::Wait` and `Cursor::Progress`.
+//!
+//! - **R-C14b-3: rune-kit's `TextInput` can't describe its editor** (draft, not filed). Its
+//!   `name_field` passes no description to the editor at the pinned rev, so an error can't be the
+//!   field's description; `TextField` can (`error`) but has no `on_submit`. The archive prompt's
+//!   error is a polite live region instead. Repro: `TextInput::new(&edit).build(k).description("x")`
+//!   puts "x" on the outer group, not on the `text-input` node `--tree` shows. Ask:
+//!   `TextInput::description` (or `error`) applied to the editor.
 //!
 //! Earlier drafts these views meet: U-C1e-4 (no programmatic focus: the archive's "first
 //! member focused" on Space, [`archive`]), U-C1e-6 (no clock on `Tx`: route playback runs on

@@ -3,13 +3,18 @@
 //! a password field with an Unlock button, and the last attempt's error.
 //!
 //! The host checks the password (in Strata's sandbox) and answers with a tree or with
-//! [`PromptState::set_error`]. Whether the field takes focus when the prompt shows is the host's:
+//! [`PromptState::set_error`], which empties the field, as Strata's prompt comes back empty.
+//!
+//! **The error is heard** as it appears: it is a polite live region, and the field is marked
+//! invalid. It isn't the field's accessible description: rune-kit's `TextInput` gives its editor
+//! no description (`name_field(.., None, ..)` at the pinned rev), and `TextField`, which can,
+//! has no `on_submit` for Enter to unlock. (rune-kit draft R-C14b-3 in `viewers`.) Whether the field takes focus when the prompt shows is the host's:
 //! with the preview closed, Space on the archive focuses it, and Right does in List and Columns
 //! ([`PromptState::focus`]); moving the cursor onto the archive leaves it unfocused.
 
 use std::rc::Rc;
 
-use rune::{El, TextEdit, Tx, col, icon, row, text};
+use rune::{El, LiveRegion, TextEdit, Tx, col, icon, row, text};
 use rune_kit::{Button, ButtonVariant, TextInput};
 use strata_kit::icons::IconName;
 use strata_kit::look::Look;
@@ -36,8 +41,11 @@ impl PromptState {
         self.edit.focused = true;
     }
 
-    /// "The password is incorrect.", or none.
+    /// "The password is incorrect.", or none. An error empties the field.
     pub fn set_error(&mut self, error: Option<String>) {
+        if error.is_some() {
+            self.edit.clear();
+        }
         self.error = error;
     }
 
@@ -122,6 +130,7 @@ impl<'a, S: 'static> ArchivePrompt<'a, S> {
         };
         let field = TextInput::new(&self.state.edit)
             .secure()
+            .invalid(self.state.error.is_some())
             .placeholder(self.labels.placeholder.clone())
             .label(self.labels.placeholder.clone())
             .width(Some(look.space.xxl * 8.0))
@@ -176,6 +185,7 @@ impl<'a, S: 'static> ArchivePrompt<'a, S> {
             body = body.child(
                 text(error.to_owned())
                     .key(format!("{key}-error"))
+                    .live_region(LiveRegion::Polite)
                     .font(k.ty.small)
                     .color(k.c.danger.fg)
                     .wrap()

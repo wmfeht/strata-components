@@ -4,12 +4,15 @@
 //! and no Escape (that's the host's: Columns closes the preview). Left and Right have no
 //! neighbour in a list, so C1c reports them as edges, and the view opens a folder or goes up.
 
-use rune::PointerButton;
+use rune::{Key, PointerButton};
 
 use crate::collection::element::{
-    Activation, Ctx, Effect, Flow, Intent, PointerController, PointerInput, PointerPhase,
+    Activation, Ctx, Effect, Flow, Intent, KeyController, KeyInput, PointerController,
+    PointerInput, PointerPhase,
 };
-use crate::collection::keyboard::{Command, KeyMap, KeySettings, Letters, Target, Vertical};
+use crate::collection::keyboard::{
+    Command, KeyMap, KeySettings, Keyboard, Letters, Target, Vertical,
+};
 use crate::contract::Direction;
 
 /// How far (points) a release may land from its press and still click: Rune's click slop.
@@ -102,5 +105,55 @@ impl PointerController for ArchivePointer {
 
     fn reset(&mut self) {
         self.pressed = None;
+    }
+}
+
+/// A collection setting: Left at the folder shown goes on past the tree rather than to C1c. The
+/// view sets it at the root when the host has no `on_leave`, so the key reaches the host's own
+/// key handling (Strata's 10xer `h` behaviour) instead of being swallowed.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct LeftPasses(pub bool);
+
+/// C1c's keyboard, less Left where [`LeftPasses`] says so.
+#[derive(Debug, Default)]
+pub struct ArchiveKeys {
+    inner: Keyboard,
+}
+
+impl ArchiveKeys {
+    fn left(input: &KeyInput<'_>, cx: &Ctx<'_>) -> bool {
+        let settings = cx.settings::<KeySettings>();
+        let map_left = settings.is_some_and(|k| {
+            k.map
+                .chords_for(Command::Select(Target::Step(Direction::Left)))
+                .iter()
+                .any(|c| input.matches(c))
+        });
+        let letters = settings.is_some_and(|k| k.letters == Letters::Arrows);
+        let mods = input.event.mods;
+        let plain = !(mods.ctrl || mods.alt || mods.cmd || mods.logo || mods.shift);
+        let h = letters && plain && matches!(&input.event.key, Key::Text(t) if t == "h");
+        map_left || h
+    }
+}
+
+impl KeyController for ArchiveKeys {
+    fn key(&mut self, input: &KeyInput<'_>, cx: &mut Ctx<'_>) -> Flow {
+        if cx.settings::<LeftPasses>().is_some_and(|l| l.0) && Self::left(input, cx) {
+            return Flow::Pass;
+        }
+        self.inner.key(input, cx)
+    }
+
+    fn tick(&mut self, cx: &mut Ctx<'_>) -> Flow {
+        self.inner.tick(cx)
+    }
+
+    fn pointer_seen(&mut self, input: &PointerInput) {
+        self.inner.pointer_seen(input);
+    }
+
+    fn reset(&mut self) {
+        self.inner.reset();
     }
 }

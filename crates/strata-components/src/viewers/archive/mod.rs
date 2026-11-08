@@ -21,7 +21,8 @@
 //! - **Keys** (C1c with [`controllers::key_map`]): Up and Down (and Home, End, the page keys)
 //!   move the highlight; Right or Enter opens a folder and does nothing on a file; Left goes to
 //!   the parent. At the root Left reaches the host's [`ArchiveView::on_leave`] (Strata returns
-//!   focus to the listing). With Type to search off, `h j k l` act as the arrows
+//!   focus to the listing), and the tree takes the key; with no `on_leave`, it goes on past the
+//!   tree to the host's key handling ([`controllers::LeftPasses`]). With Type to search off, `h j k l` act as the arrows
 //!   ([`ArchiveView::letters`]). Edges are taken, so the keys never move focus out of the tree;
 //!   only the cursor's member is outlined. Space isn't taken: it goes on to the host, which
 //!   closes the preview.
@@ -32,6 +33,15 @@
 //!   when the cursor moves onto an archive with the preview open. [`ArchiveState::enter`]
 //!   highlights the first member: Space opening the preview, Right from the listing, Enter in
 //!   Columns, an Unlock.
+//!
+//! # Gap: file sizes aren't read
+//!
+//! A file row shows its size, but assistive technology hears only the name: C1e builds the row's
+//! option node itself (`row.rs`, `.label(entry.name)`) and its slots can't describe it, so the size
+//! text is hidden rather than heard as a stray label inside the option. Strata's GTK row reads the
+//! name, the size and the chevron as separate labels. Closing it needs a C1e addition, for
+//! instance `Collection::describe(|s, rcx| Option<String>)` setting the option's description
+//! (follow-up for C1e's owner).
 //!
 //! What stays in Strata: listing the archive (in its sandbox), the order, the limits and their
 //! messages, and the routing around the tree: which keys enter it from the listing, Escape and
@@ -61,7 +71,6 @@ use strata_kit::icons::IconName;
 use strata_kit::look::Look;
 
 use crate::collection::element::{Collection, CollectionState, ContentSlot, Intent};
-use crate::collection::keyboard::Keyboard;
 use crate::collection::selection::Listing;
 use crate::contract::{Direction, EntrySource};
 
@@ -154,7 +163,7 @@ impl ArchiveState {
     pub fn new(scope: impl Into<Rc<str>>, tree: ArchiveTree) -> ArchiveState {
         let mut coll = CollectionState::new();
         coll.controllers.pointer = Some(Box::new(controllers::ArchivePointer::default()));
-        coll.controllers.keyboard = Some(Box::<Keyboard>::default());
+        coll.controllers.keyboard = Some(Box::<controllers::ArchiveKeys>::default());
         ArchiveState {
             scope: scope.into(),
             listing: ArchiveListing::new(tree),
@@ -351,6 +360,9 @@ impl<S: 'static> ArchiveView<S> {
         )
         .read_only()
         .settings(controllers::key_settings(self.letters))
+        .settings(controllers::LeftPasses(
+            get(s).at_root() && self.on_leave.is_none(),
+        ))
         .on_intent(move |s: &mut S, intent, tx| {
             if let Heard::Leave = get_mut(s).heard(intent, tx)
                 && let Some(f) = &on_leave

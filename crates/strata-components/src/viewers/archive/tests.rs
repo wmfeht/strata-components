@@ -200,3 +200,98 @@ fn the_key_map_keeps_one_member_highlighted() {
             .is_empty()
     );
 }
+
+/// `operations/archives/preview`: "A wrong password keeps the prompt open with "The password is
+/// incorrect."": with the field empty again, as Strata's prompt comes back.
+#[test]
+fn an_error_clears_the_password_typed() {
+    let mut prompt = super::PromptState::default();
+    prompt.edit.replace_text("hunter2");
+    prompt.set_error(Some("The password is incorrect.".into()));
+    assert_eq!(prompt.edit.text, "");
+    assert_eq!(prompt.error(), Some("The password is incorrect."));
+}
+
+// The element, in a runtime.
+
+mod element {
+    use std::cell::Cell;
+
+    use rune::{Cx, El, Env, Key, KeyEvent, Mods, Runtime, Tx};
+    use strata_kit::look::Look;
+
+    use super::super::{ArchiveState, ArchiveView};
+    use super::tree;
+
+    thread_local! {
+        static PASSED: Cell<u32> = const { Cell::new(0) };
+        static LEFT: Cell<u32> = const { Cell::new(0) };
+    }
+
+    struct App {
+        archive: ArchiveState,
+        look: Look,
+        leave: bool,
+    }
+
+    fn view(s: &App, _cx: &mut Cx<App>) -> El {
+        let mut v = ArchiveView::new(
+            |s: &App| &s.archive,
+            |s: &mut App| &mut s.archive,
+            |s: &App| &s.look,
+        );
+        if s.leave {
+            v = v.on_leave(|_: &mut App, _: &mut Tx| LEFT.with(|l| l.set(l.get() + 1)));
+        }
+        v.build(s)
+    }
+
+    fn on_key(_: &mut App, _: &KeyEvent, _: &mut Tx) -> bool {
+        PASSED.with(|p| p.set(p.get() + 1));
+        true
+    }
+
+    /// Left at the root, with the tree focused: (keys the window heard, `on_leave` calls).
+    fn left_at_root(leave: bool) -> (u32, u32) {
+        PASSED.with(|p| p.set(0));
+        LEFT.with(|l| l.set(0));
+        let app = App {
+            archive: ArchiveState::new("archive", tree()),
+            look: Look::fallback(false),
+            leave,
+        };
+        let mut rt = Runtime::new(app, view, (420.0, 400.0), Env::new(false, 1.0));
+        rt.on_key = Some(on_key);
+        for _ in 0..20 {
+            rt.frame(1.0 / 60.0);
+        }
+        // Click README.md (a file, so nothing opens) to focus the tree.
+        let r = rt
+            .elements()
+            .into_iter()
+            .find(|e| e.label.as_deref() == Some("README.md"))
+            .expect("README.md")
+            .rect;
+        let (x, y) = (r[0] + r[2] / 2.0, r[1] + r[3] / 2.0);
+        rt.pointer_move(x, y);
+        rt.pointer_down(x, y);
+        rt.frame(1.0 / 60.0);
+        rt.pointer_up(x, y);
+        rt.frame(1.0 / 60.0);
+        rt.key(KeyEvent {
+            key: Key::Left,
+            mods: Mods::default(),
+        });
+        rt.frame(1.0 / 60.0);
+        assert!(rt.state.archive.at_root());
+        (PASSED.with(Cell::get), LEFT.with(Cell::get))
+    }
+
+    /// Left at the root goes to the host's `on_leave`; with none, it goes on past the tree to
+    /// the window's keys, as Strata's 10xer `h` behaviour does.
+    #[test]
+    fn left_at_the_root_reaches_the_host() {
+        assert_eq!(left_at_root(true), (0, 1), "taken, and on_leave heard it");
+        assert_eq!(left_at_root(false), (1, 0), "passed on to the window");
+    }
+}

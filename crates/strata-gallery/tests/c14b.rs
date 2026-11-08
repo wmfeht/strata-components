@@ -91,6 +91,29 @@ mod c14b {
         assert!(!element(&rt, "c14b-model-camera-dot").moving);
     }
 
+    /// `preview/preview-panel/model-views`: "Selecting another file resets the camera view to
+    /// Front left" with the dot at Front left at once: a new file's indicator starts over, as
+    /// Strata's fresh widget does, rather than sweeping back from the last file's view.
+    #[test]
+    fn a_new_file_puts_the_dot_at_front_left_at_once() {
+        let mut rt = scene("c14b-model-light");
+        next_sweeps(&mut rt);
+        next_sweeps(&mut rt);
+        assert_eq!(rt.state.c14b.model.camera(), CameraView::BackRight);
+        // The page's `n` stands in for selecting the next model file.
+        rt.key(rune::KeyEvent {
+            key: rune::Key::Text("n".into()),
+            mods: rune::Mods::default(),
+        });
+        frames(&mut rt, 3);
+        assert_eq!(rt.state.c14b.model.file().name, "gear.stl");
+        assert_eq!(rt.state.c14b.model.camera(), CameraView::FrontLeft);
+        assert!(
+            !element(&rt, "c14b-model-camera-dot").moving,
+            "the dot lands at Front left without a sweep"
+        );
+    }
+
     /// `preview/preview-panel/model-views`: "Changing the theme re-renders the open model preview
     /// with the new accent and keeps the selected camera view." The render is the host's; the
     /// view keeps the camera across the new look.

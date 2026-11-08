@@ -4,8 +4,10 @@
 //!
 //! The dot sits in a box the size of the map, which turns about its centre (`El::rotate`) to the
 //! camera's angle on a 240 ms emphasized-decelerate tween. The state keeps the angle unwrapped,
-//! so a turn takes the shorter way. The turn lands at once when the indicator first mounts (a new
-//! file's preview), under reduced motion (Rune's own), and with the look's animations off.
+//! so a turn takes the shorter way. The turn lands at once when the indicator first mounts, when
+//! a new file opens (`sweep` false: the dot keeps its key, so without that it would sweep back
+//! from the last file's view), under reduced motion (Rune's own), and with the look's animations
+//! off.
 
 use std::f32::consts::TAU;
 
@@ -24,8 +26,16 @@ const INSET: f32 = 4.0;
 const SWEEP: f32 = 0.24;
 
 /// The indicator, keyed `key`: an image named `label` and described by `view` (no visible
-/// caption), with the dot at `angle` (radians, clockwise from the right).
-pub fn indicator(key: String, label: &str, view: String, angle: f32, look: &Look) -> El {
+/// caption), with the dot at `angle` (radians, clockwise from the right). A change of angle
+/// sweeps when `sweep` and the look's animations are on, and lands at once otherwise.
+pub fn indicator(
+    key: String,
+    label: &str,
+    view: String,
+    angle: f32,
+    sweep: bool,
+    look: &Look,
+) -> El {
     let k = &look.kit;
     let c = SIZE / 2.0;
     let ring = c - INSET;
@@ -45,7 +55,7 @@ pub fn indicator(key: String, label: &str, view: String, angle: f32, look: &Look
             1.5,
             with_alpha(k.c.text_accent, 0.8),
         );
-    let motion: Anim = if look.animations {
+    let motion: Anim = if sweep && look.animations {
         Curve::tween(
             SWEEP,
             Easing::CubicBezier(CubicBezier::new(0.16, 1.0, 0.3, 1.0)),

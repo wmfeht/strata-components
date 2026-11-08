@@ -215,6 +215,7 @@ impl<'a, S: 'static> ModelView<'a, S> {
                 &labels.camera,
                 (labels.view)(st.camera()),
                 st.angle(),
+                !st.fresh(),
                 look,
             ))
             .child(button(&labels.next, IconName::SkipForward, 1).key(format!("{key}-next")));

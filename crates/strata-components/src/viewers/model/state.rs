@@ -204,6 +204,9 @@ pub struct ModelState {
     shown: CameraView,
     /// The indicator's angle, unwrapped, so each turn takes the shorter way round.
     angle: f32,
+    /// No camera button has turned the camera since the file opened: the indicator lands at its
+    /// angle rather than sweeping there (Strata builds a fresh indicator per file).
+    fresh: bool,
     /// Some while a first load or a view render runs.
     stage: Option<Stage>,
     /// The spinner's label for `stage`, kept so [`ModelState::busy`] can lend it.
@@ -234,6 +237,7 @@ impl ModelState {
             camera: CameraView::FrontLeft,
             shown: CameraView::FrontLeft,
             angle: CameraView::FrontLeft.angle(),
+            fresh: true,
             stage: None,
             busy: None,
             has_image: false,
@@ -245,7 +249,8 @@ impl ModelState {
     }
 
     /// A new file: back to Front left, and loading. The camera and the indicator start over at
-    /// once (the indicator doesn't sweep from the last file's view).
+    /// once: the indicator lands at Front left rather than sweeping from the last file's view
+    /// ([`ModelState::fresh`]).
     pub fn open(&mut self, file: ModelFile) {
         let mode = match file.kind {
             ModelKind::Mesh => Mode::Fit,
@@ -312,6 +317,7 @@ impl ModelState {
             return None;
         }
         let view = self.camera.step(step);
+        self.fresh = false;
         self.turn_to(view);
         self.error = None;
         self.set_stage(Some(Stage::Loading));
@@ -350,6 +356,12 @@ impl ModelState {
     /// The indicator's unwrapped angle, in radians.
     pub fn angle(&self) -> f32 {
         self.angle
+    }
+
+    /// No camera button has turned the camera since the file opened: the indicator shows its
+    /// angle at once, with no sweep.
+    pub fn fresh(&self) -> bool {
+        self.fresh
     }
 
     pub fn stage(&self) -> Option<Stage> {

@@ -13,7 +13,7 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | C1f | waiting (after C1e merges) | contract addition for C4: Lines spans (group-header lines), per C1e lines.rs design | |
 | G1 | merged | owner request: index is rune-kit Buttons grouped by lane; markers from registry (has golden scenes); index goldens hide markers, review scene shows them | 9b4bf5c |
 | W2 | merged | 1 review round + fixes; token-name review by K1/K2/C1e owners pending; PNG goldens on NVIDIA | 341e8cb |
-| W3 | planning |  |  |
+| W3 | merged | 3 review rounds + final nits; private headless sway sessions, env-scoped watchdog; Platform CI workflow never run (needs push to main/PR, owner); lavapipe run local only | 5c8ea08 |
 | S1 | merged | P3: X11 shim conditional on mutter/KWin hand test; Wayland resize/menu blocked on Rune (R1-R3, R7); Hyprland/GNOME/KDE/lavapipe hand test pending | c5794e1 |
 | S2 | merged | 3 review rounds; P0 feasible w/o Rune patch on libwayland>=1.23; Ubuntu 24.04 GNOME: DnD unsupported; R1-R5 drafted; Hyprland/GNOME/KDE/Dolphin hand test pending | 702338f |
 | S3 | merged | sway Wayland/X11 measured; Hyprland/GNOME/KDE/Firefox hand test pending (QEMU Tier B not run); 3 owner decisions | f5682e4 |
@@ -40,12 +40,12 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | K2 | merged | 1 review round + fixes; Strata values at upstream/main 35ee677ab; font list arrives as data (Rune #114/U16); Switch/Button sizes are rune-kit gaps | db41ea7 |
 | K3 | ready | | |
 | K4 | ready | | |
-| P0 | waiting | | |
-| P3 | waiting | | |
-| P5 | waiting | | |
+| P0 | ready | | |
+| P3 | ready | | |
+| P5 | ready | | |
 | P6 | ready | | |
 | P7 | ready | | |
-| P8 | waiting | | |
+| P8 | ready | | |
 | P9 | merged | 1 review round + fixes; ci.yml gains libglib2.0-dev (approved exception); example compiled, not run; no desktop hand test | 54786b4 |
 | C10b | waiting | | |
 | C11 | waiting | | |

@@ -356,6 +356,12 @@ impl Doc {
         range: Range<usize>,
         exact: bool,
     ) -> Result<(), ParseFailed> {
+        if !exact {
+            // These colours come from a provisional state, off the chain the pass checks
+            // against: had the pass stopped inside them, `Settled` would mark them exact.
+            // So it may not stop before their end, and re-sends or drops each of them.
+            self.dirty_until = self.dirty_until.max(range.end);
+        }
         for line in range {
             let tokens = parse_line(
                 ctx,
@@ -565,7 +571,8 @@ pub(crate) struct OpenArgs {
 
 /// The highlighter thread's state: every document, block pool and block job.
 pub(crate) struct Engine {
-    set: &'static SyntaxSet,
+    /// `None` when the grammar set failed to load: everything answers plain at once.
+    set: Option<&'static SyntaxSet>,
     theme: Arc<Theme>,
     opts: Options,
     docs: HashMap<u64, Doc>,
@@ -579,8 +586,16 @@ pub(crate) struct Engine {
 
 impl Engine {
     pub(crate) fn new(theme: Arc<Theme>, opts: Options) -> Engine {
+        Engine::with_syntaxes(theme, opts, detect::syntaxes())
+    }
+
+    pub(crate) fn with_syntaxes(
+        theme: Arc<Theme>,
+        opts: Options,
+        set: Option<&'static SyntaxSet>,
+    ) -> Engine {
         Engine {
-            set: detect::syntaxes(),
+            set,
             theme,
             opts,
             docs: HashMap::new(),
@@ -591,20 +606,32 @@ impl Engine {
         }
     }
 
-    fn ctx(&self) -> Ctx {
-        Ctx {
-            set: self.set,
+    fn ctx(&self) -> Option<Ctx> {
+        Some(Ctx {
+            set: self.set?,
             long_line: self.opts.long_line,
-        }
+        })
     }
 
+    /// Opens a text, replacing any open under `id` (a retry after a failure).
     pub(crate) fn open(&mut self, id: u64, seq: u64, args: OpenArgs) {
-        let syntax = detect::detect(
-            self.set,
-            args.syntax.as_deref(),
-            args.file_name.as_deref(),
-            &args.text,
-        );
+        let detected = self.set.and_then(|set| {
+            catch_unwind(AssertUnwindSafe(|| {
+                detect::detect(
+                    set,
+                    args.syntax.as_deref(),
+                    args.file_name.as_deref(),
+                    &args.text,
+                )
+            }))
+            .ok()
+        });
+        let Some(syntax) = detected else {
+            self.docs.remove(&id);
+            self.out.push((id, Reply::Failed));
+            self.out.push((id, Reply::Idle { seq }));
+            return;
+        };
         let every = match args.mode {
             Mode::Editable => 1,
             Mode::Preview => self.opts.checkpoint_every,
@@ -666,7 +693,10 @@ impl Engine {
         let Some(p) = self.pools.get_mut(&pool) else {
             return;
         };
-        match detect::by_token(self.set, lang) {
+        let syntax = self
+            .set
+            .and_then(|set| catch_unwind(|| detect::by_token(set, lang)).ok().flatten());
+        match syntax {
             Some(syntax) => self.blocks.push_back(BlockJob {
                 pool,
                 key,
@@ -708,7 +738,10 @@ impl Engine {
     /// Does one unit of work, most urgent first: an edit's foreground, a viewport, a block
     /// slice, then a background slice. False when there was nothing to do.
     pub(crate) fn step(&mut self) -> bool {
-        let ctx = self.ctx();
+        let Some(ctx) = self.ctx() else {
+            // No grammars: open answered `Failed`, blocks answered plain; nothing to do.
+            return false;
+        };
         let deadline = Some(Instant::now() + self.opts.slice);
         let mut ids: Vec<u64> = self.docs.keys().copied().collect();
         ids.sort_unstable();
@@ -747,12 +780,13 @@ impl Engine {
             return false;
         };
         doc.idle_owed = true;
+        let seq = doc.seq;
         let ok = matches!(catch_unwind(AssertUnwindSafe(|| f(doc))), Ok(Ok(())));
         if !ok {
             // The state may be half-updated: drop it, and let the text draw plain.
             self.docs.remove(&id);
             self.out.push((id, Reply::Failed));
-            self.out.push((id, Reply::Idle { seq: u64::MAX }));
+            self.out.push((id, Reply::Idle { seq }));
         }
         true
     }
@@ -766,31 +800,29 @@ impl Engine {
         };
         let mut scratch = String::new();
         let mut n = 0usize;
-        let mut failed = false;
-        while job.line < job.lines.len() {
-            let line = job.line;
-            let offset = job.lines.start(line) as u32;
-            match parse_line(
-                ctx,
-                &mut job.state,
-                &mut pool.interner,
-                job.lines.content(line),
-                &mut scratch,
-            ) {
-                Ok(tokens) => job
-                    .tokens
-                    .extend(tokens.iter().map(|&(a, b, c)| (a + offset, b + offset, c))),
-                Err(ParseFailed) => {
-                    failed = true;
+        // A grammar error or a panic leaves the block plain; the rest go on.
+        let parsed = catch_unwind(AssertUnwindSafe(|| {
+            while job.line < job.lines.len() {
+                let line = job.line;
+                let offset = job.lines.start(line) as u32;
+                let tokens = parse_line(
+                    ctx,
+                    &mut job.state,
+                    &mut pool.interner,
+                    job.lines.content(line),
+                    &mut scratch,
+                )?;
+                job.tokens
+                    .extend(tokens.iter().map(|&(a, b, c)| (a + offset, b + offset, c)));
+                job.line += 1;
+                n += 1;
+                if n.is_multiple_of(CLOCK_EVERY) && deadline.is_some_and(|d| Instant::now() >= d) {
                     break;
                 }
             }
-            job.line += 1;
-            n += 1;
-            if n.is_multiple_of(CLOCK_EVERY) && deadline.is_some_and(|d| Instant::now() >= d) {
-                break;
-            }
-        }
+            Ok::<(), ParseFailed>(())
+        }));
+        let failed = !matches!(parsed, Ok(Ok(())));
         if failed {
             job.tokens.clear();
         } else if job.line < job.lines.len() {
@@ -865,6 +897,40 @@ impl Engine {
                 }
             }
         }
+    }
+
+    /// The backstop for a panic outside a guarded document: every text fails (plain) and
+    /// every queued block answers plain, so nothing on the UI side waits forever.
+    pub(crate) fn fail_all(&mut self) {
+        let mut ids: Vec<(u64, u64)> = self.docs.iter().map(|(&id, d)| (id, d.seq)).collect();
+        ids.sort_unstable();
+        for (id, seq) in ids {
+            self.out.push((id, Reply::Failed));
+            self.out.push((id, Reply::Idle { seq }));
+        }
+        self.docs.clear();
+        for job in self.blocks.drain(..) {
+            self.out.push((
+                job.pool,
+                Reply::Block {
+                    key: job.key,
+                    tokens: Vec::new(),
+                },
+            ));
+        }
+        for (&id, pool) in &mut self.pools {
+            for reply in pool.outbox.drain(..) {
+                if let Reply::Block { key, .. } = reply {
+                    let tokens = Vec::new();
+                    self.out.push((id, Reply::Block { key, tokens }));
+                }
+            }
+        }
+    }
+
+    /// The replies collected so far, without collecting more (after [`Engine::fail_all`]).
+    pub(crate) fn take_raw(&mut self) -> Vec<(u64, Reply)> {
+        std::mem::take(&mut self.out)
     }
 
     /// Takes the replies collected so far, after a request or a step.

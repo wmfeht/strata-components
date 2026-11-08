@@ -11,10 +11,12 @@ use std::sync::OnceLock;
 use syntect::parsing::{SyntaxReference, SyntaxSet};
 
 /// The grammar set, loaded once per process on the first highlighter thread that needs it
-/// (S4: `extra_newlines`, so lines are fed with their `\n`). It is never freed.
-pub(crate) fn syntaxes() -> &'static SyntaxSet {
-    static SET: OnceLock<SyntaxSet> = OnceLock::new();
-    SET.get_or_init(two_face::syntax::extra_newlines)
+/// (S4: `extra_newlines`, so lines are fed with their `\n`). It is never freed. `None` when
+/// loading it panicked: every text and block is then plain.
+pub(crate) fn syntaxes() -> Option<&'static SyntaxSet> {
+    static SET: OnceLock<Option<SyntaxSet>> = OnceLock::new();
+    SET.get_or_init(|| std::panic::catch_unwind(two_face::syntax::extra_newlines).ok())
+        .as_ref()
 }
 
 /// How many lines at each end of a text Vim reads modelines from (its `modelines` default).

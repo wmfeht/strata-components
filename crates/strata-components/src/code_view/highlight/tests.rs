@@ -58,7 +58,7 @@ pub(super) fn reference(
     theme: &Theme,
     long_line: usize,
 ) -> Vec<Runs> {
-    let set = syntaxes();
+    let set = syntaxes().expect("grammars");
     let hl = SynHighlighter::new(theme);
     let default = hl.get_default().foreground;
     let mut ps = ParseState::new(syntax);
@@ -102,7 +102,7 @@ fn runs_of(spans: &[Span]) -> Runs {
 }
 
 fn syntax_for(file_name: &str, text: &str) -> &'static SyntaxReference {
-    detect(syntaxes(), None, Some(file_name), text)
+    detect(syntaxes().expect("grammars"), None, Some(file_name), text)
 }
 
 /// A highlighter worker driven on the test thread: requests queue until [`Pump::run`].
@@ -111,6 +111,7 @@ struct Pump {
     rx: Receiver<Request>,
     tx: Sender<Request>,
     blocks_asked: usize,
+    shows_asked: usize,
 }
 
 impl Pump {
@@ -121,6 +122,7 @@ impl Pump {
             rx,
             tx,
             blocks_asked: 0,
+            shows_asked: 0,
         }
     }
 
@@ -139,8 +141,10 @@ impl Pump {
     /// Hands the queued requests to the worker, and sends their replies.
     fn requests(&mut self) {
         while let Ok(req) = self.rx.try_recv() {
-            if matches!(req, Request::Block { .. }) {
-                self.blocks_asked += 1;
+            match req {
+                Request::Block { .. } => self.blocks_asked += 1,
+                Request::Show { .. } => self.shows_asked += 1,
+                _ => {}
             }
             self.worker.handle(req);
         }
@@ -195,7 +199,9 @@ fn assert_lines_eq(got: &[Runs], want: &[Runs], what: &str) {
 // Detection.
 
 fn detected(name: Option<&str>, text: &str) -> String {
-    detect(syntaxes(), None, name, text).name.clone()
+    detect(syntaxes().expect("grammars"), None, name, text)
+        .name
+        .clone()
 }
 
 #[test]
@@ -260,13 +266,18 @@ fn detects_vim_and_emacs_modelines() {
 fn the_name_beats_the_first_line_and_an_explicit_grammar_beats_both() {
     assert_eq!(detected(Some("tool.py"), "#!/usr/bin/env bash\n"), "Python");
     let s = detect(
-        syntaxes(),
+        syntaxes().expect("grammars"),
         Some("rust"),
         Some("tool.py"),
         "#!/usr/bin/env bash\n",
     );
     assert_eq!(s.name, "Rust");
-    let s = detect(syntaxes(), Some("Bourne Again Shell (bash)"), None, "");
+    let s = detect(
+        syntaxes().expect("grammars"),
+        Some("Bourne Again Shell (bash)"),
+        None,
+        "",
+    );
     assert_eq!(s.name, "Bourne Again Shell (bash)");
 }
 
@@ -277,7 +288,12 @@ fn unknown_text_falls_back_to_plain_text() {
         "Plain Text"
     );
     assert_eq!(detected(None, ""), "Plain Text");
-    let s = detect(syntaxes(), Some("no-such-grammar"), None, "");
+    let s = detect(
+        syntaxes().expect("grammars"),
+        Some("no-such-grammar"),
+        None,
+        "",
+    );
     assert_eq!(s.name, "Plain Text");
 }
 
@@ -879,7 +895,7 @@ fn the_thread_starts_on_first_use_and_ends_with_the_last_handle() {
 const BLOCK: &str = "fn main() {\n    let s = \"hi\"; // greet\n    println!(\"{s}\");\n}";
 
 fn block_reference(lang: &str, code: &str, theme: &Theme) -> Runs {
-    let syntax = super::detect::by_token(syntaxes(), lang).expect("grammar");
+    let syntax = super::detect::by_token(syntaxes().expect("grammars"), lang).expect("grammar");
     let lines = Lines::new(code.into());
     let mut out = Vec::new();
     for (i, runs) in reference(code, syntax, theme, LONG_LINE)
@@ -1073,10 +1089,17 @@ fn a_waker_set_after_the_thread_starts_is_used() {
     assert!(woke.lock().is_ok_and(|b| *b));
 }
 
-#[test]
-fn random_edits_with_partial_passes_end_exact() {
+/// Seeds the committed random-edit test runs. 11, 17 and 207 gave wrong lines before
+/// provisional colours stopped the pass converging under them (review round 1); sweep more
+/// locally by running `random_edit_run` over a range.
+const RANDOM_SEEDS: &[u64] = &[1, 2, 3, 11, 17, 207];
+
+/// One seed of random edits: up to three queued before any work, viewports in between, and
+/// a random amount of work after. Every few rounds the pass runs out and every line must
+/// match a full parse. Returns the first wrong (round, line).
+fn random_edit_run(seed: u64) -> Option<(usize, usize)> {
     let name = "shell-5k.sh";
-    let mut text = head(name, 400);
+    let mut text = head(name, 300);
     let mut pump = Pump::new(light());
     let mut doc = pump.open(
         Source::new(text.as_str())
@@ -1084,46 +1107,284 @@ fn random_edits_with_partial_passes_end_exact() {
             .mode(Mode::Editable),
     );
     all_lines(&mut pump, &mut doc);
-    let mut seed = 0x2545_f491_4f6c_dd1d_u64;
+    let mut state = seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1;
     let mut rand = |n: usize| {
-        seed ^= seed << 13;
-        seed ^= seed >> 7;
-        seed ^= seed << 17;
-        (seed % n as u64) as usize
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        (state % n.max(1) as u64) as usize
     };
-    for round in 0..60 {
-        let mut lines: Vec<String> = text.split_inclusive('\n').map(str::to_owned).collect();
-        let at = rand(lines.len());
-        match rand(6) {
-            0 => lines[at].insert(0, '"'),
-            1 => lines[at] = lines[at].replacen('"', "", 1),
-            2 => lines.insert(at, "cat <<EOF\n".into()),
-            3 => lines.insert(at, "EOF\n".into()),
-            4 if lines.len() > 10 => {
-                lines.remove(at);
+    for round in 0..30 {
+        for _ in 0..1 + rand(3) {
+            let mut lines: Vec<String> = text.split_inclusive('\n').map(str::to_owned).collect();
+            let at = rand(lines.len());
+            match rand(7) {
+                0 | 1 => lines[at].insert(0, '"'),
+                2 => lines[at] = lines[at].replacen('"', "", 1),
+                3 => lines.insert(at, "cat <<EOF\n".into()),
+                4 => lines.insert(at, "EOF\n".into()),
+                5 if lines.len() > 10 => {
+                    lines.remove(at);
+                }
+                _ => lines[at] = lines[at].replace("EOF", "EOT"),
             }
-            _ => lines[at] = lines[at].replace("EOF", "EOT"),
+            let new: String = lines.concat();
+            let line = at.min(lines.len().saturating_sub(1));
+            let visible = if rand(2) == 0 {
+                line.saturating_sub(20)..line + 60
+            } else {
+                let v = rand(lines.len());
+                v..v + 60
+            };
+            doc.edit(new.as_str().into(), LineEdit::diff(&text, &new), visible);
+            text = new;
+            if rand(3) == 0 {
+                let v = rand(doc.line_count());
+                doc.show(v..v + 60);
+            }
         }
-        let new: String = lines.concat();
-        let line = at.min(lines.len().saturating_sub(1));
-        doc.edit(
-            new.as_str().into(),
-            LineEdit::diff(&text, &new),
-            line.saturating_sub(20)..line + 60,
-        );
-        text = new;
         pump.requests();
         for _ in 0..rand(4) {
             pump.step();
         }
         doc.poll();
-        if round % 15 == 14 {
+        if rand(3) == 0 {
+            let v = rand(doc.line_count());
+            doc.show(v..v + 60);
+            pump.requests();
+            pump.step();
+            doc.poll();
+        }
+        if round % 5 == 4 {
             pump.run();
             doc.poll();
             assert_eq!(doc.provisional_from(), None);
             let got = all_lines(&mut pump, &mut doc);
             let want = reference(&text, syntax_for(name, &text), &light(), LONG_LINE);
-            assert_lines_eq(&got, &want, &format!("after round {round}"));
+            if let Some(line) = (0..want.len()).find(|&i| got[i] != want[i]) {
+                return Some((round, line));
+            }
         }
     }
+    None
+}
+
+#[test]
+fn random_queued_edits_and_viewports_end_exact() {
+    let wrong: Vec<_> = RANDOM_SEEDS
+        .iter()
+        .filter_map(|&seed| random_edit_run(seed).map(|at| (seed, at)))
+        .collect();
+    assert!(
+        wrong.is_empty(),
+        "seeds with wrong lines (seed, (round, line)): {wrong:?}"
+    );
+}
+
+/// Lines that open a string, one after another: each edit flips everything below it.
+fn quote_script(n: usize) -> String {
+    (0..n)
+        .map(|i| format!("x={i} && run_it --flag {i}\n"))
+        .collect()
+}
+
+#[test]
+fn queued_edits_before_any_work_settle_exact() {
+    let text = quote_script(400);
+    let mut pump = Pump::new(light());
+    let mut doc = pump.open(
+        Source::new(text.as_str())
+            .file_name("p.sh")
+            .mode(Mode::Editable),
+    );
+    all_lines(&mut pump, &mut doc);
+    let one = replace_line(&text, 10, |l| format!("\"{l}"));
+    doc.edit(one.as_str().into(), LineEdit::diff(&text, &one), 0..60);
+    // The second quote closes the first's string: line 101 on is code again.
+    let two = replace_line(&one, 100, |l| format!("\"{l}"));
+    edit_and_check(&mut pump, &mut doc, "p.sh", &two, 100..140, "queued quotes");
+}
+
+#[test]
+fn an_edit_below_an_unfinished_cascade_settles_exact() {
+    let text = quote_script(1500);
+    let mut pump = Pump::new(light());
+    let mut doc = pump.open(
+        Source::new(text.as_str())
+            .file_name("p.sh")
+            .mode(Mode::Editable),
+    );
+    all_lines(&mut pump, &mut doc);
+    let one = replace_line(&text, 100, |l| format!("\"{l}"));
+    doc.edit(one.as_str().into(), LineEdit::diff(&text, &one), 90..170);
+    pump.requests();
+    pump.step();
+    let two = replace_line(&one, 1200, |l| format!("\"{l}"));
+    edit_and_check(
+        &mut pump,
+        &mut doc,
+        "p.sh",
+        &two,
+        1190..1270,
+        "below the frontier",
+    );
+}
+
+#[test]
+fn a_viewport_across_an_unreached_edit_settles_exact() {
+    let text = quote_script(1500);
+    let mut pump = Pump::new(light());
+    let mut doc = pump.open(
+        Source::new(text.as_str())
+            .file_name("p.sh")
+            .mode(Mode::Editable),
+    );
+    all_lines(&mut pump, &mut doc);
+    let one = replace_line(&text, 100, |l| format!("\"{l}"));
+    doc.edit(one.as_str().into(), LineEdit::diff(&text, &one), 90..170);
+    pump.requests();
+    pump.step();
+    // A second edit far below, with its viewport elsewhere, then a viewport across it.
+    let two = replace_line(&one, 1200, |l| format!("\"{l}"));
+    doc.edit(two.as_str().into(), LineEdit::diff(&one, &two), 1000..1010);
+    pump.requests();
+    pump.step();
+    doc.poll();
+    doc.show(1150..1230);
+    pump.requests();
+    pump.step();
+    doc.poll();
+    pump.run();
+    doc.poll();
+    assert_eq!(doc.provisional_from(), None);
+    let got = all_lines(&mut pump, &mut doc);
+    assert_lines_eq(
+        &got,
+        &reference(&two, syntax_for("p.sh", &two), &light(), LONG_LINE),
+        "viewport across",
+    );
+}
+
+#[test]
+fn lines_in_view_are_never_evicted() {
+    let name = "rust-50k.rs";
+    let text = head(name, 12000);
+    let mut pump = Pump::new(light());
+    let mut doc = pump.open(Source::new(text.as_str()).file_name(name));
+    pump.run();
+    doc.show(2000..2080);
+    pump.run();
+    doc.poll();
+    assert!(doc.line_spans(2000).is_some());
+    // Scroll far, then straight back before the far lines land: the view is cached, so
+    // nothing is asked, but it is still the view.
+    doc.show(6000..10500);
+    doc.show(2000..2080);
+    pump.run();
+    doc.poll();
+    assert!(doc.line_spans(2000).is_some(), "a line in view was evicted");
+}
+
+#[test]
+fn show_does_not_ask_again_for_lines_on_their_way() {
+    let name = "rust-50k.rs";
+    let text = head(name, 3000);
+    let mut pump = Pump::new(light());
+    let mut doc = pump.open(Source::new(text.as_str()).file_name(name));
+    // The pass hasn't reached the view: its lines land as the pass passes them.
+    doc.show(1000..1080);
+    pump.requests();
+    let asked = pump.shows_asked;
+    while doc.line_spans(1119).is_none() {
+        assert!(pump.step());
+        doc.poll();
+        // The host asks on every build; part of the view has landed.
+        doc.show(1000..1080);
+        pump.requests();
+    }
+    assert_eq!(
+        pump.shows_asked, asked,
+        "the shrinking rest of the view was asked again"
+    );
+}
+
+#[test]
+fn a_page_of_blocks_over_the_cache_size_is_asked_for_once() {
+    let mut pump = Pump::new(light());
+    let mut blocks = pump.blocks();
+    // 160 blocks of about 34 KiB, over the 4 MiB cache. Their lines are over the long-line
+    // cap, so the thread skips them and the test stays quick.
+    let codes: Vec<String> = (0..160)
+        .map(|i| {
+            format!(
+                "// block {i}\n{}\n{}",
+                "x".repeat(17_000),
+                "y".repeat(17_000)
+            )
+        })
+        .collect();
+    let mut asked = Vec::new();
+    for _build in 0..4 {
+        let before = pump.blocks_asked;
+        for c in &codes {
+            blocks.highlight(Some("rust"), c);
+        }
+        pump.run();
+        blocks.poll();
+        asked.push(pump.blocks_asked - before);
+    }
+    assert_eq!(asked, [160, 0, 0, 0], "blocks asked per build");
+    assert!(
+        codes
+            .iter()
+            .all(|c| blocks.highlight(Some("rust"), c).is_some())
+    );
+}
+
+#[test]
+fn blocks_without_a_thread_are_plain() {
+    let blocks = CodeBlocks::new(None);
+    assert_eq!(blocks.highlight(Some("rust"), BLOCK), Some(Vec::new()));
+}
+
+#[test]
+fn without_grammars_everything_is_plain_and_nothing_waits() {
+    let mut pump = Pump::new(light());
+    pump.worker.engine = super::engine::Engine::with_syntaxes(light(), Options::default(), None);
+    let mut doc = pump.open(Source::new("fn main() {}\n").file_name("a.rs"));
+    let mut blocks = pump.blocks();
+    assert!(blocks.highlight(Some("rust"), BLOCK).is_none());
+    pump.run();
+    doc.poll();
+    assert!(
+        doc.is_idle(),
+        "a text that can't be coloured doesn't look pending"
+    );
+    assert!(doc.settle(Duration::ZERO));
+    assert!(doc.line_spans(0).is_none(), "plain");
+    assert!(blocks.settle(Duration::ZERO), "no block looks pending");
+    assert_eq!(blocks.highlight(Some("rust"), BLOCK), Some(Vec::new()));
+}
+
+#[test]
+fn a_failed_text_is_opened_again_on_the_next_edit() {
+    let mut pump = Pump::new(light());
+    pump.worker.engine = super::engine::Engine::with_syntaxes(light(), Options::default(), None);
+    let text = "fn main() {}\n";
+    let mut doc = pump.open(Source::new(text).file_name("a.rs").mode(Mode::Editable));
+    pump.run();
+    doc.poll();
+    assert!(doc.is_idle() && doc.line_spans(0).is_none());
+    // The grammars are back (a stand-in for whatever failed): the next edit tries again.
+    pump.worker.engine = super::engine::Engine::new(light(), Options::default());
+    let new = "fn main() { let x = 1; }\n";
+    doc.edit(new.into(), LineEdit::diff(text, new), 0..1);
+    assert!(!doc.is_idle());
+    let got = all_lines(&mut pump, &mut doc);
+    assert_lines_eq(
+        &got,
+        &reference(new, syntax_for("a.rs", new), &light(), LONG_LINE),
+        "retried",
+    );
+    assert!(doc.settle(Duration::ZERO));
 }

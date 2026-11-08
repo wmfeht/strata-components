@@ -8,6 +8,7 @@
 
 use std::collections::HashMap;
 use std::ops::Range;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 use std::sync::{Arc, Mutex};
 
@@ -113,11 +114,26 @@ impl Worker {
         }
     }
 
+    /// Runs `f`, the backstop for a panic the engine's own guards don't catch: every text
+    /// and queued block then answers plain, and the thread carries on.
+    pub(crate) fn guard(&mut self, f: impl FnOnce(&mut Worker)) {
+        if catch_unwind(AssertUnwindSafe(|| f(self))).is_err() {
+            self.engine.fail_all();
+        }
+    }
+
     /// Sends the engine's replies, and wakes the window if any went out. A document whose
     /// receiver is gone is closed.
     pub(crate) fn flush(&mut self) {
         let mut sent = false;
-        for (id, reply) in self.engine.take_out() {
+        let out = match catch_unwind(AssertUnwindSafe(|| self.engine.take_out())) {
+            Ok(out) => out,
+            Err(_) => {
+                self.engine.fail_all();
+                self.engine.take_raw()
+            }
+        };
+        for (id, reply) in out {
             let alive = self
                 .replies
                 .get(&id)
@@ -130,7 +146,7 @@ impl Worker {
             }
         }
         if sent {
-            let waker = self.waker.lock().ok().and_then(|w| w.clone());
+            let waker = super::lock(&self.waker).clone();
             if let Some(wake) = waker {
                 wake();
             }
@@ -155,12 +171,14 @@ pub(crate) fn run(rx: Receiver<Request>, mut worker: Worker) {
             }
         };
         if let Some(req) = first {
-            worker.handle(req);
+            worker.guard(|w| w.handle(req));
             while let Ok(req) = rx.try_recv() {
-                worker.handle(req);
+                worker.guard(|w| w.handle(req));
             }
         }
-        worker.engine.step();
+        worker.guard(|w| {
+            w.engine.step();
+        });
         worker.flush();
     }
 }

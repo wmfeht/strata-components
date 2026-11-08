@@ -1,10 +1,10 @@
 //! Perf tests on the S4 fixtures (`tests/fixtures/code/`), against S4's budgets: a viewport
 //! within 8 ms at p95 (the reading N = 64 is sized for), and an edit's foreground within
 //! 2 ms. They time the engine on the test thread, which is the work the highlighter thread
-//! does. `#[ignore]`d; run them in release, one at a time:
+//! does. `#[ignore]`d; run them with the `perf` profile, one at a time:
 //!
 //! ```sh
-//! CARGO_BUILD_JOBS=8 cargo test --release -p strata-components --lib \
+//! CARGO_BUILD_JOBS=8 cargo test --profile perf -p strata-components --lib \
 //!     code_view::highlight::tests::perf -- --ignored --test-threads=1 --nocapture
 //! ```
 
@@ -21,7 +21,7 @@ const POSITIONS: usize = 200;
 
 fn release_only() {
     if cfg!(debug_assertions) {
-        panic!("perf tests measure release builds: run them with --release");
+        panic!("perf tests measure release builds: run them with --profile perf");
     }
 }
 
@@ -109,37 +109,37 @@ fn viewport(name: &str) {
 }
 
 #[test]
-#[ignore = "perf: run in release (see the module docs)"]
+#[ignore = "perf: run with --profile perf (see the module docs)"]
 fn viewport_rust() {
     viewport("rust-50k.rs");
 }
 
 #[test]
-#[ignore = "perf: run in release (see the module docs)"]
+#[ignore = "perf: run with --profile perf (see the module docs)"]
 fn viewport_c() {
     viewport("c-50k.c");
 }
 
 #[test]
-#[ignore = "perf: run in release (see the module docs)"]
+#[ignore = "perf: run with --profile perf (see the module docs)"]
 fn viewport_js() {
     viewport("js-50k.js");
 }
 
 #[test]
-#[ignore = "perf: run in release (see the module docs)"]
+#[ignore = "perf: run with --profile perf (see the module docs)"]
 fn viewport_python() {
     viewport("python-50k.py");
 }
 
 #[test]
-#[ignore = "perf: run in release (see the module docs)"]
+#[ignore = "perf: run with --profile perf (see the module docs)"]
 fn viewport_markdown() {
     viewport("markdown-50k.md");
 }
 
 #[test]
-#[ignore = "perf: run in release (see the module docs)"]
+#[ignore = "perf: run with --profile perf (see the module docs)"]
 fn viewport_shell() {
     viewport("shell-5k.sh");
 }
@@ -206,7 +206,7 @@ fn undo(edit: LineEdit) -> LineEdit {
 }
 
 #[test]
-#[ignore = "perf: run in release (see the module docs)"]
+#[ignore = "perf: run with --profile perf (see the module docs)"]
 fn edit_shell() {
     release_only();
     let name = "shell-5k.sh";
@@ -323,7 +323,7 @@ fn edit_shell() {
 }
 
 #[test]
-#[ignore = "perf: run in release (see the module docs)"]
+#[ignore = "perf: run with --profile perf (see the module docs)"]
 fn theme_switch_markdown() {
     release_only();
     let name = "markdown-50k.md";
@@ -348,7 +348,7 @@ fn theme_switch_markdown() {
 }
 
 #[test]
-#[ignore = "perf: run in release (see the module docs)"]
+#[ignore = "perf: run with --profile perf (see the module docs)"]
 fn viewport_through_the_thread() {
     release_only();
     let name = "rust-50k.rs";

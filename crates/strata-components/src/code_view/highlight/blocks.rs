@@ -7,8 +7,8 @@
 //! the hook's cache key, so the next build asks again and gets them.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
-use std::collections::{HashMap, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::ops::Range;
 use std::rc::Rc;
@@ -23,7 +23,9 @@ use super::engine::{Reply, Token};
 use super::spans;
 use super::worker::Request;
 
-/// Highlighted blocks kept, in bytes of code, before the oldest go.
+/// Highlighted blocks kept, in bytes of code, before the least recently asked go. Blocks asked
+/// for since the last poll (the current build's) are never evicted: the cap stretches to fit
+/// one build, so a large document can't evict what it is drawing and ask again.
 const CACHE_BYTES: usize = 4 << 20;
 
 /// A pool of code blocks on the highlighter thread, from [`Highlighter::blocks`]. Clones
@@ -40,6 +42,8 @@ struct Entry {
     code: Box<str>,
     /// `None` while the thread works on it.
     tokens: Option<Rc<[Token]>>,
+    /// When it was last asked for, in [`Blocks::tick`]s.
+    used: u64,
 }
 
 struct Blocks {
@@ -47,8 +51,11 @@ struct Blocks {
     tx: Option<Sender<Request>>,
     rx: Receiver<Reply>,
     entries: HashMap<u64, Entry>,
-    order: VecDeque<u64>,
     bytes: usize,
+    /// Counts `highlight` calls.
+    tick: u64,
+    /// The tick of the last poll: entries used after it belong to the current build.
+    polled: u64,
     palette: Vec<Option<Color>>,
     epoch: u64,
     wait: Option<Duration>,
@@ -73,8 +80,9 @@ impl CodeBlocks {
                 tx,
                 rx,
                 entries: HashMap::new(),
-                order: VecDeque::new(),
                 bytes: 0,
+                tick: 0,
+                polled: 0,
                 palette: Vec::new(),
                 epoch: 0,
                 wait: None,
@@ -106,6 +114,7 @@ impl CodeBlocks {
     /// Takes the blocks that have landed. True when colours changed, so the host rebuilds.
     pub fn poll(&mut self) -> bool {
         let mut s = self.state.borrow_mut();
+        s.polled = s.tick;
         let mut changed = false;
         while let Ok(reply) = s.rx.try_recv() {
             changed |= s.apply(reply);
@@ -171,13 +180,15 @@ impl Blocks {
         let Some(lang) = lang.map(str::trim).filter(|l| !l.is_empty()) else {
             return Some(Vec::new());
         };
+        // No highlighter thread (it couldn't start, or it stopped): plain, as documented.
+        if self.tx.is_none() {
+            return Some(Vec::new());
+        }
+        self.tick += 1;
         let key = key_of(lang, code);
-        let known = self
-            .entries
-            .get(&key)
-            .is_some_and(|e| *e.lang == *lang && *e.code == *code);
-        if !known {
-            self.request(key, lang, code);
+        match self.entries.get_mut(&key) {
+            Some(e) if *e.lang == *lang && *e.code == *code => e.used = self.tick,
+            _ => self.request(key, lang, code),
         }
         if self.entries.get(&key).is_some_and(|e| e.tokens.is_none())
             && let Some(wait) = self.wait
@@ -198,32 +209,43 @@ impl Blocks {
         let Some(tx) = &self.tx else {
             return;
         };
-        let _ = tx.send(Request::Block {
+        let sent = tx.send(Request::Block {
             pool: self.id,
             key,
             lang: lang.into(),
             code: Arc::from(code),
         });
-        if self
-            .entries
-            .insert(
-                key,
-                Entry {
-                    lang: lang.into(),
-                    code: code.into(),
-                    tokens: None,
-                },
-            )
-            .is_none()
-        {
-            self.order.push_back(key);
+        if sent.is_err() {
+            // The thread is gone: every block is plain from now on.
+            self.tx = None;
+            return;
+        }
+        let entry = Entry {
+            lang: lang.into(),
+            code: code.into(),
+            tokens: None,
+            used: self.tick,
+        };
+        // A hash collision replaces the other block: count only the one kept.
+        if let Some(old) = self.entries.insert(key, entry) {
+            self.bytes = self.bytes.saturating_sub(old.code.len());
         }
         self.bytes += code.len();
+        self.evict();
+    }
+
+    /// Drops the least recently asked blocks until the cache fits, sparing the current
+    /// build's.
+    fn evict(&mut self) {
         while self.bytes > CACHE_BYTES {
-            let Some(old) = self.order.pop_front() else {
-                break;
-            };
-            if let Some(e) = self.entries.remove(&old) {
+            let oldest = self
+                .entries
+                .iter()
+                .filter(|(_, e)| e.used <= self.polled)
+                .min_by_key(|(_, e)| e.used)
+                .map(|(&k, _)| k);
+            let Some(key) = oldest else { break };
+            if let Some(e) = self.entries.remove(&key) {
                 self.bytes = self.bytes.saturating_sub(e.code.len());
             }
         }

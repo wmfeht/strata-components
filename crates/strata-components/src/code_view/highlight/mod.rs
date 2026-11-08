@@ -39,10 +39,11 @@
 //!
 //! # Perf tests
 //!
-//! The perf tests on the S4 fixtures are `#[ignore]`d. Run them in release, one at a time:
+//! The perf tests on the S4 fixtures are `#[ignore]`d. Run them with the workspace's `perf`
+//! profile (release, no LTO), one at a time:
 //!
 //! ```sh
-//! CARGO_BUILD_JOBS=8 cargo test --release -p strata-components --lib \
+//! CARGO_BUILD_JOBS=8 cargo test --profile perf -p strata-components --lib \
 //!     code_view::highlight::tests::perf -- --ignored --test-threads=1 --nocapture
 //! ```
 
@@ -60,7 +61,7 @@ mod tests;
 use std::ops::Range;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -194,6 +195,12 @@ impl LineEdit {
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
+/// Locks `m`, poisoned or not: a panic elsewhere must not stop highlighting (the data behind
+/// these locks is replaced whole, never left half-written).
+pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
 fn next_id() -> u64 {
     NEXT_ID.fetch_add(1, Ordering::Relaxed)
 }
@@ -241,18 +248,14 @@ impl Highlighter {
     /// The window's waker (`AppSpec::setup`'s): the thread calls it after sending replies,
     /// so the host's `poll` runs and calls each document's `poll`.
     pub fn set_waker(&self, waker: Waker) {
-        if let Ok(mut slot) = self.inner.waker.lock() {
-            *slot = Some(waker);
-        }
+        *lock(&self.inner.waker) = Some(waker);
     }
 
     /// Colours every open text and block with `theme` from now on, re-colouring cached lines
     /// from their classes, with no re-parse.
     pub fn set_theme(&self, theme: Arc<Theme>) {
-        if let Ok(mut t) = self.inner.theme.lock() {
-            *t = theme.clone();
-        }
-        let tx = self.inner.thread.lock().ok().and_then(|t| t.tx.clone());
+        *lock(&self.inner.theme) = theme.clone();
+        let tx = lock(&self.inner.thread).tx.clone();
         if let Some(tx) = tx {
             let _ = tx.send(Request::SetTheme(theme));
         }
@@ -265,11 +268,11 @@ impl Highlighter {
     /// The thread's queue, starting the thread on first use. `None` when it couldn't start:
     /// texts then draw plain.
     fn sender(&self) -> Option<Sender<Request>> {
-        let mut t = self.inner.thread.lock().ok()?;
+        let mut t = lock(&self.inner.thread);
         if !t.started {
             t.started = true;
             let (tx, rx) = mpsc::channel();
-            let theme = self.inner.theme.lock().ok()?.clone();
+            let theme = lock(&self.inner.theme).clone();
             let (opts, waker) = (self.inner.opts, self.inner.waker.clone());
             // The worker is built on the thread: it holds parse states, which can't cross.
             let spawned = std::thread::Builder::new()
@@ -297,9 +300,7 @@ impl Highlighter {
     #[cfg(test)]
     pub(crate) fn join(&self) -> bool {
         let handle = {
-            let Ok(mut t) = self.inner.thread.lock() else {
-                return false;
-            };
+            let mut t = lock(&self.inner.thread);
             t.tx = None;
             t.handle.take()
         };
@@ -336,7 +337,14 @@ pub struct CodeDoc {
     seq: u64,
     idle_seq: u64,
     syntax: Option<String>,
+    /// What [`Source`] said besides the text, for a retry after a failure.
+    file_name: Option<String>,
+    syntax_hint: Option<String>,
+    /// The lines in view (with the overscan), as of the last `show`.
+    view: Option<Range<usize>>,
+    /// The last lines asked for, and the request that asked.
     last_show: Option<Range<usize>>,
+    last_show_seq: u64,
     provisional_from: Option<usize>,
     failed: bool,
 }
@@ -344,14 +352,12 @@ pub struct CodeDoc {
 impl CodeDoc {
     /// Opens `src` on the thread behind `tx` (none: it stays plain).
     fn open(tx: Option<Sender<Request>>, src: Source, opts: Options) -> CodeDoc {
-        let id = next_id();
-        let (reply, rx) = mpsc::channel();
-        let lines = Lines::new(src.text.clone());
+        let lines = Lines::new(src.text);
         let n = lines.len();
-        let doc = CodeDoc {
-            id,
+        let mut doc = CodeDoc {
+            id: next_id(),
             tx,
-            rx,
+            rx: mpsc::channel().1,
             lines,
             mode: src.mode,
             overscan: opts.overscan,
@@ -359,30 +365,45 @@ impl CodeDoc {
             cached: 0,
             palette: Vec::new(),
             generation: 0,
-            seq: 1,
+            seq: 0,
             idle_seq: 0,
             syntax: None,
+            file_name: src.file_name,
+            syntax_hint: src.syntax,
+            view: None,
             last_show: None,
+            last_show_seq: 0,
             provisional_from: None,
             failed: false,
         };
-        doc.send(Request::Open {
-            id,
-            seq: 1,
-            args: OpenArgs {
-                text: src.text,
-                file_name: src.file_name,
-                syntax: src.syntax,
-                mode: src.mode,
-            },
-            reply,
-        });
+        doc.send_open();
         doc
     }
 
-    fn send(&self, req: Request) {
-        if let Some(tx) = &self.tx {
-            let _ = tx.send(req);
+    /// Opens the current text on the thread, from scratch, with a fresh reply channel.
+    fn send_open(&mut self) {
+        let (reply, rx) = mpsc::channel();
+        self.rx = rx;
+        self.seq += 1;
+        self.send(Request::Open {
+            id: self.id,
+            seq: self.seq,
+            args: OpenArgs {
+                text: self.lines.text.clone(),
+                file_name: self.file_name.clone(),
+                syntax: self.syntax_hint.clone(),
+                mode: self.mode,
+            },
+            reply,
+        });
+    }
+
+    fn send(&mut self, req: Request) {
+        if let Some(tx) = &self.tx
+            && tx.send(req).is_err()
+        {
+            // The thread is gone: the text stays plain.
+            self.tx = None;
         }
     }
 
@@ -409,6 +430,7 @@ impl CodeDoc {
         if range.is_empty() || self.failed {
             return;
         }
+        self.view = Some(range.clone());
         let missing = |c: &Option<Cached>| c.as_ref().is_none_or(|c| c.provisional);
         let first = range.clone().find(|&i| missing(&self.cache[i]));
         let Some(first) = first else { return };
@@ -418,11 +440,17 @@ impl CodeDoc {
             .find(|&i| missing(&self.cache[i]))
             .unwrap_or(first);
         let want = first..last + 1;
-        if self.last_show.as_ref() == Some(&want) {
-            return;
+        if let Some(last) = &self.last_show {
+            // Asked for already; part may have landed while the rest is on its way (a pass
+            // crossing the view sends its lines as it goes).
+            let within = last.start <= want.start && want.end <= last.end;
+            if *last == want || (within && self.idle_seq < self.last_show_seq) {
+                return;
+            }
         }
         self.last_show = Some(want.clone());
         self.seq += 1;
+        self.last_show_seq = self.seq;
         self.send(Request::Show {
             id: self.id,
             seq: self.seq,
@@ -515,7 +543,7 @@ impl CodeDoc {
         if self.mode == Mode::Editable || self.cached <= CACHED_LINES {
             return;
         }
-        let Some(view) = self.last_show.clone() else {
+        let Some(view) = self.view.clone() else {
             return;
         };
         let keep = view.start.saturating_sub(CACHED_LINES / 4)..view.end + CACHED_LINES / 4;
@@ -548,6 +576,10 @@ impl CodeDoc {
     pub fn text_spans(&self, lines: Range<usize>) -> Vec<Span> {
         let mut runs = Vec::new();
         for i in lines.start..lines.end.min(self.lines.len()) {
+            // Rune's span offsets are `u32`: a text past 4 GiB draws plain from there.
+            if self.lines.start(i) + LONG_LINE > u32::MAX as usize {
+                break;
+            }
             if let Some(Some(c)) = self.cache.get(i) {
                 spans::colored(&c.tokens, &self.palette, self.lines.start(i), &mut runs);
             }
@@ -564,8 +596,26 @@ impl CodeDoc {
     ///
     /// An editable text re-parses in the foreground down to the viewport's bottom plus the
     /// overscan, then in the background; cached lines after the edit keep their colours,
-    /// marked provisional, until the pass reaches them. A preview starts over.
+    /// marked provisional, until the pass reaches them. The foreground has no deadline: an
+    /// edit far above the viewport (a scripted or programmatic one) parses every line from
+    /// the edit to the viewport's bottom before the viewport's colours come back. A preview
+    /// starts over. A text whose highlighting failed is opened again, from scratch.
     pub fn edit(&mut self, text: Arc<str>, edit: LineEdit, visible: Range<usize>) {
+        if self.failed {
+            self.lines = Lines::new(text);
+            self.cache = vec![None; self.lines.len()];
+            self.cached = 0;
+            self.generation = 0;
+            self.view = None;
+            self.last_show = None;
+            self.provisional_from = None;
+            self.failed = false;
+            // Replies to the failed open arrive on the old channel, which `send_open`
+            // replaces; the new open starts counting idleness afresh.
+            self.idle_seq = 0;
+            self.send_open();
+            return;
+        }
         let old_n = self.lines.len();
         self.lines = Lines::new(text.clone());
         let new_n = self.lines.len();
@@ -615,9 +665,10 @@ impl CodeDoc {
         self.provisional_from
     }
 
-    /// Whether the thread has finished every request sent so far.
+    /// Whether the thread has finished every request sent so far. A text that failed, or has
+    /// no thread, is idle: it stays plain.
     pub fn is_idle(&self) -> bool {
-        self.idle_seq >= self.seq || self.tx.is_none()
+        self.failed || self.idle_seq >= self.seq || self.tx.is_none()
     }
 
     /// Blocks until the thread has finished every request sent so far (its background passes

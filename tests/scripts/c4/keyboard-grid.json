@@ -21,14 +21,19 @@
       "name": "Down"
     },
     {
-      "t": 1.2,
+      "t": 1.4,
+      "type": "key",
+      "name": "Up"
+    },
+    {
+      "t": 1.6,
       "type": "key",
       "name": "Right"
     }
   ],
   "expect": [
     {
-      "key": "row-2",
+      "key": "row-1",
       "states": [
         "selected"
       ]
@@ -40,6 +45,10 @@
     {
       "key": "c4-sort",
       "name": "Sorted by Name ↑"
+    },
+    {
+      "key": "status",
+      "name": ""
     }
   ]
 }

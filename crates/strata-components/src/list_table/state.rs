@@ -1,5 +1,7 @@
 //! [`ListTableState`]: what the table keeps between frames, in the host's state.
 
+use std::cell::Cell;
+
 use super::column::ColumnId;
 use super::layout::DropSite;
 use crate::contract::Rect;
@@ -46,9 +48,11 @@ pub struct ListTableState {
     /// The heading strip's rect in window points, as last laid out.
     pub(super) strip: Rect,
     pub(super) drag: Option<HeadingDrag>,
-    /// The press that follows a reorder drag's release on the same heading isn't a sort
-    /// click (Rune draft R-C4-1).
-    pub(super) suppress_press: bool,
+    /// The press that follows a reorder drag's release on the same heading, in the same frame,
+    /// isn't a sort click (Rune draft R-C4-1). Set by the release, taken by that press, and
+    /// cleared by the next build whether or not one came: a cell, as the build reads the
+    /// state shared.
+    pub(super) suppress_press: Cell<bool>,
     pub(super) resize: Option<Resize>,
     pub(super) menu: Option<MenuAt>,
 }
@@ -65,7 +69,13 @@ impl ListTableState {
     pub fn reset(&mut self) {
         self.drag = None;
         self.resize = None;
-        self.suppress_press = false;
+        self.suppress_press.set(false);
+    }
+
+    /// The end of the frame's input, as the view builds: a sort click a reorder drag's release
+    /// held back has had its frame to come.
+    pub(super) fn end_frame(&self) {
+        self.suppress_press.set(false);
     }
 
     /// Opens the columns menu at `at`: [`MenuAt::Headings`]`(None)` is Strata's "Customize

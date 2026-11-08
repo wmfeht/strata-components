@@ -136,8 +136,8 @@ fn moving_a_column_puts_it_before_its_target_or_after_the_last() {
 // The sizing rule.
 
 /// list: "Name takes the width left after the metadata columns until it is resized by hand;
-/// below the minimum widths the table scrolls horizontally" (the rule; scripts check the
-/// scroll).
+/// below the minimum widths the table scrolls horizontally" (the widths; `horizontal-scroll.json`
+/// checks that the wheel scrolls them sideways).
 #[test]
 fn the_fill_column_takes_what_the_others_leave_until_resized_and_overflows_below_its_width() {
     let layout = ColumnLayout::new(defaults());
@@ -350,4 +350,17 @@ fn groups_are_runs_of_one_key_and_a_key_that_comes_back_makes_a_group_of_its_own
     k.dedup();
     assert_eq!(k.len(), 4, "keys stay unique");
     assert_eq!(groups.len(), keys.len());
+}
+
+/// Whatever keys the host gives: a key that comes back never takes one another group has.
+#[test]
+fn a_key_that_comes_back_never_takes_another_groups_key() {
+    let keys = [0u64, 1, 0, 0x9e37_79b9_7f4a_7c15, 1, 2];
+    let groups = groups_from_runs(keys.len(), |i| (keys[i], Arc::from("g")));
+    let mut k: Vec<u64> = groups.groups().iter().map(|g| g.key).collect();
+    let n = k.len();
+    k.sort_unstable();
+    k.dedup();
+    assert_eq!(k.len(), n, "unique: {k:?}");
+    assert_eq!(n, keys.len(), "a group per run");
 }

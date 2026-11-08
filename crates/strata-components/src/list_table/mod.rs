@@ -88,9 +88,9 @@
 //! # What assistive technology hears
 //!
 //! The collection is a grid named by the host. Its first row is the headings: column headers
-//! named by their titles, the sorted one with its direction, each with a resize separator. Each
-//! entry is a row named by its name, holding a grid cell per shown column, named by its text.
-//! The cursor's row is the grid's active descendant (C1e).
+//! named by their titles, the sorted one with its direction, the sortable ones pressed to sort.
+//! Each entry is a row named by its name, holding a grid cell per shown column, named by its
+//! text. The cursor's row is the grid's active descendant (C1e).
 //!
 //! # Decisions and deviations
 //!
@@ -103,7 +103,17 @@
 //! - **Fit uses Rune's double press** (owner ruling; a deviation): Rune pairs presses within
 //!   its fixed 0.5 s on Linux (S5 U13), where Strata waits 400 ms.
 //! - **The sort click after a drag is suppressed by hand**: Rune presses an element whose own
-//!   drag was released on it (Rune draft [R-C4-1]).
+//!   drag was released on it (Rune draft [R-C4-1]). The table doesn't predict that press (Rune
+//!   decides it from the heading's drawn, possibly clipped, rect): the release sets a flag,
+//!   the press Rune queues with it in the same frame takes it, and the next build clears it,
+//!   so a press from assistive technology, which comes in a later frame, always sorts.
+//! - **The resize handles are hidden from assistive technology.** They take no steps, so they
+//!   would only read as a "Resize …" splitter under every column header. Rune could make
+//!   them adjustable (`El::range_value` and `El::on_step`, as rune-kit's pane grip does), an
+//!   assistive resize Strata doesn't have; left for a later change.
+//! - **Known interaction: C24's edge bar.** In a List narrower than its columns, C24's bar on
+//!   the viewport's edge sits inside this sideways scroll, so it can be scrolled out of view;
+//!   it is settled where C24 and X1 merge, not here.
 //! - **A view switch mid-drag**: Rune tells an element removed under a drag nothing (Rune draft
 //!   [R-C4-2]), so the host calls [`ListTableState::reset`] when the table leaves the view.
 //! - **Cells don't know their column** to assistive technology: Rune has no column index or
@@ -139,8 +149,8 @@
 //!
 //! | Bullet (node) | Check |
 //! | --- | --- |
-//! | list: Name takes the width left…; below the minimum widths the table scrolls horizontally | unit `the_fill_column_takes…` (the rule); `horizontal-scroll` (a click on a cell after scrolling sideways) |
-//! | list: Clicking the Name, Size, Type, or Modified heading sorts…, reverses it, and an arrow marks it | `sort-intent` (the arrow's direction is in its tree golden); runtime `assistive_technology_presses_a_heading_to_sort` and the three `an_assistive_press_after_…` (a press after a reorder drag released outside, Escaped, or on a heading that doesn't sort) |
+//! | list: Name takes the width left…; below the minimum widths the table scrolls horizontally | unit `the_fill_column_takes…` (the rule); `horizontal-scroll` (a drag at one point, a file drag from Mode's cell before the wheel scrolls sideways, starts a band from blank Name space after it) |
+//! | list: Clicking the Name, Size, Type, or Modified heading sorts…, reverses it, and an arrow marks it | `sort-intent` (the arrow's direction is in its tree golden); runtime `assistive_technology_presses_a_heading_to_sort` and the five `an_assistive_press_after_…` (a press after a reorder drag released outside the strip, over a heading's clipped part, on itself, Escaped, or of a heading that doesn't sort) |
 //! | list: Clicking the Mode heading does not sort | `sort-mode-heading` |
 //! | list: Sorted by Extension, Created, or Unsorted, no heading shows an arrow | `sort-no-column`, *partial*: a sort with no column (Extension) shows none; which fields have columns is the host's |
 //! | list: Dragging a heading's right edge resizes… without an initial jump | runtime `a_resize_follows_the_pointer…` (the width mid-drag); `resize-follow` (one drag lands at the drawn width plus the travel) |
@@ -181,7 +191,7 @@
 //! | view-modes: Click the first of five entries and Ctrl+click the third. Shift+Down in List… selects only the third and fourth | gallery `a_ctrl_click_then_shift_down…`, *partial*: List |
 //! | view-modes: Long filenames are middle-ellipsized in… the List Name column | PNG golden `c4-default` (the tree keeps the whole name, so no script can see the cut) |
 //! | selection: A plain click on an entry selects only that entry and replaces the previous selection | `cell-click` (on a cell, through C4's regions); `scroll-100k` (100,000 rows) |
-//! | keyboard-navigation: In Icons and List, Up and Down move focus and selection…; In List, Right keeps focus on the current entry… | `keyboard-grid` |
+//! | keyboard-navigation: In Icons and List, Up and Down move focus and selection…; In List, Right keeps focus on the current entry… | `keyboard-grid` (Down, Down, Up, then Right) |
 //!
 //! The sticky group header has no feature-map bullet (Strata's GTK headers don't stick; the
 //! plan adds it), and its stuck copy is hidden from assistive technology, so no script can
@@ -496,6 +506,7 @@ impl<S: 'static> ListTable<S> {
     /// The table: `base` with its parts and the heading strip, in a viewport that scrolls
     /// sideways when the columns are wider than it. The columns menu mounts into `layer`.
     pub fn build(&self, s: &S, base: Collection<S>, layer: &mut Vec<El>) -> El {
+        (self.shared.parts)(s).table.end_frame();
         let shared = Rc::new(self.shared.clone());
         let resolved = self.resolved(s);
         let strip = header::strip(&shared, &resolved, s);

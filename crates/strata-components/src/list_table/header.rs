@@ -141,7 +141,7 @@ fn heading<S: 'static>(shared: &Rc<Shared<S>>, resolved: &Rc<Resolved>, s: &S, p
             .hover(kit.c.hover)
             .on_press_tx(move |s: &mut S, tx: &mut Tx| {
                 let st = (sort_shared.table_mut)(s);
-                if std::mem::take(&mut st.suppress_press) {
+                if st.suppress_press.replace(false) {
                     tx.live_only();
                     return;
                 }
@@ -201,7 +201,7 @@ fn reorder<S: 'static>(
         match d.phase {
             Phase::Down => {
                 let st = (shared.table_mut)(s);
-                st.suppress_press = false;
+                st.suppress_press.set(false);
                 st.drag = Some(HeadingDrag {
                     column: id.clone(),
                     active: false,
@@ -237,15 +237,16 @@ fn reorder<S: 'static>(
                     return;
                 }
                 // Rune presses the heading after a drag released on it (Rune draft R-C4-1):
-                // that press isn't a sort click. Only then: a release outside the heading, a
-                // cancelled drag and a heading with no press of its own (it doesn't sort) get no
-                // press, and a flag left set would swallow the next press from assistive
-                // technology, which comes with no drag before it.
-                let inside = d.x >= 0.0 && d.x < d.w && d.y >= 0.0 && d.y < d.h;
+                // that press isn't a sort click. Whether Rune presses depends on what it drew
+                // (a heading the sideways scroll clips presses only where it shows), so the
+                // table doesn't predict it: Rune runs that press in the same frame as this
+                // release, before the view, and the next build clears a flag no press took
+                // (`ListTableState::end_frame`). A press from assistive technology comes in a
+                // later frame, and is never taken for this one.
                 if d.cancelled() {
                     return;
                 }
-                st.suppress_press = sortable && inside;
+                st.suppress_press.set(sortable);
                 let moved = site.and_then(|site| (shared.parts)(s).layout.moved(&id, &site));
                 if let (Some(layout), Some(f)) = (moved, &shared.on_layout) {
                     f(
@@ -279,8 +280,9 @@ fn resize_handle<S: 'static>(
     let def = p.def;
     row()
         .key("resize")
-        .role("separator")
-        .label(format!("Resize {}", column.title))
+        // Assistive technology can't move it (it takes no steps), so it would only add a
+        // "Resize …" splitter under every column header: hidden. See the module docs.
+        .a11y_hidden()
         .pin(None, Some(0.0), Some(0.0), Some(0.0))
         .w(RESIZE_EDGE)
         .cursor(Cursor::ResizeColumn)

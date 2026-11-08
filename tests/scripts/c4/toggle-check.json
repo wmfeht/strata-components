@@ -28,7 +28,10 @@
   "expect": [
     {
       "key": "c4-list-columns-menu-item3",
-      "name": "Size"
+      "name": "Size",
+      "states": [
+        "unchecked"
+      ]
     },
     {
       "key": "c4-list-columns-menu-item4",

@@ -367,10 +367,18 @@ fn a_heading_drag_grabs_marks_the_drop_point_and_moves_no_heading() {
         mods: rune::Mods::default(),
     });
     settle(&mut rt);
+    assert!(
+        element(&rt, "reorder-line").is_none(),
+        "Escape clears the line"
+    );
+    assert_ne!(
+        rt.cursor(),
+        Cursor::Grabbing,
+        "Escape clears the cursor, with the button still down"
+    );
     rt.pointer_up(mx + mw - 2.0, py);
     settle(&mut rt);
     assert!(element(&rt, "reorder-line").is_none());
-    assert_ne!(rt.cursor(), Cursor::Grabbing, "Escape clears the cursor");
     assert!(rt.state.layouts.is_empty());
 }
 
@@ -539,4 +547,43 @@ fn outside_the_heading_row_the_line_hides_and_a_release_changes_nothing() {
     rt.pointer_up(tx + 10.0, y + h / 2.0 + 150.0);
     settle(&mut rt);
     assert!(rt.state.layouts.is_empty(), "the order is unchanged");
+}
+
+/// As above, after a reorder drag of a sortable heading released on itself: Rune presses the
+/// heading then, that press isn't a sort click, and the next press from assistive technology
+/// is.
+#[test]
+fn an_assistive_press_after_a_sortable_heading_released_on_itself_sorts() {
+    let mut rt = runtime(Host::new(1, Look::fallback(false)));
+    let [x, y, w, h] = heading(&rt, 0, "type");
+    drag(&mut rt, x + w / 2.0, y + h / 2.0, 20.0, 4);
+    assert!(rt.state.layouts.is_empty(), "its own place");
+    assert!(rt.state.sorts.is_empty(), "the release isn't a sort click");
+    at_press(&mut rt, "size");
+    assert_eq!(rt.state.sorts.len(), 1, "the press on Size sorts");
+}
+
+/// As above, after a reorder drag released over the part of a heading the sideways scroll
+/// clips away: Rune presses nothing there, as it tests a release against what it drew.
+#[test]
+fn an_assistive_press_after_a_release_over_a_clipped_heading_sorts() {
+    // Two 450 pt panes, narrower than the columns: Type's heading runs past pane 0's edge.
+    let mut rt = runtime(Host::new(2, Look::fallback(false)));
+    let [x, y, w, h] = heading(&rt, 0, "type");
+    let full = element(&rt, &format!("t0-headings/{}", heading_key("type")))
+        .unwrap()
+        .rect;
+    assert!(full[2] > w + 20.0, "clipped: drawn {w} of {}", full[2]);
+    let right = x + w;
+    rt.pointer_down(right - 15.0, y + h / 2.0);
+    rt.frame(1.0 / 60.0);
+    rt.pointer_move(right - 40.0, y + h / 2.0);
+    settle(&mut rt);
+    rt.pointer_move(right + 10.0, y + h / 2.0);
+    settle(&mut rt);
+    rt.pointer_up(right + 10.0, y + h / 2.0);
+    settle(&mut rt);
+    assert!(rt.state.sorts.is_empty());
+    at_press(&mut rt, "size");
+    assert_eq!(rt.state.sorts.len(), 1, "the press on Size sorts");
 }

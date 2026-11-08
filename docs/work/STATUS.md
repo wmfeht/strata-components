@@ -56,9 +56,9 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | C16 | ready | | |
 | C17 | ready | | |
 | C18 | ready | | |
-| C19 | ready | | |
+| C19 | ready | note from C1c: KeyMap aliases (h j k l) aren't removed by unbind_chord | |
 | C1b | merged | 3 review rounds; settings via Ctx::settings (shared handle dropped); no rename timeout (Strata); modifier bullets in-process (Rune draft U-C1b-1); click runs count like GTK; round-3 nits open (run distance from previous press not first; two half-bullet labels; secondary press ends a run: doc) | c4b35d3 |
-| C1c | review 3 queued (final; round 2 fixed: 18e75a8) | default + 10xer maps; layout-aware chord workaround (U-C1c-1) | |
+| C1c | merged | 3 review rounds; default + 10xer maps; layout-aware chord workaround (U-C1c-1); open should-fix for whichever WP builds key rebinding: unbind_chord leaves aliases (h j k l) — add unalias or unbind aliases; aliases follow the key not the command | 3b4c852 |
 | C1d | review 1 (adapter done: 19 unit tests, 4 scripts, perf-warn + budget checks; open-band PNG scene approved for fix round) | ~10 Hz apply while auto-scrolling keeps perf meter silent (deviation) | |
 | C1e | merged | 3 review rounds; all controller seam requests in; scroll p95 0.59 ms vs Table 0.88; S14 sticky group lines deferred to contract WP C1f before C4; round-3 should-fix SF1 (grid restore before first layout) + nits (KeyboardMode commits unchanged, read_only/roles not in row memo) carried to C1f | 8ea925e |
 | C26 | waiting | | |

@@ -74,19 +74,28 @@ fn an_old_offer_is_destroyed_without_finish() {
     assert_eq!(s.finish(), Ok(false));
 }
 
-#[test]
-fn an_ask_drop_settles_on_the_preferred_action() {
+/// A drop whose action is still ask, from a source offering `source`.
+fn asked(source: &[Action]) -> DropState {
     let mut s = DropState::new(3);
+    s.on_source_actions(source.iter().fold(0, |m, a| m | a.bits()));
     s.accept(Some("text/plain"), &offered()).expect("accept");
     s.on_action(Action::Ask.bits());
     s.on_drop();
+    s
+}
+
+#[test]
+fn an_ask_drop_settles_on_one_action_the_source_offers() {
+    let (copy, ask) = (Action::Copy.bits(), Action::Ask.bits());
+    let mut s = asked(&[Action::Copy, Action::Ask]);
     assert!(s.finish().is_err(), "ask isn't settled yet");
-    let (copy, mv) = (Action::Copy.bits(), Action::Move.bits());
-    // After the drop the target picks; no further action event comes.
-    s.set_actions(mv, mv).expect("settle on move");
+    // The compositor can only take copy: the drop is settled.
+    s.set_actions(copy, copy).expect("answer copy");
     assert_eq!(s.finish(), Ok(true));
+    // Before the drop, set_actions settles nothing.
     let mut before = DropState::new(3);
-    before.on_action(Action::Ask.bits());
+    before.on_source_actions(copy | ask);
+    before.on_action(ask);
     before
         .set_actions(copy, copy)
         .expect("set_actions before the drop");
@@ -98,6 +107,32 @@ fn an_ask_drop_settles_on_the_preferred_action() {
         before.finish().is_err(),
         "only a request after the drop settles ask"
     );
+}
+
+/// The review's case: wlroots ignores a preferred action the source doesn't offer and takes
+/// the lowest common one, here ask again, so a finish would end winit's connection.
+#[test]
+fn an_ask_drop_answered_with_an_action_the_source_lacks_stays_ask() {
+    let (copy, mv, ask) = (Action::Copy.bits(), Action::Move.bits(), Action::Ask.bits());
+    let mut s = asked(&[Action::Copy, Action::Ask]);
+    s.set_actions(mv | ask, mv).expect("a valid request");
+    assert!(s.finish().is_err(), "move isn't offered: still ask");
+    let mut s = asked(&[Action::Copy, Action::Ask]);
+    s.set_actions(copy | ask, copy).expect("a valid request");
+    assert!(
+        s.finish().is_err(),
+        "two actions: the compositor may still pick ask"
+    );
+    let mut s = asked(&[Action::Copy, Action::Ask]);
+    s.set_actions(ask, ask).expect("a valid request");
+    assert!(s.finish().is_err(), "ask answers nothing");
+    // Source actions never heard: nothing is known to be offered.
+    let mut s = DropState::new(3);
+    s.accept(Some("text/plain"), &offered()).expect("accept");
+    s.on_action(ask);
+    s.on_drop();
+    s.set_actions(copy, copy).expect("a valid request");
+    assert!(s.finish().is_err(), "the source's actions are unknown");
 }
 
 // ---- offers without a compositor: closed proxies on a connection to nothing ----
@@ -187,21 +222,28 @@ fn offers_on_winits_display_refuse_other_threads() {
         rx.recv_timeout(Duration::from_secs(5)),
         Ok(Err(ReadError::OffUiThread))
     );
+    // Each refusal names the thread, not just any refusal: the offer is closed too, which
+    // refuses with another reason.
     let drag = DragOffer::closed(vec!["text/plain".into()], home);
-    assert!(matches!(
-        drag.accept(Some("text/plain")),
-        Err(Error::Refused(_))
-    ));
-    assert!(matches!(
+    assert_eq!(drag.accept(Some("text/plain")), Err(Error::Refused(OFF_UI)));
+    assert_eq!(
         drag.set_actions(&[Action::Copy], None),
-        Err(Error::Refused(_))
-    ));
-    assert!(matches!(drag.finish(), Err(Error::Refused(_))));
+        Err(Error::Refused(OFF_UI))
+    );
+    assert_eq!(drag.finish(), Err(Error::Refused(OFF_UI)));
+    let (tx, rx) = mpsc::channel();
+    drag.read("text/plain", ReadLimits::default(), move |r| {
+        let _ = tx.send(r);
+    });
+    assert_eq!(
+        rx.recv_timeout(Duration::from_secs(5)),
+        Ok(Err(ReadError::OffUiThread))
+    );
     // The UI thread (here, this one) may.
     let (_backend, mine) = nowhere(Some(std::thread::current().id()));
     let drag = DragOffer::closed(vec!["text/plain".into()], mine);
-    assert!(matches!(
+    assert_eq!(
         drag.accept(Some("text/plain")),
         Err(Error::Refused("the drag is gone"))
-    ));
+    );
 }

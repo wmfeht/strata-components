@@ -34,6 +34,10 @@ use super::super::error::{Error, ReadError};
 use super::super::event::{Action, Done, ReadOffer};
 use super::super::pipe;
 
+/// Why a drag offer refused a request from the wrong thread.
+pub(super) const OFF_UI: &str =
+    "a drag offer on winit's display takes requests on the UI thread only";
+
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
@@ -154,6 +158,8 @@ pub(crate) struct DropState {
     accepted: Option<String>,
     /// The action the compositor settled on (`wl_data_offer.action`).
     action: Option<u32>,
+    /// The actions the drag's source offers (`wl_data_offer.source_actions`).
+    source_actions: Option<u32>,
     dropped: bool,
     finished: bool,
 }
@@ -197,10 +203,16 @@ impl DropState {
         if preferred != 0 && (preferred.count_ones() != 1 || preferred & actions == 0) {
             return Err("a preferred action that isn't one of the actions");
         }
-        // After a drop whose action is ask, this request settles it, and the compositor sends
-        // no further action event: the preferred action is the one taken.
-        if self.dropped && self.action == Some(Action::Ask.bits()) && preferred != 0 {
-            self.action = Some(preferred);
+        // After a drop whose action is ask, this request settles it, and no further action
+        // event need come. Only a choice the compositor can't make otherwise counts: one
+        // action, not ask, that the source offers. wlroots takes the preferred action only if
+        // the source offers it, else the lowest of the actions both offer, which may be ask
+        // again; and `finish` while the action is ask is a protocol error that ends winit's
+        // connection. Anything else leaves ask standing, so `finish` is refused.
+        let single = actions.count_ones() == 1 && actions != Action::Ask.bits();
+        let offered = self.source_actions.is_some_and(|s| s & actions != 0);
+        if self.dropped && self.action == Some(Action::Ask.bits()) && single && offered {
+            self.action = Some(actions);
         }
         Ok(())
     }
@@ -229,6 +241,10 @@ impl DropState {
         }
         self.finished = true;
         Ok(self.version >= 3)
+    }
+
+    pub(crate) fn on_source_actions(&mut self, actions: u32) {
+        self.source_actions = Some(actions);
     }
 
     pub(crate) fn on_action(&mut self, action: u32) {
@@ -293,9 +309,7 @@ impl DragOffer {
         if self.0.home.here() {
             Ok(())
         } else {
-            Err(Error::Refused(
-                "a drag offer on winit's display takes requests on the UI thread only",
-            ))
+            Err(Error::Refused(OFF_UI))
         }
     }
 

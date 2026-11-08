@@ -24,11 +24,23 @@ pub const LABEL: &str = "label";
 /// The live status line's key, under the collection's key.
 pub const STATUS: &str = "status";
 
+/// The stuck group header's key, under the collection's key: the header of the group at the
+/// top of the viewport, drawn over it (`CollectionState::set_groups`). Its label is keyed
+/// [`LABEL`].
+pub const STUCK: &str = "stuck";
+
 /// The key of the row (or grid cell) that shows entry `id`.
 ///
 /// Used by: C1e, C5 (the row to keep on screen), C23 (flight sources), scripts.
 pub fn row_key(id: EntryId) -> String {
     format!("row-{}", id.get())
+}
+
+/// The key of the header line of the group keyed `key` (`Group::key`).
+///
+/// Used by: C4, scripts.
+pub fn header_key(key: u64) -> String {
+    format!("head-{key}")
 }
 
 /// The key of the virtual line whose first entry is `first`: the row itself when each line

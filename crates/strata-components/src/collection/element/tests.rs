@@ -48,6 +48,13 @@ struct Host {
     tile: Option<f32>,
     /// The collection's width.
     width: f32,
+    /// Roles other than the default, when set.
+    roles: Option<Roles>,
+    /// Takes drops, recording where each went.
+    drops: bool,
+    dropped: Vec<Option<EntryId>>,
+    /// What `on_press` and a recording controller heard, in order.
+    order: Rc<RefCell<Vec<String>>>,
 }
 
 impl Host {
@@ -69,6 +76,10 @@ impl Host {
             row_h: None,
             tile: None,
             width: W,
+            roles: None,
+            drops: false,
+            dropped: Vec::new(),
+            order: Rc::default(),
         }
     }
 }
@@ -147,6 +158,11 @@ fn collection(s: &Host) -> Collection<Host> {
     }))
     .on_cursor(|s: &mut Host, id, _| s.cursors.push(id))
     .on_selection(|s: &mut Host, _| s.selections += 1)
+    .on_press(|s: &mut Host, input, _| {
+        s.order
+            .borrow_mut()
+            .push(format!("press {:?} {:?}", input.button, input.hit.index));
+    })
     .on_intent(|s: &mut Host, intent, _| {
         s.intents.push(format!("{intent:?}"));
         s.last_intent = Some(intent);
@@ -170,6 +186,12 @@ fn collection(s: &Host) -> Collection<Host> {
             |_: &Host| Some(EntryId::new(2)),
             Slot::pure(|_: &Host, _| rune::el().key("editor")),
         );
+    }
+    if let Some(roles) = s.roles {
+        c = c.roles(roles);
+    }
+    if s.drops {
+        c = c.on_drop(|s: &mut Host, target, _, _| s.dropped.push(target));
     }
     c.settings(7u32)
 }
@@ -1704,38 +1726,40 @@ fn a_band_that_rides_live_values_runs_no_view_while_it_moves_and_scrolls() {
     }
 }
 
+/// A band that selects the entries above the pointer, as C1d's does.
+struct Selecting(bool);
+impl MarqueeController for Selecting {
+    fn begin(&mut self, _: Point, _: Mods, cx: &mut Ctx<'_>) {
+        self.0 = true;
+        cx.apply(|sel, _| sel.begin_band(crate::collection::selection::BandMode::Replace));
+    }
+    fn moved(&mut self, at: Point, cx: &mut Ctx<'_>) {
+        let crossed = cx
+            .geometry
+            .range_in(crate::contract::Rect::new(0.0, 0.0, 10.0, at.y));
+        cx.apply(|sel, src| sel.band(src, &crossed));
+    }
+    fn end(&mut self, cx: &mut Ctx<'_>) {
+        self.0 = false;
+        cx.apply(|sel, _| {
+            sel.end_band();
+            crate::collection::selection::Changed::NONE
+        });
+    }
+    fn cancel(&mut self, _: &mut Ctx<'_>) -> bool {
+        std::mem::replace(&mut self.0, false)
+    }
+    fn active(&self) -> bool {
+        self.0
+    }
+    fn band(&self) -> Option<crate::contract::Rect> {
+        None
+    }
+}
+
 /// Nit: an open band's selection is announced when its gesture ends, not at each step.
 #[test]
 fn a_band_announces_its_count_when_it_ends() {
-    struct Selecting(bool);
-    impl MarqueeController for Selecting {
-        fn begin(&mut self, _: Point, _: Mods, cx: &mut Ctx<'_>) {
-            self.0 = true;
-            cx.apply(|sel, _| sel.begin_band(crate::collection::selection::BandMode::Replace));
-        }
-        fn moved(&mut self, at: Point, cx: &mut Ctx<'_>) {
-            let crossed = cx
-                .geometry
-                .range_in(crate::contract::Rect::new(0.0, 0.0, 10.0, at.y));
-            cx.apply(|sel, src| sel.band(src, &crossed));
-        }
-        fn end(&mut self, cx: &mut Ctx<'_>) {
-            self.0 = false;
-            cx.apply(|sel, _| {
-                sel.end_band();
-                crate::collection::selection::Changed::NONE
-            });
-        }
-        fn cancel(&mut self, _: &mut Ctx<'_>) -> bool {
-            std::mem::replace(&mut self.0, false)
-        }
-        fn active(&self) -> bool {
-            self.0
-        }
-        fn band(&self) -> Option<crate::contract::Rect> {
-            None
-        }
-    }
     let log = Rc::new(RefCell::new(Log::default()));
     let mut host = Host::new(40);
     host.coll.controllers.pointer = Some(Box::new(Pointer(log)));
@@ -1760,6 +1784,66 @@ fn a_band_announces_its_count_when_it_ends() {
     rt.frame(1.0 / 60.0);
     let n = rt.state.coll.selection.len();
     assert_eq!(status(&rt), format!("{n} items selected"));
+}
+
+/// A listing change synced while a band is open doesn't announce the band's count: it waits
+/// for the band to end (C1d review S3).
+#[test]
+fn a_sync_during_an_open_band_keeps_the_status_line_quiet() {
+    let log = Rc::new(RefCell::new(Log::default()));
+    let mut host = Host::new(40);
+    host.coll.controllers.pointer = Some(Box::new(Pointer(log)));
+    host.coll.controllers.marquee = Some(Box::new(Selecting(false)));
+    let mut rt = runtime(host);
+    let status = |rt: &Runtime<Host>| element(rt, STATUS).and_then(|e| e.text).unwrap_or_default();
+    let [x, y, _, h] = element(&rt, "row-1").unwrap().visible;
+    rt.physical_input(rune::PhysicalInput::Modifiers(Mods {
+        shift: true,
+        ..Mods::default()
+    }));
+    rt.pointer_down(x + 30.0, y + h / 2.0);
+    rt.frame(1.0 / 60.0);
+    rt.physical_input(rune::PhysicalInput::Modifiers(Mods::default()));
+    for k in 1..=4 {
+        rt.pointer_move(x + 30.0, y + h / 2.0 + k as f32 * 26.0);
+        rt.frame(1.0 / 60.0);
+    }
+    assert!(rt.state.coll.selection.len() > 2);
+    rt.update(|s, tx| {
+        s.src.insert_top(2);
+        s.coll
+            .sync(SCOPE, &s.src, SyncRule::complete(CursorGone::Neighbor), tx);
+    });
+    rt.frame(1.0 / 60.0);
+    assert_eq!(status(&rt), "", "no count mid-band");
+    rt.pointer_up(x + 30.0, y + h / 2.0 + 4.0 * 26.0);
+    rt.frame(1.0 / 60.0);
+    let n = rt.state.coll.selection.len();
+    assert_eq!(status(&rt), format!("{n} items selected"), "once it ends");
+}
+
+/// Controllers read whether motion is on from the look the element builds with (C1d review
+/// S2).
+#[test]
+fn controllers_read_whether_animations_are_on() {
+    struct Reads(Rc<RefCell<Vec<bool>>>);
+    impl PointerController for Reads {
+        fn pointer(&mut self, input: &PointerInput, cx: &mut Ctx<'_>) -> Flow {
+            if input.phase == PointerPhase::Down {
+                self.0.borrow_mut().push(cx.animations());
+            }
+            Flow::Handled
+        }
+    }
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let mut host = Host::new(5);
+    host.coll.controllers.pointer = Some(Box::new(Reads(seen.clone())));
+    let mut rt = runtime(host);
+    click(&mut rt, "row-1");
+    rt.update(|s, _| s.look.animations = false);
+    settle(&mut rt);
+    click(&mut rt, "row-2");
+    assert_eq!(*seen.borrow(), [true, false]);
 }
 
 /// B2: a row height that changes through the state draws rows at it, and presses hit the
@@ -1850,31 +1934,649 @@ fn a_reflow_scrolls_the_cursor_into_view() {
     }
 }
 
-/// S1: settings are one value per type.
+// C1e round-3 carry-overs (C1f).
+
+/// SF1: a new grid entered with a remembered position before its first layout keeps the
+/// remembered scroll: the first width isn't a reflow that reveals the cursor instead.
 #[test]
-fn settings_hold_one_value_per_type() {
-    struct A(u32);
-    struct B(u32);
-    let mut settings = Settings::default();
-    settings.insert(A(1));
-    settings.insert(B(2));
-    settings.insert(A(3));
-    let src = FastSource::new(3);
-    let g = OnePerLine.geometry(3, 26.0, 300.0, 200.0);
-    let mut sel = crate::collection::selection::Selection::new();
-    let cx = Ctx::new(
-        &src,
-        &*g,
-        crate::contract::Rect::new(0.0, 0.0, 300.0, 200.0),
-        0.0,
-        &mut sel,
-    )
-    .with_settings(Rc::new(settings));
+fn a_fresh_grid_keeps_a_restored_scroll_through_its_first_layout() {
+    let grid = || {
+        let mut host = Host::new(4_000);
+        host.tile = Some(100.0);
+        host
+    };
+    let mut rt = runtime(grid());
+    settle(&mut rt);
+    click_label(&mut rt, "row-7");
+    for _ in 0..20 {
+        rt.wheel(W / 4.0, H / 2.0, -200.0);
+        rt.frame(1.0 / 60.0);
+    }
+    settle(&mut rt);
+    let offset = rt.state.coll.scroll_offset();
+    assert!(offset > 1_000.0, "scrolled away from the cursor: {offset}");
+    let position = rt.state.coll.position(&rt.state.src);
+
+    for before_first_frame in [true, false] {
+        let mut rt = Runtime::new(grid(), view, (W, H), Env::new(false, 1.0));
+        if !before_first_frame {
+            rt.frame(0.0);
+        }
+        let p = position.clone();
+        rt.update(move |s, tx| {
+            s.coll.enter(SCOPE, &s.src, Some(&p), Listing::Complete, tx);
+        });
+        rt.frame(0.0);
+        settle(&mut rt);
+        assert_eq!(
+            rt.state.coll.scroll_offset(),
+            offset,
+            "entered before the first frame: {before_first_frame}"
+        );
+        assert_eq!(rt.state.coll.selection.cursor(), Some(id(7)));
+    }
+}
+
+/// SF1: a new grid entered before its first layout with a position whose scroll was measured
+/// in another layout shows the cursor's cell, revealed once the lines are known.
+#[test]
+fn a_fresh_grid_restore_in_another_layout_reveals_the_cursor() {
+    let position = {
+        let mut host = Host::new(4_000);
+        host.tile = Some(100.0);
+        let mut rt = runtime(host);
+        settle(&mut rt);
+        rt.update(|s, _| {
+            s.coll.selection.select_only(&s.src, 2_000);
+        });
+        rt.state.coll.position(&rt.state.src)
+    };
+    let mut host = Host::new(4_000);
+    host.tile = Some(100.0);
+    host.coll.set_layout_key(5);
+    let mut rt = Runtime::new(host, view, (W, H), Env::new(false, 1.0));
+    rt.update(move |s, tx| {
+        s.coll
+            .enter(SCOPE, &s.src, Some(&position), Listing::Complete, tx);
+    });
+    rt.frame(0.0);
+    settle(&mut rt);
+    let key = row_key(id(2_000));
+    let shown = element(&rt, &key)
+        .expect("the cursor's cell is mounted")
+        .visible;
+    assert!(shown[3] > 20.0, "and shows whole: {shown:?}");
+}
+
+/// A keyboard controller whose tick says keyboard mode is on, and changes nothing else.
+struct ModeOn;
+
+impl KeyController for ModeOn {
+    fn key(&mut self, _input: &KeyInput<'_>, _cx: &mut Ctx<'_>) -> Flow {
+        Flow::Pass
+    }
+
+    fn tick(&mut self, cx: &mut Ctx<'_>) -> Flow {
+        cx.emit(Effect::KeyboardMode(true));
+        Flow::Handled
+    }
+}
+
+/// A keyboard-mode effect commits only when it changes the mode.
+#[test]
+fn a_keyboard_mode_effect_that_changes_nothing_commits_nothing() {
+    let mut host = Host::new(20);
+    host.coll.controllers.keyboard = Some(Box::new(ModeOn));
+    let mut rt = runtime(host);
+    let mut ticks = Vec::new();
+    for _ in 0..2 {
+        let shows = rt.update_if(|s, tx| collection(s).tick(s, tx));
+        ticks.push(shows);
+    }
+    assert!(rt.state.coll.keyboard_mode());
+    assert_eq!(ticks, [true, false], "on, then on again");
+}
+
+/// Rows built for one builder setting are built again when it changes: the roles, and
+/// read-only (which takes the rows' drop zones away).
+#[test]
+fn switching_roles_or_read_only_rebuilds_the_rows_that_show() {
+    let mut host = Host::new(20);
+    host.drops = true;
+    let mut rt = runtime(host);
+    assert_eq!(element(&rt, "row-3").unwrap().role, "option");
+    rt.update(|s, _| s.roles = Some(Roles::GRID_ROWS));
+    settle(&mut rt);
+    assert_eq!(element(&rt, "row-3").unwrap().role, "row");
+
+    // Entry 0 is a folder: a file drag over it hovers its row.
+    let [x, y, w, h] = element(&rt, "row-0").unwrap().visible;
+    let at = (x + w / 2.0, y + h / 2.0);
+    rt.drag_files(vec!["/tmp/a.txt".into()], Some(at));
+    rt.frame(1.0 / 60.0);
+    assert_eq!(rt.state.coll.drop_over(), Some(DropOver::Row(id(0))));
+    rt.drag_files_leave();
+    rt.frame(1.0 / 60.0);
+    rt.update(|s, _| {
+        s.read_only = true;
+        s.coll.set_drop_over(None);
+    });
+    settle(&mut rt);
+    rt.drag_files(vec!["/tmp/a.txt".into()], Some(at));
+    rt.frame(1.0 / 60.0);
     assert_eq!(
-        cx.settings::<A>().map(|a| a.0),
-        Some(3),
-        "the later A replaces the first"
+        rt.state.coll.drop_over(),
+        None,
+        "a read-only row takes no drop"
     );
-    assert_eq!(cx.settings::<B>().map(|b| b.0), Some(2));
-    assert!(cx.settings::<u64>().is_none());
+}
+
+/// Each controller reads its own type from the builder's settings, the last value of a type
+/// winning.
+#[test]
+fn each_controller_reads_its_own_settings_from_the_builder() {
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    struct A(u32);
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    struct B(u32);
+    type Seen = Rc<RefCell<Vec<String>>>;
+    struct ReadsA(Seen);
+    impl PointerController for ReadsA {
+        fn pointer(&mut self, input: &PointerInput, cx: &mut Ctx<'_>) -> Flow {
+            if input.phase == PointerPhase::Down {
+                let read = cx.settings::<A>().copied();
+                self.0.borrow_mut().push(format!("pointer {read:?}"));
+            }
+            Flow::Handled
+        }
+    }
+    struct ReadsB(Seen);
+    impl KeyController for ReadsB {
+        fn key(&mut self, _input: &KeyInput<'_>, cx: &mut Ctx<'_>) -> Flow {
+            let read = cx.settings::<B>().copied();
+            self.0.borrow_mut().push(format!("keys {read:?}"));
+            Flow::Handled
+        }
+    }
+    fn with_settings(s: &Host, _: &mut Cx<Host>) -> El {
+        col().size(W, H).child(
+            collection(s)
+                .settings(A(1))
+                .settings(B(2))
+                .settings(A(3))
+                .build(s),
+        )
+    }
+    let seen: Seen = Rc::default();
+    let mut host = Host::new(10);
+    host.coll.controllers.pointer = Some(Box::new(ReadsA(seen.clone())));
+    host.coll.controllers.keyboard = Some(Box::new(ReadsB(seen.clone())));
+    let mut rt = Runtime::new(host, with_settings, (W, H), Env::new(false, 1.0));
+    rt.frame(0.0);
+    rt.frame(1.0 / 60.0);
+    click(&mut rt, "row-2");
+    press(&mut rt, Key::Down);
+    assert_eq!(*seen.borrow(), ["pointer Some(A(3))", "keys Some(B(2))"]);
+}
+
+// Group header lines (C1f).
+
+/// `n` entries in groups of `size`, keyed by their number and labelled "Group {g}".
+fn grouped(n: usize, size: usize) -> Host {
+    let mut host = Host::new(n);
+    host.coll.set_groups(groups_of(n, size, "Group"));
+    host
+}
+
+fn groups_of(n: usize, size: usize, label: &str) -> Groups {
+    Groups::new(
+        (0..n.div_ceil(size))
+            .map(|g| Group::new(g as u64, format!("{label} {g}"), size.min(n - g * size))),
+    )
+}
+
+/// Scrolls the viewport to content y `y` and lets it settle.
+fn scroll_to(rt: &mut Runtime<Host>, y: f32) {
+    rt.update(move |_, tx| tx.scroll_to_instant(keys::viewport_path(SCOPE), 0.0, y));
+    settle(rt);
+}
+
+fn row_h(rt: &Runtime<Host>) -> f32 {
+    rt.state.look.row.list
+}
+
+/// The stuck header's label and its part's visible rect.
+fn stuck(rt: &Runtime<Host>) -> (Option<String>, [f32; 4]) {
+    let elements = rt.elements();
+    let part = elements
+        .iter()
+        .find(|e| !e.exiting && e.key.as_deref() == Some(STUCK))
+        .expect("a stuck header");
+    let label = elements
+        .iter()
+        .find(|e| e.path.ends_with(&format!("{STUCK}/{LABEL}")))
+        .and_then(|e| e.text.clone());
+    (label, part.visible)
+}
+
+#[test]
+fn grouped_lines_put_a_heading_above_each_group_and_rows_keep_their_entry_positions() {
+    let mut rt = runtime(grouped(100, 10));
+    click(&mut rt, "row-12");
+    let head = a11y_node(&rt, &header_key(1)).expect("group 1's header is in the tree");
+    assert!(head.contains(r#""role":"heading""#), "{head}");
+    assert!(head.contains(r#""name":"Group 1""#), "{head}");
+    let row = a11y_node(&rt, "row-12").unwrap();
+    assert!(
+        row.contains(r#""position":13"#),
+        "its entry's place, not its line's: {row}"
+    );
+    let rows = a11y_node(&rt, ROWS).unwrap();
+    assert!(
+        rows.contains(r#""setSize":100"#),
+        "the entries, not the lines: {rows}"
+    );
+    let list = a11y_node(&rt, SCOPE).unwrap();
+    assert!(list.contains(r#""activeDescendant":"row-12""#), "{list}");
+    assert!(
+        a11y_node(&rt, STUCK).is_none(),
+        "the stuck copy is hidden from assistive technology"
+    );
+}
+
+#[test]
+fn a_press_on_a_header_line_or_the_stuck_header_is_on_no_entry() {
+    let mut rt = runtime(grouped(100, 10));
+    click(&mut rt, "row-3");
+    assert_eq!(rt.state.coll.selection.len(), 1);
+    click(&mut rt, &header_key(1));
+    assert!(
+        rt.state.coll.selection.is_empty(),
+        "a header line is empty space"
+    );
+
+    // Entry 4's line at the top, under the stuck header: a press there is on no entry.
+    let h = row_h(&rt);
+    scroll_to(&mut rt, 5.0 * h);
+    click(&mut rt, "row-6");
+    assert_eq!(rt.state.coll.selection.len(), 1);
+    let vp = rt.state.coll.viewport();
+    click_at(&mut rt, vp.x + 40.0, vp.y + h / 2.0);
+    assert!(rt.state.coll.selection.is_empty(), "the stuck header");
+}
+
+#[test]
+fn a_press_just_below_the_stuck_header_hits_the_entry_drawn_there() {
+    let mut rt = runtime(grouped(100, 10));
+    let h = row_h(&rt);
+    scroll_to(&mut rt, 5.0 * h);
+    let vp = rt.state.coll.viewport();
+    click_at(&mut rt, vp.x + 40.0, vp.y + h + h / 2.0);
+    assert_eq!(
+        rt.state.coll.selection.cursor(),
+        Some(id(5)),
+        "line 6: entry 5"
+    );
+    let shown = element(&rt, "row-5").unwrap().visible;
+    assert!(
+        shown[1] >= vp.y + h - 0.5,
+        "drawn below the stuck header: {shown:?}"
+    );
+}
+
+/// Up and Down move the cursor one entry; the element reveals it.
+struct Step;
+
+impl KeyController for Step {
+    fn key(&mut self, input: &KeyInput<'_>, cx: &mut Ctx<'_>) -> Flow {
+        let Some(i) = cx.selection().cursor_index(cx.source) else {
+            return Flow::Pass;
+        };
+        let to = match input.event.key {
+            Key::Up => i.saturating_sub(1),
+            Key::Down => (i + 1).min(cx.source.len() - 1),
+            _ => return Flow::Pass,
+        };
+        cx.apply(|sel, src| sel.select_only(src, to));
+        Flow::Handled
+    }
+}
+
+#[test]
+fn revealing_an_entry_keeps_it_clear_of_the_stuck_header() {
+    let mut rt = runtime(grouped(1_000, 10));
+    let h = row_h(&rt);
+    let vh = rt.state.coll.viewport().h;
+    let line_of = |i: usize| (i + i / 10 + 1) as f32;
+    let reveal = |rt: &mut Runtime<Host>, i: usize| {
+        rt.update(move |s, tx| s.coll.reveal(SCOPE, &s.src, i, tx));
+        settle(rt);
+        rt.state.coll.scroll_offset()
+    };
+    scroll_to(&mut rt, 900.0 * h);
+    assert_eq!(
+        reveal(&mut rt, 500),
+        (line_of(500) - 1.0) * h,
+        "its header at the top"
+    );
+    scroll_to(&mut rt, 900.0 * h);
+    assert_eq!(
+        reveal(&mut rt, 503),
+        (line_of(503) - 1.0) * h,
+        "the entry above at the top"
+    );
+    assert_eq!(reveal(&mut rt, 0), 0.0, "the first header shows");
+    assert_eq!(
+        reveal(&mut rt, 80) + vh,
+        (line_of(80) + 1.0) * h,
+        "going down, the entry at the bottom"
+    );
+
+    // A key that moves the cursor up onto the line the stuck header covers.
+    let mut host = grouped(1_000, 10);
+    host.coll.controllers.keyboard = Some(Box::new(Step));
+    let mut rt = runtime(host);
+    scroll_to(&mut rt, line_of(504) * h);
+    let vp = rt.state.coll.viewport();
+    click_at(&mut rt, vp.x + 40.0, vp.y + h + h / 2.0);
+    assert_eq!(rt.state.coll.selection.cursor(), Some(id(505)));
+    press(&mut rt, Key::Up);
+    settle(&mut rt);
+    assert_eq!(rt.state.coll.selection.cursor(), Some(id(504)));
+    let shown = element(&rt, "row-504").unwrap().visible;
+    assert!(
+        shown[1] >= vp.y + h - 0.5 && shown[3] > h - 0.5,
+        "whole, below the stuck header: {shown:?}"
+    );
+}
+
+/// The stuck header shows the top group's header, pushed up by the next group's: the push
+/// rides the scroll, and a new group's label costs one view run per group crossed (until it
+/// lands the stuck header hides, and the new group's own header line shows at the top).
+#[test]
+fn the_stuck_header_follows_the_top_group_and_the_next_pushes_it_out() {
+    thread_local! {
+        static VIEWS: Cell<usize> = const { Cell::new(0) };
+    }
+    fn counted(s: &Host, cx: &mut Cx<Host>) -> El {
+        VIEWS.with(|v| v.set(v.get() + 1));
+        view(s, cx)
+    }
+    let mut rt = Runtime::new(grouped(1_000, 10), counted, (W, H), Env::new(false, 1.0));
+    rt.frame(0.0);
+    settle(&mut rt);
+    let h = row_h(&rt);
+    let vp = rt.state.coll.viewport();
+    assert_eq!(stuck(&rt).0.as_deref(), Some("Group 0"));
+    let views = VIEWS.with(Cell::get);
+    let (mut pushed, mut hidden) = (0, 0);
+    let mut groups = std::collections::BTreeSet::new();
+    for _ in 0..200 {
+        rt.wheel(W / 2.0, H / 2.0, -7.0);
+        rt.frame(1.0 / 60.0);
+        let offset = rt.state.coll.scroll_offset();
+        let top = (offset / h) as usize / 11;
+        let next = ((top + 1) * 11) as f32 * h;
+        let extent = (next - offset).clamp(0.0, h);
+        let (label, rect) = stuck(&rt);
+        groups.insert(top);
+        if rect[3] < 0.5 {
+            hidden += 1;
+            continue;
+        }
+        assert_eq!(label, Some(format!("Group {top}")), "at {offset}");
+        assert!(
+            (rect[1] + rect[3] - (vp.y + extent)).abs() < 0.6,
+            "pushed to {extent} at {offset}: {rect:?}"
+        );
+        pushed += usize::from(extent < h - 0.5);
+    }
+    let crossed = groups.len() - 1;
+    assert!(crossed >= 3, "crossed groups: {groups:?}");
+    assert!(pushed > 0, "seen pushed");
+    assert!(
+        hidden <= crossed,
+        "hidden {hidden} frames for {crossed} crossings"
+    );
+    assert_eq!(
+        VIEWS.with(Cell::get) - views,
+        crossed,
+        "a view run per group crossed, none per frame"
+    );
+}
+
+/// A regroup at the same listing version and the same number of lines draws the new groups.
+#[test]
+fn a_regroup_rekeys_the_lines() {
+    let mut rt = runtime(grouped(100, 10));
+    assert!(element(&rt, &header_key(1)).is_some());
+    rt.update(|s, _| {
+        s.coll.set_groups(Groups::new((0..10).map(|g| {
+            Group::new(g, format!("Big {g}"), if g % 2 == 0 { 5 } else { 15 })
+        })));
+    });
+    settle(&mut rt);
+    let head = a11y_node(&rt, &header_key(0)).unwrap();
+    assert!(head.contains(r#""name":"Big 0""#), "{head}");
+    assert_eq!(stuck(&rt).0.as_deref(), Some("Big 0"), "without a scroll");
+    let top = element(&rt, &header_key(0)).unwrap().visible[1];
+    let [_, y, _, _] = element(&rt, &header_key(1)).unwrap().visible;
+    assert!(
+        (y - top - 6.0 * row_h(&rt)).abs() < 0.5,
+        "group 1 now 6 lines down: {y} {top}"
+    );
+}
+
+#[test]
+fn groups_that_dont_cover_the_listing_draw_it_ungrouped() {
+    let mut host = Host::new(100);
+    host.coll.set_groups(groups_of(50, 10, "Group"));
+    let rt = runtime(host);
+    assert!(element(&rt, &header_key(0)).is_none());
+    assert!(element(&rt, STUCK).is_none());
+    assert!(a11y_node(&rt, "row-3").unwrap().contains(r#""position":4"#));
+}
+
+#[test]
+fn a_drop_over_the_stuck_header_goes_to_the_folder_shown() {
+    let mut host = grouped(100, 10);
+    host.drops = true;
+    let mut rt = runtime(host);
+    let h = row_h(&rt);
+    // Entry 0, a folder, on the top line, under the stuck header.
+    scroll_to(&mut rt, h);
+    let vp = rt.state.coll.viewport();
+    rt.drag_files(
+        vec!["/tmp/a.txt".into()],
+        Some((vp.x + 60.0, vp.y + h / 2.0)),
+    );
+    rt.frame(1.0 / 60.0);
+    rt.drag_files_to(Some((vp.x + 61.0, vp.y + h / 2.0)));
+    rt.frame(1.0 / 60.0);
+    assert_eq!(rt.state.coll.drop_over(), Some(DropOver::Background));
+    rt.drop_files(
+        vec!["/tmp/a.txt".into()],
+        Some((vp.x + 61.0, vp.y + h / 2.0)),
+    );
+    rt.frame(1.0 / 60.0);
+    // Folder 10's row shows below: a drop there goes to it.
+    let [x, y, w, rh] = element(&rt, "row-10").unwrap().visible;
+    let at = (x + w / 2.0, y + rh / 2.0);
+    rt.drag_files(vec!["/tmp/a.txt".into()], Some(at));
+    rt.frame(1.0 / 60.0);
+    rt.drag_files_to(Some((at.0 + 1.0, at.1)));
+    rt.frame(1.0 / 60.0);
+    rt.drop_files(vec!["/tmp/a.txt".into()], Some((at.0 + 1.0, at.1)));
+    rt.frame(1.0 / 60.0);
+    assert_eq!(rt.state.dropped, [None, Some(id(10))]);
+}
+
+/// Records each press it hears in the host's order log, and takes it, changing nothing.
+struct Hears(Rc<RefCell<Vec<String>>>);
+
+impl PointerController for Hears {
+    fn pointer(&mut self, input: &PointerInput, _cx: &mut Ctx<'_>) -> Flow {
+        if input.phase == PointerPhase::Down {
+            self.0.borrow_mut().push("controller".to_owned());
+        }
+        Flow::Handled
+    }
+}
+
+#[test]
+fn every_press_reaches_on_press_before_the_controllers() {
+    let mut host = Host::new(5);
+    host.parts = true;
+    host.coll.controllers.pointer = Some(Box::new(Hears(host.order.clone())));
+    let mut rt = runtime(host);
+    // Ctrl on the empty space below the rows: nothing changes.
+    let vp = rt.state.coll.viewport();
+    rt.physical_input(rune::PhysicalInput::Modifiers(Mods {
+        ctrl: true,
+        ..Mods::default()
+    }));
+    click_at(&mut rt, vp.x + 40.0, vp.y + vp.h - 10.0);
+    rt.physical_input(rune::PhysicalInput::Modifiers(Mods::default()));
+    let [x, y, w, h] = element(&rt, "row-2").unwrap().visible;
+    rt.secondary_down(x + w / 2.0, y + h / 2.0);
+    rt.secondary_up(x + w / 2.0, y + h / 2.0);
+    rt.frame(1.0 / 60.0);
+    rt.button_down(x + w / 2.0, y + h / 2.0, rune::PointerButton::Middle);
+    rt.button_up(x + w / 2.0, y + h / 2.0, rune::PointerButton::Middle);
+    rt.frame(1.0 / 60.0);
+    // The part above the viewport isn't the collection's.
+    click(&mut rt, "head");
+    assert!(rt.state.coll.selection.is_empty());
+    assert_eq!(
+        *rt.state.order.borrow(),
+        [
+            "press Primary None",
+            "controller",
+            "press Secondary Some(2)",
+            "controller",
+            "press Middle Some(2)",
+            "controller",
+        ]
+    );
+}
+
+// C1f review round 1.
+
+/// B1: entering a folder with new groups, from another layout's position, reveals the cursor
+/// among the new folder's header lines: clear of the stuck header.
+#[test]
+fn a_regrouped_enter_reveals_the_cursor_clear_of_the_stuck_header() {
+    let position = {
+        let mut rt = runtime(grouped(990, 10));
+        rt.update(|s, _| {
+            s.coll.selection.select_only(&s.src, 300);
+        });
+        rt.state.coll.position(&rt.state.src)
+    };
+    let mut rt = runtime(grouped(1_000, 10));
+    settle(&mut rt);
+    let h = row_h(&rt);
+    scroll_to(&mut rt, 900.0 * h);
+    rt.update(move |s, tx| {
+        s.coll.set_layout_key(5);
+        s.src = FastSource::new(990);
+        s.version += 1;
+        s.coll.set_groups(groups_of(990, 10, "New"));
+        s.coll
+            .enter(SCOPE, &s.src, Some(&position), Listing::Complete, tx);
+    });
+    settle(&mut rt);
+    let vp = rt.state.coll.viewport();
+    let shown = element(&rt, "row-300")
+        .expect("the cursor's row is mounted")
+        .visible;
+    assert!(
+        shown[1] >= vp.y + h - 0.5 && shown[3] > h - 0.5,
+        "whole, below the stuck header: {shown:?}"
+    );
+}
+
+/// B1: a restore that waits for a loading listing drawn ungrouped decides whether the cursor
+/// shows by the complete listing's header lines, which push it below the view here.
+#[test]
+fn a_restore_completing_into_groups_places_the_cursor_among_their_headers() {
+    let position = {
+        let mut host = Host::new(30);
+        host.coll.set_layout_key(7);
+        let mut rt = runtime(host);
+        rt.update(|s, _| {
+            s.coll.selection.select_only(&s.src, 12);
+        });
+        rt.state.coll.position(&rt.state.src)
+    };
+    let mut rt = runtime(Host::new(0));
+    rt.update(move |s, tx| {
+        s.src = FastSource::new(13);
+        s.coll
+            .enter(SCOPE, &s.src, Some(&position), Listing::Loading, tx);
+    });
+    settle(&mut rt);
+    assert!(rt.state.coll.restore_pending());
+    // Ungrouped, entry 12 would sit on line 12, inside the 400 pt view; in groups of 2 it is
+    // on line 19, below it.
+    rt.update(|s, tx| {
+        s.src = FastSource::new(30);
+        s.coll.set_groups(groups_of(30, 2, "Pair"));
+        s.coll
+            .sync(SCOPE, &s.src, SyncRule::complete(CursorGone::Neighbor), tx);
+    });
+    settle(&mut rt);
+    assert_eq!(rt.state.coll.selection.cursor(), Some(id(12)));
+    let vp = rt.state.coll.viewport();
+    let shown = element(&rt, "row-12")
+        .expect("the cursor's row is mounted")
+        .visible;
+    assert!(
+        shown[3] > row_h(&rt) - 0.5 && shown[1] + shown[3] <= vp.y + vp.h + 0.5,
+        "whole, in the view: {shown:?}"
+    );
+}
+
+/// S1: a grid collapsed to no width and back at another width reflows, and reveals its cursor.
+#[test]
+fn a_grid_collapsed_and_back_at_another_width_reveals_its_cursor() {
+    let mut host = Host::new(4_000);
+    host.tile = Some(100.0);
+    let mut rt = runtime(host);
+    settle(&mut rt);
+    for _ in 0..20 {
+        rt.wheel(W / 4.0, H / 2.0, -200.0);
+        rt.frame(1.0 / 60.0);
+    }
+    settle(&mut rt);
+    let key = rt
+        .elements()
+        .into_iter()
+        .find(|e| !e.exiting && e.role == "gridcell" && e.visible[1] > 150.0 && e.visible[3] > 20.0)
+        .and_then(|e| e.key)
+        .unwrap();
+    click_label(&mut rt, &key);
+    rt.update(|s, _| s.width = 0.0);
+    settle(&mut rt);
+    rt.update(|s, _| s.width = 250.0);
+    settle(&mut rt);
+    let shown = element(&rt, &key)
+        .expect("the cursor's cell is mounted")
+        .visible;
+    assert!(shown[3] > 20.0, "and shows whole: {shown:?}");
+}
+
+/// In the frame after a far jump into another group, before the build that relabels the stuck
+/// header, it is hidden: a press on the top line drawn there is on that line's entry.
+#[test]
+fn a_press_while_the_stuck_header_hides_is_on_the_row_drawn_there() {
+    let mut rt = runtime(grouped(1_000, 10));
+    let h = row_h(&rt);
+    // Entry 503 (line 554) at the top of the view, in group 50.
+    rt.update(move |_, tx| tx.scroll_to_instant(keys::viewport_path(SCOPE), 0.0, 554.0 * h));
+    rt.frame(1.0 / 60.0);
+    assert!(stuck(&rt).1[3] < 0.5, "hidden until the relabelling build");
+    let vp = rt.state.coll.viewport();
+    click_at(&mut rt, vp.x + 40.0, vp.y + h / 2.0);
+    assert_eq!(rt.state.coll.selection.cursor(), Some(id(503)));
 }

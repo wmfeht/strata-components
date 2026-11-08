@@ -15,12 +15,13 @@ use std::rc::Rc;
 
 use rune::{Drag, KeyEvent, KeyPlatform, Mods, Phase, PointerButton, PointerEvent, Tx};
 
+use super::lines::{GroupedRows, LineMap};
 use super::seam::{
     Ctx, Effect, Flow, Hit, KeyInput, PointerInput, PointerPhase, Region, default_pointer,
 };
 use super::{Config, keys};
 use crate::collection::selection::Changed;
-use crate::contract::{EntrySource, Point, Rect};
+use crate::contract::{CollectionGeometry, EntrySource, Point, Rect};
 
 /// Where an input came from, for what the element does after it.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -29,6 +30,54 @@ enum Source {
     Pointer(Option<Point>),
     Key,
     Tick,
+}
+
+/// How the element lays out `s`'s entries now: the state's count a line, and the host's groups
+/// when they cover the source.
+pub(super) fn line_map<S: 'static>(cfg: &Config<S>, s: &S) -> LineMap {
+    let (src, st) = (cfg.get)(s);
+    LineMap::new(st.per_line.get(), Some(&st.groups), src.len())
+}
+
+/// Where `s`'s entries sit, mounted or not: the grouped rows, or the lines' own geometry.
+pub(super) fn geometry<S: 'static>(cfg: &Config<S>, s: &S) -> Box<dyn CollectionGeometry> {
+    let row_height = cfg.row_height_of(s);
+    let (src, st) = (cfg.get)(s);
+    match line_map(cfg, s) {
+        LineMap::Grouped(groups) => Box::new(
+            GroupedRows::new(groups, row_height, st.viewport.w).viewport_height(st.viewport.h),
+        ),
+        LineMap::Packed(_) => {
+            cfg.lines
+                .geometry(src.len(), row_height, st.viewport.w, st.viewport.h)
+        }
+    }
+}
+
+/// Whether content point `p` is under the stuck group header, which covers the top of the
+/// viewport: a press there is on no entry, as on a header line.
+///
+/// Only while the stuck header shows: in the frame between a scroll into another group and the
+/// build that relabels it, it is hidden, and the top line is the one drawn there.
+fn in_stuck_header<S: 'static>(cfg: &Config<S>, s: &S, p: Point) -> bool {
+    let st = (cfg.get)(s).1;
+    let offset = st.scroll.get();
+    let h = cfg.row_height_of(s);
+    let map = line_map(cfg, s);
+    let shown = st.stuck_shown.get();
+    if shown.is_none() || map.top_group(offset, h) != shown {
+        return false;
+    }
+    let extent = map.stuck_extent(offset, h);
+    p.y >= offset && p.y < offset + extent
+}
+
+/// Whether the window point of a drag is under the stuck group header.
+pub(super) fn under_stuck_header<S: 'static>(cfg: &Config<S>, s: &S, e: PointerEvent) -> bool {
+    let p = (cfg.get)(s)
+        .1
+        .content_point(Point::new(e.window_x, e.window_y));
+    in_stuck_header(cfg, s, p)
 }
 
 /// Runs `f` with the controllers and a [`Ctx`], then applies what it changed and asked for.
@@ -41,11 +90,9 @@ fn dispatch<S: 'static>(
     f: impl FnOnce(&mut super::Controllers, &mut Ctx<'_>) -> Flow,
 ) -> (Flow, bool) {
     let now = cfg.now(s);
-    let row_height = cfg.row_height_of(s);
+    let animations = (cfg.look)(s).animations;
+    let geometry = geometry(cfg, s);
     let (src, st) = (cfg.get_mut)(s);
-    let geometry = cfg
-        .lines
-        .geometry(src.len(), row_height, st.viewport.w, st.viewport.h);
     let visible = st.visible_content();
     let origin = Point::new(st.viewport.x, st.viewport.y);
     let before = st.selection.cursor();
@@ -56,6 +103,7 @@ fn dispatch<S: 'static>(
     } = &mut *st;
     let mut cx = Ctx::new(src, &*geometry, visible, now, selection)
         .read_only_mode(cfg.read_only)
+        .with_animations(animations)
         .window_origin(origin)
         .with_settings(cfg.settings.clone());
     let flow = f(controllers, &mut cx);
@@ -63,15 +111,19 @@ fn dispatch<S: 'static>(
     let moved = before != st.selection.cursor();
     // Only what the view reads needs a commit. Scrolls, reveals and wake-ups go through the
     // transaction, which Rune applies whether or not the view runs (a poll's too, even when it
-    // returns false: `runtime/frame.rs`, the poll's `merge`).
+    // returns false: `runtime/frame.rs`, the poll's `merge`). Keyboard mode counts only when
+    // the effects leave it other than it was.
+    let mode_was = (st.keyboard, st.hover_live);
+    let mode = effects.iter().fold(mode_was, |mode, e| match e {
+        Effect::KeyboardMode(on) => (*on, !*on),
+        _ => mode,
+    });
     let shows = changed.any()
         || repaint
-        || effects.iter().any(|e| {
-            matches!(
-                e,
-                Effect::KeyboardMode(_) | Effect::BeginMarquee { .. } | Effect::Intent(_)
-            )
-        });
+        || mode != mode_was
+        || effects
+            .iter()
+            .any(|e| matches!(e, Effect::BeginMarquee { .. } | Effect::Intent(_)));
     after(cfg, s, tx, from, changed, moved, effects);
     (flow, shows)
 }
@@ -192,12 +244,10 @@ fn begin_marquee<S: 'static>(
 /// The entry under content point `p`, and the region it's in when `regions` (presses and
 /// releases); a move reuses the press's region over the pressed entry.
 fn hit<S: 'static>(cfg: &Rc<Config<S>>, s: &S, p: Point, press: Option<Hit>) -> Hit {
-    let row_height = cfg.row_height_of(s);
-    let (src, st) = (cfg.get)(s);
-    let geometry = cfg
-        .lines
-        .geometry(src.len(), row_height, st.viewport.w, st.viewport.h);
-    let Some(index) = geometry.index_at(p) else {
+    let src = (cfg.get)(s).0;
+    let geometry = geometry(cfg, s);
+    let index = geometry.index_at(p).filter(|_| !in_stuck_header(cfg, s, p));
+    let Some(index) = index else {
         return Hit {
             index: None,
             region: Region::Gutter,
@@ -303,6 +353,11 @@ pub(super) fn on_drag<S: 'static>(cfg: &Rc<Config<S>>, s: &mut S, d: &mut Drag, 
         cancelled: d.cancelled(),
         now: cfg.now(s),
     };
+    if phase == PointerPhase::Down
+        && let Some(f) = &cfg.on_press
+    {
+        f(s, &input, tx);
+    }
     let shows = route_pointer(cfg, s, tx, &input);
     // A move that changed nothing the view reads commits nothing, an open band's included: a
     // marquee that redraws says so with `Ctx::repaint`.
@@ -338,6 +393,9 @@ pub(super) fn on_secondary<S: 'static>(
         cancelled: false,
         now: cfg.now(s),
     };
+    if let Some(f) = &cfg.on_press {
+        f(s, &input, tx);
+    }
     route_pointer(cfg, s, tx, &input);
 }
 
@@ -439,30 +497,57 @@ pub(super) fn on_layout<S: 'static>(cfg: &Rc<Config<S>>, s: &mut S, r: [f32; 4],
     let (src, st) = (cfg.get_mut)(s);
     st.viewport = Rect::from(r);
     st.row_height = row_height;
-    if !st.reflow_to(&cfg.key, src, per, tx) {
+    // A collapsed viewport (a Columns column at no width) keeps its count: the width it comes
+    // back at decides it, as a reflow. Reveals asked for meanwhile wait for it.
+    if r[2] <= 0.0 {
+        tx.live_only();
+        return;
+    }
+    let changed = if st.laid_out {
+        st.reflow_to(&cfg.key, src, per, tx)
+    } else {
+        // The very first width isn't a reflow: nothing was laid out at the count the state
+        // started with, so a restore made before it (`enter`) stands.
+        st.laid_out = true;
+        let changed = per != st.per_line.get();
+        st.per_line.set(per);
+        changed
+    };
+    // A reveal asked for while the viewport had no width, keyed by the lines as they are now.
+    if let Some(id) = st.reveal_after_layout.take()
+        && let Some(index) = src.index_of(id)
+    {
+        st.reveal(&cfg.key, src, index, tx);
+    }
+    if !changed {
         tx.live_only();
     }
 }
 
-/// `on_visible_rows` on the rows stack, with lines turned into entries. A scroll away from
-/// where a waiting restore put the view is the person's, and cancels it.
+/// `on_visible_rows` on the rows stack, with lines turned into entries by `map`, the map of
+/// the build that laid them out. A scroll away from where a waiting restore put the view is
+/// the person's, and cancels it. A scroll into a group other than the one whose header the
+/// build stuck at the top (`shown`) builds the view again, to stick that group's.
 pub(super) fn on_visible<S: 'static>(
     cfg: &Rc<Config<S>>,
     s: &mut S,
     lines: std::ops::Range<usize>,
+    map: &LineMap,
+    shown: Option<usize>,
 ) -> bool {
+    let restick = map.groups().is_some() && map.group_at_line(lines.start) != shown;
+    (cfg.get)(s).1.top_line.set(Some(lines.start));
     let (src, st) = (cfg.get_mut)(s);
-    let per = st.per_line.get().max(1);
-    let len = src.len();
-    let range = (lines.start * per).min(len)..(lines.end * per).min(len);
+    let range = map.entries_in(lines, src.len());
     st.visible = range.clone();
     if st.pending.is_some() && (st.scroll.get() - st.pending_offset).abs() > 0.5 {
         st.pending = None;
     }
-    match &cfg.on_visible {
+    let host = match &cfg.on_visible {
         Some(f) => f(s, range),
         None => false,
-    }
+    };
+    host || restick
 }
 
 /// The controllers' timeouts and queued commands, from the host's poll.
@@ -485,11 +570,13 @@ pub(super) fn tick<S: 'static>(cfg: &Rc<Config<S>>, s: &mut S, tx: &mut Tx) -> b
 }
 
 /// A drag over the collection near the viewport's top or bottom edge glides it that way, a
-/// row's height a move, so a drop target out of view can be reached.
+/// row's height a move, so a drop target out of view can be reached. `changed`: the move
+/// changed what the view draws (the drop target), so it commits either way.
 pub(super) fn drop_edge_scroll<S: 'static>(
     cfg: &Rc<Config<S>>,
     s: &mut S,
     point: PointerEvent,
+    changed: bool,
     tx: &mut Tx,
 ) {
     let row_height = cfg.row_height_of(s);
@@ -501,7 +588,9 @@ pub(super) fn drop_edge_scroll<S: 'static>(
     } else if y > st.viewport.h - row_height {
         offset + row_height
     } else {
-        tx.live_only();
+        if !changed {
+            tx.live_only();
+        }
         return;
     };
     tx.scroll_to(keys::viewport_path(&cfg.key), 0.0, to);

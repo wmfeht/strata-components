@@ -32,7 +32,8 @@ use std::collections::HashMap;
 use rune::{Cx, El, Key, KeyEvent, TextEdit, Tx, col, row, text, text_input};
 use rune_kit::{Button, ButtonVariant};
 use strata_components::collection::element::{
-    Collection, CollectionState, Controllers, DropOver, Intent, RowMarks, Slot,
+    Collection, CollectionState, Controllers, DropOver, Group, Groups, Intent, RowMarks, Slot,
+    viewport_path,
 };
 use strata_components::collection::selection::{
     AnchorRule, CursorGone, Extend, Listing, RestoreMemory, SyncRule,
@@ -167,6 +168,8 @@ pub struct Demo {
     pub next_id: u64,
     /// Polls run since the page opened, for the budget warm-up.
     pub polls: u32,
+    /// C1f: the grouped folder a `c1-groups-*` scene shows instead (see [`Grouped`]).
+    pub grouped: Option<Grouped>,
 }
 
 impl Default for Demo {
@@ -196,6 +199,7 @@ impl Default for Demo {
             loading: None,
             next_id: 900_000,
             polls: 0,
+            grouped: None,
         }
     }
 }
@@ -568,6 +572,11 @@ pub const SCENES: &[Scene] = &[
     ("c1-rename-dark", |g| rename(g, true)),
     ("c1-marquee-light", |g| marquee(g, false)),
     ("c1-marquee-dark", |g| marquee(g, true)),
+    // C1f: group header lines (the grouped folder, at the end of this file).
+    ("c1-groups-light", |g| groups(g, false)),
+    ("c1-groups-dark", |g| groups(g, true)),
+    ("c1-groups-stuck-light", |g| groups_stuck(g, false)),
+    ("c1-groups-stuck-dark", |g| groups_stuck(g, true)),
 ];
 
 pub const REVIEW: &[Scene] = &[
@@ -648,10 +657,13 @@ pub fn collection() -> Collection<Gallery> {
     })
 }
 
-pub fn view(g: &Gallery, _cx: &mut Cx<Gallery>) -> El {
+pub fn view(g: &Gallery, cx: &mut Cx<Gallery>) -> El {
+    if g.c1.grouped.is_some() {
+        return grouped_view(g, cx);
+    }
     let d = &g.c1;
     let look = g.look();
-    _cx.reduced_motion(!look.animations);
+    cx.reduced_motion(!look.animations);
     let kit = g.kit();
     let count = d.listing.len();
     let title = if d.loading.is_some() {
@@ -731,6 +743,9 @@ pub fn on_key(g: &mut Gallery, key: &KeyEvent, tx: &mut Tx) -> bool {
 }
 
 pub fn poll(g: &mut Gallery, t: f64, tx: &mut Tx) -> bool {
+    if g.c1.grouped.is_some() {
+        return grouped_poll(g, t, tx);
+    }
     let d = &mut g.c1;
     d.clock = t;
     let mut changed = false;
@@ -746,4 +761,140 @@ pub fn poll(g: &mut Gallery, t: f64, tx: &mut Tx) -> bool {
         changed = true;
     }
     changed | collection().settings(marquee_settings(g)).tick(g, tx)
+}
+
+// C1f: group header lines. A folder of 600 entries in six file-type groups, with its own
+// state, collection and scenes, kept apart from the rest of the page.
+
+/// The grouped folder's collection key.
+pub const GROUPS_SCOPE: &str = "c1-groups";
+
+/// The grouped folder's groups, in display order: (label, icon, name pattern, count).
+const GROUPS: [(&str, &str, &str, usize); 6] = [
+    ("Folders", "folder", "Folder", 8),
+    ("Images", "file_image", "IMG_", 166),
+    ("Documents", "file_text", "report-", 120),
+    ("Spreadsheets", "file", "budget-", 60),
+    ("Archives", "archive", "backup-", 30),
+    ("Other", "file", "data-", 216),
+];
+
+/// The grouped folder (`c1-groups-*`): its listing and its own collection state, which holds
+/// its groups.
+pub struct Grouped {
+    pub listing: ListSource,
+    pub coll: CollectionState,
+    /// Where to scroll once the viewport is laid out, in content points.
+    pub scroll_to: Option<f32>,
+    pub clock: f64,
+}
+
+impl Grouped {
+    fn new() -> Self {
+        let mut entries = Vec::new();
+        let mut groups = Vec::new();
+        for (g, (label, icon, stem, count)) in GROUPS.into_iter().enumerate() {
+            for k in 0..count {
+                let id = EntryId::new(500_000 + entries.len() as u64);
+                let (name, kind) = match g {
+                    0 => (format!("{stem} {:02}", k + 1), EntryKind::Folder),
+                    1 => (format!("{stem}{:04}.jpg", k + 1), EntryKind::File),
+                    2 => (format!("{stem}{:03}.odt", k + 1), EntryKind::File),
+                    3 => (format!("{stem}{:02}.ods", k + 1), EntryKind::File),
+                    4 => (format!("{stem}{:02}.tar.gz", k + 1), EntryKind::File),
+                    _ => (format!("{stem}{:03}.bin", k + 1), EntryKind::File),
+                };
+                entries.push(ListEntry::new(id, name, kind, icon));
+            }
+            groups.push(Group::new(g as u64, label, count));
+        }
+        let mut coll = CollectionState::new();
+        install(&mut coll.controllers);
+        coll.set_groups(Groups::new(groups));
+        Self {
+            listing: ListSource::new(entries),
+            coll,
+            scroll_to: None,
+            clock: 0.0,
+        }
+    }
+}
+
+fn grouped_scene(g: &mut Gallery, dark: bool) -> &mut Grouped {
+    g.open("c1", dark);
+    g.c1.grouped.insert(Grouped::new())
+}
+
+/// At the top: a selection in Images, the cursor moved on by keyboard.
+fn groups(g: &mut Gallery, dark: bool) {
+    let d = grouped_scene(g, dark);
+    d.coll.selection.select_only(&d.listing, 10);
+    d.coll.selection.extend_to(&d.listing, 12, Extend::Replace);
+    d.coll.keyboard_moved();
+    d.coll.note_selection(&d.listing);
+}
+
+/// Scrolled to the end of Images: its header is stuck at the top, part pushed out by the
+/// Documents header coming up under it.
+fn groups_stuck(g: &mut Gallery, dark: bool) {
+    let h = g.look().row.list;
+    let d = grouped_scene(g, dark);
+    // Documents' header is line 8 + 166 + 2 = 176: the view starts 14 pt into line 175, so
+    // the stuck Images header shows only its last 12 pt.
+    d.scroll_to = Some(175.0 * h + 14.0);
+}
+
+fn grouped_collection() -> Collection<Gallery> {
+    fn d(g: &Gallery) -> &Grouped {
+        g.c1.grouped.as_ref().expect("the grouped scene")
+    }
+    Collection::new(
+        GROUPS_SCOPE,
+        |g: &Gallery| (&d(g).listing, &d(g).coll),
+        |g: &mut Gallery| {
+            let d = g.c1.grouped.as_mut().expect("the grouped scene");
+            (&d.listing, &mut d.coll)
+        },
+        |g: &Gallery| g.look(),
+        |_: &Gallery| 1,
+    )
+    .name("Grouped")
+    .clock(|g: &Gallery| d(g).clock)
+}
+
+fn grouped_view(g: &Gallery, _cx: &mut Cx<Gallery>) -> El {
+    let look = g.look();
+    let kit = g.kit();
+    let d = g.c1.grouped.as_ref().expect("the grouped scene");
+    let header = row()
+        .w_full()
+        .h(look.frame.bar)
+        .px(look.space.lg)
+        .center_y()
+        .child(
+            text(format!("Grouped · {} items", d.listing.len()))
+                .key("c1-title")
+                .font(kit.ty.ui_medium)
+                .color(kit.c.text_base),
+        );
+    col().key("c1-page").w_full().h_full().child(header).child(
+        col()
+            .w_full()
+            .grow(1.0)
+            .min_h(0.0)
+            .py(look.content.pad)
+            .child(grouped_collection().build(g)),
+    )
+}
+
+fn grouped_poll(g: &mut Gallery, t: f64, tx: &mut Tx) -> bool {
+    let d = g.c1.grouped.as_mut().expect("the grouped scene");
+    d.clock = t;
+    // Once laid out: a scroll asked for before the viewport exists has nothing to move.
+    if d.coll.viewport().h > 0.0
+        && let Some(y) = d.scroll_to.take()
+    {
+        tx.scroll_to_instant(viewport_path(GROUPS_SCOPE), 0.0, y);
+    }
+    grouped_collection().tick(g, tx)
 }

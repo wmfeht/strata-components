@@ -68,7 +68,8 @@ impl Region {
 /// Used by: C1b, C1d.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Hit {
-    /// The entry under the pointer, or `None` over empty space.
+    /// The entry under the pointer, or `None` over empty space: a group's header line and the
+    /// stuck group header are empty space too.
     pub index: Option<usize>,
     /// Which part of the entry's row. Empty space is [`Region::Gutter`].
     pub region: Region,
@@ -329,6 +330,7 @@ pub struct Ctx<'a> {
     changed: Changed,
     effects: Vec<Effect>,
     read_only: bool,
+    animations: bool,
     origin: Point,
     settings: Rc<Settings>,
     repaint: bool,
@@ -354,6 +356,7 @@ impl<'a> Ctx<'a> {
             changed: Changed::NONE,
             effects: Vec::new(),
             read_only: false,
+            animations: true,
             origin: Point::default(),
             settings: Rc::new(Settings::default()),
             repaint: false,
@@ -364,6 +367,13 @@ impl<'a> Ctx<'a> {
     /// drag. The element sets it from `Collection::read_only`.
     pub fn read_only_mode(mut self, read_only: bool) -> Self {
         self.read_only = read_only;
+        self
+    }
+
+    /// The same context with animations on or off. The element sets it from the look it
+    /// builds with (`Look::animations`).
+    pub fn with_animations(mut self, animations: bool) -> Self {
+        self.animations = animations;
         self
     }
 
@@ -383,6 +393,14 @@ impl<'a> Ctx<'a> {
     /// Whether the collection is read-only: a controller asks for no rename and no drag.
     pub fn read_only(&self) -> bool {
         self.read_only
+    }
+
+    /// Whether motion is on: false when the user or the desktop turned animations off
+    /// (`Look::animations`). A controller that moves the view then jumps rather than glides
+    /// ([`Effect::ScrollTo`] with `glide: false`, no [`Effect::Glide`]), as C1d's auto-scroll
+    /// may. True in a context made with [`Ctx::new`].
+    pub fn animations(&self) -> bool {
+        self.animations
     }
 
     /// `rect`, in content coordinates, in window points: where a popup anchored to an entry

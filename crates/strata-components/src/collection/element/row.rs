@@ -10,7 +10,8 @@ use strata_kit::look::Look;
 use strata_kit::slots::collection as tokens;
 
 use super::Config;
-use super::keys::{ICON, LABEL, line_key, row_key};
+use super::keys::{ICON, LABEL, header_key, line_key, row_key};
+use super::lines::{Group, GroupStyle, Line, LineMap};
 use super::state::DropOver;
 use crate::contract::{DropHover, DropZone, Entry, EntryId};
 
@@ -182,9 +183,13 @@ const OUTLINE: f32 = 1.0;
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Frame {
     pub look_key: u64,
+    /// What the builder's settings make every row: see [`config_key`].
+    pub config_key: u64,
     pub row_height: f32,
     pub per_line: usize,
     pub len: usize,
+    /// Drawn in groups under header lines: rows state their own place in the set.
+    pub grouped: bool,
     pub hover_live: bool,
     pub cursor_shown: bool,
     pub drop: Option<DropOver>,
@@ -216,15 +221,41 @@ pub(super) fn look_key(look: &Look) -> u64 {
     h.finish()
 }
 
-/// Virtual line `line`: its one entry's row, or a row of its entries.
-pub(super) fn build_line<S: 'static>(cfg: &Rc<Config<S>>, frame: &Frame, s: &S, line: usize) -> El {
+/// A key for the builder settings that change what every row is, as a memo version: its
+/// roles, read-only, whether it takes drops, and which parts a slot fills. A collection whose
+/// builder changes one of them (a view that switches roles) builds its rows again.
+pub(super) fn config_key<S>(cfg: &Config<S>) -> u64 {
+    let mut h = std::hash::DefaultHasher::new();
+    cfg.roles.hash(&mut h);
+    cfg.read_only.hash(&mut h);
+    cfg.on_drop.is_some().hash(&mut h);
+    cfg.icon.is_some().hash(&mut h);
+    cfg.label.is_some().hash(&mut h);
+    cfg.content.is_some().hash(&mut h);
+    h.finish()
+}
+
+/// Virtual line `line`: its one entry's row, a row of its entries, or a group's header.
+pub(super) fn build_line<S: 'static>(
+    cfg: &Rc<Config<S>>,
+    frame: &Frame,
+    map: &LineMap,
+    s: &S,
+    line: usize,
+) -> El {
     let per = frame.per_line.max(1);
-    let start = line * per;
+    let (start, end) = match map.line(line, frame.len) {
+        Line::Header(g) => {
+            let group = &map.groups().expect("a header line is grouped").groups()[g];
+            let look = (cfg.look)(s);
+            return header_line(cfg, &(cfg.group_style)(look), frame.row_height, group);
+        }
+        Line::Entries(r) => (r.start, r.end),
+    };
     if per == 1 {
         return build_item(cfg, frame, s, start);
     }
     let (src, _) = (cfg.get)(s);
-    let end = (start + per).min(src.len());
     let first = src.id_at(start);
     let mut el = row().key(line_key(first, per)).w_full().h(frame.row_height);
     if let Some(role) = cfg.roles.line {
@@ -283,12 +314,14 @@ fn build_item<S: 'static>(cfg: &Rc<Config<S>>, frame: &Frame, s: &S, index: usiz
             .and_then(|v| v.version.as_ref())
             .map(|f| f(s, &rcx)),
     ];
-    // A grid cell states its place in the set itself, so it changes with its index.
-    let place = (frame.per_line > 1).then_some((index, frame.len));
+    // A grid cell, and a row among header lines, states its place in the set itself, so it
+    // changes with its index.
+    let place = (frame.per_line > 1 || frame.grouped).then_some((index, frame.len));
     let version = (
         (entry.name, entry.kind, entry.icon, entry.thumbnail),
         state,
         frame.look_key,
+        frame.config_key,
         frame.row_height.to_bits(),
         frame.hover_live,
         versions,
@@ -363,13 +396,13 @@ fn item<S: 'static>(cfg: &Rc<Config<S>>, frame: &Frame, s: &S, rcx: &RowCx<'_>) 
         .px(tokens::row_inset(look))
         .child(inner);
     outer = if frame.per_line > 1 {
-        outer
-            .w(0.0)
-            .grow(1.0)
-            .position_in_set(rcx.index + 1, frame.len)
+        outer.w(0.0).grow(1.0)
     } else {
         outer.w_full()
     };
+    if frame.per_line > 1 || frame.grouped {
+        outer = outer.position_in_set(rcx.index + 1, frame.len);
+    }
     if cfg.read_only {
         return outer;
     }
@@ -379,6 +412,37 @@ fn item<S: 'static>(cfg: &Rc<Config<S>>, frame: &Frame, s: &S, rcx: &RowCx<'_>) 
         outer = cfg.dnd.drop_zone(outer, row_zone(cfg, on_drop.clone(), id));
     }
     outer
+}
+
+/// A group's header line: its label over the style's divider, a heading named by the label.
+fn header_line<S: 'static>(cfg: &Config<S>, style: &GroupStyle, h: f32, group: &Group) -> El {
+    header_body(style, h, text(group.label.to_string()).truncate())
+        .key(header_key(group.key))
+        .role(cfg.roles.header)
+        .label(group.label.to_string())
+}
+
+/// What a header draws, around its label part: the stuck header's too, so the two match.
+pub(super) fn header_body(style: &GroupStyle, h: f32, label: El) -> El {
+    let mut el = row()
+        .w_full()
+        .h(h)
+        .px(style.inset)
+        .pb(style.bottom)
+        .items_end()
+        .child(
+            label
+                .key(LABEL)
+                .a11y_hidden()
+                .font(style.font)
+                .color(style.color)
+                .shrink()
+                .min_w(0.0),
+        );
+    if let Some(divider) = style.divider {
+        el = el.border_sides([0.0, 0.0, OUTLINE, 0.0], divider);
+    }
+    el
 }
 
 /// The entry's catalog icon, else the Folder or File icon, at the row icon size.
@@ -415,13 +479,29 @@ pub(super) type DropFn<S> = Rc<dyn Fn(&mut S, Option<EntryId>, crate::contract::
 
 /// A folder row's drop zone: drops go to `on_drop` with the folder's id, the hover draws the
 /// row's drop highlight, and moves near the viewport's edges scroll it.
+///
+/// The stuck group header takes no input, so a drag over it is over the row it covers: there
+/// the drop goes to the folder shown, as on a header line, judged by the drop's point (or the
+/// last move's, when the platform gives the drop none). The row's drop highlight follows the
+/// moves, and is hidden under the stuck header anyway.
 fn row_zone<S: 'static>(cfg: &Rc<Config<S>>, on_drop: DropFn<S>, id: EntryId) -> DropZone<S> {
     let get_mut = cfg.get_mut.clone();
     let hover_mut = cfg.get_mut.clone();
     let edge = cfg.clone();
-    DropZone::new(move |s: &mut S, dropped, tx| {
-        (get_mut)(s).1.drop = None;
-        on_drop(s, Some(id), dropped, tx);
+    let drop_cfg = cfg.clone();
+    DropZone::new(move |s: &mut S, dropped: crate::contract::Dropped, tx| {
+        // Where it landed when the platform says, else where the last move was (a drop with
+        // no position and no move over the stuck header goes to the row it covers).
+        let under_stuck = dropped
+            .point
+            .map(|p| super::route::under_stuck_header(&drop_cfg, s, p));
+        let st = (get_mut)(s).1;
+        let last = st.drop.take();
+        let target = match (under_stuck, last) {
+            (Some(true), _) | (None, Some(DropOver::Background)) => None,
+            _ => Some(id),
+        };
+        on_drop(s, target, dropped, tx);
     })
     .on_hover(move |s: &mut S, hover, _offer, _tx| {
         let st = (hover_mut)(s).1;
@@ -434,5 +514,16 @@ fn row_zone<S: 'static>(cfg: &Rc<Config<S>>, on_drop: DropFn<S>, id: EntryId) ->
             }
         }
     })
-    .on_move(move |s: &mut S, point, tx| super::route::drop_edge_scroll(&edge, s, point, tx))
+    .on_move(move |s: &mut S, point, tx| {
+        let under_stuck = super::route::under_stuck_header(&edge, s, point);
+        let st = (edge.get_mut)(s).1;
+        let over = Some(if under_stuck {
+            DropOver::Background
+        } else {
+            DropOver::Row(id)
+        });
+        let changed = st.drop != over;
+        st.drop = over;
+        super::route::drop_edge_scroll(&edge, s, point, changed, tx)
+    })
 }

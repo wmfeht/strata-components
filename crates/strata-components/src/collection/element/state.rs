@@ -5,7 +5,8 @@ use std::ops::Range;
 
 use rune::{Live, Tx};
 
-use super::keys::{line_key, line_path, viewport_path};
+use super::keys::{line_path, viewport_path};
+use super::lines::{Groups, LineMap};
 use super::seam::{Controllers, Hit};
 use crate::collection::selection::{Changed, Listing, Position, ScrollMemo, Selection, SyncRule};
 use crate::contract::{EntryId, EntrySource, Point, Rect};
@@ -58,6 +59,19 @@ pub struct CollectionState {
     pub(super) gesture: Option<Hit>,
     /// The selection as last announced: its revision, how many were selected and of how many.
     pub(super) announced: (u64, usize, usize),
+    /// A reveal asked for before the viewport had a width, done at its first layout.
+    pub(super) reveal_after_layout: Cell<Option<EntryId>>,
+    /// The groups the host draws the entries in ([`CollectionState::set_groups`]).
+    pub(super) groups: Groups,
+    /// The group whose header the last build stuck at the top, if any.
+    pub(super) stuck_shown: Cell<Option<usize>>,
+    /// The viewport has had a width: a later width that changes the count is a reflow.
+    pub(super) laid_out: bool,
+    /// The stuck header's offset, `[0, dy]`: up by as much as the next header pushes it.
+    pub(super) stuck_offset: Live<[f32; 2]>,
+    /// The first line Rune last reported visible: the one whose group's header sticks. Rune
+    /// reports it from the layout it is drawing, which the recorded scroll offset can trail.
+    pub(super) top_line: Cell<Option<usize>>,
 }
 
 impl Default for CollectionState {
@@ -80,6 +94,12 @@ impl Default for CollectionState {
             row_height: 0.0,
             gesture: None,
             announced: (0, 0, 0),
+            reveal_after_layout: Cell::new(None),
+            groups: Groups::default(),
+            stuck_shown: Cell::new(None),
+            laid_out: false,
+            stuck_offset: Live::new([0.0, 0.0]),
+            top_line: Cell::new(None),
         }
     }
 }
@@ -125,6 +145,12 @@ impl CollectionState {
     }
 
     /// The entries in the viewport, as last reported: what thumbnails load first (C25).
+    ///
+    /// Rune reports the rows a commit laid out on the frame after it, so for one frame after
+    /// a reflow (a grid's width) or a regroup this is the range before it (Rune draft
+    /// [U-C1f-5]). It is a priority hint, and catches up on its own.
+    ///
+    /// [U-C1f-5]: crate::collection::element#rune-drafts-not-filed
     pub fn visible_range(&self) -> Range<usize> {
         self.visible.clone()
     }
@@ -201,6 +227,23 @@ impl CollectionState {
         self.drop = drop;
     }
 
+    /// Sets the groups the entries draw in, each under a header line, the top group's header
+    /// stuck at the top of the viewport (C4's file-type groups; see [`Groups`]). Empty groups
+    /// (the default) draw the entries ungrouped.
+    ///
+    /// The groups belong to the listing: set them whenever it changes, before
+    /// [`CollectionState::enter`] or [`CollectionState::sync`] with it, so the restore and the
+    /// reveal those make place the cursor among the new header lines. Groups that don't cover
+    /// the listing (their lengths don't add up to its length) draw it ungrouped.
+    pub fn set_groups(&mut self, groups: Groups) {
+        self.groups = groups;
+    }
+
+    /// The groups the entries draw in: see [`CollectionState::set_groups`].
+    pub fn groups(&self) -> &Groups {
+        &self.groups
+    }
+
     /// Shows the cursor or not: in Columns, only the column holding the keyboard cursor
     /// shows it (C2).
     pub fn set_active(&mut self, active: bool) {
@@ -235,7 +278,8 @@ impl CollectionState {
 
     /// Brings the collection in step with `source` after it changed: [`Selection::sync`], then
     /// the cursor row keeps its place on screen (`Tx::keep_on_screen`). When the listing is
-    /// complete and a restore waits for it, the restore applies now instead.
+    /// complete and a restore waits for it, the restore applies now instead. While a marquee
+    /// band is open, the status line waits for it to end.
     ///
     /// `scope` is the collection's key, as given to the element.
     pub fn sync(
@@ -249,7 +293,7 @@ impl CollectionState {
             && let Some(position) = self.pending.take()
         {
             let changed = self.apply_position(scope, source, &position, rule, tx);
-            self.note_selection(source);
+            self.note_unless_banding(source);
             return changed;
         }
         let changed = self.selection.sync(source, rule);
@@ -259,19 +303,41 @@ impl CollectionState {
             // Rune finds no drawn rect to hold, and lets it go.
             tx.keep_on_screen(line_path(scope, source, index, self.per_line.get()));
         }
-        self.note_selection(source);
+        self.note_unless_banding(source);
         changed
     }
 
-    /// Whether the line holding entry `index` shows whole in the viewport, as last laid out.
-    fn shows_line(&self, index: usize) -> bool {
+    /// [`CollectionState::note_selection`], unless a marquee band is open: the status line
+    /// reads a band's count once its gesture ends (the element notes it then), not a count a
+    /// listing change makes mid-band.
+    fn note_unless_banding(&mut self, source: &dyn EntrySource) {
+        let banding = self
+            .controllers
+            .marquee
+            .as_ref()
+            .is_some_and(|m| m.active());
+        if !banding {
+            self.note_selection(source);
+        }
+    }
+
+    /// How the last build laid out `len` entries.
+    pub(super) fn line_map(&self, len: usize) -> LineMap {
+        LineMap::new(self.per_line.get(), Some(&self.groups), len)
+    }
+
+    /// Whether the line holding entry `index` shows whole in the viewport, as last laid out,
+    /// and clear of a stuck group header (which covers the viewport's top line).
+    fn shows_line(&self, index: usize, len: usize) -> bool {
         let h = self.row_height;
         if h <= 0.0 {
             return false;
         }
-        let top = (index / self.per_line.get().max(1)) as f32 * h;
+        let map = self.line_map(len);
+        let top = map.line_of(index) as f32 * h;
         let offset = self.scroll.get();
-        top >= offset && top + h <= offset + self.viewport.h
+        let covered = if map.groups().is_some() { h } else { 0.0 };
+        top >= offset + covered && top + h <= offset + self.viewport.h
     }
 
     /// Takes `per` entries a line from now on. When that differs from before and there is a
@@ -295,14 +361,25 @@ impl CollectionState {
         true
     }
 
-    /// Scrolls the entry at `index` into view, mounted or not, just far enough.
+    /// Scrolls the entry at `index` into view, mounted or not, just far enough. In a grouped
+    /// collection it lands clear of the stuck header: going up, the line above it (another
+    /// entry, or its group's header) shows under the stuck header.
     pub fn reveal(&self, scope: &str, source: &dyn EntrySource, index: usize, tx: &mut Tx) {
         if index >= source.len() {
             return;
         }
-        let per = self.per_line.get().max(1);
-        let first = source.id_at(index / per * per);
-        tx.scroll_into_view_in(scope.to_owned(), line_key(first, per));
+        if self.viewport.w <= 0.0 {
+            self.reveal_after_layout.set(Some(source.id_at(index)));
+            return;
+        }
+        let map = self.line_map(source.len());
+        // Rune runs a transaction's reveals in order, each from where the one before left the
+        // view (`runtime/frame.rs`): the line above comes to the top when the entry is above,
+        // and the entry to the bottom when it is below; neither moves a view showing both.
+        if let Some(above) = map.key_above(source, index) {
+            tx.scroll_into_view_in(scope.to_owned(), above);
+        }
+        tx.scroll_into_view_in(scope.to_owned(), map.line_key(source, map.line_of(index)));
     }
 
     // Position restore.
@@ -343,6 +420,8 @@ impl CollectionState {
     ) -> Changed {
         self.pending = None;
         self.drop = None;
+        self.reveal_after_layout.set(None);
+        self.top_line.set(None);
         // The folder left takes its gestures and keyboard mode with it.
         self.controllers.reset();
         self.gesture = None;
@@ -391,7 +470,7 @@ impl CollectionState {
                 // Instant either way, and either way a scroll request, which stops a glide in
                 // progress: the reveal when the row is out of view, else a scroll to where the
                 // view is (a reveal that has nowhere to go might leave a glide running).
-                Some(index) if self.shows_line(index) => {
+                Some(index) if self.shows_line(index, source.len()) => {
                     tx.scroll_to_instant(viewport_path(scope), 0.0, self.scroll.get());
                 }
                 Some(index) => self.reveal(scope, source, index, tx),

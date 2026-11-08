@@ -11,13 +11,17 @@
 //! only in how a Catppuccin icon is coloured; [`super::catppuccin`] has the brand colours.
 //! Every [`IconName`] maps to the same Lucide icon in each ([`semantic`]).
 //!
-//! `build.rs` generates the icons from `crates/strata-kit/icons/` ([`catalog`]).
+//! `build.rs` generates the icons from `crates/strata-kit/icons/` ([`catalog`]), by the rules
+//! in `lucide/generate.rs`.
 
 use rune::Icon;
 
 use super::{IconName, IconSet};
 
 pub(super) mod catalog;
+/// The generator `build.rs` runs, compiled here only for its tests.
+#[cfg(test)]
+mod generate;
 mod semantic;
 
 /// Strata's Theme colors: every icon in the element's colour.

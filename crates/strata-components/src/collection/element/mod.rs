@@ -225,6 +225,7 @@ type AnnounceFn<S> = Rc<dyn Fn(&S, &Announcement) -> String>;
 type GroupStyleFn = Rc<dyn Fn(&Look) -> GroupStyle>;
 type PressFn<S> = Rc<dyn Fn(&mut S, &PointerInput, &mut Tx)>;
 type ScrollFn = Rc<dyn Fn(ScrollPos)>;
+pub(crate) type DragOverFn<S> = Rc<dyn Fn(&mut S, Option<Point>, &mut Tx) -> bool>;
 
 /// What [`Collection`] was built with, shared by its rows and handlers.
 pub(crate) struct Config<S> {
@@ -262,6 +263,7 @@ pub(crate) struct Config<S> {
     announce: Option<AnnounceFn<S>>,
     on_scroll: Option<ScrollFn>,
     keys_by_host: bool,
+    on_drag_over: Option<DragOverFn<S>>,
 }
 
 impl<S> Config<S> {
@@ -339,6 +341,7 @@ impl<S: 'static> Collection<S> {
                 announce: None,
                 on_scroll: None,
                 keys_by_host: false,
+                on_drag_over: None,
             },
         }
     }
@@ -514,6 +517,21 @@ impl<S: 'static> Collection<S> {
     /// Rune can't move focus between elements from code at the pinned rev.
     pub fn keys_by_host(mut self) -> Self {
         self.cfg.keys_by_host = true;
+        self
+    }
+
+    /// Hears where a drag the collection's drop zones accept is, in window points, while it is
+    /// over them (`Some`, on reaching a zone and on every move), and when it leaves them or a
+    /// zone refuses it (`None`). Set, it replaces the element's own edge scroll during a drag
+    /// (a row's height a move near the viewport's top or bottom): the host scrolls instead.
+    /// Columns (C2) follows the drag across its whole strip with it, since Rune tells only the
+    /// innermost zone under a drag that it moved (Rune draft U-C2-1). Return true when it
+    /// changed what the view reads. Needs [`Collection::on_drop`], which makes the zones.
+    pub fn on_drag_over(
+        mut self,
+        f: impl Fn(&mut S, Option<Point>, &mut Tx) -> bool + 'static,
+    ) -> Self {
+        self.cfg.on_drag_over = Some(Rc::new(f));
         self
     }
 
@@ -894,14 +912,14 @@ fn pinned(part: El) -> El {
 /// The background's drop zone: drops go to the folder shown.
 fn background_zone<S: 'static>(cfg: &Rc<Config<S>>, on_drop: row::DropFn<S>) -> DropZone<S> {
     let get_mut = cfg.get_mut.clone();
-    let hover_mut = cfg.get_mut.clone();
+    let hover_cfg = cfg.clone();
     let edge = cfg.clone();
     DropZone::new(move |s: &mut S, dropped, tx| {
         (get_mut)(s).1.drop = None;
         on_drop(s, None, dropped, tx);
     })
-    .on_hover(move |s: &mut S, hover, _offer, _tx| {
-        let st = (hover_mut)(s).1;
+    .on_hover(move |s: &mut S, hover, _offer, tx| {
+        let st = (hover_cfg.get_mut)(s).1;
         match hover {
             DropHover::Accepting | DropHover::Rejecting => {
                 if st.drop.is_none() {
@@ -914,6 +932,32 @@ fn background_zone<S: 'static>(cfg: &Rc<Config<S>>, on_drop: row::DropFn<S>) -> 
                 }
             }
         }
+        drag_over_hover(&hover_cfg, s, hover, tx);
     })
-    .on_move(move |s: &mut S, point, tx| route::drop_edge_scroll(&edge, s, point, false, tx))
+    .on_move(move |s: &mut S, point, tx| match &edge.on_drag_over {
+        Some(f) => {
+            if !f(s, Some(Point::new(point.window_x, point.window_y)), tx) {
+                tx.live_only();
+            }
+        }
+        None => route::drop_edge_scroll(&edge, s, point, false, tx),
+    })
+}
+
+/// Tells the host's drag-over hook about a hover: where an accepted drag reached a zone, or
+/// that it left one or was refused.
+pub(super) fn drag_over_hover<S: 'static>(
+    cfg: &Config<S>,
+    s: &mut S,
+    hover: DropHover,
+    tx: &mut Tx,
+) {
+    let Some(f) = &cfg.on_drag_over else {
+        return;
+    };
+    let at = match hover {
+        DropHover::Accepting => tx.drop_point().map(|p| Point::new(p.window_x, p.window_y)),
+        DropHover::Rejecting | DropHover::Left => None,
+    };
+    f(s, at, tx);
 }

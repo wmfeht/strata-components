@@ -56,6 +56,8 @@ struct Host {
     dropped: Vec<Option<EntryId>>,
     /// What `on_press` and a recording controller heard, in order.
     order: Rc<RefCell<Vec<String>>>,
+    /// Hears drags over the drop zones through `on_drag_over`, when set.
+    over: Option<Rc<RefCell<Vec<Option<Point>>>>>,
 }
 
 impl Host {
@@ -81,6 +83,7 @@ impl Host {
             drops: false,
             dropped: Vec::new(),
             order: Rc::default(),
+            over: None,
         }
     }
 }
@@ -203,6 +206,13 @@ fn collection(s: &Host) -> Collection<Host> {
     }
     if s.drops {
         c = c.on_drop(|s: &mut Host, target, _, _| s.dropped.push(target));
+    }
+    if let Some(log) = &s.over {
+        let log = log.clone();
+        c = c.on_drag_over(move |_: &mut Host, at, _| {
+            log.borrow_mut().push(at);
+            false
+        });
     }
     c.settings(7u32)
 }
@@ -2804,4 +2814,62 @@ fn a_collection_keyed_by_its_host_takes_keys_through_the_host() {
         )
     });
     assert!(!taken);
+}
+
+// The drag-over hook (C2's request E2).
+
+/// Drags `at` a point on a folder row and then near the viewport's bottom edge, for 20 frames;
+/// the scroll offset after.
+fn drag_near_the_bottom(rt: &mut Runtime<Host>) -> f32 {
+    let [x, y, w, h] = element(rt, "row-0").unwrap().visible;
+    rt.drag_files(vec!["/tmp/a.txt".into()], Some((x + w / 2.0, y + h / 2.0)));
+    rt.frame(1.0 / 60.0);
+    for i in 0..20 {
+        rt.drag_files_to(Some((x + w / 2.0, H - 4.0 - (i % 2) as f32)));
+        rt.frame(1.0 / 60.0);
+    }
+    settle(rt);
+    let offset = rt.state.coll.scroll_offset();
+    rt.drag_files_leave();
+    rt.frame(1.0 / 60.0);
+    offset
+}
+
+/// E2: with `on_drag_over` the host hears an accepted drag over the rows and the background,
+/// with its window point, and its leaving; the element's own edge scroll then stays still.
+#[test]
+fn the_drag_over_hook_hears_the_drag_and_replaces_the_edge_scroll() {
+    let mut host = Host::new(2_000);
+    host.drops = true;
+    let mut rt = runtime(host);
+    assert!(
+        drag_near_the_bottom(&mut rt) > 0.0,
+        "without the hook, the element's edge scroll moves"
+    );
+
+    let mut host = Host::new(2_000);
+    host.drops = true;
+    let log = Rc::new(RefCell::new(Vec::new()));
+    host.over = Some(log.clone());
+    let mut rt = runtime(host);
+    let [x, y, w, h] = element(&rt, "row-0").unwrap().visible;
+    assert_eq!(
+        drag_near_the_bottom(&mut rt),
+        0.0,
+        "the hook scrolls instead"
+    );
+    let log = log.borrow();
+    assert_eq!(
+        log.first().copied().flatten(),
+        Some(Point::new(x + w / 2.0, y + h / 2.0)),
+        "the hover on the folder row says where"
+    );
+    assert!(
+        log.iter()
+            .flatten()
+            .any(|p| p.y >= H - 5.0 && p.y <= H - 3.0),
+        "moves over the background say where: {log:?}"
+    );
+    assert_eq!(log.last(), Some(&None), "leaving says so");
+    assert_eq!(rt.state.coll.drop_over(), None);
 }

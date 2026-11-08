@@ -13,7 +13,7 @@ use super::Config;
 use super::keys::{ICON, LABEL, header_key, line_key, row_key};
 use super::lines::{Group, GroupStyle, Line, LineMap};
 use super::state::DropOver;
-use crate::contract::{DropHover, DropZone, Entry, EntryId};
+use crate::contract::{DropHover, DropZone, Entry, EntryId, Point};
 
 /// Marks the host puts on rows, each with its own look.
 ///
@@ -536,7 +536,7 @@ pub(super) type DropFn<S> = Rc<dyn Fn(&mut S, Option<EntryId>, crate::contract::
 /// moves, and is hidden under the stuck header anyway.
 fn row_zone<S: 'static>(cfg: &Rc<Config<S>>, on_drop: DropFn<S>, id: EntryId) -> DropZone<S> {
     let get_mut = cfg.get_mut.clone();
-    let hover_mut = cfg.get_mut.clone();
+    let hover_cfg = cfg.clone();
     let edge = cfg.clone();
     let drop_cfg = cfg.clone();
     DropZone::new(move |s: &mut S, dropped: crate::contract::Dropped, tx| {
@@ -553,8 +553,8 @@ fn row_zone<S: 'static>(cfg: &Rc<Config<S>>, on_drop: DropFn<S>, id: EntryId) ->
         };
         on_drop(s, target, dropped, tx);
     })
-    .on_hover(move |s: &mut S, hover, _offer, _tx| {
-        let st = (hover_mut)(s).1;
+    .on_hover(move |s: &mut S, hover, _offer, tx| {
+        let st = (hover_cfg.get_mut)(s).1;
         match hover {
             DropHover::Accepting | DropHover::Rejecting => st.drop = Some(DropOver::Row(id)),
             DropHover::Left => {
@@ -563,6 +563,7 @@ fn row_zone<S: 'static>(cfg: &Rc<Config<S>>, on_drop: DropFn<S>, id: EntryId) ->
                 }
             }
         }
+        super::drag_over_hover(&hover_cfg, s, hover, tx);
     })
     .on_move(move |s: &mut S, point, tx| {
         let under_stuck = super::route::under_stuck_header(&edge, s, point);
@@ -574,6 +575,14 @@ fn row_zone<S: 'static>(cfg: &Rc<Config<S>>, on_drop: DropFn<S>, id: EntryId) ->
         });
         let changed = st.drop != over;
         st.drop = over;
-        super::route::drop_edge_scroll(&edge, s, point, changed, tx)
+        match &edge.on_drag_over {
+            Some(f) => {
+                let host = f(s, Some(Point::new(point.window_x, point.window_y)), tx);
+                if !changed && !host {
+                    tx.live_only();
+                }
+            }
+            None => super::route::drop_edge_scroll(&edge, s, point, changed, tx),
+        }
     })
 }

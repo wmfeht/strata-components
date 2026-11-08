@@ -14,8 +14,6 @@ pub(super) struct PendingRename {
     pub(super) due: f64,
     /// The selection's revision once the click was handled: any change after it cancels.
     pub(super) revision: u64,
-    /// The handle's interrupt count when it armed.
-    pub(super) interrupts: u64,
 }
 
 /// What a pending rename does on a tick.
@@ -33,14 +31,8 @@ impl PendingRename {
     /// Whether it renames at `now`. It renames only the same, solely selected entry under the
     /// cursor, as Strata's `click_rename_still_wanted` checks; whether something else is being
     /// edited is the host's to check when it hears the rename.
-    pub(super) fn due(
-        &self,
-        now: f64,
-        interrupts: u64,
-        selection: &Selection,
-        source: &dyn EntrySource,
-    ) -> Due {
-        if interrupts != self.interrupts || selection.revision() != self.revision {
+    pub(super) fn due(&self, now: f64, selection: &Selection, source: &dyn EntrySource) -> Due {
+        if selection.revision() != self.revision {
             return Due::Cancelled;
         }
         if now < self.due {

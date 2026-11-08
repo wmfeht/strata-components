@@ -7,7 +7,7 @@ use rune::Mods;
 
 use super::clicks::Clicks;
 use super::rename::{Due, PendingRename};
-use super::settings::{ClickCount, PointerHandle, PointerSettings};
+use super::settings::{ClickCount, PointerSettings};
 use crate::collection::selection::{Changed, Extend, Selection};
 use crate::contract::{EntryId, EntrySource, Point};
 
@@ -120,7 +120,7 @@ pub enum Outcome {
     BeginDrag {
         /// The dragged entries, in display order.
         ids: Vec<EntryId>,
-        /// The press, in window points.
+        /// Where the pointer is as the drag starts, in window points.
         at: Point,
     },
     /// Start a marquee at the press.
@@ -146,11 +146,15 @@ pub enum Outcome {
     WakeAfter(Duration),
 }
 
-/// What the machine reads and changes: the source, the selection, and where its outcomes go.
-/// C1e's `Ctx` is one; tests use a plain one.
+/// What the machine reads and changes: its settings, the source, the selection, and where its
+/// outcomes go. C1e's `Ctx` is one ([`PointerIntent`](super::PointerIntent)); tests use a
+/// plain one.
 ///
 /// Used by: the C1e adapter.
 pub trait Surface {
+    /// The settings now.
+    fn settings(&self) -> PointerSettings;
+
     /// The entries, in display order.
     fn source(&self) -> &dyn EntrySource;
 
@@ -202,32 +206,21 @@ struct Gesture {
 /// The pointer state machine of one collection.
 ///
 /// Feed it each press, move and release, and run [`PointerMachine::tick`] when it asked to be
-/// woken. It changes the selection through the [`Surface`] and emits [`Outcome`]s for the rest.
-/// The [module docs](super) give the rules.
+/// woken. It reads its settings from the [`Surface`], changes the selection through it and
+/// emits [`Outcome`]s for the rest. The [module docs](super) give the rules.
 ///
 /// Used by: the C1e adapter.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct PointerMachine {
-    settings: PointerHandle,
     clicks: Clicks,
     gesture: Option<Gesture>,
     rename: Option<PendingRename>,
 }
 
 impl PointerMachine {
-    /// A machine reading `settings` on every press.
-    pub fn new(settings: PointerHandle) -> Self {
-        Self {
-            settings,
-            clicks: Clicks::default(),
-            gesture: None,
-            rename: None,
-        }
-    }
-
-    /// The settings it reads.
-    pub fn settings(&self) -> &PointerHandle {
-        &self.settings
+    /// A machine with no gesture held.
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Whether a slow-click rename is waiting.
@@ -241,7 +234,7 @@ impl PointerMachine {
     pub fn press(&mut self, press: &Press, s: &mut dyn Surface) -> bool {
         self.rename = None;
         self.gesture = None;
-        let settings = self.settings.get();
+        let settings = s.settings();
         let entry = press
             .index
             .filter(|&i| i < s.source().len())
@@ -287,7 +280,7 @@ impl PointerMachine {
     /// The held pointer moved; `travel` is its travel since the press. Past the threshold, the
     /// press becomes a drag or a marquee and is no longer a click. True while a gesture is held.
     pub fn moved(&mut self, travel: Point, s: &mut dyn Surface) -> bool {
-        let threshold = self.settings.get().drag_threshold;
+        let threshold = s.settings().drag_threshold;
         let Some(g) = self.gesture.as_mut() else {
             return false;
         };
@@ -305,10 +298,8 @@ impl PointerMachine {
                 g.deferred = Deferred::None;
                 let ids = s.selection().selected_ids(s.source());
                 if !ids.is_empty() {
-                    s.emit(Outcome::BeginDrag {
-                        ids,
-                        at: g.press.window,
-                    });
+                    let at = Point::new(g.press.window.x + travel.x, g.press.window.y + travel.y);
+                    s.emit(Outcome::BeginDrag { ids, at });
                 }
             }
             Plan::Marquee => {
@@ -327,7 +318,8 @@ impl PointerMachine {
     /// The button came up, or the gesture was cancelled. A press that crossed the threshold,
     /// was cancelled, or whose entry moved during it (a re-sort, a reload) does nothing more.
     pub fn release(&mut self, release: &Release, s: &mut dyn Surface) -> bool {
-        let threshold = self.settings.get().drag_threshold;
+        let settings = s.settings();
+        let threshold = settings.drag_threshold;
         let Some(g) = self.gesture.take() else {
             return false;
         };
@@ -345,14 +337,12 @@ impl PointerMachine {
         match g.press.button {
             Button::Middle => middle(&g, index, id, release.mods, s),
             Button::Primary => {
-                let settings = self.settings.get();
                 self.rename = primary_release(&g, index, id, &settings, s).map(|due| {
                     s.emit(Outcome::WakeAfter(settings.double_click));
                     PendingRename {
                         id,
                         due: release.now + due,
                         revision: s.selection().revision(),
-                        interrupts: self.settings.interrupts(),
                     }
                 });
             }
@@ -366,7 +356,7 @@ impl PointerMachine {
         let Some(pending) = self.rename else {
             return false;
         };
-        match pending.due(now, self.settings.interrupts(), s.selection(), s.source()) {
+        match pending.due(now, s.selection(), s.source()) {
             Due::Wait => false,
             Due::Cancelled => {
                 self.rename = None;
@@ -383,6 +373,14 @@ impl PointerMachine {
     /// A key reached the collection: it cancels a pending rename.
     pub fn interrupt(&mut self) {
         self.rename = None;
+    }
+
+    /// Drops the press held and a pending rename, and ends the click run: the collection shows
+    /// another folder, or the host saw a press or a key elsewhere (another Columns column).
+    pub fn reset(&mut self) {
+        self.gesture = None;
+        self.rename = None;
+        self.clicks.break_run();
     }
 }
 

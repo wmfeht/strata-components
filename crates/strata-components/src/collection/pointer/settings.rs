@@ -1,8 +1,6 @@
-//! What the pointer machine reads on every press: the click modes, the double-click interval
-//! and the drag threshold, shared live with the host through a [`PointerHandle`].
+//! What the pointer machine reads on every input: the click modes, the double-click interval
+//! and the drag threshold. The host passes them with `Collection::settings`.
 
-use std::cell::Cell;
-use std::rc::Rc;
 use std::time::Duration;
 
 use crate::collection::selection::Extend;
@@ -48,11 +46,13 @@ impl ClickModes {
     }
 }
 
-/// The pointer machine's settings. All of it is plain data the host keeps current through
-/// its [`PointerHandle`]: the double-click interval from the desktop (P5), the click modes from
-/// the preferences, and the per-view switches.
+/// The pointer machine's settings: the double-click interval from the desktop (P5), the click
+/// modes from the preferences, and the per-view switches. The host passes the current value
+/// each time it builds the view (`Collection::settings(PointerSettings { .. })`), and the
+/// controller reads it on every input (`Ctx::settings`); with none, it uses the default.
 ///
-/// Fields may be added: start from [`PointerSettings::default`].
+/// Fields may be added: start from [`PointerSettings::default`] and set fields, or use the
+/// builder methods.
 ///
 /// Used by: C2, C3, C4, C14b, C18, and hosts.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -99,59 +99,28 @@ impl Default for PointerSettings {
     }
 }
 
-#[derive(Debug, Default)]
-struct Shared {
-    settings: Cell<PointerSettings>,
-    interrupts: Cell<u64>,
-}
-
-/// The settings one pointer machine reads, shared with the host that keeps them current.
-///
-/// Clones share one value: the host keeps a clone and changes it with [`PointerHandle::set`] or
-/// [`PointerHandle::update`], and the next press reads the change. See the
-/// [module docs](super#the-shared-handle) for why this is a handle and not an accessor.
-///
-/// Used by: C2, C3, C4, C14b, C18, and hosts.
-#[derive(Clone, Debug, Default)]
-pub struct PointerHandle(Rc<Shared>);
-
-impl PointerHandle {
-    /// A handle holding `settings`.
-    pub fn new(settings: PointerSettings) -> Self {
-        Self(Rc::new(Shared {
-            settings: Cell::new(settings),
-            interrupts: Cell::new(0),
-        }))
+impl PointerSettings {
+    /// The same settings with `modes`.
+    pub const fn modes(mut self, modes: ClickModes) -> Self {
+        self.modes = modes;
+        self
     }
 
-    /// The settings now.
-    pub fn get(&self) -> PointerSettings {
-        self.0.settings.get()
+    /// The same settings with the double-click interval `interval` (from P5).
+    pub const fn double_click(mut self, interval: Duration) -> Self {
+        self.double_click = interval;
+        self
     }
 
-    /// Replaces the settings.
-    pub fn set(&self, settings: PointerSettings) {
-        self.0.settings.set(settings);
+    /// The same settings with slow-click rename on or off.
+    pub const fn rename(mut self, rename: bool) -> Self {
+        self.rename = rename;
+        self
     }
 
-    /// Changes the settings in place: `handle.update(|s| s.double_click = interval)`.
-    pub fn update(&self, f: impl FnOnce(&mut PointerSettings)) {
-        let mut settings = self.get();
-        f(&mut settings);
-        self.set(settings);
-    }
-
-    /// Cancels a pending slow-click rename: the host calls it for a press or a key the
-    /// collection doesn't hear (another Columns column, a page shortcut).
-    pub fn interrupt(&self) {
-        let shared = &self.0;
-        shared
-            .interrupts
-            .set(shared.interrupts.get().wrapping_add(1));
-    }
-
-    /// How many interrupts there have been, for a pending rename to compare.
-    pub(super) fn interrupts(&self) -> u64 {
-        self.0.interrupts.get()
+    /// The same settings with `entry` as the one whose activation changes nothing.
+    pub const fn already_open(mut self, entry: Option<EntryId>) -> Self {
+        self.already_open = entry;
+        self
     }
 }

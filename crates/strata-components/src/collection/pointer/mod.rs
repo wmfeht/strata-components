@@ -3,8 +3,8 @@
 //! [`PointerMachine`] turns presses, moves and releases on a collection into selection
 //! operations on its [`Selection`] and [`Outcome`]s: open, a plain click (where previews
 //! follow), a file drag, a marquee, a rename, a new tab or window, a context menu. It is plain
-//! data with no Rune elements, driven through a [`Surface`]; the collection element (C1e) feeds
-//! it through its pointer seam. It follows Strata at `upstream/main` 35ee677ab:
+//! data with no Rune elements, driven through a [`Surface`]. [`PointerIntent`] puts it on the
+//! collection element's pointer seam (C1e). It follows Strata at `upstream/main` 35ee677ab:
 //! `src/ui/pointer.rs`, `src/ui/collection_interaction.rs`, `src/ui/browser_modes/clicks.rs` and
 //! `src/ui/browser/columns/rows/click.rs`.
 //!
@@ -63,9 +63,10 @@
 //! [`PointerSettings::already_open`]) and [`PointerSettings::rename`] is on. An automatic pick
 //! ([`Selection::auto_select`]) counts as that only selection, as GTK shows it selected in
 //! Strata. The rename comes one double-click interval later from [`PointerMachine::tick`], so
-//! that a second press makes a double click instead. Any press, a key
-//! ([`PointerMachine::interrupt`]), a [`PointerHandle::interrupt`] or any selection change
-//! cancels it.
+//! that a second press makes a double click instead. Any press, any key the collection hears
+//! (`PointerController::key_seen`), a reset (`PointerController::reset`: another folder, or a
+//! host that saw a press or a key elsewhere, such as another Columns column) or any selection
+//! change cancels it.
 //!
 //! **Deviation from the work package doc:** it asks for the second click "before a rename
 //! timeout". Strata has none: a click on the sole selection's name renames however long after
@@ -83,18 +84,41 @@
 //! A secondary press selects an unselected entry alone and keeps a selection it lands in, then
 //! asks for the menu ([`Outcome::ContextMenu`]). Where the menu goes is C21's.
 //!
-//! # The shared handle
+//! # On the element
 //!
-//! Components take state by accessor, but the element keeps its controllers boxed in its
-//! `CollectionState` (C1e's seam), where no accessor reaches. So the settings live in a
-//! [`PointerHandle`] the machine and the host share: the host changes the interval (from P5),
-//! the click modes (from the preferences) and the per-view switches through its clone, and the
-//! next press reads them. This is a recorded deviation from the accessor rule.
+//! Install [`PointerIntent`] as the collection's pointer controller, and pass the
+//! [`PointerSettings`] with `Collection::settings` each time the view builds: the interval from
+//! P5, the click modes from the preferences, `already_open` from Columns. With none, the
+//! defaults apply. A read-only collection (`Collection::read_only`) neither drags nor renames.
+//! Settings arrive by type through the element's `Ctx::settings`, its one settings path for
+//! controllers, so C1b keeps no handle of its own.
 //!
+//! The element hit-tests: a press's `Region` becomes the [`Spot`] (a region C1b doesn't know
+//! is gutter). A file drag starts only from the `Intent::BeginDrag` C1b sends past the
+//! threshold, with the pointer's window point; rows have no drag source (C1e's decision). A
+//! context menu's anchor is a zero-size rect at the press.
+//!
+//! # Hand-off to the marquee (C1d)
+//!
+//! C1b decides when a press becomes a band. On the move that takes a primary press past the
+//! threshold, it emits `Effect::BeginMarquee { at, mods }`, with `at` the press in content
+//! coordinates and `mods` the modifiers held at the press, when the press was on:
+//!
+//! - empty space (a plain one has already cleared the selection, as Strata does at the press);
+//! - blank space beside an entry that wasn't selected (a plain one has already selected that
+//!   entry alone; a Ctrl or Shift one has changed nothing);
+//! - anything, with Alt held.
+//!
+//! The element then calls `MarqueeController::begin(at, mods)` and `moved` with that move's
+//! point, and routes the rest of the gesture to the marquee while it is active. C1b is done
+//! with the gesture: its release never reaches C1b, and C1b's next press starts afresh. How
+//! `mods` maps to a band mode (Ctrl toggles, Shift adds) is C1d's.
+
 //! Work package: C1b, `docs/work/phase-2-composites/C1b-pointer-intent.md`.
 
 #![warn(missing_docs)]
 
+mod adapter;
 mod clicks;
 mod machine;
 mod rename;
@@ -103,8 +127,9 @@ mod settings;
 #[cfg(test)]
 mod tests;
 
+pub use adapter::PointerIntent;
 pub use machine::{ActivateBy, Button, Outcome, PointerMachine, Press, Release, Spot, Surface};
-pub use settings::{ClickCount, ClickModes, PointerHandle, PointerSettings};
+pub use settings::{ClickCount, ClickModes, PointerSettings};
 
 #[cfg(doc)]
 use crate::collection::selection::{Extend, Selection};

@@ -6,6 +6,8 @@ use std::time::Duration;
 use rune::Mods;
 
 use super::*;
+
+mod element;
 use crate::collection::selection::{Changed, Extend, Selection, SyncRule};
 use crate::contract::{EntryId, EntryKind, EntrySource, ListEntry, ListSource, Point};
 
@@ -14,12 +16,17 @@ const INTERVAL: f64 = 0.4;
 
 /// A surface over a plain listing and selection, keeping what the machine emits.
 struct Fake {
+    settings: PointerSettings,
     src: ListSource,
     sel: Selection,
     out: Vec<Outcome>,
 }
 
 impl Surface for Fake {
+    fn settings(&self) -> PointerSettings {
+        self.settings
+    }
+
     fn source(&self) -> &dyn EntrySource {
         &self.src
     }
@@ -44,7 +51,6 @@ impl Surface for Fake {
 struct Rig {
     m: PointerMachine,
     f: Fake,
-    handle: PointerHandle,
     now: f64,
 }
 
@@ -88,15 +94,14 @@ fn modes(files: ClickCount, folders: ClickCount) -> PointerSettings {
 
 impl Rig {
     fn new(settings: PointerSettings) -> Self {
-        let handle = PointerHandle::new(settings);
         Self {
-            m: PointerMachine::new(handle.clone()),
+            m: PointerMachine::new(),
             f: Fake {
+                settings,
                 src: ListSource::new((0..10).map(entry).collect()),
                 sel: Selection::new(),
                 out: Vec::new(),
             },
-            handle,
             now: 0.0,
         }
     }
@@ -541,7 +546,7 @@ fn a_changed_click_count_applies_to_the_next_click() {
     let mut r = Rig::double();
     r.click(1, Spot::Content, PLAIN);
     assert_eq!(r.take(), [Outcome::Clicked { id: id(1) }]);
-    r.handle.update(|s| s.modes.folders = ClickCount::One);
+    r.f.settings.modes.folders = ClickCount::One;
     r.wait(1.0).click(2, Spot::Content, PLAIN);
     assert_eq!(
         r.take(),
@@ -616,7 +621,9 @@ fn a_press_key_or_selection_change_cancels_a_pending_rename() {
             r.to(0.0, 30.0);
         }),
         ("a key", |r| r.m.interrupt()),
-        ("an outside press or key", |r| r.handle.interrupt()),
+        ("a reset: another folder, or a press elsewhere", |r| {
+            r.m.reset()
+        }),
         ("a selection change", |r| {
             r.f.sel
                 .move_cursor(&r.f.src, 5, crate::collection::selection::AnchorRule::Keep);
@@ -719,7 +726,7 @@ fn a_slow_click_on_an_open_folders_name_renames_instead_of_reopening() {
         }),
         "a folder that isn't open opens"
     );
-    r.handle.update(|s| s.already_open = Some(id(1)));
+    r.f.settings.already_open = Some(id(1));
     r.wait(1.0).click(1, Spot::Name, PLAIN);
     r.settle();
     assert_eq!(

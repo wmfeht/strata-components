@@ -43,7 +43,7 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | K3 | ready | | |
 | K4 | ready | | |
 | P0 | fixing round 1 (B1 reader parsed events off the UI thread: use-after-free race; Platform CI on ubuntu-26.04, unverified on GitHub) | owner: S2 Q1 = a (degrade on libwayland 1.22; own-connection data-control route); owner: move Platform CI to libwayland >= 1.23 in P0 (unverified until a push); S2 Q2/Q3 deferred to P1 | |
-| P3 | fixing round 1 (no blockers; taking should-fixes: Outcome honesty, watcher lifetime, Close claim, MOVERESIZE payload) | owner: borderless on Wayland now with NO edge resize until Rune U6, no minimise (U7) or window menu (U8); X11 borderless under Auto via shim (mutter/KWin hand test pending); no in-app resize; corners Cursor::Move; header component folded into X1; Done-when narrowed (deliberate parity regressions recorded) | |
+| P3 | review 2 (round 1 should-fixes done: 582be51) | owner: borderless on Wayland now with NO edge resize until Rune U6, no minimise (U7) or window menu (U8); X11 borderless under Auto via shim (mutter/KWin hand test pending); no in-app resize; corners Cursor::Move; header component folded into X1; Done-when narrowed (deliberate parity regressions recorded) | |
 | P5 | ready | | |
 | P6 | ready | | |
 | P7 | ready | | |

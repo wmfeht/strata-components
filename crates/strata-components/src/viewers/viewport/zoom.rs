@@ -86,7 +86,7 @@ impl ZoomLimits {
         }
     }
 
-    /// The default steps' range: 10 % to 3200 %.
+    /// The range `steps` spans, from its first step to its last.
     pub fn of(steps: &Ladder) -> ZoomLimits {
         ZoomLimits::new(steps.min(), steps.max())
     }

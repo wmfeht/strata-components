@@ -268,8 +268,9 @@ impl<'a, S: 'static> Viewport<'a, S> {
         self
     }
 
-    /// Children over the content, built with where content pixels land. The overlay fills the
-    /// content element, pans with it, and is rebuilt at each level.
+    /// Children over the content, built with where content pixels land. The element `f` returns
+    /// sits in a box the content's size (keyed `<key>-overlay`), pans with the content, and is
+    /// rebuilt at each level. Its children appear under the image to assistive technology.
     pub fn overlay(mut self, f: impl FnOnce(&ContentMap) -> El + 'a) -> Self {
         self.overlay = Some(Box::new(f));
         self
@@ -382,10 +383,11 @@ impl<'a, S: 'static> Viewport<'a, S> {
                 }
                 if let Some(overlay) = overlay {
                     body = body.child(
-                        overlay(&map)
-                            .key(format!("{key}-overlay"))
+                        el().key(format!("{key}-overlay"))
+                            .role("presentation")
                             .pin(Some(0.0), Some(0.0), None, None)
-                            .size(drawn[0], drawn[1]),
+                            .size(drawn[0], drawn[1])
+                            .child(overlay(&map)),
                     );
                 }
                 frame = frame.child(body);

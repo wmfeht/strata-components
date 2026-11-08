@@ -15,8 +15,8 @@ rename, if any, happens before the first release tag.
 
 ## Features
 
-None is on by default. `glib-bridge` is implemented; the other modules are placeholders until
-their work packages land. "Issue" is the upstream ask, drafted in
+None is on by default. `glib-bridge` and `csd` are implemented; the other modules are placeholders
+until their work packages land. "Issue" is the upstream ask, drafted in
 [`docs/decisions/S5-upstream.md`](../../docs/decisions/S5-upstream.md#draft-index), with its link
 once filed.
 
@@ -24,7 +24,7 @@ once filed.
 | --- | --- | --- | --- |
 | `dnd` | `dnd` | System drag and drop: `drag_out` is macOS-only, and Wayland drops reach no handler. Neither takes MIME types beyond file paths. | [U1](../../docs/decisions/S5-upstream.md#u1), [U2](../../docs/decisions/S5-upstream.md#u2), [U9](../../docs/decisions/S5-upstream.md#u9), [U10](../../docs/decisions/S5-upstream.md#u10); upstream [#171](https://github.com/anomalyco/rune/issues/171) |
 | `clipboard` | `clipboard` | Custom MIME types, several forms in one write, typed reads, and a notice when another app takes the clipboard | [U5](../../docs/decisions/S5-upstream.md#u5), [U9](../../docs/decisions/S5-upstream.md#u9) |
-| `csd` | `csd` | Interactive resize, minimise and the window menu for a borderless window | [U6](../../docs/decisions/S5-upstream.md#u6), [U7](../../docs/decisions/S5-upstream.md#u7), [U8](../../docs/decisions/S5-upstream.md#u8), [U9](../../docs/decisions/S5-upstream.md#u9); upstream [#145](https://github.com/anomalyco/rune/issues/145) |
+| `csd` | `csd` | Interactive resize, minimise and the window menu for a borderless window, and its maximised state. Implemented: borderless windows on Wayland and X11, a header that moves the window, and window buttons routed to Rune or the window manager. X11 resizes from the edges and has minimise and the window menu through its own connection (mutter and KWin untested). Wayland has no edge resize, minimise or window menu until Rune ships them. | [U6](../../docs/decisions/S5-upstream.md#u6), [U7](../../docs/decisions/S5-upstream.md#u7), [U8](../../docs/decisions/S5-upstream.md#u8), [U9](../../docs/decisions/S5-upstream.md#u9); upstream [#145](https://github.com/anomalyco/rune/issues/145) |
 | `foreign-parent` | `foreign_parent` | Making a window transient for another app's window | [U11](../../docs/decisions/S5-upstream.md#u11), [U9](../../docs/decisions/S5-upstream.md#u9) |
 | `settings` | `settings` | Settings portal keys beyond `color-scheme`, and the desktop's double-click interval | [U12](../../docs/decisions/S5-upstream.md#u12), [U13](../../docs/decisions/S5-upstream.md#u13) |
 | `icon-theme` | `icon_theme` | Freedesktop icon theme lookup | None proposed |

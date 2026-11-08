@@ -29,7 +29,8 @@ Nothing is released yet. The first release is planned for milestone M1 with the 
 
 - One cargo feature per shim, each gating its own module: `dnd`, `clipboard`, `csd`,
   `foreign-parent`, `settings`, `icon-theme`, `media-audio`, `single-instance` and `glib-bridge`.
-  Apart from `glib-bridge`, the modules are placeholders until their work packages land.
+  Apart from `glib-bridge` and `csd`, the modules are placeholders until their work packages
+  land.
 - `glib-bridge`: a GLib main loop for Rune apps. `GlibThread::start` runs a fresh `MainContext`
   on its own thread and wakes the app's `poll` as answers land in its state.
   - `Glib::spawn` runs a GIO future there, and its output lands in a `Task`.
@@ -41,3 +42,17 @@ Nothing is released yet. The first release is planned for milestone M1 with the 
     them on its own thread.
 
   It needs GLib and GIO; building it needs `libglib2.0-dev` or your distribution's equivalent.
+- `csd`: client-side decorations. `Policy::Auto` opens a borderless window on Wayland and X11;
+  `Policy::Native` keeps the native frame. The app keeps a `Csd` in its state.
+  - `csd::header` makes the app's header move the window and maximise it on a double press, and
+    opens the window menu where the window manager has one.
+  - `csd::decorate` adds resize bands over the window's edges where they can work.
+  - `Csd::close`, `Csd::minimize` and `Csd::toggle_maximized` are the window buttons' handlers.
+    Each request answers an `Outcome`, naming the Rune issue draft behind a gap.
+  - `csd::attach`, from `App::on_window`, links the window. On X11 it opens its own connection
+    for `_NET_WM_MOVERESIZE`, `WM_CHANGE_STATE` and `_GTK_SHOW_WINDOW_MENU`, and watches the
+    window's maximised and full-screen state and the window manager's capabilities.
+
+  On Wayland a borderless window has no edge resize, minimise or window menu until Rune ships
+  them (drafts U6, U7 and U8). On X11, resizing may fail where the window manager grabs the
+  pointer itself (mutter and KWin are untested). It uses `x11rb`.

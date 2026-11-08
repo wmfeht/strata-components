@@ -28,7 +28,7 @@ dnd = ["_transfer"]
 clipboard = ["_transfer"]
 
 # P3 client-side decorations: src/csd/
-csd = []
+csd = ["dep:x11rb"]
 
 # P4 foreign parenting: src/foreign_parent/
 foreign-parent = ["_transfer"]
@@ -64,6 +64,7 @@ rune.workspace = true
 # clipboard (P2)
 
 # csd (P3)
+x11rb = { workspace = true, optional = true }
 
 # foreign-parent (P4)
 

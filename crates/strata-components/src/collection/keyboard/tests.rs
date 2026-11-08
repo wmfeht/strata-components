@@ -4,15 +4,17 @@
 
 use std::time::Duration;
 
-use rune::{Chord, ChordKey, Key, KeyEvent, KeyPlatform, Mods, PhysicalKeyCode};
+use rune::{Chord, ChordKey, Key, KeyEvent, Mods};
 
 use super::*;
+use crate::collection::element::KeyInput;
 use crate::collection::selection::{Changed, Selection};
 use crate::contract::{
     CollectionGeometry, Direction, EntryId, EntryKind, EntrySource, ListEntry, ListSource,
     UniformRows,
 };
 
+mod adapter;
 mod grid;
 
 use grid::Grid;
@@ -23,11 +25,16 @@ const ROW: f32 = 20.0;
 struct Fake {
     src: ListSource,
     geo: Box<dyn CollectionGeometry>,
+    settings: KeySettings,
     sel: Selection,
     out: Vec<Outcome>,
 }
 
 impl Surface for Fake {
+    fn settings(&self) -> &KeySettings {
+        &self.settings
+    }
+
     fn source(&self) -> &dyn EntrySource {
         &self.src
     }
@@ -74,19 +81,15 @@ fn source(names: &[&str]) -> ListSource {
     )
 }
 
-fn settings(mut s: KeySettings) -> KeySettings {
-    s.platform = KeyPlatform::Linux;
-    s
-}
-
 impl Rig {
     fn new(src: ListSource, geo: Box<dyn CollectionGeometry>, s: KeySettings) -> Self {
-        let handle = KeyHandle::new(settings(s));
+        let handle = KeyHandle::new();
         Self {
             m: KeyMachine::new(handle.clone()),
             f: Fake {
                 src,
                 geo,
+                settings: s,
                 sel: Selection::new(),
                 out: Vec::new(),
             },
@@ -135,21 +138,11 @@ impl Rig {
         self.f.geo.page_step()
     }
 
-    fn send(
-        &mut self,
-        event: KeyEvent,
-        physical: Option<PhysicalKeyCode>,
-        base: Option<char>,
-    ) -> bool {
-        let mut press = KeyPress::new(&event);
-        press.physical = physical;
-        press.base = base;
-        press.now = self.now;
-        self.m.key(&press, &mut self.f)
-    }
-
     fn press(&mut self, key: Key, mods: Mods) -> bool {
-        self.send(KeyEvent { key, mods }, None, None)
+        let event = KeyEvent { key, mods };
+        let mut input = KeyInput::new(&event);
+        input.now = self.now;
+        self.m.key(&input, &mut self.f)
     }
 
     fn key(&mut self, key: Key) -> bool {
@@ -742,50 +735,12 @@ fn a_repeated_key_counts_as_a_press() {
         key: Key::Down,
         mods: Mods::default(),
     };
-    let mut press = KeyPress::new(&down);
-    press.repeat = true;
+    let mut input = KeyInput::new(&down);
+    input.repeat = true;
     for _ in 0..3 {
-        assert!(r.m.key(&press, &mut r.f));
+        assert!(r.m.key(&input, &mut r.f));
     }
     assert_eq!(r.cursor(), Some(3));
-}
-
-#[test]
-fn letters_follow_the_layout_and_fall_back_to_the_us_key() {
-    // C1c scope: keys match by layout-aware chords, so `h j k l` follow Strata's layout rules.
-    let s = arrows();
-    let mut r = Rig::list_with(6, s);
-    r.click(2);
-    // Dvorak: the key that types `j` sits where US has `c`. The label wins.
-    let j = KeyEvent {
-        key: Key::Text("j".into()),
-        mods: Mods::default(),
-    };
-    assert!(r.send(j, Some(PhysicalKeyCode::KeyC), Some('j')));
-    assert_eq!(r.cursor(), Some(3));
-    // Russian: `о` types nothing ASCII, so the US key in its place (J) stands in.
-    let o = KeyEvent {
-        key: Key::Text("о".into()),
-        mods: Mods::default(),
-    };
-    assert!(r.send(o, Some(PhysicalKeyCode::KeyJ), Some('о')));
-    assert_eq!(r.cursor(), Some(4));
-    // A non-ASCII key with no physical key and no ASCII base matches nothing.
-    let o = KeyEvent {
-        key: Key::Text("о".into()),
-        mods: Mods::default(),
-    };
-    assert!(!r.send(o, None, Some('о')));
-
-    // 10xer Shift+G (last) on a Russian layout: Shift with the key that types `п`.
-    let mut t = Rig::tenxer(6);
-    t.click(1);
-    let g = KeyEvent {
-        key: Key::Text("П".into()),
-        mods: SHIFT,
-    };
-    assert!(t.send(g, Some(PhysicalKeyCode::KeyG), Some('п')));
-    assert_eq!(t.cursor(), Some(5));
 }
 
 #[test]

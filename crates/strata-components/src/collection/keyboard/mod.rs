@@ -5,7 +5,8 @@
 //! reached the collection's edge, nothing to select. Every move goes through
 //! [`CollectionGeometry::neighbor`] and [`CollectionGeometry::page_step`], so the list, the icons
 //! grid and each Columns column behave the same. It is plain data with no Rune elements, driven
-//! through a [`Surface`]; the collection element (C1e) feeds it through its keyboard seam. It
+//! through a [`Surface`]; [`Keyboard`] puts it on the collection element's keyboard seam (C1e).
+//! It
 //! follows Strata at `upstream/main` 35ee677ab: `src/app/navigation/cursor.rs` and `visual.rs`,
 //! `src/ui/browser/view_selection.rs`, `src/ui/window/key_routing.rs`,
 //! `src/ui/window/keyboard/items/tenxer_cursor.rs`, and the tables in `src/ui/keys/bindings/`.
@@ -86,7 +87,7 @@
 //! whose name starts with what was typed, case-insensitively, wrapping past the end, and
 //! selects it. A character within [`KeySettings::type_ahead_timeout`] of the last extends the
 //! prefix; the same letter again steps to the next entry starting with it. Space joins an open
-//! prefix only. Time is the key's own clock ([`KeyPress::now`]), so tests run on a virtual
+//! prefix only. Time is the key's own clock (`KeyInput::now`), so tests run on a virtual
 //! clock and no timer is needed.
 //!
 //! **Strata has no counterpart.** Its plain letters start type-to-search, which opens the
@@ -96,11 +97,24 @@
 //!
 //! # Layouts
 //!
-//! Keys match by `rune::Chord`, so a letter follows the key's label under the active layout,
-//! and a key that types a non-Latin character falls back to the US key in its place. Rune's
-//! layout matching needs a `Tx` the machine doesn't have: the `chord` module is a workaround,
-//! with draft U-C1c-1 and the deviation from Strata's fallback order in its docs.
+//! Keys match with C1e's `KeyInput::matches`, which is Rune's `Chord::matches_tx_on` over the
+//! key's own transaction: a letter follows the key's label under the active layout (Dvorak's
+//! `j` is the key labelled J), and a key that types a non-Latin character (Cyrillic, Greek)
+//! falls back to the character its key types unmodified, else the US key in its place. So
+//! `h j k l` and Ctrl+A follow Strata's layout rules (`docs/keyboard-shortcuts.md`).
 //!
+//! **Deviation from Strata:** Strata first tries the Latin character the same key types in
+//! another configured layout, and uses US-QWERTY only when no configured layout has one. Rune
+//! can't list the configured layouts, so the US fallback applies at once.
+//!
+//! Unit tests build a `KeyInput` with no transaction, where Rune reads the event alone, so the
+//! layout fallback is checked by a headless script (`tests/scripts/c1/keyboard-layout.json`)
+//! rather than by a copy of Rune's matcher here. Rune draft U-C1c-1 asks for a way to do it in
+//! process: a public `Chord::matches_with(event, base, physical, platform)` (private at the
+//! pinned rev, `crates/rune/src/input/chord.rs`), or a public `Runtime::physical_key_input`
+//! (`pub(crate)`, `crates/rune/src/runtime/input/physical.rs`). Without either, a layout case
+//! the gallery page can't reach (10xer's `о` and `л` as `j` and `k`) has no test.
+
 //! # Decisions
 //!
 //! - **Return with no cursor** selects the first entry and opens it (Strata's grouped-List
@@ -114,17 +128,21 @@
 //! - **Ctrl+A in an empty collection** emits [`Outcome::NothingToSelect`] in both maps; the
 //!   default map's host ignores it.
 //!
-//! # The shared handle
+//! # Settings and the shared handle
 //!
-//! The settings live in a [`KeyHandle`] the machine and the host share, as C1b's pointer
-//! settings do, because the element keeps its controllers boxed where no accessor reaches. This
-//! is a recorded deviation from the accessor rule.
-//!
+//! [`KeySettings`] reach the machine the one way C1e gives controllers settings: the host
+//! passes them with `Collection::settings`, current each time it builds the view, and the
+//! machine reads them with `Ctx::settings` (the defaults when the host passed none). What the
+//! host must reach between builds, the 10xer range and commands that start outside the
+//! collection, lives in a [`KeyHandle`] the machine and the host share, because the element
+//! keeps its controllers boxed where no accessor reaches. That handle is a recorded deviation
+//! from the accessor rule; C1e's `KeyController::tick` names it as the way to queue commands.
+
 //! Work package: C1c, `docs/work/phase-2-composites/C1c-keyboard-navigation.md`.
 
 #![warn(missing_docs)]
 
-mod chord;
+mod adapter;
 mod command;
 mod keymap;
 mod machine;
@@ -134,9 +152,10 @@ mod type_ahead;
 #[cfg(test)]
 mod tests;
 
+pub use adapter::{Keyboard, NothingToSelect};
 pub use command::{Command, RangeKind, Target, Vertical};
 pub use keymap::KeyMap;
-pub use machine::{KeyMachine, KeyPress, Outcome, Surface};
+pub use machine::{KeyMachine, Outcome, Surface};
 pub use settings::{KeyHandle, KeySettings, Letters};
 
 #[cfg(doc)]

@@ -1,11 +1,10 @@
 //! The key map: which chords run which [`Command`]s, and which keys stand in for the arrows.
 
-use rune::{Chord, ChordKey, ChordMod, KeyPlatform};
+use rune::{Chord, ChordKey, ChordMod};
 
-use super::chord;
 use super::command::{Command, RangeKind, Target, Vertical};
-use super::machine::KeyPress;
 use super::settings::Letters;
+use crate::collection::element::KeyInput;
 use crate::contract::Direction;
 
 /// Which chords run which commands, and which other keys act as an arrow.
@@ -16,7 +15,10 @@ use crate::contract::Direction;
 /// [`KeyMap::alias`]. Checking a binding against the rest of the table (Strata's refused and
 /// noted keys) is the host's.
 ///
-/// Modifiers match exactly, as Strata's do: Ctrl+Shift+Up is not Ctrl+Up, so it doesn't jump.
+/// Keys match with [`KeyInput::matches`]: Rune's layout-aware chords, so a letter follows the
+/// key's label under the active layout and a key that types a non-Latin character falls back
+/// to the US key in its place. Modifiers match exactly, as Strata's do: Ctrl+Shift+Up is not
+/// Ctrl+Up, so it doesn't jump.
 /// Bindings apply whatever [`Letters`] says. An alias stands in for an arrow, as `h j k l` do
 /// in the default map; one on a plain printable key (no Ctrl, Alt or Super) applies only with
 /// [`Letters::Arrows`], and only without modifiers, so Shift+J doesn't extend.
@@ -168,14 +170,9 @@ impl KeyMap {
         &self.bindings
     }
 
-    /// The command `press` runs.
-    pub(super) fn lookup(
-        &self,
-        press: &KeyPress<'_>,
-        letters: Letters,
-        platform: KeyPlatform,
-    ) -> Option<Command> {
-        let hit = |c: &Chord| chord::matches(c, press, platform);
+    /// The command `input` runs.
+    pub(super) fn lookup(&self, input: &KeyInput<'_>, letters: Letters) -> Option<Command> {
+        let hit = |c: &Chord| input.matches(c);
         if let Some((_, command)) = self.bindings.iter().find(|(c, _)| hit(c)) {
             return Some(*command);
         }

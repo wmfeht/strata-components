@@ -1,12 +1,11 @@
-//! What the keyboard machine reads on every key, shared live with the host through a
-//! [`KeyHandle`], with the 10xer range state and the commands the host queues.
+//! What the keyboard machine reads on every key ([`KeySettings`], which the host passes as a
+//! collection setting), and the [`KeyHandle`] it shares with the host: the 10xer range state
+//! and the commands the host queues.
 
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::rc::Rc;
 use std::time::Duration;
-
-use rune::KeyPlatform;
 
 use super::command::{Command, RangeKind};
 use super::keymap::KeyMap;
@@ -27,7 +26,9 @@ pub enum Letters {
     TypeAhead,
 }
 
-/// The keyboard machine's settings.
+/// The keyboard machine's settings. The host passes them as a collection setting,
+/// `Collection::settings(settings)`, with its current values each time it builds the view, and
+/// the machine reads them with `Ctx::settings`; with none, it uses [`KeySettings::default`].
 ///
 /// Fields may be added: start from [`KeySettings::default`] or [`KeySettings::tenxer`].
 ///
@@ -47,9 +48,6 @@ pub struct KeySettings {
     /// (lgse/strata#2044); W1's geometries never wrap themselves. Off for lists and columns,
     /// where Left and Right then reach the view's edge.
     pub wrap_rows: bool,
-    /// The platform whose chord conventions keys match by. The current one by default; tests
-    /// pin it.
-    pub platform: KeyPlatform,
 }
 
 impl Default for KeySettings {
@@ -60,7 +58,6 @@ impl Default for KeySettings {
             letters: Letters::Pass,
             type_ahead_timeout: Duration::from_secs(1),
             wrap_rows: false,
-            platform: KeyPlatform::current(),
         }
     }
 }
@@ -74,56 +71,42 @@ impl KeySettings {
             ..Self::default()
         }
     }
+
+    /// The same settings with `letters`.
+    pub fn letters(mut self, letters: Letters) -> Self {
+        self.letters = letters;
+        self
+    }
+
+    /// The same settings, wrapping Left and Right at row ends or not.
+    pub fn wrap_rows(mut self, wrap: bool) -> Self {
+        self.wrap_rows = wrap;
+        self
+    }
 }
 
 #[derive(Debug, Default)]
 struct Shared {
-    settings: RefCell<KeySettings>,
     range: Cell<Option<RangeKind>>,
     queue: RefCell<VecDeque<Command>>,
 }
 
-/// The settings one keyboard machine reads, its 10xer range, and commands for it to run,
-/// shared with the host.
+/// One keyboard machine's 10xer range, and commands for it to run, shared with the host.
 ///
-/// Clones share one value. Components take state by accessor, but the element keeps its
-/// controllers boxed in its `CollectionState` (C1e's seam), where no accessor reaches; so, as
-/// C1b's `PointerHandle` does, the host keeps a clone, changes the settings through it (the
-/// 10xer switch, Type to search, a rebinding), reads the range for the footer, and queues
-/// commands that start outside the collection. This is a recorded deviation from the accessor
-/// rule.
+/// Clones share one value. The element keeps its controllers boxed in its `CollectionState`,
+/// where the host can't reach them, so the host keeps a clone: it reads the range for the
+/// footer, ends it from its Escape ladder, and queues commands that start outside the
+/// collection, which run at the collection's next `tick` (C1e's `KeyController::tick`).
+/// Settings don't live here: they come through `Ctx::settings`.
 ///
 /// Used by: C2, C3, C4, C18, and hosts.
 #[derive(Clone, Debug, Default)]
 pub struct KeyHandle(Rc<Shared>);
 
 impl KeyHandle {
-    /// A handle holding `settings`.
-    pub fn new(settings: KeySettings) -> Self {
-        Self(Rc::new(Shared {
-            settings: RefCell::new(settings),
-            ..Shared::default()
-        }))
-    }
-
-    /// The settings now.
-    pub fn get(&self) -> KeySettings {
-        self.0.settings.borrow().clone()
-    }
-
-    /// Replaces the settings.
-    pub fn set(&self, settings: KeySettings) {
-        *self.0.settings.borrow_mut() = settings;
-    }
-
-    /// Changes the settings in place: `handle.update(|s| s.letters = Letters::Arrows)`.
-    pub fn update(&self, f: impl FnOnce(&mut KeySettings)) {
-        f(&mut self.0.settings.borrow_mut());
-    }
-
-    /// Reads the settings without copying them.
-    pub(super) fn with<R>(&self, f: impl FnOnce(&KeySettings) -> R) -> R {
-        f(&self.0.settings.borrow())
+    /// A handle with no range and nothing queued.
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// The active 10xer range, for the `VISUAL` and `UNSET` footer (C18) and Columns' mirroring

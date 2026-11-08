@@ -207,7 +207,9 @@ fn install(controllers: &mut Controllers) {
         strata_components::collection::pointer::PointerIntent::new(),
     ));
 
-    // C1c: controllers.keyboard = Some(Box::new(…));
+    // C1c: the default map; the page passes no KeySettings, so letters go on to the page.
+    controllers.keyboard =
+        Some(Box::<strata_components::collection::keyboard::Keyboard>::default());
 
     // C1d: controllers.marquee = Some(Box::new(…));
 }

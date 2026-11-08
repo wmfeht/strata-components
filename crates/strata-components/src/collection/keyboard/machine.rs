@@ -1,48 +1,14 @@
 //! The keyboard state machine: keys in, selection operations and [`Outcome`]s out. Plain data,
 //! no Rune elements.
 
-use rune::{Key, KeyEvent, PhysicalKeyCode};
+use rune::{Key, KeyEvent};
 
 use super::command::{Command, RangeKind, Target, Vertical};
-use super::settings::{KeyHandle, Letters};
+use super::settings::{KeyHandle, KeySettings, Letters};
 use super::type_ahead::TypeAhead;
+use crate::collection::element::KeyInput;
 use crate::collection::selection::{AnchorRule, Changed, Extend, Selection};
 use crate::contract::{CollectionGeometry, Direction, EntryId, EntrySource};
-
-/// One key the focused collection heard, as data.
-///
-/// Fields may be added: build one with [`KeyPress::new`].
-///
-/// Used by: the C1e adapter, tests.
-#[derive(Clone, Copy, Debug)]
-#[non_exhaustive]
-pub struct KeyPress<'a> {
-    /// The key and its modifiers, as Rune reports them.
-    pub event: &'a KeyEvent,
-    /// The physical key behind it (`tx.physical_key()`).
-    pub physical: Option<PhysicalKeyCode>,
-    /// The character the key types with no modifiers under the current layout
-    /// (`tx.key_base()`).
-    pub base: Option<char>,
-    /// Whether the key is repeating. A repeat counts as a press (see the module docs).
-    pub repeat: bool,
-    /// The host's clock, in seconds.
-    pub now: f64,
-}
-
-impl<'a> KeyPress<'a> {
-    /// `event` with no physical key or base, not repeating, at time 0. Set the other fields
-    /// after.
-    pub fn new(event: &'a KeyEvent) -> Self {
-        Self {
-            event,
-            physical: None,
-            base: None,
-            repeat: false,
-            now: 0.0,
-        }
-    }
-}
 
 /// What the machine asks for besides selection changes. What each means is the host's policy.
 ///
@@ -68,11 +34,15 @@ pub enum Outcome {
     NothingToSelect,
 }
 
-/// What the machine reads and changes: the source, its geometry, the selection, and where its
-/// outcomes go. C1e's `Ctx` is one; tests use a plain one.
+/// What the machine reads and changes: the source, its geometry, its settings, the selection,
+/// and where its outcomes go. The adapter ([`Keyboard`](super::Keyboard)) makes one of C1e's
+/// `Ctx`; tests use a plain one.
 ///
-/// Used by: the C1e adapter.
+/// Used by: the adapter, and views that drive the machine themselves.
 pub trait Surface {
+    /// The settings: the host's collection setting, else the defaults.
+    fn settings(&self) -> &KeySettings;
+
     /// The entries, in display order.
     fn source(&self) -> &dyn EntrySource;
 
@@ -104,7 +74,7 @@ enum Landing {
 /// queued commands on its [`KeyHandle`]. It changes the selection through the [`Surface`] and
 /// emits [`Outcome`]s for the rest. The [module docs](super) give the rules.
 ///
-/// Used by: the C1e adapter.
+/// Used by: the adapter ([`Keyboard`](super::Keyboard)).
 #[derive(Debug)]
 pub struct KeyMachine {
     handle: KeyHandle,
@@ -115,8 +85,15 @@ pub struct KeyMachine {
     range_revision: u64,
 }
 
+impl Default for KeyMachine {
+    /// A machine with a handle of its own.
+    fn default() -> Self {
+        Self::new(KeyHandle::new())
+    }
+}
+
 impl KeyMachine {
-    /// A machine reading `handle` on every key.
+    /// A machine sharing `handle` with the host.
     pub fn new(handle: KeyHandle) -> Self {
         Self {
             handle,
@@ -131,16 +108,10 @@ impl KeyMachine {
     }
 
     /// Handles one key. True when the machine took it; false lets the page and Rune hear it.
-    pub fn key(&mut self, press: &KeyPress<'_>, s: &mut dyn Surface) -> bool {
-        let (command, letters, timeout) = self.handle.with(|settings| {
-            (
-                settings
-                    .map
-                    .lookup(press, settings.letters, settings.platform),
-                settings.letters,
-                settings.type_ahead_timeout,
-            )
-        });
+    pub fn key(&mut self, input: &KeyInput<'_>, s: &mut dyn Surface) -> bool {
+        let settings = s.settings();
+        let command = settings.map.lookup(input, settings.letters);
+        let (letters, timeout) = (settings.letters, settings.type_ahead_timeout);
         if let Some(command) = command {
             self.type_ahead.reset();
             return self.run(command, s);
@@ -148,21 +119,35 @@ impl KeyMachine {
         if letters != Letters::TypeAhead {
             return false;
         }
-        let Some(c) = printable(press.event) else {
+        let Some(c) = printable(input.event) else {
             return false;
         };
-        if c == ' ' && !self.type_ahead.open(press.now, timeout) {
+        if c == ' ' && !self.type_ahead.open(input.now, timeout) {
             return false;
         }
         let cursor = s.selection().cursor_index(s.source());
         if let Some(i) = self
             .type_ahead
-            .push(c, press.now, timeout, s.source(), cursor)
+            .push(c, input.now, timeout, s.source(), cursor)
         {
             op(s, |sel, src| sel.select_only(src, i));
             s.emit(Outcome::Reveal(i));
         }
         true
+    }
+
+    /// A pointer press on the collection: it ends a 10xer range, as a click does in Strata.
+    /// (The selection's revision catches the click too, at the next key; this ends the range
+    /// at once, so the footer is right.)
+    pub fn pressed(&mut self) {
+        self.handle.set_range(None);
+    }
+
+    /// Drops what is in progress: the type-ahead prefix and a 10xer range. The collection shows
+    /// another folder.
+    pub fn reset(&mut self) {
+        self.type_ahead.reset();
+        self.handle.set_range(None);
     }
 
     /// Runs the commands the host queued on the handle ([`KeyHandle::run`]). True when one
@@ -355,7 +340,7 @@ impl KeyMachine {
                 if let Some(next) = s.geometry().neighbor(i, d) {
                     return Landing::At(next);
                 }
-                let wrap = self.handle.with(|settings| settings.wrap_rows);
+                let wrap = s.settings().wrap_rows;
                 match d {
                     Direction::Left if wrap && i > 0 => Landing::At(i - 1),
                     Direction::Right if wrap && i < last => Landing::At(i + 1),

@@ -4,6 +4,8 @@ use std::rc::Rc;
 
 use super::machine::{KeyMachine, Outcome, Surface};
 use super::settings::{KeyHandle, KeySettings};
+use rune::PointerButton;
+
 use crate::collection::element::{
     Activation, Ctx, Effect, Flow, Intent, KeyController, KeyInput, PointerInput, PointerPhase,
 };
@@ -34,12 +36,18 @@ pub struct NothingToSelect;
 /// | [`Outcome::Activate`] | `Intent::Activate` with `Activation::Key` |
 /// | [`Outcome::Edge`] | `Intent::Edge` |
 /// | [`Outcome::NothingToSelect`] | `Intent::Other` holding [`NothingToSelect`] |
+/// | [`Outcome::Keyboard`] | `Effect::KeyboardMode(true)` |
 ///
-/// A key that moves the cursor turns keyboard mode on in the element itself. A queued command
-/// that moves it (from [`KeyHandle::run`], at `tick`) emits `Effect::KeyboardMode(true)`, once
-/// per tick, and only when the cursor moved: a moved cursor commits the view anyway, so the
-/// mode costs no extra commit. A pointer press ends a 10xer range (`pointer_seen`); a folder
-/// change (`reset`) drops the range and the type-ahead prefix.
+/// A key that moves the cursor turns keyboard mode on in the element itself. Ctrl+A and
+/// Escape, which move none, say so with [`Outcome::Keyboard`], and a queued command that moves
+/// the cursor (from [`KeyHandle::run`], at `tick`) does too. The adapter sends at most one
+/// `KeyboardMode` an input, and only with a selection change or a cursor move, which commit
+/// the view anyway, so the mode costs no extra commit. A primary press ends a 10xer range
+/// (`pointer_seen`); a folder change (`reset`) drops the range, the type-ahead prefix and any
+/// queued commands.
+///
+/// **Type-ahead needs the collection's clock** (`Collection::clock`): its timeout compares the
+/// keys' times, and without a clock every key comes at 0, so a prefix never times out.
 ///
 /// Used by: hosts, C2, C3, C4.
 #[derive(Debug, Default)]
@@ -69,6 +77,7 @@ impl KeyController for Keyboard {
         let mut s = CtxSurface {
             cx,
             defaults: &self.defaults,
+            mode_sent: false,
         };
         if self.machine.key(input, &mut s) {
             Flow::Handled
@@ -82,18 +91,19 @@ impl KeyController for Keyboard {
         let mut s = CtxSurface {
             cx: &mut *cx,
             defaults: &self.defaults,
+            mode_sent: false,
         };
         if !self.machine.tick(&mut s) {
             return Flow::Pass;
         }
-        if cx.selection().cursor() != before {
-            cx.emit(Effect::KeyboardMode(true));
+        if s.cx.selection().cursor() != before {
+            s.keyboard_mode();
         }
         Flow::Handled
     }
 
     fn pointer_seen(&mut self, input: &PointerInput) {
-        if input.phase == PointerPhase::Down {
+        if input.phase == PointerPhase::Down && input.button == PointerButton::Primary {
             self.machine.pressed();
         }
     }
@@ -107,6 +117,17 @@ impl KeyController for Keyboard {
 struct CtxSurface<'c, 'a> {
     cx: &'c mut Ctx<'a>,
     defaults: &'c KeySettings,
+    /// Whether this input already sent `KeyboardMode(true)`.
+    mode_sent: bool,
+}
+
+impl CtxSurface<'_, '_> {
+    fn keyboard_mode(&mut self) {
+        if !self.mode_sent {
+            self.mode_sent = true;
+            self.cx.emit(Effect::KeyboardMode(true));
+        }
+    }
 }
 
 impl Surface for CtxSurface<'_, '_> {
@@ -142,6 +163,7 @@ impl Surface for CtxSurface<'_, '_> {
             }),
             Outcome::Edge(d) => Effect::Intent(Intent::Edge(d)),
             Outcome::NothingToSelect => Effect::Intent(Intent::Other(Rc::new(NothingToSelect))),
+            Outcome::Keyboard => return self.keyboard_mode(),
         };
         self.cx.emit(effect);
     }

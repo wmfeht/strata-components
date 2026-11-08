@@ -28,8 +28,12 @@ pub enum Outcome {
     /// The cursor can't move this way inside the collection. The host decides: the sidebar or
     /// the pane header (unless Keep arrows in file list is on), the next Columns column (C2),
     /// the parent folder or the folder under the cursor (10xer List and Columns), or nothing
-    /// (List's Right).
+    /// (List's Right). While a key repeats, an edge is reported once on arrival, not at every
+    /// repeat; a new press reports it again.
     Edge(Direction),
+    /// The key was keyboard navigation that moved no cursor (Ctrl+A, Escape): the cursor
+    /// outline shows, as Strata's `keyboard_navigation` turns it on.
+    Keyboard,
     /// A 10xer selection key in an empty folder: the host flashes `Nothing to select` (C18).
     NothingToSelect,
 }
@@ -83,6 +87,10 @@ pub struct KeyMachine {
     /// different revision means something else (a click) changed the selection, which ends
     /// the range, as a pointer change ends one in Strata.
     range_revision: u64,
+    /// Whether the key being handled is a repeat.
+    repeating: bool,
+    /// The edge the last command reported, and the cursor it was reported at.
+    last_edge: Option<(Direction, Option<EntryId>)>,
 }
 
 impl Default for KeyMachine {
@@ -99,6 +107,8 @@ impl KeyMachine {
             handle,
             type_ahead: TypeAhead::default(),
             range_revision: 0,
+            repeating: false,
+            last_edge: None,
         }
     }
 
@@ -114,7 +124,10 @@ impl KeyMachine {
         let (letters, timeout) = (settings.letters, settings.type_ahead_timeout);
         if let Some(command) = command {
             self.type_ahead.reset();
-            return self.run(command, s);
+            self.repeating = input.repeat;
+            let taken = self.run(command, s);
+            self.repeating = false;
+            return taken;
         }
         if letters != Letters::TypeAhead {
             return false;
@@ -136,18 +149,20 @@ impl KeyMachine {
         true
     }
 
-    /// A pointer press on the collection: it ends a 10xer range, as a click does in Strata.
-    /// (The selection's revision catches the click too, at the next key; this ends the range
-    /// at once, so the footer is right.)
+    /// A primary press on the collection: it ends a 10xer range, as a click does in Strata, at
+    /// once, so the footer is right. (Any other change to the selection the machine didn't
+    /// make ends the range at its next key, by the selection's revision.)
     pub fn pressed(&mut self) {
         self.handle.set_range(None);
     }
 
-    /// Drops what is in progress: the type-ahead prefix and a 10xer range. The collection shows
-    /// another folder.
+    /// Drops what is in progress: the type-ahead prefix, a 10xer range, and commands still
+    /// queued on the handle. The collection shows another folder.
     pub fn reset(&mut self) {
         self.type_ahead.reset();
         self.handle.set_range(None);
+        while self.handle.next().is_some() {}
+        self.last_edge = None;
     }
 
     /// Runs the commands the host queued on the handle ([`KeyHandle::run`]). True when one
@@ -168,12 +183,42 @@ impl KeyMachine {
         if !keeps_range(command) {
             self.handle.set_range(None);
         }
-        let taken = self.dispatch(command, s);
+        let edge_before = self.last_edge.take();
+        let taken = self.dispatch(command, edge_before, s);
         self.range_revision = s.selection().revision();
         taken
     }
 
-    fn dispatch(&mut self, command: Command, s: &mut dyn Surface) -> bool {
+    /// Reports `d` as an edge, unless the key is a repeat that reached the same edge at the
+    /// same cursor last time.
+    fn edge(
+        &mut self,
+        d: Direction,
+        before: Option<(Direction, Option<EntryId>)>,
+        s: &mut dyn Surface,
+    ) {
+        let at = (d, s.selection().cursor());
+        if !(self.repeating && before == Some(at)) {
+            s.emit(Outcome::Edge(d));
+        }
+        self.last_edge = Some(at);
+    }
+
+    /// Moves the cursor to `i`, keeping the selection, or walks an active 10xer range there.
+    fn cursor_to(&self, i: usize, s: &mut dyn Surface) {
+        match self.handle.range() {
+            Some(kind) => op(s, |sel, src| sel.extend_to(src, i, kind.extend())),
+            None => op(s, |sel, src| sel.move_cursor(src, i, AnchorRule::Keep)),
+        };
+        s.emit(Outcome::Reveal(i));
+    }
+
+    fn dispatch(
+        &mut self,
+        command: Command,
+        edge_before: Option<(Direction, Option<EntryId>)>,
+        s: &mut dyn Surface,
+    ) -> bool {
         let len = s.source().len();
         match command {
             Command::Select(target) => {
@@ -182,26 +227,23 @@ impl KeyMachine {
                         op(s, |sel, src| sel.select_only(src, i));
                         s.emit(Outcome::Reveal(i));
                     }
-                    Landing::Edge(d) => s.emit(Outcome::Edge(d)),
+                    Landing::Edge(d) => self.edge(d, edge_before, s),
                     Landing::Nowhere => {}
                 }
                 true
             }
-            Command::Extend(target) => {
-                self.extend(target, s);
-                true
-            }
+            Command::Extend(target) => self.extend(target, s),
             Command::Cursor(target) => {
                 match self.land(target, s) {
-                    Landing::At(i) => {
-                        match self.handle.range() {
-                            Some(kind) => op(s, |sel, src| sel.extend_to(src, i, kind.extend())),
-                            None => op(s, |sel, src| sel.move_cursor(src, i, AnchorRule::Keep)),
-                        };
-                        s.emit(Outcome::Reveal(i));
-                    }
-                    Landing::Edge(d) => s.emit(Outcome::Edge(d)),
+                    Landing::At(i) => self.cursor_to(i, s),
+                    Landing::Edge(d) => self.edge(d, edge_before, s),
                     Landing::Nowhere => {}
+                }
+                true
+            }
+            Command::Nudge(d) => {
+                if let Landing::At(i) = self.land(Target::Step(d), s) {
+                    self.cursor_to(i, s);
                 }
                 true
             }
@@ -231,8 +273,11 @@ impl KeyMachine {
             Command::SelectAll => {
                 if len == 0 {
                     s.emit(Outcome::NothingToSelect);
-                } else if op(s, |sel, src| sel.select_all(src)).cursor {
-                    s.emit(Outcome::Reveal(0));
+                } else {
+                    if op(s, |sel, src| sel.select_all(src)).cursor {
+                        s.emit(Outcome::Reveal(0));
+                    }
+                    s.emit(Outcome::Keyboard);
                 }
                 true
             }
@@ -253,6 +298,7 @@ impl KeyMachine {
                     return false;
                 }
                 op(s, |sel, _| sel.clear());
+                s.emit(Outcome::Keyboard);
                 true
             }
             Command::Activate => activate(s),
@@ -260,23 +306,33 @@ impl KeyMachine {
         }
     }
 
-    /// Shift: the range from the anchor. With nothing selected, the anchor first moves to the
-    /// cursor (or the end the move starts from); a one-entry step then selects that entry
-    /// alone without moving, as Strata's `extend_selection` does, while a page or a jump
-    /// extends from it at once (`extend_page_selection`).
-    fn extend(&mut self, target: Target, s: &mut dyn Surface) {
+    /// Shift: the range from the anchor, as Strata's `extend_selection` and
+    /// `extend_page_selection` do. Where there is no anchor (or no cursor), the anchor moves to
+    /// the cursor, or to the end the move starts from. With nothing selected, it moves there
+    /// too, and a one-entry step then selects that entry alone without moving, while a page or
+    /// a jump extends from it at once.
+    ///
+    /// A sideways step with no neighbour isn't taken (false), so the view decides: Columns'
+    /// Shift+Right enters the folder and Shift+Left opens the parent (C2), and List does
+    /// nothing, as Strata keeps a Shift-held sideways arrow there.
+    fn extend(&mut self, target: Target, s: &mut dyn Surface) -> bool {
         let len = s.source().len();
         if len == 0 {
-            return;
+            return true;
         }
         let cursor = s.selection().cursor_index(s.source());
-        let anchored = s.selection().anchor_index(s.source()).is_some();
-        let fresh = s.selection().is_empty() || !anchored || cursor.is_none();
         let origin = cursor.unwrap_or(if forward(target) { 0 } else { len - 1 });
-        if fresh {
+        if let Target::Step(d @ (Direction::Left | Direction::Right)) = target
+            && !matches!(self.step(origin, d, s), Landing::At(_))
+        {
+            return false;
+        }
+        let empty = s.selection().is_empty();
+        let anchored = s.selection().anchor_index(s.source()).is_some();
+        if empty || !anchored || cursor.is_none() {
             op(s, |sel, src| sel.move_cursor(src, origin, AnchorRule::Move));
         }
-        let to = match (target, fresh) {
+        let to = match (target, empty) {
             (Target::Step(_), true) => origin,
             _ => match self.land(target, s) {
                 Landing::At(i) => i,
@@ -285,6 +341,7 @@ impl KeyMachine {
         };
         op(s, |sel, src| sel.extend_to(src, to, Extend::Replace));
         s.emit(Outcome::Reveal(to));
+        true
     }
 
     /// `v` or `V`: starts a range at the cursor, switches its kind, or ends one of this kind.
@@ -298,9 +355,14 @@ impl KeyMachine {
             s.emit(Outcome::NothingToSelect);
             return;
         }
-        // A load's automatic pick isn't part of the range's base (Strata's `start_visual`).
+        // A range starts at the cursor; with none there is nothing to select (Strata's
+        // `start_visual`). A load's automatic pick isn't part of the range's base.
+        let Some(i) = s.selection().cursor_index(s.source()) else {
+            self.handle.set_range(None);
+            s.emit(Outcome::NothingToSelect);
+            return;
+        };
         op(s, |sel, _| sel.discard_provisional());
-        let i = cursor_or_first(s);
         op(s, |sel, src| sel.move_cursor(src, i, AnchorRule::Move));
         op(s, |sel, src| sel.extend_to(src, i, kind.extend()));
         self.handle.set_range(Some(kind));
@@ -337,16 +399,23 @@ impl KeyMachine {
                         Direction::Up | Direction::Left => last,
                     });
                 };
-                if let Some(next) = s.geometry().neighbor(i, d) {
-                    return Landing::At(next);
-                }
-                let wrap = s.settings().wrap_rows;
-                match d {
-                    Direction::Left if wrap && i > 0 => Landing::At(i - 1),
-                    Direction::Right if wrap && i < last => Landing::At(i + 1),
-                    _ => Landing::Edge(d),
-                }
+                self.step(i, d, s)
             }
+        }
+    }
+
+    /// The entry next to `i` in direction `d`: the geometry's neighbour, else across a row
+    /// end with `wrap_rows`, else the edge.
+    fn step(&self, i: usize, d: Direction, s: &dyn Surface) -> Landing {
+        if let Some(next) = s.geometry().neighbor(i, d) {
+            return Landing::At(next);
+        }
+        let wrap = s.settings().wrap_rows;
+        let last = s.source().len().saturating_sub(1);
+        match d {
+            Direction::Left if wrap && i > 0 => Landing::At(i - 1),
+            Direction::Right if wrap && i < last => Landing::At(i + 1),
+            _ => Landing::Edge(d),
         }
     }
 }
@@ -369,6 +438,7 @@ fn keeps_range(command: Command) -> bool {
             | Command::Range(_)
             | Command::Activate
             | Command::Swallow
+            | Command::Nudge(_)
     )
 }
 

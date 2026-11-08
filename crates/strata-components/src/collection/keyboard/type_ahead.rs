@@ -13,7 +13,7 @@ pub(super) struct TypeAhead {
 }
 
 impl TypeAhead {
-    /// Forgets the prefix: any other key, or a selection change that wasn't type-ahead's.
+    /// Forgets the prefix: a key the map binds, or a folder change (the machine's `reset`).
     pub(super) fn reset(&mut self) {
         self.typed.clear();
     }

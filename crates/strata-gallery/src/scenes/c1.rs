@@ -6,7 +6,7 @@
 //! The page is a stand-in file pane over four fake folders: Documents (10 entries), Photos
 //! (2,000), Archive (100,000) and Empty. Its header shows the folder, the preview (the
 //! cursor's entry, as `on_cursor` reports it) and the last thing the host heard. Page keys
-//! stand in for the host's commands, since the keyboard controller (C1c) isn't installed. The
+//! stand in for the host's commands; the keyboard controller (C1c) moves the cursor. The
 //! header's intent label (`c1-intent`) shows the last intent the controllers sent; a
 //! `BeginRename` opens the rename slot, where Enter renames and Escape cancels.
 //!
@@ -382,6 +382,7 @@ impl Demo {
                 Some(id) => format!("Menu on {}", self.name_of(Some(id))),
                 None => "Menu on the background".to_owned(),
             },
+            Intent::Edge(d) => format!("Edge {d:?}"),
             _ => "Other".to_owned(),
         };
     }

@@ -19,23 +19,26 @@
 //! | --- | --- | --- |
 //! | Arrows | [`Command::Select`] a step | [`Command::Cursor`] a step |
 //! | `h` `j` `k` `l` | The arrows, with [`Letters::Arrows`] | The arrows' moves |
-//! | Shift+arrows | [`Command::Extend`] a step | [`Command::Swallow`]: `v` and `V` are the range keys |
-//! | Ctrl+Left, Ctrl+Right | Cursor a step | |
+//! | Shift+arrows | [`Command::Extend`] a step; Shift+Up and Shift+Down also with Ctrl, Alt or Super | [`Command::Swallow`]: `v` and `V` are the range keys |
+//! | Ctrl+Left, Ctrl+Right | [`Command::Nudge`]: the cursor a step, silent at an edge | |
 //! | Ctrl+Up, Ctrl+Down | Select the first, the last | Cursor the first, the last |
 //! | Home, End | Select the first, the last | Cursor the first, the last; also Shift+G |
 //! | Shift+Home, Shift+End | Extend to the first, the last | |
-//! | Page Up, Page Down | Select a page | Cursor a page; also Ctrl+B, Ctrl+F, Ctrl+Page Up, Ctrl+Page Down |
-//! | Shift+Page Up, Shift+Page Down | Extend a page | |
+//! | Page Up, Page Down | Select a page (Super ignored) | Cursor a page; also Ctrl+B, Ctrl+F, Ctrl+Page Up, Ctrl+Page Down |
+//! | Shift+Page Up, Shift+Page Down | Extend a page (Super ignored) | |
 //! | Ctrl+U, Ctrl+D | | Cursor half a page |
 //! | Space | | [`Command::ToggleAdvance`] |
 //! | Ctrl+Space | [`Command::Toggle`] | Toggle |
 //! | `v`, Shift+V | | [`Command::Range`] |
 //! | Ctrl+A | [`Command::SelectAll`] | Select all |
 //! | Ctrl+R | | [`Command::Invert`] |
-//! | Escape | [`Command::Clear`] | The host's Escape ladder |
+//! | Escape, Shift+Escape | [`Command::Clear`] | The host's Escape ladder |
 //! | Enter | [`Command::Activate`] | Activate; also `o` |
 //!
-//! Keys match by Rune's chords, following the layout: see [Layouts](self#layouts).
+//! Keys match by Rune's chords, following the layout: see [Layouts](self#layouts). Modifiers
+//! match exactly except where Strata's matchers ignore some (`src/ui/window/keyboard/items.rs`):
+//! the extra modifiers in the table. So Ctrl+Up with Alt or Super added is left alone, and with
+//! Shift added it extends, as Shift+Up with Ctrl held does; it never jumps.
 //!
 //! # The rules
 //!
@@ -45,7 +48,10 @@
 //!   moves to the cursor; a step then selects the cursor's entry alone without moving, so
 //!   Shift+Down with nothing selected selects one entry and the next selects two
 //!   (`extend_selection`), while a page or a jump extends from the cursor at once
-//!   (`extend_page_selection`). After Escape the range so starts at the cursor.
+//!   (`extend_page_selection`). After Escape the range so starts at the cursor. With entries
+//!   selected but no anchor or cursor (a marquee's), the anchor goes to the cursor, or to the
+//!   end the move starts from, and the step moves. A sideways step with no neighbour isn't
+//!   taken: Columns' Shift+Right and Shift+Left are C2's, and List does nothing.
 //! - **Cursor** moves the cursor and keeps the selection, and the anchor stays. During a 10xer
 //!   range it walks the range instead.
 //! - **With no cursor**, Down, Right, Page Down and Shift+Down start at the first entry; Up,
@@ -55,22 +61,27 @@
 //!   machine emits [`Outcome::Edge`] and changes nothing. What an edge does (the sidebar, the
 //!   header, the next column, the parent folder, nothing) is the host's and the view's, as is
 //!   Keep arrows in file list. An empty collection reports an edge for every step, so Up from
-//!   an empty folder can still reach the header.
+//!   an empty folder can still reach the header. A held key reports an edge once, when it
+//!   arrives there; a new press reports it again. Ctrl+Left and Ctrl+Right report none: Strata
+//!   sends only a plain Left to the sidebar.
 //! - **Pages** move by [`CollectionGeometry::page_step`] entries, half a page by half that
 //!   (at least one), clamped to the first and last entry. The page size is the geometry's: the
 //!   rows that fit minus one, times the tiles per row in Icons.
 //! - **Escape** clears the selection and keeps the cursor. With nothing selected it isn't
 //!   taken, so the view can use it (Columns closes its deepest column).
+//! - **Ctrl+A and Escape** turn keyboard mode on ([`Outcome::Keyboard`]), as Strata's
+//!   `keyboard_navigation` does; a move turns it on through the element.
 //! - Every move emits [`Outcome::Reveal`] for the cursor's entry.
 //!
 //! # 10xer
 //!
-//! - **Ranges.** `v` starts a range at the cursor that adds to the selection as it was;
+//! - **Ranges.** `v` starts a range at the cursor (with no cursor, there is nothing to select) that adds to the selection as it was;
 //!   `V` one that removes from it. Moves and pages walk it; the same key again, or
 //!   [`KeyHandle::end_range`] (the host's Escape ladder, leaving the mode), ends it and keeps
-//!   what it selected. Any other selection command ends it too, as does any change to the
-//!   selection the machine didn't make (a click, a sync that dropped entries), which it notices
-//!   by the selection's revision at its next key. [`KeyHandle::range`] says whether one is
+//!   what it selected. Any other selection command ends it too. A primary press ends it at once
+//!   ([`Keyboard`]'s `pointer_seen`); a secondary press (a context menu) doesn't. Any other
+//!   change to the selection the machine didn't make (a sync that dropped entries) ends it at
+//!   its next key, by the selection's revision. [`KeyHandle::range`] says whether one is
 //!   active, for the `VISUAL`/`UNSET` footer (C18) and Columns' mirroring (C2).
 //! - **Space** adds the cursor's entry (even over a load's automatic pick), or removes it,
 //!   then moves the cursor to the next entry in display order. Inside a range, it flips the
@@ -109,7 +120,8 @@
 //!
 //! Unit tests build a `KeyInput` with no transaction, where Rune reads the event alone, so the
 //! layout fallback is checked by a headless script (`tests/scripts/c1/keyboard-layout.json`)
-//! rather than by a copy of Rune's matcher here. Rune draft U-C1c-1 asks for a way to do it in
+//! rather than by a copy of Rune's matcher here. It checks the Ctrl+A part of its bullet only:
+//! Ctrl+C and Ctrl+K on a Russian layout are the host's commands, not the collection's. Rune draft U-C1c-1 asks for a way to do it in
 //! process: a public `Chord::matches_with(event, base, physical, platform)` (private at the
 //! pinned rev, `crates/rune/src/input/chord.rs`), or a public `Runtime::physical_key_input`
 //! (`pub(crate)`, `crates/rune/src/runtime/input/physical.rs`). Without either, a layout case
@@ -154,7 +166,7 @@ mod tests;
 
 pub use adapter::{Keyboard, NothingToSelect};
 pub use command::{Command, RangeKind, Target, Vertical};
-pub use keymap::KeyMap;
+pub use keymap::{Binding, KeyMap};
 pub use machine::{KeyMachine, Outcome, Surface};
 pub use settings::{KeyHandle, KeySettings, Letters};
 

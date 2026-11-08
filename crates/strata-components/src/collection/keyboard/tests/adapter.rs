@@ -180,10 +180,13 @@ fn a_press_ends_a_range_and_a_folder_change_resets() {
     let mut moved = press();
     moved.phase = PointerPhase::Move;
     k.pointer_seen(&moved);
+    let mut secondary = press();
+    secondary.button = PointerButton::Secondary;
+    k.pointer_seen(&secondary);
     assert_eq!(
         handle.range(),
         Some(RangeKind::Select),
-        "only a press ends it"
+        "only a primary press ends it; a context menu doesn't"
     );
     k.pointer_seen(&press());
     assert_eq!(
@@ -220,4 +223,39 @@ fn reset_drops_the_type_ahead_prefix() {
     // A fresh prefix: "c" finds "cat". Without the reset, "bec" would match nothing.
     h.key(&mut k, Key::Text("c".into()), plain());
     assert_eq!(h.cursor(), Some(2));
+}
+
+#[test]
+fn ctrl_a_and_escape_turn_keyboard_mode_on_once() {
+    // browser/selection: With no transient UI open, Escape clears the active pane's selection and keeps the keyboard cursor and directory.
+    // Neither moves the cursor, so the element wouldn't turn keyboard mode on by itself.
+    let mut h = Host::new(None);
+    let mut k = Keyboard::default();
+    h.sel.select_only(&h.src, 3);
+    let ctrl = Mods {
+        ctrl: true,
+        cmd: true,
+        ..plain()
+    };
+    let (_, effects) = h.key(&mut k, Key::Command('a'), ctrl);
+    assert!(
+        matches!(effects[..], [Effect::KeyboardMode(true)]),
+        "{effects:?}"
+    );
+    let (_, effects) = h.key(&mut k, Key::Escape, plain());
+    assert!(
+        matches!(effects[..], [Effect::KeyboardMode(true)]),
+        "{effects:?}"
+    );
+    // A queued Ctrl+A that also places the cursor sends the mode once, not twice.
+    let mut fresh = Host::new(None);
+    let handle = KeyHandle::new();
+    let mut k = Keyboard::new(handle.clone());
+    handle.run(Command::SelectAll);
+    let (_, effects) = fresh.with(|cx| k.tick(cx));
+    let modes = effects
+        .iter()
+        .filter(|e| matches!(e, Effect::KeyboardMode(true)))
+        .count();
+    assert_eq!(modes, 1, "{effects:?}");
 }

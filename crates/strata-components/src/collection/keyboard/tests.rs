@@ -532,15 +532,19 @@ fn columns_shift_home_and_end_extend_from_the_anchor() {
 }
 
 #[test]
-fn ctrl_a_selects_every_entry_of_this_collection() {
-    // browser/selection: Ctrl+A selects every entry in the focused column, not the deepest open column.
-    let mut focused = Rig::list(5);
-    let deeper = Rig::list(4);
-    focused.click(2);
-    assert!(focused.ctrl_letter('a'));
-    assert_eq!(focused.selected(), range(0, 4));
-    assert_eq!(focused.cursor(), Some(2), "the cursor stays");
-    assert!(deeper.selected().is_empty());
+fn ctrl_a_selects_every_entry_and_keeps_the_cursor() {
+    // C1c scope: Ctrl+A routing. Which collection hears it (the focused column, not the
+    // deepest) is C2's, with one controller per column.
+    let mut r = Rig::list(5);
+    r.click(2);
+    assert!(r.ctrl_letter('a'));
+    assert_eq!(r.selected(), range(0, 4));
+    assert_eq!(r.cursor(), Some(2), "the cursor stays");
+    assert_eq!(
+        r.take(),
+        [Outcome::Keyboard],
+        "keyboard navigation, as Strata's select_all"
+    );
 }
 
 #[test]
@@ -552,7 +556,10 @@ fn escape_clears_the_selection_and_keeps_the_cursor() {
     assert!(r.key(Key::Escape));
     assert!(r.selected().is_empty());
     assert_eq!(r.cursor(), Some(2));
-    assert!(activated(&r.take()).is_empty());
+    assert!(
+        r.take().contains(&Outcome::Keyboard),
+        "the cursor outline shows"
+    );
 }
 
 #[test]
@@ -586,26 +593,23 @@ fn escape_with_nothing_selected_is_left_to_the_view() {
 // browser/scrolling: paging and jumps.
 
 #[test]
-fn page_keys_move_focus_and_selection_by_a_page_in_this_collection_only() {
-    // browser/scrolling: Page Up and Page Down, including the keypad keys, move the focus and selection by one page in the focused listing; in Columns only the focused column moves.
-    let mut focused = Rig::list(50);
-    let mut other = Rig::list(50);
-    other.click(7);
-    let page = focused.page();
-    focused.click(2);
-    focused.key(Key::PageDown);
+fn page_keys_move_focus_and_selection_by_a_page() {
+    // browser/scrolling: Page Up and Page Down
+    // (The keypad keys are Rune's logical keys; only the focused column moving is C2's.)
+    let mut r = Rig::list(50);
+    let page = r.page();
+    r.click(2);
+    r.key(Key::PageDown);
     assert_eq!(
-        (focused.cursor(), focused.selected()),
+        (r.cursor(), r.selected()),
         (Some(2 + page), vec![(2 + page) as u64])
     );
-    focused.key(Key::PageUp);
-    assert_eq!(focused.cursor(), Some(2));
-    assert_eq!((other.cursor(), other.selected()), (Some(7), vec![7]));
+    r.key(Key::PageUp);
+    assert_eq!(r.cursor(), Some(2));
     // A page with no cursor: Page Down starts at the first entry.
     let mut fresh = Rig::list(50);
     fresh.key(Key::PageDown);
     assert_eq!(fresh.cursor(), Some(0));
-    other.take();
 }
 
 #[test]
@@ -660,18 +664,18 @@ fn ctrl_up_and_down_with_more_modifiers_do_not_jump() {
     // browser/scrolling: Ctrl+Up or Ctrl+Down with Shift, Alt, or Super added does not jump.
     let mut r = Rig::list(30);
     r.click(10);
-    for extra in [
-        Mods {
-            shift: true,
-            ..CTRL
-        },
-        Mods { alt: true, ..CTRL },
-        Mods { logo: true, ..CTRL },
-    ] {
-        assert!(!r.press(Key::Up, extra));
+    for extra in [Mods { alt: true, ..CTRL }, Mods { logo: true, ..CTRL }] {
+        assert!(!r.press(Key::Up, extra), "left to the host and Rune");
         assert!(!r.press(Key::Down, extra));
     }
     assert_eq!((r.selected(), r.cursor()), (vec![10], Some(10)));
+    // With Shift it extends instead, as Shift+Up does with Ctrl held (Strata's EXTENDS).
+    let ctrl_shift = Mods {
+        shift: true,
+        ..CTRL
+    };
+    assert!(r.press(Key::Up, ctrl_shift));
+    assert_eq!((r.selected(), r.cursor()), (vec![9, 10], Some(9)));
 }
 
 #[test]
@@ -1103,4 +1107,186 @@ fn type_ahead_takes_space_only_inside_a_prefix_and_is_off_by_default() {
     let mut off = Rig::list(3);
     assert!(!off.typed("e"));
     assert_eq!(KeySettings::default().letters, Letters::Pass);
+}
+
+// Review round 1.
+
+#[test]
+fn ctrl_left_and_right_stop_silently_at_an_edge() {
+    // browser/selection/keyboard-navigation: In Icons, Left on the first tile focuses the visible sidebar; in List, Left from any entry does.
+    // Only a plain Left reaches the sidebar: Ctrl+Left in List stays, GTK's grid does nothing
+    // at the first tile, and Columns passes Ctrl-held arrows on (Strata's key_routing.rs).
+    let mut r = Rig::list(5);
+    r.click(2);
+    assert!(r.ctrl(Key::Left) && r.ctrl(Key::Right));
+    assert!(r.take().is_empty(), "no edge");
+    assert_eq!((r.selected(), r.cursor()), (vec![2], Some(2)));
+    let mut g = Rig::grid(8, 4);
+    g.click(0);
+    assert!(g.ctrl(Key::Left));
+    assert!(g.take().is_empty());
+    g.ctrl(Key::Right);
+    assert_eq!(
+        (g.selected(), g.cursor()),
+        (vec![0], Some(1)),
+        "a nudge still moves"
+    );
+    // 10xer moves keep reporting edges: `h` and Left open the parent in List and Columns.
+    let mut t = Rig::tenxer(5);
+    t.click(2);
+    t.typed("h");
+    t.key(Key::Left);
+    assert_eq!(
+        t.take(),
+        [
+            Outcome::Edge(Direction::Left),
+            Outcome::Edge(Direction::Left)
+        ]
+    );
+}
+
+#[test]
+fn shift_up_and_down_extend_with_ctrl_alt_or_super_held_too() {
+    // browser/selection: Shift+Up and Shift+Down extend the selection by one entry from the range anchor.
+    // Strata's selection_navigation ignores Ctrl, Alt and Super on them.
+    let mut r = Rig::list(10);
+    r.click(2);
+    let alt = Mods { alt: true, ..SHIFT };
+    let sup = Mods {
+        logo: true,
+        ..SHIFT
+    };
+    let all = Mods {
+        alt: true,
+        logo: true,
+        ..Mods {
+            shift: true,
+            ..CTRL
+        }
+    };
+    assert!(r.press(Key::Down, alt) && r.press(Key::Down, sup) && r.press(Key::Down, all));
+    assert_eq!(r.selected(), range(2, 5));
+    // Shift+Left and Shift+Right tolerate nothing: Ctrl+Shift+Left is left alone.
+    assert!(!r.press(
+        Key::Left,
+        Mods {
+            shift: true,
+            ..CTRL
+        }
+    ));
+}
+
+#[test]
+fn page_keys_ignore_super_and_escape_ignores_shift() {
+    // browser/selection: Shift+Page Up and Shift+Page Down extend or shrink the selection by one page from the range anchor.
+    // browser/selection: With no transient UI open, Escape clears the active pane's selection and keeps the keyboard cursor and directory.
+    let mut r = Rig::list(60);
+    let page = r.page();
+    r.click(2);
+    let sup = Mods {
+        logo: true,
+        ..Mods::default()
+    };
+    assert!(r.press(Key::PageDown, sup));
+    assert_eq!(r.cursor(), Some(2 + page));
+    assert!(r.press(
+        Key::PageDown,
+        Mods {
+            logo: true,
+            ..SHIFT
+        }
+    ));
+    assert_eq!(r.selected().len(), page + 1);
+    assert!(r.press(Key::Escape, SHIFT));
+    assert!(r.selected().is_empty());
+    assert_eq!(r.cursor(), Some(2 + 2 * page));
+}
+
+#[test]
+fn a_sideways_shift_step_with_no_neighbour_is_left_to_the_view() {
+    // browser/selection: Shift+Up and Shift+Down extend the selection by one entry from the range anchor.
+    // Shift+Left and Shift+Right have no neighbour in a list or column: Columns' Shift+Right
+    // enters the folder (C2), and List does nothing, even with nothing selected.
+    let mut r = Rig::list(5);
+    r.click(2);
+    assert!(!r.shift(Key::Right) && !r.shift(Key::Left));
+    assert!(r.take().is_empty());
+    r.key(Key::Escape);
+    assert!(!r.shift(Key::Left));
+    assert!(
+        r.selected().is_empty(),
+        "nothing selected, and still nothing"
+    );
+    // In the grid a sideways neighbour extends as usual.
+    let mut g = Rig::grid(8, 4);
+    g.click(1);
+    assert!(g.shift(Key::Right));
+    assert_eq!(g.selected(), [1, 2]);
+}
+
+#[test]
+fn shift_down_with_no_anchor_steps_from_the_first_entry() {
+    // browser/selection: Shift+Down with nothing selected selects only the first entry; the next Shift+Down selects two.
+    // A selection with no cursor or anchor (a marquee's) isn't "nothing selected": Strata steps,
+    // anchoring at the first entry, rather than selecting it in place.
+    let mut r = Rig::list(6);
+    r.f.sel
+        .begin_band(crate::collection::selection::BandMode::Replace);
+    r.f.sel.band(&r.f.src, &(3..5).into());
+    r.f.sel.end_band();
+    assert_eq!((r.selected(), r.cursor()), (vec![3, 4], None));
+    r.shift(Key::Down);
+    assert_eq!(
+        (r.selected(), r.cursor(), r.anchor()),
+        (vec![0, 1], Some(1), Some(0))
+    );
+}
+
+#[test]
+fn tenxer_v_with_no_cursor_has_nothing_to_select() {
+    // integration/10xer-mode: `v` starts a range from the cursor and `V` starts an unselect range; the footer shows `VISUAL` or `UNSET` while it is active.
+    let mut t = Rig::tenxer(5);
+    t.typed("v");
+    assert_eq!(t.take(), [Outcome::NothingToSelect]);
+    assert_eq!((t.handle.range(), t.cursor()), (None, None));
+}
+
+#[test]
+fn an_edge_reached_by_a_held_key_is_reported_once() {
+    // browser/selection/keyboard-navigation: Up from the first Icons row or first List entry focuses the pane header, including in an empty directory.
+    let mut r = Rig::list(4);
+    r.click(2);
+    let up = KeyEvent {
+        key: Key::Up,
+        mods: Mods::default(),
+    };
+    let mut held = KeyInput::new(&up);
+    held.repeat = true;
+    for _ in 0..5 {
+        assert!(r.m.key(&held, &mut r.f));
+    }
+    let edges = r
+        .take()
+        .into_iter()
+        .filter(|o| matches!(o, Outcome::Edge(_)))
+        .count();
+    assert_eq!(edges, 1, "once on arrival");
+    r.key(Key::Up);
+    assert_eq!(
+        r.take(),
+        [Outcome::Edge(Direction::Up)],
+        "a new press reports it again"
+    );
+}
+
+#[test]
+fn reset_drops_queued_commands() {
+    // integration/10xer-mode: In Columns, `g g` and `G` in a column with no cursor land on its first and last entry.
+    // A `g g` queued for a folder that was left doesn't run in the next one.
+    let mut t = Rig::tenxer(5);
+    t.handle.run(Command::Cursor(Target::Last));
+    t.m.reset();
+    assert!(!t.handle.pending());
+    assert!(!t.m.tick(&mut t.f));
+    assert_eq!(t.cursor(), None);
 }

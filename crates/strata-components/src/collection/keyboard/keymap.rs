@@ -17,8 +17,12 @@ use crate::contract::Direction;
 ///
 /// Keys match with [`KeyInput::matches`]: Rune's layout-aware chords, so a letter follows the
 /// key's label under the active layout and a key that types a non-Latin character falls back
-/// to the US key in its place. Modifiers match exactly, as Strata's do: Ctrl+Shift+Up is not
-/// Ctrl+Up, so it doesn't jump.
+/// to the US key in its place. Modifiers match exactly, except those a binding tolerates
+/// ([`KeyMap::bind_tolerating`]), as Strata's matchers do (`src/ui/window/keyboard/items.rs`):
+/// in the default map, Shift+Up and Shift+Down extend with Ctrl, Alt or Super held too, the
+/// page keys ignore Super, and Escape ignores Shift. Ctrl+Up and Ctrl+Down tolerate nothing,
+/// so with Alt or Super they don't jump, and with Shift they extend.
+///
 /// Bindings apply whatever [`Letters`] says. An alias stands in for an arrow, as `h j k l` do
 /// in the default map; one on a plain printable key (no Ctrl, Alt or Super) applies only with
 /// [`Letters::Arrows`], and only without modifiers, so Shift+J doesn't extend.
@@ -26,8 +30,34 @@ use crate::contract::Direction;
 /// Used by: C19 (the shortcut reference), C20 (keyboard settings), and hosts.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct KeyMap {
-    bindings: Vec<(Chord, Command)>,
+    bindings: Vec<Binding>,
     aliases: Vec<(Chord, ChordKey)>,
+}
+
+/// One binding: a chord, the modifiers it matches with or without, and its command.
+///
+/// Used by: C19, C20 (through [`KeyMap::bindings`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Binding {
+    /// The chord, as labels show it.
+    pub chord: Chord,
+    /// Modifiers that may also be held: Strata's `ignoring(..)`.
+    pub tolerates: Vec<ChordMod>,
+    /// What it runs.
+    pub command: Command,
+}
+
+impl Binding {
+    /// Whether `input` is this chord, with any of the tolerated modifiers held too.
+    fn matches(&self, input: &KeyInput<'_>) -> bool {
+        let n = self.tolerates.len();
+        (0..1u32 << n).any(|subset| {
+            let chord = (0..n)
+                .filter(|i| subset & (1 << i) != 0)
+                .fold(self.chord, |c, i| c.with(self.tolerates[i]));
+            input.matches(&chord)
+        })
+    }
 }
 
 impl KeyMap {
@@ -39,28 +69,43 @@ impl KeyMap {
     /// Strata's default map, in every view and the file chooser. `h j k l` alias the arrows.
     pub fn default_map() -> Self {
         let mut map = Self::new();
+        // Strata's `selection_navigation`: Shift+Up and Shift+Down extend even with Ctrl, Alt
+        // or Super held; Shift+Left and Shift+Right are GTK's, with no extra modifiers.
+        const EXTENDS: [ChordMod; 3] = [ChordMod::Ctrl, ChordMod::Alt, ChordMod::Super];
         for d in DIRECTIONS {
             let k = arrow(d);
             map.bind(plain(k), Command::Select(Target::Step(d)));
-            map.bind(shift(k), Command::Extend(Target::Step(d)));
+            let extend = Command::Extend(Target::Step(d));
+            match d {
+                Direction::Up | Direction::Down => map.bind_tolerating(shift(k), &EXTENDS, extend),
+                Direction::Left | Direction::Right => map.bind(shift(k), extend),
+            };
         }
-        let ends = [
+        for (k, target) in [
             (ChordKey::Home, Target::First),
             (ChordKey::End, Target::Last),
-            (ChordKey::PageUp, Target::Page(Vertical::Up)),
-            (ChordKey::PageDown, Target::Page(Vertical::Down)),
-        ];
-        for (k, target) in ends {
+        ] {
             map.bind(plain(k), Command::Select(target));
             map.bind(shift(k), Command::Extend(target));
         }
-        map.bind(ctrl(ChordKey::Left), Command::Cursor(left()));
-        map.bind(ctrl(ChordKey::Right), Command::Cursor(right()));
+        // `page_key`: the page keys ignore Super.
+        let pages = [
+            (ChordKey::PageUp, Target::Page(Vertical::Up)),
+            (ChordKey::PageDown, Target::Page(Vertical::Down)),
+        ];
+        for (k, target) in pages {
+            map.bind_tolerating(plain(k), &[ChordMod::Super], Command::Select(target));
+            map.bind_tolerating(shift(k), &[ChordMod::Super], Command::Extend(target));
+        }
+        // Ctrl+Left and Ctrl+Right move the cursor, and stop silently at an edge.
+        map.bind(ctrl(ChordKey::Left), Command::Nudge(Direction::Left));
+        map.bind(ctrl(ChordKey::Right), Command::Nudge(Direction::Right));
         map.bind(ctrl(ChordKey::Up), Command::Select(Target::First));
         map.bind(ctrl(ChordKey::Down), Command::Select(Target::Last));
         map.bind(ctrl(ChordKey::Char(' ')), Command::Toggle);
         map.bind(ctrl(ChordKey::Char('a')), Command::SelectAll);
-        map.bind(plain(ChordKey::Escape), Command::Clear);
+        // `ESCAPE_ANY_SHIFT`.
+        map.bind_tolerating(plain(ChordKey::Escape), &[ChordMod::Shift], Command::Clear);
         map.bind(plain(ChordKey::Enter), Command::Activate);
         for (c, d) in VIM {
             map.alias(plain(ChordKey::Char(c)), arrow(d));
@@ -120,19 +165,33 @@ impl KeyMap {
     /// Binds `chord` to `command`, after any binding it already has. A chord bound twice runs
     /// its first command.
     pub fn bind(&mut self, chord: Chord, command: Command) -> &mut Self {
-        self.bindings.push((chord, command));
+        self.bind_tolerating(chord, &[], command)
+    }
+
+    /// Binds `chord` to `command`, matching with or without any of `tolerates` held too.
+    pub fn bind_tolerating(
+        &mut self,
+        chord: Chord,
+        tolerates: &[ChordMod],
+        command: Command,
+    ) -> &mut Self {
+        self.bindings.push(Binding {
+            chord,
+            tolerates: tolerates.to_vec(),
+            command,
+        });
         self
     }
 
     /// Removes every chord bound to `command`.
     pub fn unbind(&mut self, command: Command) -> &mut Self {
-        self.bindings.retain(|(_, c)| *c != command);
+        self.bindings.retain(|b| b.command != command);
         self
     }
 
     /// Removes the binding of `chord`, whatever it runs.
     pub fn unbind_chord(&mut self, chord: Chord) -> &mut Self {
-        self.bindings.retain(|(c, _)| *c != chord);
+        self.bindings.retain(|b| b.chord != chord);
         self
     }
 
@@ -154,8 +213,8 @@ impl KeyMap {
         let mut chords: Vec<Chord> = self
             .bindings
             .iter()
-            .filter(|(_, c)| *c == command)
-            .map(|(chord, _)| *chord)
+            .filter(|b| b.command == command)
+            .map(|b| b.chord)
             .collect();
         for (alias, key) in &self.aliases {
             if self.bound(plain(*key)) == Some(command) {
@@ -166,28 +225,27 @@ impl KeyMap {
     }
 
     /// Every binding, in order.
-    pub fn bindings(&self) -> &[(Chord, Command)] {
+    pub fn bindings(&self) -> &[Binding] {
         &self.bindings
     }
 
     /// The command `input` runs.
     pub(super) fn lookup(&self, input: &KeyInput<'_>, letters: Letters) -> Option<Command> {
-        let hit = |c: &Chord| input.matches(c);
-        if let Some((_, command)) = self.bindings.iter().find(|(c, _)| hit(c)) {
-            return Some(*command);
+        if let Some(b) = self.bindings.iter().find(|b| b.matches(input)) {
+            return Some(b.command);
         }
         self.aliases
             .iter()
             .filter(|(c, _)| letters == Letters::Arrows || !typed(c))
-            .find(|(c, _)| hit(c))
+            .find(|(c, _)| input.matches(c))
             .and_then(|(_, key)| self.bound(plain(*key)))
     }
 
     fn bound(&self, chord: Chord) -> Option<Command> {
         self.bindings
             .iter()
-            .find(|(c, _)| *c == chord)
-            .map(|(_, command)| *command)
+            .find(|b| b.chord == chord)
+            .map(|b| b.command)
     }
 }
 
@@ -204,14 +262,6 @@ const VIM: [(char, Direction); 4] = [
     ('k', Direction::Up),
     ('l', Direction::Right),
 ];
-
-const fn left() -> Target {
-    Target::Step(Direction::Left)
-}
-
-const fn right() -> Target {
-    Target::Step(Direction::Right)
-}
 
 const fn arrow(d: Direction) -> ChordKey {
     match d {

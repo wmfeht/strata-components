@@ -41,7 +41,9 @@ pub struct KeySettings {
     /// What unbound plain printable keys do.
     pub letters: Letters,
     /// How long after a typed character the next one still extends the type-ahead prefix.
-    /// 1 s by default.
+    /// 1 s by default. It is measured on the keys' times, which come from the collection's
+    /// clock (`Collection::clock`): without one, every key comes at 0 and a prefix never times
+    /// out.
     pub type_ahead_timeout: Duration,
     /// Whether Left and Right cross row ends, to the previous or next entry, when the geometry
     /// has no neighbour that way. On for the icons grid (C3), as Strata's Icons does

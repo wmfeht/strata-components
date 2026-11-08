@@ -1,7 +1,6 @@
 {
   "bullets": [
-    "browser/selection: After Home, Shift+Down selects the first two entries.",
-    "browser/scrolling: Plain Home or End with several entries selected leaves only the target entry selected."
+    "browser/selection: After Home, Shift+Down selects the first two entries."
   ],
   "scene": "c1-ten-rows-light",
   "events": [

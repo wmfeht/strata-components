@@ -1,0 +1,34 @@
+{
+  "bullets": [
+    "preview/preview-panel/find: Typing a query selects and reveals the first literal, case-insensitive match"
+  ],
+  "scene": "c11-markdown-light",
+  "events": [
+    {
+      "t": 0.2,
+      "type": "tap",
+      "key": "doc-u1/t"
+    },
+    {
+      "t": 0.4,
+      "type": "key",
+      "name": "f",
+      "cmd": true
+    },
+    {
+      "t": 0.6,
+      "type": "type",
+      "text": "RELEASE"
+    }
+  ],
+  "expect": [
+    {
+      "key": "preview-find-status",
+      "name": "Match 1 of 2"
+    },
+    {
+      "key": "c11-selection",
+      "name": "Release"
+    }
+  ]
+}

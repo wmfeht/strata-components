@@ -10,6 +10,7 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | W1c | merged | contract additions for C1e: collection slot; geometry docs no longer rely on on_drag | 0b52156 |
 | W2b | merged | Look::fallback = Strata defaults via K2; slot tokens moved off w2-tokens goldens to w2-slots review scene; confirms row.sidebar 24 / row.palette 53 | 8c12ef3 |
 | W1d | merged | contract changes for C1c: UniformRows::page_step = rows that fit minus one (meaning changed, 10->9); Selection::toggle_in_run for Space inside v/V | 21f28e7 |
+| C1f | waiting (after C1e merges) | contract addition for C4: Lines spans (group-header lines), per C1e lines.rs design | |
 | G1 | merged | owner request: index is rune-kit Buttons grouped by lane; markers from registry (has golden scenes); index goldens hide markers, review scene shows them | 9b4bf5c |
 | W2 | merged | 1 review round + fixes; token-name review by K1/K2/C1e owners pending; PNG goldens on NVIDIA | 341e8cb |
 | W3 | planning |  |  |
@@ -57,7 +58,7 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | C1b | coding (state machine done; adapter waits on C1e merge) | 37 unit tests; PointerHandle shared settings (deviation); no rename timeout (Strata) | |
 | C1c | coding (machine done, 50 tests; adapter waits on C1e, Space-in-range on W1d) | default + 10xer maps; layout-aware chord workaround (U-C1c-1) | |
 | C1d | coding (machine first; adapter waits on C1e + C1b adapter) | ~10 Hz apply while auto-scrolling keeps perf meter silent (deviation) | |
-| C1e | review 1 (fixing B1 per-column accessors + 16 should-fix) | 0 view runs over 600 scroll frames at 100k (probe); focus-on-return bullets deferred (Rune focus API) | |
+| C1e | review 2 | all controller seam requests in; scroll p95 0.59 ms vs Table 0.88; S14 sticky group lines deferred to contract WP C1f before C4 | |
 | C26 | waiting | | |
 | P1 | waiting | | |
 | P2 | waiting | | |

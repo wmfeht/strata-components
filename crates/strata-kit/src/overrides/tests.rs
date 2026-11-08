@@ -127,10 +127,8 @@ fn an_unknown_token_is_reported_once_with_its_line_and_column() {
         messages(&o)[0],
         "line 2, column 3: unknown token `list.row.length`"
     );
-    // The good row still applies, and rebuilding the look reports nothing more.
-    let look = o.applied(o.applied(theme_look(true)));
-    assert_eq!(look.row.list, 30.0);
-    assert_eq!(o.errors().len(), 2);
+    // The good row still applies.
+    assert_eq!(o.applied(theme_look(true)).row.list, 30.0);
 }
 
 #[test]
@@ -263,7 +261,11 @@ fn a_bad_value_reports_where_it_is_and_keeps_the_themes_value() {
 fn rows_that_parse_still_apply_around_syntax_errors() {
     // Each file sets row.list = 30, row.columns = 28 and list.row.height = 40 around one
     // break, on the lines given.
-    let cases: &[(&str, &str, &[usize])] = &[
+    let deep = format!(
+        "row.list = 30\nrow.sidebar = {}1\nrow.columns = 28\n[list.row]\nheight = 40\n",
+        "[".repeat(5000)
+    );
+    let mut cases: Vec<(&str, &str, &[usize])> = vec![
         (
             "an unquoted value",
             "row.list = 30\ncolor.bg_base = #fff\nrow.columns = 28\n[list.row]\nheight = 40\n",
@@ -294,7 +296,39 @@ fn rows_that_parse_still_apply_around_syntax_errors() {
             "row.list = 30\nrow.columns = 28\n[sidebar.row\nheight = 99\n[list.row]\nheight = 40\n",
             &[3],
         ),
+        (
+            "an unclosed inline table",
+            "row.list = 30\nlist.row = { height = 30\nrow.columns = 28\n[list.row]\nheight = 40\n",
+            &[2],
+        ),
+        (
+            "an unclosed array",
+            "row.list = 30\nrow.sidebar = [1,\nrow.columns = 28\n[list.row]\nheight = 40\n",
+            &[2],
+        ),
+        (
+            "an unclosed multi-line array",
+            "row.list = 30\nrow.sidebar = [\n  1,\nrow.columns = 28\n[list.row]\nheight = 40\n",
+            // The array's element left on its own line is reported too.
+            &[2, 3],
+        ),
+        (
+            "a form feed",
+            "row.list = 30\n\x0c\nrow.columns = 28\n[list.row]\nheight = 40\n",
+            &[2],
+        ),
+        (
+            "a lone carriage return",
+            "row.list = 30\nrow.sidebar = 3\rx\nrow.columns = 28\n[list.row]\nheight = 40\n",
+            &[2],
+        ),
+        (
+            "a bad value in a CRLF file",
+            "row.list = 30\r\nrow.sidebar = x\r\nrow.columns = 28\r\n[list.row]\r\nheight = 40\r\n",
+            &[2],
+        ),
     ];
+    cases.push(("an unclosed array too deep to parse", &deep, &[2]));
     for (what, src, lines) in cases {
         let o = Overrides::parse(src);
         let got: Vec<usize> = o.errors().iter().map(|e| e.at.line).collect();
@@ -332,13 +366,121 @@ fn a_broken_table_header_skips_its_rows_and_says_so() {
 }
 
 #[test]
-fn a_string_left_open_at_the_end_applies_the_rows_before_it() {
+fn a_string_left_open_is_reported_where_it_opens_and_the_rest_applies() {
     let o = Overrides::parse("row.list = 30\nrow.columns = \"\"\"\nrow.palette = 50\n");
-    assert_eq!(o.errors().len(), 1, "{:?}", messages(&o));
+    let at: Vec<_> = o.errors().iter().map(|e| e.at).collect();
+    assert_eq!(
+        at,
+        [Location {
+            line: 2,
+            column: 15
+        }],
+        "{:?}",
+        messages(&o)
+    );
+    let look = o.applied(theme_look(true));
+    assert_eq!(look.row.list, 30.0);
+    assert_eq!(look.row.palette, 50.0);
+}
+
+#[test]
+fn a_row_whose_value_runs_over_a_broken_line_doesnt_apply() {
+    let src = "color.scrim = \"\"\"red\n\\q\n\"\"\"\nrow.list = 30\n";
+    let o = Overrides::parse(src);
+    let lines: Vec<_> = o.errors().iter().map(|e| e.at.line).collect();
+    assert_eq!(lines, [2], "{:?}", messages(&o));
     let base = theme_look(true);
     let look = o.applied(base.clone());
+    assert_eq!(look.kit.c.scrim, base.kit.c.scrim);
     assert_eq!(look.row.list, 30.0);
-    assert_eq!(look.row.palette, base.row.palette);
+}
+
+/// Should-fix 4: the salvage loop and the walk stay near linear. The bound is generous for a
+/// debug build; quadratic bookkeeping took over 15 s here.
+#[test]
+fn a_large_broken_file_parses_quickly() {
+    // Keys set again, unknown tokens and lines of garbage: every line but the first is an
+    // error.
+    let src: String = (0..20_000)
+        .map(|i| match i % 3 {
+            0 => "row.list = 30\n".to_owned(),
+            1 => format!("x{i} = 1\n"),
+            _ => format!("garbage line {i}\n"),
+        })
+        .collect();
+    let t = std::time::Instant::now();
+    let o = Overrides::parse(&src);
+    let took = t.elapsed();
+    assert_eq!(o.len(), 1);
+    assert_eq!(o.errors().len(), 19_999);
+    assert!(took.as_secs_f64() < 5.0, "{took:?}");
+}
+
+/// Ruling B1: one row per token wins (the scoped one for this appearance), whichever of the
+/// two is a reference, wherever each sits in the file; a reference reads only winners.
+#[test]
+fn a_scoped_row_beats_an_unscoped_one_whatever_their_kinds() {
+    let accent = |look: &Look| look.kit.c.bg_accent;
+    for (src, scoped_is_ref) in [
+        (
+            "color.scrim = \"@color.bg_accent\"\n[dark]\ncolor.scrim = \"#123456\"\n",
+            false,
+        ),
+        (
+            "dark.color.scrim = \"#123456\"\ncolor.scrim = \"@color.bg_accent\"\n",
+            false,
+        ),
+        (
+            "color.scrim = \"#123456\"\n[dark]\ncolor.scrim = \"@color.bg_accent\"\n",
+            true,
+        ),
+        (
+            "dark.color.scrim = \"@color.bg_accent\"\ncolor.scrim = \"#123456\"\n",
+            true,
+        ),
+    ] {
+        let src = format!("fill.muted = \"@color.scrim\"\n{src}");
+        let o = Overrides::parse(&src);
+        assert_eq!(messages(&o), Vec::<String>::new(), "{src}");
+        for dark in [false, true] {
+            let base = theme_look(dark);
+            let look = o.applied(base.clone());
+            let wins_ref = scoped_is_ref == dark;
+            let want = if wins_ref {
+                accent(&base)
+            } else {
+                color("#123456")
+            };
+            assert_eq!(look.kit.c.scrim, want, "{src} dark={dark}");
+            // A reference to it reads the winning literal, or the theme's value when the
+            // winner is itself a reference: never the losing row's.
+            let read = if wins_ref {
+                base.kit.c.scrim
+            } else {
+                color("#123456")
+            };
+            assert_eq!(look.fill.muted, read, "{src} dark={dark}");
+        }
+    }
+}
+
+#[test]
+fn a_quoted_key_with_dots_is_one_key_not_a_token() {
+    let o = Overrides::parse("\"list.row.height\" = 30\n");
+    assert!(o.is_empty());
+    assert_eq!(
+        messages(&o),
+        ["line 1, column 1: unknown token `\"list.row.height\"`"]
+    );
+}
+
+#[test]
+fn alpha_of_minus_zero_is_zero() {
+    let o = Overrides::parse("color.scrim = \"alpha(red, -0)\"");
+    match o.rows[0].value {
+        Setting::Derived { alpha: Some(a), .. } => assert!(a == 0.0 && a.is_sign_positive()),
+        other => panic!("{other:?}"),
+    }
 }
 
 /// Done when: "The token names in error messages match the registry."

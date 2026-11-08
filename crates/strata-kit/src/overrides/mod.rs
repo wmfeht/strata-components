@@ -39,10 +39,11 @@
 //!   - a length or a number is a TOML integer or float, in points for a length, inside the
 //!     token's range ([`Token::range`](crate::tokens::Token::range));
 //!   - a flag is `true` or `false`.
-//! - **References** (ruling Q2) read the look after the theme, the settings and every
-//!   literal override, so `"@color.border_focus"` follows an override of `color.border_focus`.
-//!   They never read another reference's result: references don't chain, so the file's order
-//!   never matters.
+//! - **One row wins per token**: the one scoped to the look's appearance, else the unscoped
+//!   one, whether either is a literal or a reference, and wherever each sits in the file.
+//! - **References** (ruling Q2) read the look after the theme, the settings and the winning
+//!   literal overrides, so `"@color.border_focus"` follows an override of `color.border_focus`.
+//!   They never read another reference's result (references don't chain) nor a row that lost.
 //! - **Errors.** Each unknown token, wrong kind, value out of range, bad colour and TOML
 //!   syntax error is reported with its line and column ([`Overrides::errors`]). A row with an
 //!   error doesn't apply, so its token keeps the theme's value; every other row applies, as
@@ -202,26 +203,43 @@ impl Overrides {
         }
     }
 
-    /// Sets every row's token on `look`: the unscoped rows, then the rows scoped to `look`'s
-    /// appearance. Literal values first; then colours taken from other tokens, all read from
-    /// the look as the literals left it, so references don't chain.
+    /// Sets every row's token on `look`.
+    ///
+    /// One row wins per token: the one scoped to `look`'s appearance, else the unscoped one.
+    /// The winners' literal values are set first; then the winners' colours taken from other
+    /// tokens, each read from the look as the literals left it, so references don't chain and
+    /// never read a row that lost.
+    ///
+    /// `look` must be freshly built (the theme, then [`LookParams`](crate::shape::LookParams)):
+    /// a reference reads the look it is applied to, so applying twice can change it again
+    /// (`alpha(@color.scrim, 0.5)` halves the scrim each time). Rebuild, then apply.
     pub fn apply(&self, look: &mut Look) {
         let scoped = Scope::of(look.kit.dark);
-        let in_order = || {
-            [Scope::All, scoped]
-                .into_iter()
-                .flat_map(|scope| self.rows.iter().filter(move |r| r.scope == scope))
-        };
+        // The rows in the order they win: unscoped, then scoped, so the last for a token wins.
+        let mut winners: Vec<&Row> = Vec::new();
+        for row in [Scope::All, scoped]
+            .into_iter()
+            .flat_map(|scope| self.rows.iter().filter(move |r| r.scope == scope))
+        {
+            match winners
+                .iter_mut()
+                .find(|w| w.token.name() == row.token.name())
+            {
+                Some(w) => *w = row,
+                None => winners.push(row),
+            }
+        }
         let set = |look: &mut Look, token: &Token, value| {
             let set = token.set(look, value);
             debug_assert!(set.is_ok(), "parse checks every value: {set:?}");
         };
-        for row in in_order() {
+        for row in &winners {
             if let Setting::Value(v) = row.value {
                 set(look, row.token, v);
             }
         }
-        let derived: Vec<(&Token, Value)> = in_order()
+        let derived: Vec<(&Token, Value)> = winners
+            .iter()
             .filter_map(|row| match row.value {
                 Setting::Derived { from, alpha } => {
                     Some((row.token, Value::Color(Setting::resolve(from, alpha, look))))
@@ -234,7 +252,7 @@ impl Overrides {
         }
     }
 
-    /// `look` with [`Overrides::apply`] applied.
+    /// `look` with [`Overrides::apply`] applied. `look` must be freshly built, as there.
     pub fn applied(&self, mut look: Look) -> Look {
         self.apply(&mut look);
         look

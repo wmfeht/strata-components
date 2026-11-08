@@ -110,7 +110,8 @@ fn color(name: &'static str, s: &str) -> Result<Setting, Problem> {
         .and_then(|_| t[6..].strip_suffix(')'));
     if let Some(args) = alpha_args {
         let (inner, factor) = args.rsplit_once(',').ok_or_else(bad)?;
-        let factor: f32 = factor.trim().parse().map_err(|_| bad())?;
+        // `+ 0.0` turns `-0` into `0`, so equal files compare equal.
+        let factor = factor.trim().parse::<f32>().map_err(|_| bad())? + 0.0;
         if !(0.0..=1.0).contains(&factor) {
             return Err(bad());
         }

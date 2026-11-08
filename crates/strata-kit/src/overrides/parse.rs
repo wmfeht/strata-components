@@ -3,92 +3,268 @@
 //!
 //! toml's own recovery (`DeTable::parse_recoverable`, toml 1.2.1) isn't enough to keep every
 //! good row: after a line of garbage it drops every row below it, a bad value comes back as an
-//! empty string, an unclosed `[header` leaves its rows at the top level, and an unterminated
-//! multi-line string runs to the end of the file. So [`salvage`] blanks each line toml
-//! reports, and a broken header's rows with it, and parses again until nothing is reported.
-//! Blanking writes spaces over the bytes, so every span still points into the original text.
+//! empty string, an unclosed `[header` leaves its rows at the top level, and an unclosed `{`,
+//! `[` or `"""` swallows every line after it. So [`salvage`] blanks the lines toml reports and
+//! parses again until nothing is reported:
+//!
+//! - Blanking writes spaces over a line, keeping its line break, so every span still points
+//!   into the original text. A broken table header takes the rows under it with it.
+//! - An unclosed array, inline table or multi-line string reports knock-on errors on every
+//!   line it swallowed. So when toml reports one, the round blanks only the line where the
+//!   value holding the first error opens (or that error's own line), reports the unclosed
+//!   error there, and parses again: the lines after it parse on their own. After
+//!   [`OPENER_ROUNDS`] such rounds, the rest go in batches, so a file of nothing but unclosed
+//!   arrays stays fast.
+//! - Lines are found from an index built once, so the loop and the walk stay near linear.
+//! - A row whose value runs over a blanked line (a multi-line string with a bad escape)
+//!   doesn't apply.
 
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
+use std::sync::OnceLock;
 
 use toml::Spanned;
 use toml::de::{DeTable, DeValue};
 
 use super::{OverrideError, Overrides, Problem, Row, Scope, value};
 use crate::theme::Location;
-use crate::tokens;
+use crate::tokens::{self, Token};
+
+/// How many rounds may each blank one unclosed value's opening line before the rest are
+/// blanked in batches.
+const OPENER_ROUNDS: usize = 64;
 
 pub(super) fn parse(src: &str) -> Overrides {
-    let (text, cutoff, mut errors) = salvage(src);
-    let (doc, _) = DeTable::parse_recoverable(&text);
+    let lines = Lines::new(src);
+    let salvaged = salvage(src, &lines);
+    let (doc, _) = DeTable::parse_recoverable(&salvaged.text);
     let mut out = Overrides::default();
     let mut walk = Walk {
         src,
-        cutoff,
+        lines: &lines,
+        blanked: &salvaged.blanked,
+        cutoff: salvaged.cutoff,
         out: &mut out,
     };
     walk.table(doc.get_ref(), "", Scope::All);
+    let mut errors = salvaged.errors;
     errors.append(&mut out.errors);
     errors.sort_by_key(|e| (e.at.line, e.at.column));
     out.errors = errors;
     out
 }
 
-/// `src` with every line toml can't parse blanked, the byte past which nothing applies (the
-/// end, unless an error couldn't be blanked away), and the syntax errors.
-fn salvage(src: &str) -> (String, usize, Vec<OverrideError>) {
-    let mut text = src.as_bytes().to_vec();
-    let mut errors = Vec::new();
-    let mut reported = Vec::new();
-    // Each round blanks at least one line or stops, so this bounds the loop.
-    for _ in 0..=src.lines().count() {
-        let found: Vec<(usize, String)> = {
-            let s = std::str::from_utf8(&text).expect("blanking keeps UTF-8");
-            let (_, errs) = DeTable::parse_recoverable(s);
-            errs.iter()
-                .map(|e| {
-                    let at = e.span().map_or(s.len(), |r| r.start);
-                    (at, e.message().trim().to_owned())
-                })
-                .collect()
-        };
-        if found.is_empty() {
-            return (into_string(text), usize::MAX, errors);
+/// Where each line of a text starts, to find a byte's line and column without rescanning.
+pub(super) struct Lines {
+    starts: Vec<usize>,
+    len: usize,
+}
+
+impl Lines {
+    pub(super) fn new(text: &str) -> Lines {
+        let starts = std::iter::once(0)
+            .chain(text.match_indices('\n').map(|(i, _)| i + 1))
+            .collect();
+        Lines {
+            starts,
+            len: text.len(),
         }
-        let mut progressed = false;
-        // What this round blanked: an error inside it (a row under a broken header) is a
-        // consequence of the one that blanked it.
-        let mut hit: Vec<Range<usize>> = Vec::new();
-        for &(at, ref message) in &found {
-            if hit.iter().any(|r| r.contains(&at) || r.start == at) {
-                continue;
-            }
-            let line = line_of(&text, at);
-            let skipped = blank(&mut text, line.clone());
-            hit.push(line.start..skipped.end);
-            progressed |= skipped.blanked;
-            if reported.contains(&at) {
-                continue;
-            }
-            reported.push(at);
-            let message = if skipped.rows > 0 {
-                format!("{message}; the rows under it don't apply")
-            } else {
-                message.clone()
-            };
+    }
+
+    fn count(&self) -> usize {
+        self.starts.len()
+    }
+
+    /// The index of the line holding byte `at`.
+    fn index(&self, at: usize) -> usize {
+        self.starts.partition_point(|&s| s <= at).saturating_sub(1)
+    }
+
+    /// Line `i`'s bytes, without its line break.
+    fn range(&self, i: usize) -> Range<usize> {
+        let end = self.starts.get(i + 1).map_or(self.len, |&next| next - 1);
+        self.starts[i]..end
+    }
+
+    /// The 1-based line and column of byte `at` in `text`, moved back onto a character
+    /// boundary.
+    pub(super) fn locate(&self, text: &str, at: usize) -> Location {
+        let mut at = at.min(text.len());
+        while !text.is_char_boundary(at) {
+            at -= 1;
+        }
+        let i = self.index(at);
+        Location {
+            line: i + 1,
+            column: text[self.starts[i]..at].chars().count() + 1,
+        }
+    }
+}
+
+/// What [`salvage`] leaves to parse.
+struct Salvaged {
+    /// The text with every broken line blanked.
+    text: String,
+    /// Which lines were blanked, by index.
+    blanked: Vec<bool>,
+    /// The byte from which nothing applies: the end, unless an error couldn't be blanked.
+    cutoff: usize,
+    /// The syntax errors.
+    errors: Vec<OverrideError>,
+}
+
+/// One error toml reported in a round.
+struct Found {
+    at: usize,
+    message: String,
+}
+
+impl Found {
+    /// toml says an array, inline table or multi-line string is never closed: it swallowed
+    /// the lines after it, and reported knock-on errors on them.
+    fn unclosed(&self) -> bool {
+        // Not `unclosed table`: a broken header's own line is the one to blank.
+        let m = &self.message;
+        m.starts_with("unclosed array")
+            || m.starts_with("unclosed inline table")
+            || m.contains("multi-line")
+    }
+}
+
+fn salvage(src: &str, lines: &Lines) -> Salvaged {
+    let mut text = src.as_bytes().to_vec();
+    let mut blanked = vec![false; lines.count()];
+    let mut errors = Vec::new();
+    let mut reported = HashSet::new();
+    let mut opener_rounds = 0;
+    let mut report = |errors: &mut Vec<OverrideError>, at: usize, message: String| {
+        if reported.insert(at) {
             errors.push(OverrideError {
-                at: locate(src, at),
+                at: lines.locate(src, at),
                 scope: Scope::All,
                 problem: Problem::Syntax(message),
             });
         }
-        if !progressed {
-            // An error blanking can't remove, such as a multi-line string still open at the
-            // end of the file: nothing from the first such error on applies.
-            let cutoff = found.iter().map(|&(at, _)| at).min().unwrap_or(0);
-            return (into_string(text), cutoff, errors);
+    };
+    // Each round blanks at least one line or stops, so this bounds the loop.
+    for _ in 0..=lines.count() {
+        let (mut found, values) = round(&text);
+        if found.is_empty() {
+            return Salvaged {
+                text: into_string(text),
+                blanked,
+                cutoff: usize::MAX,
+                errors,
+            };
+        }
+        found.sort_by_key(|f| f.at);
+        // The outermost value that holds byte `at`, or runs to it: where it opens.
+        let opener = |at: usize| {
+            values
+                .iter()
+                .filter(|v| v.start < at && at <= v.end)
+                .map(|v| v.start)
+                .min()
+        };
+
+        // An unclosed value: blank only the line where the first error's value opens (or the
+        // first error's own line), so the lines it swallowed parse next round.
+        if opener_rounds < OPENER_ROUNDS && found.iter().any(Found::unclosed) {
+            let first = &found[0];
+            let open = opener(first.at).unwrap_or(first.at);
+            let i = lines.index(open);
+            if !blanked[i] && blank(&mut text, lines, &mut blanked, i).changed {
+                opener_rounds += 1;
+                let named = found.iter().find(|f| f.unclosed()).unwrap_or(first);
+                report(&mut errors, open, named.message.clone());
+                continue;
+            }
+        }
+
+        let mut progressed = false;
+        let mut stuck = Vec::new();
+        for f in &found {
+            let i = lines.index(f.at);
+            if blanked[i] {
+                // A consequence of a line blanked this round, such as a row under a broken
+                // header.
+                continue;
+            }
+            let b = blank(&mut text, lines, &mut blanked, i);
+            if !b.changed {
+                stuck.push(f);
+                continue;
+            }
+            progressed = true;
+            let message = if b.rows > 0 {
+                format!("{}; the rows under it don't apply", f.message)
+            } else {
+                f.message.clone()
+            };
+            report(&mut errors, f.at, message);
+        }
+        if progressed {
+            continue;
+        }
+        // Nothing on a reported line is left to blank, such as a string left open at the end
+        // of the file: blank where its value opens if that is known, else stop there.
+        let Some(f) = stuck.first().copied().or(found.first()) else {
+            break;
+        };
+        match opener(f.at).filter(|&open| !blanked[lines.index(open)]) {
+            Some(open) => {
+                blank(&mut text, lines, &mut blanked, lines.index(open));
+                report(&mut errors, open, f.message.clone());
+            }
+            None => {
+                report(&mut errors, f.at, f.message.clone());
+                return Salvaged {
+                    text: into_string(text),
+                    blanked,
+                    cutoff: f.at,
+                    errors,
+                };
+            }
         }
     }
-    (into_string(text), 0, errors)
+    Salvaged {
+        text: into_string(text),
+        blanked,
+        cutoff: 0,
+        errors,
+    }
+}
+
+/// Parses `text` once: each error, and the span of every value it read.
+fn round(text: &[u8]) -> (Vec<Found>, Vec<Range<usize>>) {
+    let s = std::str::from_utf8(text).expect("blanking keeps UTF-8");
+    let (doc, errs) = DeTable::parse_recoverable(s);
+    let mut values = Vec::new();
+    spans(doc.get_ref(), &mut values);
+    let found = errs
+        .iter()
+        .map(|e| Found {
+            at: e.span().map_or(s.len(), |r| r.start),
+            message: e.message().trim().to_owned(),
+        })
+        .collect();
+    (found, values)
+}
+
+/// The spans of every value in `table`, nested ones included. A dotted or header table's
+/// span is its key's, which reaches no error.
+fn spans(table: &DeTable<'_>, out: &mut Vec<Range<usize>>) {
+    fn value(v: &Spanned<DeValue<'_>>, out: &mut Vec<Range<usize>>) {
+        out.push(v.span());
+        match v.get_ref() {
+            DeValue::Table(t) => spans(t, out),
+            DeValue::Array(a) => a.iter().for_each(|v| value(v, out)),
+            _ => {}
+        }
+    }
+    for (_, v) in table.iter() {
+        value(v, out);
+    }
 }
 
 fn into_string(text: Vec<u8>) -> String {
@@ -97,48 +273,49 @@ fn into_string(text: Vec<u8>) -> String {
 
 /// What [`blank`] did.
 struct Blanked {
-    /// Some byte that wasn't white space became a space.
-    blanked: bool,
+    /// Some byte changed.
+    changed: bool,
     /// Rows under a broken table header blanked with it.
     rows: usize,
-    /// The end of what was blanked: the line's end, or the last row's under a header.
-    end: usize,
 }
 
-/// Writes spaces over `line`, and when it is a table header, over the rows under it up to the
-/// next header: they would otherwise land in the table above.
-fn blank(text: &mut [u8], line: Range<usize>) -> Blanked {
-    let is_header = |l: &[u8]| l.trim_ascii_start().starts_with(b"[");
-    let header = is_header(&text[line.clone()]);
-    let mut blanked = spaces(text, line.clone());
+/// Blanks line `i`, and when it is a table header, the rows under it up to the next header:
+/// they would otherwise land in the table above.
+fn blank(text: &mut [u8], lines: &Lines, blanked: &mut [bool], i: usize) -> Blanked {
+    let header = text[lines.range(i)].trim_ascii_start().starts_with(b"[");
+    let mut changed = spaces(text, lines.range(i));
+    blanked[i] = true;
     let mut rows = 0;
-    let mut end = line.end;
     if header {
-        let mut at = line.end + 1;
-        while at < text.len() {
-            let next = line_of(text, at);
-            let l = text[next.clone()].trim_ascii();
+        for j in i + 1..lines.count() {
+            let l = text[lines.range(j)].trim_ascii();
             if l.starts_with(b"[") {
                 break;
             }
             let row = !l.is_empty() && !l.starts_with(b"#");
-            if spaces(text, next.clone()) {
-                blanked = true;
+            if spaces(text, lines.range(j)) {
+                changed = true;
                 rows += usize::from(row);
             }
-            end = next.end;
-            at = next.end + 1;
+            blanked[j] = true;
         }
     }
-    Blanked { blanked, rows, end }
+    Blanked { changed, rows }
 }
 
-/// Writes spaces over every byte of `range` that isn't one, keeping line breaks. True when
-/// anything changed.
+/// Writes spaces over `range`, which holds no line break. A carriage return just before the
+/// line break stays, so a CRLF line stays one; TOML takes no other control character, so
+/// every other byte becomes a space. True when anything changed.
 fn spaces(text: &mut [u8], range: Range<usize>) -> bool {
+    let crlf = text.get(range.end) == Some(&b'\n') && range.end > range.start;
+    let end = if crlf && text[range.end - 1] == b'\r' {
+        range.end - 1
+    } else {
+        range.end
+    };
     let mut changed = false;
-    for b in &mut text[range] {
-        if !b.is_ascii_whitespace() {
+    for b in &mut text[range.start..end] {
+        if *b != b' ' {
             *b = b' ';
             changed = true;
         }
@@ -146,32 +323,24 @@ fn spaces(text: &mut [u8], range: Range<usize>) -> bool {
     changed
 }
 
-/// The byte range of the line holding byte `at`, without its line break.
-fn line_of(text: &[u8], at: usize) -> Range<usize> {
-    let at = at.min(text.len());
-    let start = text[..at]
-        .iter()
-        .rposition(|&b| b == b'\n')
-        .map_or(0, |i| i + 1);
-    let end = text[at..]
-        .iter()
-        .position(|&b| b == b'\n')
-        .map_or(text.len(), |i| at + i);
-    start..end
-}
-
-/// The location of byte `at` in `src`, moved back onto a character boundary.
-pub(super) fn locate(src: &str, at: usize) -> Location {
-    let mut at = at.min(src.len());
-    while !src.is_char_boundary(at) {
-        at -= 1;
-    }
-    Location::of(src, at)
+/// Every token by name, and every name that starts tokens' names (`list.row`).
+fn registry() -> &'static (HashMap<&'static str, &'static Token>, HashSet<&'static str>) {
+    static REGISTRY: OnceLock<(HashMap<&'static str, &'static Token>, HashSet<&'static str>)> =
+        OnceLock::new();
+    REGISTRY.get_or_init(|| {
+        let names = tokens::all().map(|t| (t.name(), t)).collect();
+        let groups = tokens::all()
+            .flat_map(|t| t.name().match_indices('.').map(|(i, _)| &t.name()[..i]))
+            .collect();
+        (names, groups)
+    })
 }
 
 /// Reads a parsed table's rows into `out`.
 struct Walk<'a> {
     src: &'a str,
+    lines: &'a Lines,
+    blanked: &'a [bool],
     cutoff: usize,
     out: &'a mut Overrides,
 }
@@ -179,7 +348,7 @@ struct Walk<'a> {
 impl Walk<'_> {
     fn error(&mut self, at: usize, scope: Scope, problem: Problem) {
         self.out.errors.push(OverrideError {
-            at: locate(self.src, at),
+            at: self.lines.locate(self.src, at),
             scope,
             problem,
         });
@@ -188,7 +357,7 @@ impl Walk<'_> {
     /// A problem with a key: reported where its line's text starts, so a dotted key
     /// (`list.row.length = 3`) or a table header (`[list.roww]`) reads from its first segment.
     fn key_error(&mut self, at: usize, scope: Scope, problem: Problem) {
-        let line = line_of(self.src.as_bytes(), at);
+        let line = self.lines.range(self.lines.index(at));
         let indent = self.src.as_bytes()[line.clone()]
             .iter()
             .take_while(|b| b.is_ascii_whitespace())
@@ -196,19 +365,41 @@ impl Walk<'_> {
         self.error((line.start + indent).min(at), scope, problem);
     }
 
+    /// True when `span` runs into a blanked line or past the cutoff: a value toml read from
+    /// what was left of a broken one.
+    fn broken(&self, span: Range<usize>) -> bool {
+        if span.end >= self.cutoff {
+            return true;
+        }
+        let (first, last) = (
+            self.lines.index(span.start),
+            self.lines.index(span.end.max(span.start)),
+        );
+        self.blanked[first..=last].iter().any(|&b| b)
+    }
+
     /// The rows of `table`, whose keys continue `prefix` (empty at the top of the file or of
     /// a scope).
     fn table(&mut self, table: &DeTable<'_>, prefix: &str, scope: Scope) {
         for (key, value) in table.iter() {
-            // A value reaching an error blanking couldn't remove runs into it.
-            if value.span().end >= self.cutoff {
+            if self.broken(value.span()) {
                 continue;
             }
             let k: &str = key.get_ref();
-            let name = if prefix.is_empty() {
+            // A token's segments are snake_case words. Any other key was quoted ("a.b" is one
+            // key, not two), and names no token.
+            let segment = !k.is_empty()
+                && k.bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_');
+            let written = if segment {
                 k.to_owned()
             } else {
-                format!("{prefix}.{k}")
+                format!("{k:?}")
+            };
+            let name = if prefix.is_empty() {
+                written
+            } else {
+                format!("{prefix}.{written}")
             };
             let at = key.span().start;
             if prefix.is_empty() && matches!(k, "light" | "dark") {
@@ -230,32 +421,24 @@ impl Walk<'_> {
     }
 
     fn row(&mut self, name: &str, at: usize, value: &Spanned<DeValue<'_>>, scope: Scope) {
-        if let Some(token) = tokens::find(name) {
+        let (names, groups) = registry();
+        if let Some(&token) = names.get(name) {
             match value::read(token, value.get_ref()) {
                 Ok(v) => self.out.rows.push(Row {
                     scope,
                     token,
                     value: v,
-                    at: locate(self.src, at),
+                    at: self.lines.locate(self.src, at),
                 }),
                 Err(problem) => self.error(value.span().start, scope, problem),
             }
             return;
         }
-        let group = is_group(name);
+        let group = groups.contains(name);
         match value.get_ref() {
             DeValue::Table(t) if group => self.table(t, name, scope),
             _ if group => self.key_error(at, scope, Problem::Group(name.to_owned())),
             _ => self.key_error(at, scope, Problem::Unknown(name.to_owned())),
         }
     }
-}
-
-/// True when `name` starts some token's name at a dot: `list.row` for `list.row.height`.
-fn is_group(name: &str) -> bool {
-    tokens::all().any(|t| {
-        t.name()
-            .strip_prefix(name)
-            .is_some_and(|rest| rest.starts_with('.'))
-    })
 }

@@ -215,8 +215,19 @@ impl Session {
             .join(&name);
         let _ = std::fs::remove_dir_all(&logs);
         std::fs::create_dir_all(&logs).expect("session log directory");
-        // Short, for the 108-byte limit on Unix socket paths.
-        let dir = PathBuf::from(format!("/tmp/strata-session-{}-{n}", std::process::id()));
+        // Unique even when this test process's pid is reused (its start time tells them apart),
+        // and short: sockets in it (`sway-ipc.<uid>.<pid>.sock`, about 30 bytes) must fit in a
+        // Unix socket path's 108 bytes.
+        let dir = PathBuf::from(format!(
+            "/tmp/strata-session-{}-{}-{n}",
+            std::process::id(),
+            start_time("self").expect("this process's start time")
+        ));
+        assert!(
+            dir.as_os_str().len() + 40 < 108,
+            "{} is too long for socket paths in it",
+            dir.display()
+        );
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::DirBuilder::new()
             .mode(0o700)
@@ -550,12 +561,13 @@ alive() {
 }
 while alive; do sleep 0.2; done
 [ -d "$d" ] || exit 0
+# The session's processes: one grep over every environ. `mine` checks one again just before it
+# is signalled, in case it exited and its pid went to someone else in between.
 ours() {
-  for e in /proc/[0-9]*/environ; do
-    tr '\0' '\n' < "$e" 2>/dev/null | grep -qxF "XDG_RUNTIME_DIR=$d" || continue
-    p=${e#/proc/}; echo "${p%/environ}"
-  done
+  grep -lxzF "XDG_RUNTIME_DIR=$d" /proc/[0-9]*/environ 2>/dev/null |
+    sed 's#^/proc/##; s#/environ$##'
 }
+mine() { grep -qxzF "XDG_RUNTIME_DIR=$d" "/proc/$1/environ" 2>/dev/null; }
 pids=$(ours)
 inodes=$(for p in $pids; do for f in /proc/$p/fd/*; do readlink "$f"; done; done 2>/dev/null |
   sed -n 's/^socket:\[\([0-9]*\)\]$/\1/p' | sort -u)
@@ -573,7 +585,9 @@ if [ -n "$inodes" ]; then
 fi
 for round in 1 2 3 4 5; do
   [ -n "$pids" ] || break
-  kill -KILL $pids 2>/dev/null
+  for p in $pids; do
+    mine "$p" && kill -KILL "$p" 2>/dev/null
+  done
   sleep 0.2
   pids=$(ours)
 done
@@ -629,19 +643,22 @@ pub fn alive(pid: u32) -> bool {
 /// The live processes started with `XDG_RUNTIME_DIR` set to `dir`: a session's own, D-Bus
 /// activated services and Xwayland (which wlroots forks twice) included.
 pub fn processes_of(dir: &Path) -> Vec<u32> {
-    let want = format!("XDG_RUNTIME_DIR={}", dir.display());
     let Ok(entries) = std::fs::read_dir("/proc") else {
         return Vec::new();
     };
     entries
         .flatten()
         .filter_map(|e| e.file_name().to_str()?.parse::<u32>().ok())
-        .filter(|pid| {
-            std::fs::read(format!("/proc/{pid}/environ"))
-                .is_ok_and(|env| env.split(|b| *b == 0).any(|v| v == want.as_bytes()))
-        })
+        .filter(|pid| started_with(*pid, dir))
         .filter(|pid| alive(*pid))
         .collect()
+}
+
+/// Whether process `pid` was started with `XDG_RUNTIME_DIR` set to `dir`.
+fn started_with(pid: u32, dir: &Path) -> bool {
+    let want = format!("XDG_RUNTIME_DIR={}", dir.display());
+    std::fs::read(format!("/proc/{pid}/environ"))
+        .is_ok_and(|env| env.split(|b| *b == 0).any(|v| v == want.as_bytes()))
 }
 
 /// A mount point from `/proc/self/mountinfo`, with its octal escapes (`\040` for a space)
@@ -700,10 +717,15 @@ impl Drop for Session {
         }
         if !left.is_empty() {
             eprintln!("{}: killing what outlived the session: {left:?}", self.name);
-            let _ = Command::new("kill")
-                .arg("-KILL")
-                .args(left.iter().map(u32::to_string))
-                .status();
+            for pid in left {
+                // Again just before the signal: the pid may have gone to another process since
+                // the scan. (A pidfd would close the gap, but not without unsafe code.)
+                if started_with(pid, &self.dir) {
+                    let _ = Command::new("kill")
+                        .args(["-KILL", &pid.to_string()])
+                        .status();
+                }
+            }
             while !processes_of(&self.dir).is_empty() && Instant::now() < deadline + timeout() {
                 std::thread::sleep(Duration::from_millis(20));
             }

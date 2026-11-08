@@ -20,6 +20,8 @@ strata-kit.workspace = true
 # Shared by two or more work packages.
 
 # C10a highlighter: syntect and two-face
+syntect.workspace = true
+two-face.workspace = true
 
 # C11 DocumentView
 

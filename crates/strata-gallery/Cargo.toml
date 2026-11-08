@@ -9,7 +9,7 @@ publish = false
 
 [dependencies]
 rune.workspace = true
-rune-kit.workspace = true
+rune-kit = { workspace = true, features = ["markdown"] }
 strata-kit.workspace = true
 strata-components.workspace = true
 

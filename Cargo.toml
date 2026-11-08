@@ -63,6 +63,10 @@ wayland-protocols-wlr = "0.3"
 x11rb = "0.13"
 xkbcommon = "0.9"
 
+# Regex backend and grammar set chosen in S4 (docs/decisions/S4-syntect-backend.md).
+syntect = { version = "5.3.0", default-features = false, features = ["parsing", "regex-onig"] }
+two-face = { version = "0.5.2", default-features = false, features = ["syntect-onig"] }
+
 [profile.dev.package."*"]
 debug = false
 

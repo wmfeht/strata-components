@@ -9,3 +9,6 @@ extend-exclude = [
 Omarchy = "Omarchy"
 Hyprland = "Hyprland"
 Strata = "Strata"
+# A bundled theme's name (crates/strata-kit/themes/catalog.toml), not a misspelt Dracula.
+darcula = "darcula"
+Darcula = "Darcula"

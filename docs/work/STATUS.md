@@ -32,8 +32,8 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | C21 | ready | | |
 | C22 | ready | | |
 | C23 | ready | | |
-| C24 | planning | | |
-| C25 | ready | | |
+| C24 | coding | own overlay scrollbar instead of rune-kit ScrollBar (it collides across collections and can't sit outside C4's scroll_x: deviation from plan §4, owner edit); small C1e edit (edge part + on_scroll); modal autoscroll shield (wheel/keys blocked while running); follow-ups: row-margin middle press (C1b/C1e), retrofit bars + popover wheel bullets (X1) | |
+| C25 | planning | | |
 | C5 | ready | | |
 | C6 | ready | | |
 | C7 | ready | | |

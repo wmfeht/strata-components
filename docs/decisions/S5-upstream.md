@@ -1357,6 +1357,18 @@ S5 decides none of these. Each has a recommendation.
 Drafts written after S5, by the work package named in each. The same rules hold: nothing here is
 filed or posted, and each waits for the owner. The entries above are S5's and stay as they are.
 
+### U-P1-1
+
+From P1 (`dnd`): an element has one handler of each kind, and a shim can't read an element's key,
+so a shim attaching drag and drop to a component's element takes over its `on_drag` or
+`drawn_rect_into`. Draft, not filed; the text is in `crates/strata-platform/src/dnd/mod.rs`.
+
+### U-P1-2
+
+From P1 (`dnd`): `Tx::element_at` gives a path and key but no rect and no point in the element's
+own coordinates, as Rune's own drops have in `drop_point`. Draft, not filed; the text is in
+`crates/strata-platform/src/dnd/mod.rs`.
+
 ### U-P8-1
 
 From P8 (`single-instance`), cited by `crates/strata-platform/src/single_instance/mod.rs`.

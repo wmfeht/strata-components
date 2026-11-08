@@ -1,0 +1,650 @@
+//! Unit tests for the document view: the model's conversions, what a unit shows and copies,
+//! find, and, on Rune's headless runtime, selection, copy, links, Copy code and code colours.
+
+mod perf;
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use rune::{Cx, El, Env, Key, KeyEvent, Mods, PhysicalInput, Pixels, Runtime, Tx, clipboard};
+use strata_kit::look::Look;
+
+use super::find::{Point, match_ranges};
+use super::shown::{Insert, Shown, math_inserts};
+use super::*;
+use crate::code_view::highlight::{CodeBlocks, Highlighter, theme_from_look};
+use crate::preview_drawer::{FindStatus, HostedPreview};
+
+// --- The model ------------------------------------------------------------------------------
+
+#[test]
+fn char_spans_become_byte_spans() {
+    let u = Unit::new(UnitKind::Paragraph, "café au lait")
+        .from_char_spans([(5..7, SpanStyle::Bold), (8..99, SpanStyle::Italic)]);
+    // "café " is 6 bytes: the é takes two.
+    assert_eq!(u.spans[0].range, 6..8);
+    assert_eq!(&u.text[u.spans[0].range.clone()], "au");
+    assert_eq!(
+        u.spans[1].range,
+        9..u.text.len(),
+        "a range past the text ends at it"
+    );
+}
+
+#[test]
+fn an_inline_equation_shows_its_source_and_copies_its_dollars() {
+    let text = "Area \u{fffc} m.";
+    let at = text.find('\u{fffc}').unwrap();
+    let spans = vec![
+        Span::new(0..4, SpanStyle::Bold),
+        Span::new(at..at + 3, SpanStyle::Math("\\pi r^2".into())),
+        Span::new(at + 3..text.len(), SpanStyle::Italic),
+    ];
+    let shown = Shown::with(text, &spans, math_inserts(text, &spans));
+    assert_eq!(shown.text, "Area \\pi r^2 m.");
+    let math = &shown.spans[1];
+    assert_eq!(&shown.text[math.range.clone()], "\\pi r^2");
+    assert_eq!(&shown.text[shown.spans[2].range.clone()], " m.");
+    // Any part of the equation copies the whole of it, with its delimiters.
+    assert_eq!(shown.copy(0..shown.text.len()), "Area $\\pi r^2$ m.");
+    assert_eq!(shown.copy(7..9), "$\\pi r^2$");
+    assert_eq!(shown.copy(0..4), "Area");
+}
+
+#[test]
+fn the_copy_button_room_draws_but_never_copies() {
+    let text = "fn main() {\n}";
+    let shown = Shown::with(
+        text,
+        &[],
+        vec![Insert {
+            old: 11..11,
+            new: "\u{2007}\u{2007}".into(),
+            copy: String::new(),
+        }],
+    );
+    assert_eq!(shown.text, "fn main() {\u{2007}\u{2007}\n}");
+    assert_eq!(shown.copy(0..shown.text.len()), text);
+    // A colour ending at the line's end stays clear of the room; the next line moves past it.
+    assert_eq!(shown.map(11), 11);
+    assert_eq!(shown.map(12), 12 + 6);
+}
+
+// --- Find -----------------------------------------------------------------------------------
+
+#[test]
+fn find_folds_case_and_never_overlaps() {
+    assert_eq!(match_ranges("Un ÉCLAIR", "éclair"), vec![3..10]);
+    assert_eq!(match_ranges("aaa", "aa").len(), 1);
+    assert!(match_ranges("text", "").is_empty());
+}
+
+fn doc(units: Vec<Unit>) -> DocumentState {
+    DocumentState::new(Arc::new(Document::new(units)))
+}
+
+fn table(rows: &[&[&str]]) -> Unit {
+    let rows: Vec<Vec<Cell>> = rows
+        .iter()
+        .enumerate()
+        .map(|(r, cells)| {
+            cells
+                .iter()
+                .map(|c| {
+                    if r == 0 {
+                        Cell::header(*c)
+                    } else {
+                        Cell::new(*c)
+                    }
+                })
+                .collect()
+        })
+        .collect();
+    let copy: String = rows
+        .iter()
+        .map(|r| {
+            r.iter()
+                .map(|c| c.text.as_str())
+                .collect::<Vec<_>>()
+                .join("\t")
+                + "\n"
+        })
+        .collect();
+    Unit::new(
+        UnitKind::Table {
+            list_depth: None,
+            rows,
+        },
+        "",
+    )
+    .copy_text(copy)
+}
+
+#[test]
+fn find_reads_across_units_and_skips_tables() {
+    let mut d = doc(vec![
+        Unit::new(UnitKind::Paragraph, "the end of one"),
+        table(&[&["one two"], &["one"]]),
+        Unit::new(UnitKind::Paragraph, "two starts here"),
+    ]);
+    d.find("one\ntwo");
+    assert_eq!(
+        d.matches()
+            .iter()
+            .map(|m| (m.start, m.end))
+            .collect::<Vec<_>>(),
+        [(
+            Point {
+                unit: 0,
+                offset: 11
+            },
+            Point { unit: 2, offset: 3 }
+        )],
+        "a match spans the paragraphs and not the table between"
+    );
+    d.find("one");
+    assert_eq!(
+        d.find_status().map(|s| s.total),
+        Some(1),
+        "table cells aren't searched"
+    );
+}
+
+#[test]
+fn a_table_only_document_is_not_searchable() {
+    assert!(!doc(vec![table(&[&["a"], &["b"]])]).searchable());
+    assert!(doc(vec![Unit::new(UnitKind::Paragraph, "a")]).searchable());
+}
+
+#[test]
+fn find_steps_wrap_and_an_edit_clears_the_selection() {
+    let mut d = doc(vec![Unit::new(UnitKind::Paragraph, "a b a b a")]);
+    d.find("a");
+    assert_eq!(
+        d.find_status(),
+        Some(FindStatus {
+            current: Some(1),
+            total: 3
+        })
+    );
+    d.find_step(false);
+    assert_eq!(
+        d.find_status().and_then(|s| s.current),
+        Some(3),
+        "wraps back to the last"
+    );
+    d.find_step(true);
+    assert_eq!(
+        d.find_status().and_then(|s| s.current),
+        Some(1),
+        "wraps on to the first"
+    );
+    d.find("zzz");
+    assert_eq!(
+        d.find_status(),
+        Some(FindStatus {
+            current: None,
+            total: 0
+        })
+    );
+    assert_eq!(
+        d.pending().last(),
+        Some(&state::Request::Clear),
+        "with no match, nothing stays selected"
+    );
+}
+
+#[test]
+fn strata_language_ids_find_a_grammar() {
+    let set = two_face::syntax::extra_newlines();
+    let missing: Vec<&str> = lang::STRATA_IDS
+        .iter()
+        .copied()
+        .filter(|id| set.find_syntax_by_token(grammar_token(id)).is_none())
+        .collect();
+    // Vala has no grammar in two-face's set: its blocks draw plain.
+    assert_eq!(missing, ["vala"], "ids with no grammar");
+}
+
+// --- On Rune's runtime ----------------------------------------------------------------------
+
+struct Host {
+    doc: DocumentState,
+    look: Look,
+    blocks: Option<CodeBlocks>,
+    intents: Vec<DocumentIntent>,
+}
+
+fn host_view(h: &Host, cx: &mut Cx<Host>) -> El {
+    let mut v = DocumentView::new(|h: &Host| &h.doc, |h: &mut Host| &mut h.doc)
+        .on_intent(|h: &mut Host, i, _tx: &mut Tx| h.intents.push(i));
+    if let Some(b) = &h.blocks {
+        v = v.blocks(b);
+    }
+    v.build(h, &h.look, cx)
+}
+
+fn runtime(units: Vec<Unit>) -> Runtime<Host> {
+    runtime_with(doc(units), None)
+}
+
+fn runtime_with(doc: DocumentState, blocks: Option<CodeBlocks>) -> Runtime<Host> {
+    let host = Host {
+        doc,
+        look: Look::fallback(false),
+        blocks,
+        intents: Vec::new(),
+    };
+    let mut rt = Runtime::new(host, host_view, (700.0, 500.0), Env::new(false, 1.0));
+    rt.frame(0.0);
+    settle(&mut rt);
+    rt
+}
+
+fn settle(rt: &mut Runtime<Host>) {
+    for _ in 0..60 {
+        if !rt.frame(1.0 / 60.0) {
+            break;
+        }
+    }
+}
+
+/// Whether `path` is element `leaf` of row `row` (`doc-u3/t`): rows hold unkeyed boxes
+/// between the row and its texts.
+fn is(path: &str, row_leaf: &str) -> bool {
+    let (row, leaf) = row_leaf.split_once('/').expect("row/leaf");
+    path.split('/').any(|s| s == row) && path.ends_with(&format!("/{leaf}"))
+}
+
+fn rect(rt: &Runtime<Host>, row_leaf: &str) -> [f32; 4] {
+    rt.elements()
+        .into_iter()
+        .find(|e| is(&e.path, row_leaf))
+        .unwrap_or_else(|| panic!("no element {row_leaf}"))
+        .rect
+}
+
+fn command(rt: &mut Runtime<Host>, c: char) {
+    rt.key(KeyEvent {
+        key: Key::Command(c),
+        mods: Mods {
+            cmd: true,
+            ..Mods::default()
+        },
+    });
+    settle(rt);
+}
+
+fn drag(rt: &mut Runtime<Host>, from: (f32, f32), to: (f32, f32)) {
+    rt.pointer_move(from.0, from.1);
+    rt.pointer_down(from.0, from.1);
+    rt.frame(1.0 / 60.0);
+    rt.pointer_move(to.0, to.1);
+    rt.frame(1.0 / 60.0);
+    rt.pointer_up(to.0, to.1);
+    settle(rt);
+}
+
+fn image(px: u32) -> Pixels {
+    let p = Pixels::new();
+    p.set(px, px, vec![128; (px * px * 4) as usize]);
+    p
+}
+
+fn mixed() -> Vec<Unit> {
+    vec![
+        Unit::new(UnitKind::Heading(1), "Title"),
+        Unit::new(UnitKind::Paragraph, "Alpha beta."),
+        Unit::new(
+            UnitKind::Media {
+                list_depth: None,
+                media: Media::Image,
+            },
+            "pic",
+        )
+        .copy_text("[Image: pic]\n"),
+        Unit::new(
+            UnitKind::Code {
+                list_depth: None,
+                language: None,
+            },
+            "x = 1\ny = 2",
+        ),
+        Unit::new(UnitKind::Paragraph, "Omega end."),
+    ]
+}
+
+#[test]
+fn a_drag_across_blocks_copies_strata_text_with_the_image_between() {
+    let mut d = doc(mixed());
+    d.set_media(2, MediaState::Ready(image(40)));
+    let mut rt = runtime_with(d, None);
+    let clip = clipboard::memory();
+    rt.use_clipboard(&clip);
+    let first = rect(&rt, "doc-u0/t");
+    let last = rect(&rt, "doc-u4/t");
+    drag(
+        &mut rt,
+        (first[0] + 1.0, first[1] + first[3] / 2.0),
+        (last[0] + last[2] - 1.0, last[1] + last[3] / 2.0),
+    );
+    command(&mut rt, 'c');
+    assert_eq!(
+        clip.text().as_deref().map(String::as_str),
+        Some("Title\nAlpha beta.\n[Image: pic]\nx = 1\ny = 2\nOmega end.\n")
+    );
+}
+
+#[test]
+fn a_selection_ending_inside_a_unit_copies_its_part_then_the_newline_between() {
+    // Paragraphs that wrap, so the middle of a first line is inside the text.
+    let one = "alpha ".repeat(60);
+    let two = "omega ".repeat(60);
+    let mut rt = runtime(vec![
+        Unit::new(UnitKind::Paragraph, one.trim_end()),
+        Unit::new(UnitKind::Paragraph, two.trim_end()),
+    ]);
+    let clip = clipboard::memory();
+    rt.use_clipboard(&clip);
+    let a = rect(&rt, "doc-u0/t");
+    let b = rect(&rt, "doc-u1/t");
+    let line = 8.0;
+    drag(
+        &mut rt,
+        (a[0] + a[2] * 0.5, a[1] + line),
+        (b[0] + b[2] * 0.5, b[1] + line),
+    );
+    command(&mut rt, 'c');
+    let got = clip.text().map(|t| t.to_string()).unwrap_or_default();
+    let (head, tail) = got.split_once('\n').unwrap_or_else(|| panic!("{got:?}"));
+    assert!(
+        one.trim_end().ends_with(head),
+        "the first unit's end: {head:?}"
+    );
+    assert!(head.len() < one.trim_end().len(), "a part, not all");
+    assert!(
+        two.starts_with(tail) && !tail.is_empty(),
+        "the second unit's start: {tail:?}"
+    );
+    assert!(tail.len() < two.trim_end().len(), "a part, not all");
+}
+
+#[test]
+fn ctrl_a_then_ctrl_c_copies_the_whole_document_past_runes_row_cap() {
+    // Rune collects at most 10,000 unbuilt rows for a copy (R4).
+    let units: Vec<Unit> = (0..12_000)
+        .map(|i| Unit::new(UnitKind::Paragraph, format!("unit {i}")))
+        .collect();
+    let want: String = units.iter().map(|u| u.copy_text.as_str()).collect();
+    let mut rt = runtime(units);
+    let clip = clipboard::memory();
+    rt.use_clipboard(&clip);
+    let t = rect(&rt, "doc-u0/t");
+    rt.pointer_move(t[0] + 2.0, t[1] + 4.0);
+    rt.pointer_down(t[0] + 2.0, t[1] + 4.0);
+    rt.pointer_up(t[0] + 2.0, t[1] + 4.0);
+    settle(&mut rt);
+    command(&mut rt, 'a');
+    command(&mut rt, 'c');
+    let got = clip.text().map(|t| t.to_string()).unwrap_or_default();
+    assert_eq!(
+        got.len(),
+        want.len(),
+        "copied {} of {} bytes",
+        got.len(),
+        want.len()
+    );
+    assert!(got == want);
+    // A click after that ends it: the next copy is the selection's again.
+    rt.update(|h, _| assert!(h.doc.all_selected()));
+    let t = rect(&rt, "doc-u0/t");
+    drag(
+        &mut rt,
+        (t[0] + 1.0, t[1] + 4.0),
+        (t[0] + t[2] - 1.0, t[1] + 4.0),
+    );
+    rt.update(|h, _| assert!(!h.doc.all_selected()));
+}
+
+#[test]
+fn a_link_click_asks_the_host_to_open_it() {
+    let text = "Read the guide online.";
+    let at = text.find("guide").unwrap();
+    let mut rt = runtime(vec![Unit::new(UnitKind::Paragraph, text).spans([
+        Span::new(
+            at..at + 5,
+            SpanStyle::Link("https://example.org/guide".into()),
+        ),
+    ])]);
+    let link = rt
+        .elements()
+        .into_iter()
+        .find(|e| e.role == "link")
+        .expect("the link")
+        .rect;
+    let (x, y) = (link[0] + link[2] / 2.0, link[1] + link[3] / 2.0);
+    rt.pointer_move(x, y);
+    rt.pointer_down(x, y);
+    rt.frame(1.0 / 60.0);
+    rt.pointer_up(x, y);
+    settle(&mut rt);
+    rt.update(|h, _| {
+        assert_eq!(
+            h.intents,
+            [DocumentIntent::OpenLink("https://example.org/guide".into())]
+        )
+    });
+}
+
+#[test]
+fn a_shift_click_extends_the_selection_into_the_next_block() {
+    let mut rt = runtime(vec![
+        Unit::new(UnitKind::Paragraph, "Alpha beta"),
+        Unit::new(UnitKind::Paragraph, "Gamma delta"),
+    ]);
+    let a = rect(&rt, "doc-u0/t");
+    let b = rect(&rt, "doc-u1/t");
+    let at = (a[0] + 1.0, a[1] + a[3] / 2.0);
+    rt.pointer_move(at.0, at.1);
+    rt.pointer_down(at.0, at.1);
+    rt.pointer_up(at.0, at.1);
+    settle(&mut rt);
+    rt.physical_input(PhysicalInput::Modifiers(Mods {
+        shift: true,
+        ..Mods::default()
+    }));
+    let to = (b[0] + b[2] - 1.0, b[1] + b[3] / 2.0);
+    rt.pointer_move(to.0, to.1);
+    rt.pointer_down(to.0, to.1);
+    rt.pointer_up(to.0, to.1);
+    rt.physical_input(PhysicalInput::Modifiers(Mods::default()));
+    settle(&mut rt);
+    assert_eq!(
+        rt.selected_text().as_deref(),
+        Some("Alpha beta\nGamma delta")
+    );
+}
+
+#[test]
+fn find_selects_and_reveals_its_match_and_find_end_keeps_it() {
+    let mut units: Vec<Unit> = (0..300)
+        .map(|i| Unit::new(UnitKind::Paragraph, format!("filler {i}")))
+        .collect();
+    units.push(Unit::new(UnitKind::Paragraph, "The NEEDLE is here."));
+    let mut rt = runtime(units);
+    rt.update(|h, tx| {
+        h.doc.find("needle");
+        h.doc.flush(tx);
+    });
+    settle(&mut rt);
+    assert_eq!(rt.selected_text().as_deref(), Some("NEEDLE"));
+    assert!(
+        rt.elements().iter().any(|e| is(&e.path, "doc-u300/t")),
+        "the match's row was scrolled to"
+    );
+    rt.update(|h, tx| {
+        h.doc.find_end();
+        h.doc.flush(tx);
+    });
+    settle(&mut rt);
+    assert_eq!(rt.selected_text().as_deref(), Some("NEEDLE"));
+}
+
+#[test]
+fn copy_code_copies_the_block_then_turns_back_after_two_seconds() {
+    let mut rt = runtime(vec![Unit::new(
+        UnitKind::Code {
+            list_depth: None,
+            language: None,
+        },
+        "let a = 1;\nlet b = 2;",
+    )]);
+    let clip = clipboard::memory();
+    rt.use_clipboard(&clip);
+    let label = |rt: &Runtime<Host>| {
+        rt.elements()
+            .into_iter()
+            .find(|e| is(&e.path, "doc-u0/copy"))
+            .and_then(|e| e.label)
+    };
+    assert_eq!(label(&rt).as_deref(), Some("Copy code"));
+    let b = rect(&rt, "doc-u0/copy");
+    let (x, y) = (b[0] + b[2] / 2.0, b[1] + b[3] / 2.0);
+    rt.pointer_move(x, y);
+    rt.pointer_down(x, y);
+    rt.frame(1.0 / 60.0);
+    rt.pointer_up(x, y);
+    settle(&mut rt);
+    assert_eq!(
+        clip.text().as_deref().map(String::as_str),
+        Some("let a = 1;\nlet b = 2;")
+    );
+    assert_eq!(label(&rt).as_deref(), Some("Code copied"));
+    rt.update(|h, _| {
+        h.doc.tick(10.0);
+        assert!(!h.doc.tick(11.9), "still copied before 2 s");
+        assert!(h.doc.tick(12.0));
+    });
+    settle(&mut rt);
+    assert_eq!(label(&rt).as_deref(), Some("Copy code"));
+}
+
+#[test]
+fn plain_left_asks_to_leave_the_document() {
+    let mut rt = runtime(vec![Unit::new(UnitKind::Paragraph, "Some text")]);
+    let t = rect(&rt, "doc-u0/t");
+    rt.pointer_move(t[0] + 2.0, t[1] + 4.0);
+    rt.pointer_down(t[0] + 2.0, t[1] + 4.0);
+    rt.pointer_up(t[0] + 2.0, t[1] + 4.0);
+    settle(&mut rt);
+    rt.key(KeyEvent {
+        key: Key::Left,
+        mods: Mods::default(),
+    });
+    settle(&mut rt);
+    rt.update(|h, _| assert_eq!(h.intents, [DocumentIntent::Leave]));
+}
+
+#[test]
+fn code_colours_are_asked_for_near_the_viewport_only() {
+    // 3,000 units with a coloured block every 30: only those near the viewport are asked
+    // for, and a copy of the whole document (which builds every row) asks for none.
+    let units: Vec<Unit> = (0..3000)
+        .map(|i| {
+            if i % 30 == 0 {
+                Unit::new(
+                    UnitKind::Code {
+                        list_depth: None,
+                        language: Some("rust".into()),
+                    },
+                    format!("let block_{i} = {i};"),
+                )
+            } else {
+                Unit::new(UnitKind::Paragraph, format!("paragraph {i}"))
+            }
+        })
+        .collect();
+    let look = Look::fallback(false);
+    let h = Highlighter::new(Arc::new(theme_from_look(&look)));
+    let blocks = h.blocks();
+    let mut rt = runtime_with(doc(units), Some(blocks.clone()));
+    let asked = blocks.entry_count();
+    assert!(
+        (1..=10).contains(&asked),
+        "{asked} blocks asked for on open"
+    );
+    let clip = clipboard::memory();
+    rt.use_clipboard(&clip);
+    let t = rect(&rt, "doc-u1/t");
+    rt.pointer_move(t[0] + 2.0, t[1] + 4.0);
+    rt.pointer_down(t[0] + 2.0, t[1] + 4.0);
+    rt.pointer_up(t[0] + 2.0, t[1] + 4.0);
+    settle(&mut rt);
+    command(&mut rt, 'a');
+    rt.update(|h, _| h.doc.select_all_off_for_test());
+    command(&mut rt, 'c');
+    assert!(clip.text().is_some_and(|t| t.len() > 10_000));
+    assert_eq!(blocks.entry_count(), asked, "the copy asked for colours");
+}
+
+#[test]
+fn a_block_in_parts_draws_plain_with_copy_code_on_its_first_part_only() {
+    let part = |first, last, t: &str| {
+        Unit::new(
+            UnitKind::Code {
+                list_depth: None,
+                language: Some("rust".into()),
+            },
+            t,
+        )
+        .part(first, last, true)
+    };
+    let look = Look::fallback(false);
+    let h = Highlighter::new(Arc::new(theme_from_look(&look)));
+    let mut blocks = h.blocks();
+    blocks.wait_on_miss(Some(Duration::from_secs(30)));
+    let rt = runtime_with(
+        doc(vec![
+            part(true, false, "let a = 1;"),
+            part(false, true, "let b = 2;"),
+        ]),
+        Some(blocks.clone()),
+    );
+    assert_eq!(blocks.entry_count(), 0, "a split block isn't coloured");
+    let copies: Vec<String> = rt
+        .elements()
+        .into_iter()
+        .filter(|e| e.path.ends_with("/copy"))
+        .map(|e| e.path)
+        .collect();
+    assert_eq!(copies.len(), 1, "{copies:?}");
+    assert!(is(&copies[0], "doc-u0/copy"));
+}
+
+#[test]
+fn find_maps_folded_matches_back_through_characters_that_change_length() {
+    // "İ" lowercases to two characters (i and a combining dot), "ẞ" to "ß": a match after,
+    // across or inside them still lands on the original text's characters.
+    let text = "aİb ẞtraße x";
+    let r = match_ranges(text, "b");
+    assert_eq!(
+        r.iter().map(|r| &text[r.clone()]).collect::<Vec<_>>(),
+        ["b"]
+    );
+    let r = match_ranges(text, "ßtraße");
+    assert_eq!(
+        r.iter().map(|r| &text[r.clone()]).collect::<Vec<_>>(),
+        ["ẞtraße"]
+    );
+    let r = match_ranges(text, "x");
+    assert_eq!(
+        r.iter().map(|r| &text[r.clone()]).collect::<Vec<_>>(),
+        ["x"]
+    );
+    // A query matching only the first half of İ's lowercase takes the whole character.
+    let r = match_ranges(text, "ai");
+    assert_eq!(
+        r.iter().map(|r| &text[r.clone()]).collect::<Vec<_>>(),
+        ["aİ"]
+    );
+}

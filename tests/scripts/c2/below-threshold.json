@@ -1,0 +1,44 @@
+{
+  "bullets": [
+    "browser/view-modes/columns: Pressing a row and moving less than GTK's drag threshold starts no file drag."
+  ],
+  "scene": "c2-three-columns-light",
+  "events": [
+    {
+      "t": 0.2,
+      "type": "down",
+      "x": 345,
+      "y": 160
+    },
+    {
+      "t": 0.3,
+      "type": "move",
+      "x": 349,
+      "y": 162
+    },
+    {
+      "t": 0.4,
+      "type": "up",
+      "x": 349,
+      "y": 162
+    },
+    {
+      "t": 1.0,
+      "type": "move",
+      "x": 930,
+      "y": 14
+    }
+  ],
+  "expect": [
+    {
+      "key": "c2-intent",
+      "name": "Clicked cv.pdf"
+    },
+    {
+      "key": "row-2000004",
+      "states": [
+        "selected"
+      ]
+    }
+  ]
+}

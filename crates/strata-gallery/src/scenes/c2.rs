@@ -4,7 +4,7 @@
 //! Work package: `docs/work/phase-3-views/C2-columns-view.md`.
 //!
 //! The page is a stand-in Columns pane over a fake tree (see [`folder`]): Home, holding
-//! Documents, Pictures, Music, Projects, Empty, Slow (which takes 0.6 s to list), Big (100,000
+//! Documents, Pictures, Music, Projects, Empty, Slow (which takes 2 s to list), Big (100,000
 //! entries) and a chain `deep/level-1/…/level-20`. Entry ids are fixed per folder, `number ×
 //! 1,000,000 + position`, so scripts name rows by them: Home's entries are `row-1000001` on.
 //! Its header shows the columns open (`c2-path`) and the last thing the view told the host
@@ -40,7 +40,7 @@ use crate::{Gallery, Scene};
 pub const KEY: &str = "c2";
 
 /// How long Slow takes to list.
-const SLOW: f64 = 0.6;
+const SLOW: f64 = 2.0;
 
 /// One open column's listing.
 #[derive(Debug)]

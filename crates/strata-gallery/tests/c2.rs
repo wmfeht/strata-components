@@ -350,7 +350,7 @@ mod c2 {
         let mut rt = scene("c2-home-light");
         tap_name(&mut rt, &row("Home", "Slow"));
         assert!(info(&rt, &keys::spinner("c2-col-2")).is_some());
-        settle(&mut rt, 45);
+        settle(&mut rt, 130);
         assert!(info(&rt, &keys::spinner("c2-col-2")).is_none());
         assert!(info(&rt, &row("Slow", "late-0001.txt")).is_some());
     }
@@ -725,7 +725,7 @@ mod c2 {
         key(&mut rt, Key::Left);
         assert_eq!(rt.state.c2.columns.active(), 1);
         assert_eq!(cursor(&rt, 1), None, "Slow is still listing");
-        settle(&mut rt, 45);
+        settle(&mut rt, 130);
         assert_eq!(cursor(&rt, 1), Some(id("Slow", "late-0003.txt")));
     }
 

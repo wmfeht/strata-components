@@ -103,6 +103,10 @@ pub enum Command {
     DropProxy,
     /// Exports the peer's window for another client to parent to ([`Exported`]).
     Export,
+    /// Wayland: an `xdg_activation_v1` token for the peer's window, made with the serial of its
+    /// last keyboard enter or press ([`ActivationToken`]), for a test to hand another process
+    /// as `XDG_ACTIVATION_TOKEN` (P8). Map the window and give it focus first.
+    ActivationToken,
     /// Replies once everything sent before it has reached the server and come back.
     Sync,
     /// Exits. End of input does the same.
@@ -236,6 +240,12 @@ pub struct Targets {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Exported {
     pub handle: String,
+}
+
+/// The reply to [`Command::ActivationToken`].
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ActivationToken {
+    pub token: String,
 }
 
 /// A line the peer writes.

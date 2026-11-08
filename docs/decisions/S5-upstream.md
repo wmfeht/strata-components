@@ -1351,3 +1351,55 @@ S5 decides none of these. Each has a recommendation.
 - The workflow hasn't run on GitHub.
 - S4's record was read on S4's branch (`69be683`) before it merged. If its merged version adds a
   Rune ask, fold it in here.
+
+## Drafts added by later work packages
+
+Drafts written after S5, by the work package named in each. The same rules hold: nothing here is
+filed or posted, and each waits for the owner. The entries above are S5's and stay as they are.
+
+### U-P8-1
+
+From P8 (`single-instance`), cited by `crates/strata-platform/src/single_instance/mod.rs`.
+
+**Title:** X11: `AppHandle::activate(token)` on an open window ignores `DESKTOP_STARTUP_ID`
+
+**Compositor:** an X11 window manager that prevents focus stealing (mutter, KWin) shows the
+effect. The request itself shows under Xvfb with no window manager, as below. sway (Xwayland)
+focuses the window either way, so it can't show the refusal.
+
+**Steps.** Under `Xvfb :99`, with `DISPLAY=:99`, run a Rune app whose window is open, and from
+another thread call `handle.activate("demo_TIME12345")`, as a single-instance app does with the
+startup id a second launch forwarded. Watch the root window for client messages:
+
+```rust
+// Beside the app: an x11rb client listening on the root window.
+use x11rb::{connection::Connection, protocol::{Event, xproto::*}};
+let (conn, screen) = x11rb::connect(None)?;
+let root = conn.setup().roots[screen].root;
+conn.change_window_attributes(root, &ChangeWindowAttributesAux::new()
+    .event_mask(EventMask::SUBSTRUCTURE_NOTIFY))?;
+conn.flush()?;
+loop {
+    if let Event::ClientMessage(m) = conn.wait_for_event()? {
+        let name = conn.get_atom_name(m.type_)?.reply()?.name;
+        println!("{} {:?}", String::from_utf8_lossy(&name), m.data.as_data32());
+    }
+}
+```
+
+**Expected.** As GTK does for a startup id: a `_NET_ACTIVE_WINDOW` message whose timestamp
+(`data[1]`) is the id's `_TIME` value (12345), and a `_NET_STARTUP_INFO_BEGIN` "remove:
+ID=demo_TIME12345" message, so the launcher's busy feedback ends.
+
+**Actual** (by source at `78d22ed`, winit 0.30.13; the snippet above hasn't been run).
+`window/lifecycle.rs` `open()` drops the token for an open X11 window (`let _ = token;
+w.focus();`), and winit's `focus_window` sends `_NET_ACTIVE_WINDOW` with source 1 and
+`CURRENT_TIME` (`platform_impl/linux/x11/window.rs:1783`). No startup-notification remove is
+sent; winit sends one only while it creates a window (`x11/window.rs:560`). mutter and KWin may
+refuse a timestamp-less request from an application, and only mark the window urgent.
+
+**Ask.** On X11, `activate(token)` for an open window takes the `_TIME` timestamp from the
+startup id for `_NET_ACTIVE_WINDOW`, and broadcasts the startup id's "remove" message.
+
+Related: upstream [#22](https://github.com/anomalyco/rune/issues/22) (single instance), which
+forwards these ids.

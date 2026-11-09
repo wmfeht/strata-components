@@ -3,6 +3,7 @@
 
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
+use std::time::Duration;
 
 use rune::{El, Tx, icon, memo, row, text};
 use strata_kit::icons::IconName;
@@ -13,7 +14,7 @@ use super::Config;
 use super::keys::{ICON, LABEL, header_key, line_key, row_key};
 use super::lines::{Group, GroupStyle, Line, LineMap};
 use super::state::DropOver;
-use crate::contract::{DropHover, DropZone, Entry, EntryId, Point};
+use crate::contract::{DropHover, DropZone, Entry, EntryId, Point, Rect};
 
 /// Marks the host puts on rows, each with its own look.
 ///
@@ -221,6 +222,99 @@ impl<S: 'static> Describe<S> {
     }
 }
 
+type DelaysFn<S> = Rc<dyn Fn(&S, &RowCx<'_>) -> Option<(Duration, Duration)>>;
+type ReportFn<S> = Rc<dyn Fn(&mut S, RestReport, &mut Tx)>;
+type PartFn<S> = Rc<dyn Fn(&S, &RowCx<'_>) -> Option<El>>;
+
+/// Rows that report the pointer resting on them, through Rune's `El::hover_delays`: C22's
+/// folder peek. Set with [`Collection::rest`](super::Collection::rest).
+///
+/// Each row `delays` gives `Some((enter, leave))` for reports `true` once the pointer has
+/// rested on it for `enter`, and `false` once it has stayed off it for `leave`; a pass shorter
+/// than the delay reports nothing, and a press cancels a wait (Rune). A row that leaves the
+/// tree (scrolled out, a listing change, another view) reports its leave at once. While row
+/// hover is off after keyboard navigation ([`CollectionState::row_hover`]), a `true` report is
+/// dropped, so a row that moves under a parked pointer reports nothing until the pointer moves.
+///
+/// The delays and the part are part of the row's memo version, so they may read anything; a
+/// part that reads the state beyond its [`RowCx`] gives a `version` that changes with it.
+///
+/// [`CollectionState::row_hover`]: super::CollectionState::row_hover
+///
+/// Used by: C22.
+pub struct Rest<S> {
+    pub(super) delays: DelaysFn<S>,
+    pub(super) report: ReportFn<S>,
+    pub(super) part: Option<(VersionFn<S>, PartFn<S>)>,
+}
+
+impl<S> Clone for Rest<S> {
+    fn clone(&self) -> Self {
+        Self {
+            delays: self.delays.clone(),
+            report: self.report.clone(),
+            part: self.part.clone(),
+        }
+    }
+}
+
+impl<S: 'static> Rest<S> {
+    /// Rows `delays` gives delays for report to `report`.
+    pub fn new(
+        delays: impl Fn(&S, &RowCx<'_>) -> Option<(Duration, Duration)> + 'static,
+        report: impl Fn(&mut S, RestReport, &mut Tx) + 'static,
+    ) -> Self {
+        Self {
+            delays: Rc::new(delays),
+            report: Rc::new(report),
+            part: None,
+        }
+    }
+
+    /// A part added to the rows `build` returns one for, last, made inert and hidden from
+    /// assistive technology: it takes no input and says nothing. The builder pins it within the
+    /// row (C22's peek anchor). Built again whenever `version` changes.
+    pub fn part(
+        mut self,
+        version: impl Fn(&S, &RowCx<'_>) -> u64 + 'static,
+        build: impl Fn(&S, &RowCx<'_>) -> Option<El> + 'static,
+    ) -> Self {
+        self.part = Some((Rc::new(version), Rc::new(build)));
+        self
+    }
+
+    /// The memo version of what this hook adds to a row.
+    fn version(&self, s: &S, rcx: &RowCx<'_>) -> u64 {
+        let mut h = std::hash::DefaultHasher::new();
+        (self.delays)(s, rcx).hash(&mut h);
+        if let Some((version, _)) = &self.part {
+            version(s, rcx).hash(&mut h);
+        }
+        h.finish()
+    }
+}
+
+/// A row's rest report: the pointer came to rest on it, or left it.
+///
+/// Fields may be added.
+///
+/// Used by: C22.
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct RestReport {
+    /// The collection's key.
+    pub collection: Rc<str>,
+    /// The row's entry.
+    pub id: EntryId,
+    /// The pointer rests on the row (`true`) or left it (`false`).
+    pub inside: bool,
+    /// The row's rect in window points, as the element lays it out now. Empty on a leave from
+    /// an entry the source no longer holds.
+    pub row: Rect,
+    /// The viewport's rect in window points.
+    pub viewport: Rect,
+}
+
 /// The width of a row's outline (the cursor, a drop target, the Enter target): a hairline,
 /// as Strata draws them (`outline: 1px`, `src/style.css`). No look token sizes outlines.
 const OUTLINE: f32 = 1.0;
@@ -284,6 +378,9 @@ pub(super) fn config_key<S>(cfg: &Config<S>) -> u64 {
     // Hashed only when set, so every collection without bare items keeps its rows' versions.
     if cfg.bare_items {
         true.hash(&mut h);
+    }
+    if cfg.rest.is_some() {
+        "rest".hash(&mut h);
     }
     h.finish()
 }
@@ -378,6 +475,8 @@ fn build_item<S: 'static>(cfg: &Rc<Config<S>>, frame: &Frame, s: &S, index: usiz
     // A grid cell, and a row among header lines, states its place in the set itself, so it
     // changes with its index.
     let place = (frame.per_line > 1 || frame.grouped).then_some((index, frame.len));
+    // Only a collection with the hook reads it.
+    let rest = cfg.rest.as_ref().map(|r| r.version(s, &rcx));
     let version = (
         (entry.name, entry.kind, entry.icon, entry.thumbnail),
         state,
@@ -387,6 +486,7 @@ fn build_item<S: 'static>(cfg: &Rc<Config<S>>, frame: &Frame, s: &S, index: usiz
         frame.hover_live,
         versions,
         place,
+        rest,
     );
     memo(row_key(id), version, || item(cfg, frame, s, &rcx))
 }
@@ -494,6 +594,9 @@ fn finish_item<S: 'static>(
     if let Some(description) = cfg.describe.as_ref().and_then(|d| (d.build)(s, rcx)) {
         outer = outer.description(description);
     }
+    if let Some(rest) = &cfg.rest {
+        outer = rest_row(cfg, rest, s, rcx, outer);
+    }
     if cfg.read_only {
         return outer;
     }
@@ -501,6 +604,31 @@ fn finish_item<S: 'static>(
         && entry.kind.is_folder_like()
     {
         outer = cfg.dnd.drop_zone(outer, row_zone(cfg, on_drop.clone(), id));
+    }
+    outer
+}
+
+/// Row `outer` with the rest hook's delays and report, and its part.
+fn rest_row<S: 'static>(
+    cfg: &Rc<Config<S>>,
+    rest: &Rest<S>,
+    s: &S,
+    rcx: &RowCx<'_>,
+    mut outer: El,
+) -> El {
+    if let Some((enter, leave)) = (rest.delays)(s, rcx) {
+        let report_cfg = cfg.clone();
+        let id = rcx.entry.id;
+        // Not a press handler, so presses still reach the container (`Handlers::has_primary`
+        // at the pinned rev).
+        outer = outer
+            .hover_delays(enter, leave)
+            .on_hover_change(move |s: &mut S, inside, tx| {
+                super::route::on_rest(&report_cfg, s, id, inside, tx)
+            });
+    }
+    if let Some(part) = rest.part.as_ref().and_then(|(_, build)| build(s, rcx)) {
+        outer = outer.child(part.inert().a11y_hidden());
     }
     outer
 }

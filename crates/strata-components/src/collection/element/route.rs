@@ -549,6 +549,43 @@ pub(super) fn on_key<S: 'static>(
     }
 }
 
+/// A rest row's `on_hover_change` (after its delays): the hook hears it, with the row's and the
+/// viewport's window rects. An arrival while row hover is off (after keyboard navigation, until
+/// the pointer moves) is dropped.
+pub(super) fn on_rest<S: 'static>(
+    cfg: &Rc<Config<S>>,
+    s: &mut S,
+    id: crate::contract::EntryId,
+    inside: bool,
+    tx: &mut Tx,
+) {
+    let Some(rest) = &cfg.rest else {
+        tx.live_only();
+        return;
+    };
+    let (src, st) = (cfg.get)(s);
+    if inside && !st.hover_live {
+        tx.live_only();
+        return;
+    }
+    let index = src.index_of(id);
+    if inside && index.is_none() {
+        tx.live_only();
+        return;
+    }
+    let row = index.map_or_else(Rect::default, |i| {
+        st.content_to_window(geometry(cfg, s).rect_of(i))
+    });
+    let report = super::RestReport {
+        collection: cfg.key.clone(),
+        id,
+        inside,
+        row,
+        viewport: st.viewport(),
+    };
+    (rest.report)(s, report, tx);
+}
+
 /// `on_pointer_move_local` on the container: hover comes back once the pointer moves.
 pub(super) fn on_pointer_move<S: 'static>(cfg: &Rc<Config<S>>, s: &mut S, tx: &mut Tx) {
     let st = (cfg.get_mut)(s).1;

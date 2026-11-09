@@ -61,6 +61,12 @@ struct Host {
     over: Option<Rc<RefCell<Vec<Option<Point>>>>>,
     /// Holds a header press back until it passes the drag threshold.
     defer: bool,
+    /// Folder rows report resting (500 and 80 ms), and the row `anchor` names gets a part.
+    rest: bool,
+    anchor: Option<EntryId>,
+    rests: Vec<RestReport>,
+    /// The runtime's clock, from its poll ([`rest_runtime`]).
+    t: f64,
 }
 
 impl Host {
@@ -88,6 +94,10 @@ impl Host {
             order: Rc::default(),
             over: None,
             defer: false,
+            rest: false,
+            anchor: None,
+            rests: Vec::new(),
+            t: 0.0,
         }
     }
 }
@@ -222,6 +232,30 @@ fn collection(s: &Host) -> Collection<Host> {
             log.borrow_mut().push(at);
             false
         });
+    }
+    if s.rest {
+        c = c.rest(
+            Rest::new(
+                |_: &Host, rcx| {
+                    rcx.entry.kind.is_folder_like().then_some((
+                        std::time::Duration::from_millis(500),
+                        std::time::Duration::from_millis(80),
+                    ))
+                },
+                |s: &mut Host, report, _| s.rests.push(report),
+            )
+            .part(
+                |s: &Host, rcx| u64::from(s.anchor == Some(rcx.entry.id)),
+                |s: &Host, rcx| {
+                    (s.anchor == Some(rcx.entry.id)).then(|| {
+                        rune::el()
+                            .key("anchor")
+                            .pin(Some(10.0), Some(0.0), None, Some(0.0))
+                            .w(0.0)
+                    })
+                },
+            ),
+        );
     }
     c.settings(7u32)
 }
@@ -3028,4 +3062,197 @@ fn own_viewport_reveals_leave_a_sideways_strip_around_the_collection_where_it_is
     let (spacer, shown) = reveal_in_strip(false);
     assert!(spacer < -100.0, "the strip jumped: {spacer}");
     assert!(shown);
+}
+
+// The rest hook (C22's folder peek).
+
+/// Steps a still window only at the wakes it asks for (and for queued input), never a frame
+/// between, for at most `limit` seconds or until `done`; returns the seconds stepped. A wait
+/// that asked for no wake never ends here, as in a window at rest.
+fn wake_until(rt: &mut Runtime<Host>, limit: f64, done: impl Fn(&Host) -> bool) -> f64 {
+    let mut t = 0.0;
+    for _ in 0..200 {
+        if t > limit || done(&rt.state) {
+            break;
+        }
+        if rt.has_pending_input() {
+            rt.frame(1.0 / 60.0);
+            t += 1.0 / 60.0;
+            continue;
+        }
+        let now = rt.state.t;
+        let Some(deadline) = rt.wake_deadline() else {
+            break;
+        };
+        let dt = (deadline - now).max(0.001);
+        if t + dt > limit {
+            break;
+        }
+        rt.frame(dt);
+        t += dt;
+    }
+    t
+}
+
+/// A runtime over `n` entries whose folder rows report resting, with its clock in `Host::t`.
+fn rest_runtime(n: usize) -> Runtime<Host> {
+    let mut host = Host::new(n);
+    host.rest = true;
+    let mut rt = Runtime::new(host, view, (W, H), Env::new(false, 1.0));
+    rt.poll = Some(|s: &mut Host, t, _| {
+        s.t = t;
+        false
+    });
+    rt.frame(0.0);
+    rt.frame(1.0 / 60.0);
+    rt
+}
+
+fn centre_of(rt: &Runtime<Host>, key: &str) -> (f32, f32) {
+    let [x, y, w, h] = element(rt, key)
+        .unwrap_or_else(|| panic!("no {key}"))
+        .visible;
+    (x + w / 2.0, y + h / 2.0)
+}
+
+/// Presses, a drag and a secondary press on rows, as a host hears them.
+fn presses(rt: &mut Runtime<Host>) -> (Vec<EntryId>, Vec<String>) {
+    settle(rt);
+    click(rt, "row-10");
+    click(rt, "row-12");
+    let (x, y) = centre_of(rt, "row-5");
+    rt.pointer_down(x, y);
+    for i in 1..=10 {
+        rt.pointer_move(x, y + 6.0 * i as f32);
+        rt.frame(1.0 / 60.0);
+    }
+    rt.pointer_up(x, y + 60.0);
+    rt.frame(1.0 / 60.0);
+    rt.secondary_down(x, y);
+    rt.secondary_up(x, y);
+    rt.frame(1.0 / 60.0);
+    let s = &rt.state;
+    (s.coll.selection.selected_ids(&s.src), s.intents.clone())
+}
+
+#[test]
+fn rest_rows_give_their_presses_to_the_collection_as_other_rows_do() {
+    let plain = presses(&mut runtime(Host::new(30)));
+    let rest = presses(&mut rest_runtime(30));
+    assert!(!plain.0.is_empty() && !plain.1.is_empty(), "{plain:?}");
+    assert_eq!(rest, plain);
+}
+
+#[test]
+fn a_folder_row_reports_resting_after_its_delay_and_leaving_after_its_own() {
+    {
+        let mut rt = rest_runtime(30);
+        settle(&mut rt);
+        let (x, y) = centre_of(&rt, "row-10");
+        rt.pointer_move(x, y);
+        rt.frame(1.0 / 60.0);
+        let took = wake_until(&mut rt, 2.0, |s| !s.rests.is_empty());
+        assert!((0.48..0.52).contains(&took), "reported after {took:.3} s");
+        let r = &rt.state.rests[0];
+        assert!(r.inside);
+        assert_eq!(r.id, id(10));
+        assert_eq!(&*r.collection, SCOPE);
+        let drawn = element(&rt, "row-10").unwrap().rect;
+        assert_eq!(
+            [r.row.x, r.row.y, r.row.w, r.row.h],
+            drawn,
+            "the row's window rect"
+        );
+        assert_eq!(r.viewport, rt.state.coll.viewport());
+
+        // Off it, onto a file row: the leave arrives 80 ms later.
+        let (x, y) = centre_of(&rt, "row-11");
+        rt.pointer_move(x, y);
+        rt.frame(1.0 / 60.0);
+        let took = wake_until(&mut rt, 2.0, |s| s.rests.len() > 1);
+        assert!((0.06..0.1).contains(&took), "left after {took:.3} s");
+        assert!(!rt.state.rests[1].inside);
+        // File rows report nothing.
+        wake_until(&mut rt, 1.0, |_| false);
+        assert_eq!(rt.state.rests.len(), 2);
+    }
+}
+
+#[test]
+fn a_pass_shorter_than_the_delay_reports_nothing_and_leaves_no_wake() {
+    let mut rt = rest_runtime(30);
+    settle(&mut rt);
+    let (x, y) = centre_of(&rt, "row-10");
+    rt.pointer_move(x, y);
+    rt.frame(0.2);
+    let (x, y) = centre_of(&rt, "row-11");
+    rt.pointer_move(x, y);
+    rt.frame(1.0 / 60.0);
+    wake_until(&mut rt, 1.0, |_| false);
+    assert!(rt.state.rests.is_empty());
+    assert_eq!(rt.wake_deadline(), None);
+}
+
+#[test]
+fn after_keyboard_navigation_a_row_reports_resting_only_once_the_pointer_moves() {
+    let mut rt = rest_runtime(30);
+    settle(&mut rt);
+    let (x, y) = centre_of(&rt, "row-10");
+    rt.pointer_move(x, y);
+    rt.frame(1.0 / 60.0);
+    rt.update(|s, _| s.coll.keyboard_moved());
+    wake_until(&mut rt, 1.0, |_| false);
+    assert!(rt.state.rests.is_empty(), "dropped: {:?}", rt.state.rests);
+    // The pointer moves on to another folder: it reports again.
+    let (x, y) = centre_of(&rt, "row-0");
+    rt.pointer_move(x, y);
+    rt.frame(1.0 / 60.0);
+    wake_until(&mut rt, 1.0, |s| s.rests.iter().any(|r| r.inside));
+    let inside: Vec<_> = rt
+        .state
+        .rests
+        .iter()
+        .filter(|r| r.inside)
+        .map(|r| r.id)
+        .collect();
+    assert_eq!(inside, [id(0)]);
+}
+
+#[test]
+fn a_rested_row_that_leaves_the_tree_reports_its_leave_at_once() {
+    let mut rt = rest_runtime(30);
+    settle(&mut rt);
+    let (x, y) = centre_of(&rt, "row-10");
+    rt.pointer_move(x, y);
+    rt.frame(1.0 / 60.0);
+    wake_until(&mut rt, 1.0, |s| !s.rests.is_empty());
+    rt.update(|s, _| {
+        s.src = FastSource::new(5);
+        s.version += 1;
+    });
+    // The commit's frame prunes the row; Rune runs the leave it queued on the next one.
+    rt.frame(1.0 / 60.0);
+    rt.frame(1.0 / 60.0);
+    let last = rt.state.rests.last().unwrap();
+    assert_eq!((last.id, last.inside), (id(10), false));
+    assert_eq!(last.row, Rect::default(), "the source no longer holds it");
+}
+
+#[test]
+fn the_rest_part_mounts_in_the_row_that_asks_inert_and_hidden() {
+    let mut rt = rest_runtime(30);
+    settle(&mut rt);
+    assert!(element(&rt, "anchor").is_none());
+    rt.update(|s, _| s.anchor = Some(id(3)));
+    rt.frame(1.0 / 60.0);
+    let anchor = element(&rt, "anchor").expect("the part");
+    assert!(anchor.path.ends_with("row-3/anchor"), "{}", anchor.path);
+    assert!(anchor.inert);
+    let row = element(&rt, "row-3").unwrap().rect;
+    assert_eq!(anchor.rect[0], row[0] + 10.0, "pinned by its builder");
+    let tree = rt.accessibility_tree();
+    assert!(
+        !format!("{tree:?}").contains("anchor"),
+        "hidden from assistive technology"
+    );
 }

@@ -1,0 +1,235 @@
+//! [`BrowserTabsState`]: what the strip keeps between views, and [`BrowserTabsState::tick`],
+//! which runs its timer and follows the active tab.
+
+use std::time::Duration;
+
+use rune::{Live, Tx};
+use rune_kit::shell::TabDragState;
+
+use super::data::{TabId, TabsData, TitleFormat, window_title};
+use super::intent::{DropSite, TabsIntent, Via};
+use super::{scroll_key, tab_key};
+use crate::contract::dnd::DropHover;
+
+/// How long a file or content drag rests on a tab before it is selected (Strata's 450 ms).
+pub const HOVER_DELAY: f64 = 0.45;
+
+/// A drag resting on a tab, waiting to select it.
+#[derive(Clone, Debug, PartialEq)]
+struct Spring {
+    id: TabId,
+    delay: f64,
+    /// When the wait began, on the host's clock: stamped by the first tick after the hover,
+    /// since a hover handler has no clock (U-C1e-6).
+    since: Option<f64>,
+}
+
+/// Where tab 0 and the strip drew, for the wheel's sideways mapping (`wheel.rs`).
+#[derive(Clone)]
+pub(super) struct WheelProbe {
+    pub(super) strip: Live<[f32; 4]>,
+    pub(super) first: Live<[f32; 4]>,
+}
+
+impl Default for WheelProbe {
+    fn default() -> Self {
+        WheelProbe {
+            strip: Live::new([0.0; 4]),
+            first: Live::new([0.0; 4]),
+        }
+    }
+}
+
+/// What a tick asks of the host: the intents to route, and whether the state changed.
+#[derive(Clone, Debug, Default, PartialEq)]
+#[must_use]
+pub struct Polled {
+    pub intents: Vec<TabsIntent>,
+    pub changed: bool,
+}
+
+/// The strip's state, held by the host per window and reached by accessor: rune-kit's drag
+/// gestures ([`BrowserTabsState::drag`], a field so the host can pass `|s| &mut s.tabs.drag`
+/// as TabStrip's plain `fn` accessor), the drop hover, the spring, and what the last tick saw.
+#[derive(Clone)]
+pub struct BrowserTabsState {
+    key: String,
+    title_format: TitleFormat,
+    /// TabStrip's gestures: reorder, tear-out, and a tab coming in from another window
+    /// ([`TabDragState::set_incoming`], [`TabDragState::incoming_slot`],
+    /// [`TabDragState::hand_off`]).
+    pub drag: TabDragState,
+    drop: Option<(DropSite, DropHover)>,
+    open_drag: bool,
+    /// The zone whose moves place the incoming gap for a drag that opens tabs.
+    incoming_from: Option<DropSite>,
+    spring: Option<Spring>,
+    title: Option<String>,
+    active: Option<TabId>,
+    pub(super) wheel: WheelProbe,
+}
+
+impl Default for BrowserTabsState {
+    fn default() -> Self {
+        BrowserTabsState::new(super::DEFAULT_KEY)
+    }
+}
+
+impl BrowserTabsState {
+    /// A strip keyed `key`: its elements' keys start with it ([`tab_key`], [`super::new_tab_key`]).
+    pub fn new(key: impl Into<String>) -> Self {
+        BrowserTabsState {
+            key: key.into(),
+            title_format: TitleFormat::default(),
+            drag: TabDragState::new(),
+            drop: None,
+            open_drag: false,
+            incoming_from: None,
+            spring: None,
+            title: None,
+            active: None,
+            wheel: WheelProbe::default(),
+        }
+    }
+
+    /// The same state, titling the window with `format`.
+    pub fn title_format(mut self, format: TitleFormat) -> Self {
+        self.title_format = format;
+        self
+    }
+
+    /// The strip's key.
+    pub fn key(&self) -> &str {
+        &self.key
+    }
+
+    /// Where a drag is and how, if one is over the strip.
+    pub fn drop_hover(&self) -> Option<(DropSite, DropHover)> {
+        self.drop
+    }
+
+    /// Sets the drop hover at `site`: for binders, and for scenes that show it. A
+    /// [`DropHover::Left`] clears it only if `site` holds it.
+    pub fn set_drop_hover(&mut self, site: DropSite, hover: DropHover) {
+        match hover {
+            DropHover::Left if self.drop.is_some_and(|(s, _)| s == site) => self.drop = None,
+            DropHover::Left => {}
+            _ => self.drop = Some((site, hover)),
+        }
+    }
+
+    /// Whether a drag that opens tabs runs anywhere in the window (a sidebar row or a folder-only
+    /// drag, which X2's binder tells): the New tab button shows its drop tint while it does.
+    pub fn set_open_drag(&mut self, on: bool) {
+        self.open_drag = on;
+    }
+
+    pub fn open_drag(&self) -> bool {
+        self.open_drag
+    }
+
+    /// The tab a resting drag will select, if one is armed.
+    pub fn spring(&self) -> Option<TabId> {
+        self.spring.as_ref().map(|s| s.id)
+    }
+
+    /// One frame at `now` seconds on the host's clock (`Tx` has none: U-C1e-6), with the tabs
+    /// as they are now. It selects the tab a drag has rested on for the spring delay, emits the
+    /// window title when it changed, and scrolls a newly active tab into view, however it
+    /// became active (a click, the keyboard, a reopen, a restore).
+    pub fn tick(&mut self, now: f64, data: &TabsData<'_>, tx: &mut Tx) -> Polled {
+        let mut out = Polled::default();
+        if let Some(spring) = self.spring.as_mut() {
+            if data.get(spring.id).is_none() || data.active == Some(spring.id) {
+                self.spring = None;
+            } else {
+                let since = *spring.since.get_or_insert(now);
+                let left = spring.delay - (now - since);
+                if left <= 1e-6 {
+                    let id = spring.id;
+                    self.spring = None;
+                    out.intents.push(TabsIntent::Select {
+                        id,
+                        via: Via::Spring,
+                    });
+                } else {
+                    // Re-armed for the time left at every tick, so a window at rest, which polls
+                    // only at the wakes it asked for, still fires on time.
+                    tx.wake_after(Duration::from_secs_f64(left));
+                }
+            }
+        }
+        if data.active != self.active {
+            self.active = data.active;
+            if let Some(id) = data.active {
+                tx.scroll_into_view_in(scroll_key(&self.key), tab_key(&self.key, id));
+            }
+        }
+        let title = window_title(
+            data.active_tab().map(|t| t.name.as_ref()),
+            &self.title_format,
+        );
+        if self.title.as_deref() != Some(title.as_str()) {
+            self.title = Some(title.clone());
+            out.intents.push(TabsIntent::Title(title));
+        }
+        out
+    }
+
+    /// A drag reached or left tab `id`. `arm` is the spring delay when this drag may select
+    /// the tab (it isn't active and doesn't open tabs). The same hover again keeps the
+    /// spring's start: a binder may report it on each motion.
+    pub(super) fn hover_tab(&mut self, id: TabId, hover: DropHover, arm: Option<f64>) -> bool {
+        match (hover, arm) {
+            (DropHover::Accepting, Some(_)) if self.spring.as_ref().is_some_and(|s| s.id == id) => {
+                false
+            }
+            (DropHover::Accepting, Some(delay)) => {
+                self.spring = Some(Spring {
+                    id,
+                    delay,
+                    since: None,
+                });
+                true
+            }
+            // A leave, a refusal, or a drag that may not select it: its spring stops.
+            _ => {
+                if self.spring.as_ref().is_some_and(|s| s.id == id) {
+                    self.spring = None;
+                }
+                false
+            }
+        }
+    }
+
+    /// A drag that opens tabs reached `site` (`Some`), or left it: only the zone holding the
+    /// gap closes it, so moving from a tab to the gap beside it never closes it for a frame.
+    pub(super) fn follow_open(&mut self, site: DropSite, over: bool) {
+        if over {
+            self.incoming_from = Some(site);
+        } else if self.incoming_from == Some(site) {
+            self.incoming_from = None;
+            self.drag.set_incoming(None);
+        }
+    }
+
+    /// The pointer of a drag that opens tabs moved over `site`, in window points.
+    pub(super) fn open_moved(&mut self, site: DropSite, point: [f32; 2]) {
+        if self.incoming_from == Some(site) {
+            self.drag.set_incoming(Some(point));
+        }
+    }
+
+    /// Where a drag that opens tabs lands if it drops now.
+    pub(super) fn landing(&self) -> Option<usize> {
+        self.drag.incoming_slot()
+    }
+
+    /// The drag dropped or was refused: nothing springs, nothing is hovered, the gap closes.
+    pub(super) fn drag_ended(&mut self) {
+        self.spring = None;
+        self.drop = None;
+        self.incoming_from = None;
+        self.drag.set_incoming(None);
+    }
+}

@@ -197,9 +197,23 @@
                         "focus",
                         "scroll-into-view"
                       ],
-                      "description": "Cancel operation",
+                      "description": "Keep notification",
+                      "key": "c16-dock-card-1-pin",
+                      "name": "Keep notification",
+                      "role": "button",
+                      "states": [
+                        "unchecked"
+                      ]
+                    },
+                    {
+                      "actions": [
+                        "click",
+                        "focus",
+                        "scroll-into-view"
+                      ],
+                      "description": "Dismiss notification",
                       "key": "c16-dock-card-1-cancel",
-                      "name": "Cancel copying",
+                      "name": "Dismiss notification",
                       "role": "button"
                     },
                     {
@@ -207,31 +221,49 @@
                         "scroll-into-view"
                       ],
                       "key": "c16-dock-card-1-info",
-                      "name": "IMG_0003.jpg",
+                      "name": "IMG_0010.jpg",
                       "role": "label"
                     },
                     {
                       "actions": [
                         "scroll-into-view"
                       ],
-                      "description": "8 MB/s · 4s left",
+                      "description": "Time remaining before notification closes",
                       "key": "c16-dock-card-1-bar",
-                      "name": "Copying items",
+                      "name": "Copy complete",
                       "range": [
-                        0.3,
+                        0.7433,
                         0.0,
                         1.0,
                         null
                       ],
                       "role": "progress-indicator",
-                      "value": "29%"
+                      "value": "74%"
+                    },
+                    {
+                      "actions": [
+                        "click",
+                        "focus",
+                        "scroll-into-view"
+                      ],
+                      "key": "c16-dock-card-1-complete",
+                      "name": "Dismiss completed notification",
+                      "role": "button"
+                    },
+                    {
+                      "actions": [
+                        "scroll-into-view"
+                      ],
+                      "key": "c16-dock-card-1-meta",
+                      "name": "· closing in 4s",
+                      "role": "label"
                     },
                     {
                       "actions": [
                         "scroll-into-view"
                       ],
                       "key": "c16-dock-card-1-phase",
-                      "name": "Copying items",
+                      "name": "Copy complete",
                       "role": "status",
                       "states": [
                         "live-polite"
@@ -240,7 +272,7 @@
                   ],
                   "description": "/home/ada/Pictures",
                   "key": "c16-dock-card-1",
-                  "name": "Copying items",
+                  "name": "Copy complete",
                   "role": "group"
                 },
                 {
@@ -254,9 +286,23 @@
                         "focus",
                         "scroll-into-view"
                       ],
-                      "description": "Cancel operation",
+                      "description": "Keep notification",
+                      "key": "c16-dock-card-2-pin",
+                      "name": "Keep notification",
+                      "role": "button",
+                      "states": [
+                        "unchecked"
+                      ]
+                    },
+                    {
+                      "actions": [
+                        "click",
+                        "focus",
+                        "scroll-into-view"
+                      ],
+                      "description": "Dismiss notification",
                       "key": "c16-dock-card-2-cancel",
-                      "name": "Cancel copying",
+                      "name": "Dismiss notification",
                       "role": "button"
                     },
                     {
@@ -264,40 +310,57 @@
                         "scroll-into-view"
                       ],
                       "key": "c16-dock-card-2-info",
-                      "name": "IMG_0003.jpg",
+                      "name": "photos.zip",
                       "role": "label"
                     },
                     {
                       "actions": [
                         "scroll-into-view"
                       ],
-                      "description": "8 MB/s · 4s left",
+                      "description": "Time remaining before notification closes",
                       "key": "c16-dock-card-2-bar",
-                      "name": "Copying items",
+                      "name": "Compression complete",
                       "range": [
-                        0.2967,
+                        0.7067,
                         0.0,
                         1.0,
                         null
                       ],
                       "role": "progress-indicator",
-                      "value": "29%"
+                      "value": "71%"
+                    },
+                    {
+                      "actions": [
+                        "click",
+                        "focus",
+                        "scroll-into-view"
+                      ],
+                      "key": "c16-dock-card-2-complete",
+                      "name": "Dismiss completed notification",
+                      "role": "button"
+                    },
+                    {
+                      "actions": [
+                        "scroll-into-view"
+                      ],
+                      "key": "c16-dock-card-2-meta",
+                      "name": "· closing in 4s",
+                      "role": "label"
                     },
                     {
                       "actions": [
                         "scroll-into-view"
                       ],
                       "key": "c16-dock-card-2-phase",
-                      "name": "Copying items",
+                      "name": "Compression complete",
                       "role": "status",
                       "states": [
                         "live-polite"
                       ]
                     }
                   ],
-                  "description": "/home/ada/Pictures",
                   "key": "c16-dock-card-2",
-                  "name": "Copying items",
+                  "name": "Compression complete",
                   "role": "group"
                 },
                 {
@@ -313,7 +376,7 @@
                       ],
                       "description": "Cancel operation",
                       "key": "c16-dock-card-3-cancel",
-                      "name": "Cancel copying",
+                      "name": "Cancel deleting",
                       "role": "button"
                     },
                     {
@@ -321,40 +384,32 @@
                         "scroll-into-view"
                       ],
                       "key": "c16-dock-card-3-info",
-                      "name": "IMG_0003.jpg",
+                      "name": "node_modules",
                       "role": "label"
                     },
                     {
                       "actions": [
                         "scroll-into-view"
                       ],
-                      "description": "8 MB/s · 4s left",
+                      "description": "458,999 items deleted",
                       "key": "c16-dock-card-3-bar",
-                      "name": "Copying items",
-                      "range": [
-                        0.2967,
-                        0.0,
-                        1.0,
-                        null
-                      ],
-                      "role": "progress-indicator",
-                      "value": "29%"
+                      "name": "Deleting items",
+                      "role": "progress-indicator"
                     },
                     {
                       "actions": [
                         "scroll-into-view"
                       ],
                       "key": "c16-dock-card-3-phase",
-                      "name": "Copying items",
+                      "name": "Deleting items",
                       "role": "status",
                       "states": [
                         "live-polite"
                       ]
                     }
                   ],
-                  "description": "/home/ada/Pictures",
                   "key": "c16-dock-card-3",
-                  "name": "Copying items",
+                  "name": "Deleting items",
                   "role": "group"
                 },
                 {
@@ -378,24 +433,24 @@
                         "scroll-into-view"
                       ],
                       "key": "c16-dock-card-4-info",
-                      "name": "IMG_0003.jpg",
+                      "name": "IMG_0009.jpg",
                       "role": "label"
                     },
                     {
                       "actions": [
                         "scroll-into-view"
                       ],
-                      "description": "8 MB/s · 4s left",
+                      "description": "8 MB/s · 1s left",
                       "key": "c16-dock-card-4-bar",
                       "name": "Copying items",
                       "range": [
-                        0.2967,
+                        0.8967,
                         0.0,
                         1.0,
                         null
                       ],
                       "role": "progress-indicator",
-                      "value": "29%"
+                      "value": "89%"
                     },
                     {
                       "actions": [
@@ -425,9 +480,23 @@
                         "focus",
                         "scroll-into-view"
                       ],
-                      "description": "Cancel operation",
+                      "description": "Keep notification",
+                      "key": "c16-dock-card-5-pin",
+                      "name": "Keep notification",
+                      "role": "button",
+                      "states": [
+                        "unchecked"
+                      ]
+                    },
+                    {
+                      "actions": [
+                        "click",
+                        "focus",
+                        "scroll-into-view"
+                      ],
+                      "description": "Dismiss notification",
                       "key": "c16-dock-card-5-cancel",
-                      "name": "Cancel copying",
+                      "name": "Dismiss notification",
                       "role": "button"
                     },
                     {
@@ -435,40 +504,57 @@
                         "scroll-into-view"
                       ],
                       "key": "c16-dock-card-5-info",
-                      "name": "IMG_0003.jpg",
+                      "name": "photos.zip",
                       "role": "label"
                     },
                     {
                       "actions": [
                         "scroll-into-view"
                       ],
-                      "description": "8 MB/s · 4s left",
+                      "description": "Time remaining before notification closes",
                       "key": "c16-dock-card-5-bar",
-                      "name": "Copying items",
+                      "name": "Compression complete",
                       "range": [
-                        0.2967,
+                        1.0,
                         0.0,
                         1.0,
                         null
                       ],
                       "role": "progress-indicator",
-                      "value": "29%"
+                      "value": "100%"
+                    },
+                    {
+                      "actions": [
+                        "click",
+                        "focus",
+                        "scroll-into-view"
+                      ],
+                      "key": "c16-dock-card-5-complete",
+                      "name": "Dismiss completed notification",
+                      "role": "button"
+                    },
+                    {
+                      "actions": [
+                        "scroll-into-view"
+                      ],
+                      "key": "c16-dock-card-5-meta",
+                      "name": "· paused",
+                      "role": "label"
                     },
                     {
                       "actions": [
                         "scroll-into-view"
                       ],
                       "key": "c16-dock-card-5-phase",
-                      "name": "Copying items",
+                      "name": "Compression complete",
                       "role": "status",
                       "states": [
                         "live-polite"
                       ]
                     }
                   ],
-                  "description": "/home/ada/Pictures",
                   "key": "c16-dock-card-5",
-                  "name": "Copying items",
+                  "name": "Compression complete",
                   "role": "group"
                 },
                 {
@@ -484,7 +570,7 @@
                       ],
                       "description": "Cancel operation",
                       "key": "c16-dock-card-6-cancel",
-                      "name": "Cancel copying",
+                      "name": "Cancel deleting",
                       "role": "button"
                     },
                     {
@@ -492,40 +578,32 @@
                         "scroll-into-view"
                       ],
                       "key": "c16-dock-card-6-info",
-                      "name": "IMG_0003.jpg",
+                      "name": "node_modules",
                       "role": "label"
                     },
                     {
                       "actions": [
                         "scroll-into-view"
                       ],
-                      "description": "8 MB/s · 4s left",
+                      "description": "295,499 items deleted",
                       "key": "c16-dock-card-6-bar",
-                      "name": "Copying items",
-                      "range": [
-                        0.2967,
-                        0.0,
-                        1.0,
-                        null
-                      ],
-                      "role": "progress-indicator",
-                      "value": "29%"
+                      "name": "Deleting items",
+                      "role": "progress-indicator"
                     },
                     {
                       "actions": [
                         "scroll-into-view"
                       ],
                       "key": "c16-dock-card-6-phase",
-                      "name": "Copying items",
+                      "name": "Deleting items",
                       "role": "status",
                       "states": [
                         "live-polite"
                       ]
                     }
                   ],
-                  "description": "/home/ada/Pictures",
                   "key": "c16-dock-card-6",
-                  "name": "Copying items",
+                  "name": "Deleting items",
                   "role": "group"
                 },
                 {
@@ -549,24 +627,24 @@
                         "scroll-into-view"
                       ],
                       "key": "c16-dock-card-7-info",
-                      "name": "IMG_0003.jpg",
+                      "name": "IMG_0006.jpg",
                       "role": "label"
                     },
                     {
                       "actions": [
                         "scroll-into-view"
                       ],
-                      "description": "8 MB/s · 4s left",
+                      "description": "8 MB/s · 3s left",
                       "key": "c16-dock-card-7-bar",
                       "name": "Copying items",
                       "range": [
-                        0.2967,
+                        0.5367,
                         0.0,
                         1.0,
                         null
                       ],
                       "role": "progress-indicator",
-                      "value": "29%"
+                      "value": "53%"
                     },
                     {
                       "actions": [
@@ -598,7 +676,7 @@
                       ],
                       "description": "Cancel operation",
                       "key": "c16-dock-card-8-cancel",
-                      "name": "Cancel copying",
+                      "name": "Cancel compressing",
                       "role": "button"
                     },
                     {
@@ -606,40 +684,39 @@
                         "scroll-into-view"
                       ],
                       "key": "c16-dock-card-8-info",
-                      "name": "IMG_0003.jpg",
+                      "name": "photos.zip",
                       "role": "label"
                     },
                     {
                       "actions": [
                         "scroll-into-view"
                       ],
-                      "description": "8 MB/s · 4s left",
+                      "description": "2 / 2 files",
                       "key": "c16-dock-card-8-bar",
-                      "name": "Copying items",
+                      "name": "Compressing items",
                       "range": [
-                        0.2967,
+                        0.5,
                         0.0,
                         1.0,
                         null
                       ],
                       "role": "progress-indicator",
-                      "value": "29%"
+                      "value": "50%"
                     },
                     {
                       "actions": [
                         "scroll-into-view"
                       ],
                       "key": "c16-dock-card-8-phase",
-                      "name": "Copying items",
+                      "name": "Compressing items",
                       "role": "status",
                       "states": [
                         "live-polite"
                       ]
                     }
                   ],
-                  "description": "/home/ada/Pictures",
                   "key": "c16-dock-card-8",
-                  "name": "Copying items",
+                  "name": "Compressing items",
                   "role": "group"
                 }
               ],

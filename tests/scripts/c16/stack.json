@@ -25,15 +25,15 @@
     },
     {
       "key": "c16-dock-card-1",
-      "name": "Copying items"
+      "name": "Copy complete"
     },
     {
       "key": "c16-dock-card-2",
-      "name": "Copying items"
+      "name": "Compression complete"
     },
     {
       "key": "c16-dock-card-3",
-      "name": "Copying items"
+      "name": "Deleting items"
     },
     {
       "key": "c16-dock-card-4",
@@ -41,11 +41,11 @@
     },
     {
       "key": "c16-dock-card-5",
-      "name": "Copying items"
+      "name": "Compression complete"
     },
     {
       "key": "c16-dock-card-6",
-      "name": "Copying items"
+      "name": "Deleting items"
     },
     {
       "key": "c16-dock-card-7",
@@ -53,7 +53,7 @@
     },
     {
       "key": "c16-dock-card-8",
-      "name": "Copying items"
+      "name": "Compressing items"
     }
   ]
 }

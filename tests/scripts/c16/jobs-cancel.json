@@ -1,0 +1,39 @@
+{
+  "bullets": [
+    "operations/progress/jobs: Remove on a queued job ends it as Cancelled",
+    "operations/progress/jobs: Cancel on a running job shows \"Cancelling…\""
+  ],
+  "scene": "c16-jobs-light",
+  "events": [
+    {
+      "t": 0.2,
+      "type": "tap",
+      "key": "c16-jobs-row-3-cancel"
+    },
+    {
+      "t": 0.4,
+      "type": "tap",
+      "key": "c16-jobs-row-4-cancel"
+    },
+    {
+      "t": 0.6,
+      "type": "key",
+      "name": "Escape"
+    },
+    {
+      "t": 0.6,
+      "type": "mark",
+      "name": "end"
+    }
+  ],
+  "expect": [
+    {
+      "key": "c16-heard",
+      "name": "Jobs: Cancel(4) · probes 0"
+    },
+    {
+      "key": "c16-jobs",
+      "name": "5 jobs finished · failures"
+    }
+  ]
+}

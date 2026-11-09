@@ -353,7 +353,7 @@ pub(crate) fn folder_row<S: 'static>(
 fn attach<S: 'static>(ctx: &Ctx<'_, S>, el: El, spec: &Spec<'_>) -> El {
     if spec.accepts_drops {
         let zone = super::drops::row(ctx.access, &ctx.emit, ctx.action, spec.item.clone());
-        ctx.dnd.drop_zone(el, zone)
+        ctx.dnd.drop_zone_keyed(el, spec.item.key(ctx.key), zone)
     } else {
         el
     }

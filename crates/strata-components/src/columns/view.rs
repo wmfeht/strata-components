@@ -108,6 +108,7 @@ pub(super) struct Shared<S> {
     marks: Option<MarksFn<S>>,
     pointer: PointerFn<S>,
     escape_closes: FlagFn<S>,
+    pub(super) show_sizes: FlagFn<S>,
     pub(super) dnd: Dnd<S>,
     on_intent: Option<IntentFn<S>>,
     pub(super) labels: ColumnsLabels,
@@ -123,6 +124,7 @@ impl<S> Clone for Shared<S> {
             marks: self.marks.clone(),
             pointer: self.pointer.clone(),
             escape_closes: self.escape_closes.clone(),
+            show_sizes: self.show_sizes.clone(),
             dnd: self.dnd.clone(),
             on_intent: self.on_intent.clone(),
             labels: self.labels.clone(),
@@ -160,6 +162,12 @@ static NO_ENTRIES: NoEntries = NoEntries;
 
 /// The Columns view: see the [module docs](super).
 ///
+/// The view owns two of each column collection's slots: the rows' content
+/// (`Collection::content`: the icon, the label and the size badge) and their description
+/// (`Collection::describe`: the badge's text). A host sets neither in
+/// [`ColumnsView::collection`]; it gives the badge's words through [`ColumnSources::badge`] and
+/// its setting through [`ColumnsView::show_sizes`].
+///
 /// Used by: hosts (Strata's browser and chooser, the gallery).
 pub struct ColumnsView<S> {
     pub(super) sh: Rc<Shared<S>>,
@@ -189,6 +197,7 @@ impl<S: 'static> ColumnsView<S> {
                 marks: None,
                 pointer: Rc::new(|_| PointerSettings::default()),
                 escape_closes: Rc::new(|_| true),
+                show_sizes: Rc::new(|_| true),
                 dnd: Dnd::rune(),
                 on_intent: None,
                 labels: ColumnsLabels::default(),
@@ -206,7 +215,9 @@ impl<S: 'static> ColumnsView<S> {
     /// settings (except [`PointerSettings`], which go through
     /// [`ColumnsView::pointer_settings`]), a label or icon slot, a rename editor. The view sets
     /// the rest after (the name, row height, header, marks, intents, drops and keys), so
-    /// don't set those here.
+    /// don't set those here. The view owns the rows' content slot (`Collection::content`: the
+    /// icon, the label and the size badge) and their description (`Collection::describe`: the
+    /// badge's text), so don't set those either.
     pub fn collection(
         self,
         f: impl Fn(&S, usize, Collection<S>) -> Collection<S> + 'static,
@@ -243,6 +254,13 @@ impl<S: 'static> ColumnsView<S> {
         self.with(|sh| sh.escape_closes = Rc::new(f))
     }
 
+    /// Whether rows show their size badge ([`ColumnSources::badge`]): Strata's "Show sizes in
+    /// Columns view", on by default. Off, no row shows one, and assistive technology hears no
+    /// size; a count that arrives while it is off stays hidden.
+    pub fn show_sizes(self, f: impl Fn(&S) -> bool + 'static) -> Self {
+        self.with(|sh| sh.show_sizes = Rc::new(f))
+    }
+
     /// The drag-and-drop binder: Rune's own by default; X2 passes the system shim's.
     pub fn dnd(self, dnd: Dnd<S>) -> Self {
         self.with(|sh| sh.dnd = dnd)
@@ -266,8 +284,8 @@ impl<S: 'static> ColumnsView<S> {
         (depth < p.sources.len()).then(|| collection(&self.sh, s, serial))
     }
 
-    /// Runs the columns' controllers' timeouts and queued commands, and a held drag's
-    /// autoscroll: call it from the host's poll on every frame, with the host's clock in
+    /// Runs the columns' controllers' timeouts and queued commands, a held drag's autoscroll,
+    /// and the widths' following of the text size and the area: call it from the host's poll on every frame, with the host's clock in
     /// seconds. True when state the view reads changed. The window's middle-click autoscroll is
     /// the host's to drive (`ColumnsState::autoscroll`).
     pub fn tick(&self, s: &mut S, now: f64, tx: &mut Tx) -> bool {
@@ -283,6 +301,7 @@ impl<S: 'static> ColumnsView<S> {
         {
             let p = (self.sh.parts_mut)(s);
             p.state.tick_reveal(now, p.look, tx);
+            changed |= p.state.tick_widths(p.look, tx);
         }
         changed | drive(&self.sh, s, now, tx)
     }
@@ -430,6 +449,8 @@ pub(super) fn collection<S: 'static>(sh: &Rc<Shared<S>>, s: &S, serial: u64) -> 
             }
         })
         .on_drag_over(move |s: &mut S, at, tx| drag_over(&over, s, at, tx))
+        .content(super::badge::content(sh, serial))
+        .describe(super::badge::describe(sh, serial))
         .on_scroll(move |p| {
             feed.set(p);
             bar.follow(p);

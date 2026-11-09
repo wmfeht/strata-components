@@ -100,8 +100,13 @@ pub struct ColumnState {
     pub(super) slot: u64,
     pub(super) feed: ScrollFeed,
     pub(super) bar: Bar,
-    /// The width in base points (at the default text size).
+    /// The width in base points (at the default text size): dragged, fitted, spread or
+    /// saved.
     pub(super) width: f32,
+    /// The area the column was narrowed to, in points, while its width would draw wider: a
+    /// new column under a narrower area, or a text-size change. Its own width stays, so the
+    /// earlier text size draws it again.
+    pub(super) limit: Option<f32>,
     pub(super) entrance: Entrance,
     pub(super) keys: KeyHandle,
     pub(super) pending: Pending,
@@ -114,7 +119,9 @@ impl ColumnState {
         &self.keys
     }
 
-    /// The width it draws at before the text size, in base points.
+    /// The width it was given (dragged, fitted, spread or saved), in base points, before the
+    /// text size. It draws narrower while the area narrows it (a new column under a narrower
+    /// area, a text-size change).
     pub fn width(&self) -> f32 {
         self.width
     }
@@ -161,6 +168,17 @@ pub struct ColumnsState {
     pub(super) resize: Option<Resize>,
     /// The column whose edge the pointer rests on, past the caption's delay.
     pub(super) edge_hover: Option<usize>,
+    /// The column whose edge the pointer is on, at once: the last column's lights the drawer's
+    /// line.
+    pub(super) edge_lit: Option<usize>,
+    /// The last press on a column edge, by column serial, on the host's clock: a second one
+    /// soon after on the same edge fits the column.
+    pub(super) edge_press: Option<(u64, f64)>,
+    /// The text scale the widths were last drawn at.
+    scale: Option<f32>,
+    /// Open columns wider than the area are narrowed to it once the next area arrives: at the
+    /// start, and after a text-size change (from the tick it was seen in).
+    narrow: Narrow,
     pub(super) autoscroll: Autoscroll,
     /// What an accessor of a column that has gone reads (a handler or a tick that outlived
     /// it): an empty collection.
@@ -206,6 +224,16 @@ impl std::fmt::Debug for ColumnsState {
     }
 }
 
+/// When open columns wider than the area narrow to it (Strata's `clamp_to_next_column_limit`):
+/// the first area, and the first after a text-size change, narrow them; a window shrinking
+/// later doesn't.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Narrow {
+    Idle,
+    /// Armed in tick `.0`; `.1` once an area came after.
+    Armed(u64, bool),
+}
+
 /// The reveal's glide: about Strata's 220 ms `emphasized_deceleration`.
 pub(super) const REVEAL: Spring = Spring::new(0.22, 0.0);
 
@@ -234,6 +262,10 @@ impl ColumnsState {
             drag: DragScroll::new(),
             resize: None,
             edge_hover: None,
+            edge_lit: None,
+            edge_press: None,
+            scale: None,
+            narrow: Narrow::Armed(0, false),
             autoscroll,
             spare: CollectionState::new(),
             opened: None,
@@ -323,7 +355,7 @@ impl ColumnsState {
     /// (`DrawerState::light_line`, C9).
     pub fn last_edge_lit(&self) -> bool {
         let last = self.columns.len().checked_sub(1);
-        last.is_some() && (self.edge_hover == last || self.resize.as_ref().map(|r| r.depth) == last)
+        last.is_some() && (self.edge_lit == last || self.resize.as_ref().map(|r| r.depth) == last)
     }
 
     // Settings.
@@ -335,10 +367,18 @@ impl ColumnsState {
     }
 
     /// The width a column may take at most, in points: the visible browser area (the preview
-    /// split less its divider, the sidebar counted at full width). A new column opens at most
-    /// this wide, and an edge drag stops there. Never below one standard column.
+    /// split less its divider, the sidebar counted at full width). Set it whenever the area is
+    /// laid out, as Strata publishes it. A new column opens at most this wide, and an edge
+    /// drag and an autofit stop there. Never below one standard column.
+    ///
+    /// The first area, and the first after a text-size change, narrow open columns wider than
+    /// it (at the view's next tick); a window shrinking later narrows none, though an edge
+    /// drag on such a column snaps it to the area.
     pub fn set_width_cap(&mut self, cap: Option<f32>) {
         self.cap = cap.filter(|c| c.is_finite() && *c > 0.0);
+        if let (Narrow::Armed(at, _), Some(_)) = (self.narrow, self.cap) {
+            self.narrow = Narrow::Armed(at, true);
+        }
     }
 
     pub(super) fn cap(&self) -> Option<f32> {
@@ -373,11 +413,10 @@ impl ColumnsState {
         // view's own reveal (a reveal request would jump it, Rune draft U-C2-4).
         collection.set_own_viewport_reveals(true);
         let scale = width::scale(look);
-        let base = match self.cap {
-            // A saved width wider than the area opens narrowed to it; the setting stays.
-            Some(cap) => self.default_width.min((cap / scale).max(width::STANDARD)),
-            None => self.default_width,
-        };
+        // A saved width wider than the area opens narrowed to it; the setting stays.
+        let limit = self
+            .cap
+            .filter(|&cap| width::drawn(self.default_width, scale) > cap);
         let bar = Bar::new();
         bar.set_mode(self.bar_mode);
         ColumnState {
@@ -386,7 +425,8 @@ impl ColumnsState {
             slot,
             feed,
             bar,
-            width: base,
+            width: self.default_width,
+            limit,
             entrance,
             keys,
             pending: Pending::None,
@@ -476,6 +516,9 @@ impl ColumnsState {
         }
         if self.edge_hover.is_some_and(|d| d >= len) {
             self.edge_hover = None;
+        }
+        if self.edge_lit.is_some_and(|d| d >= len) {
+            self.edge_lit = None;
         }
         if self.held.is_some_and(|d| d >= len) {
             self.held = None;
@@ -692,11 +735,74 @@ impl ColumnsState {
 
     /// Column `depth`'s width as drawn now: its own, or a resize's live one.
     pub(super) fn drawn_width(&self, depth: usize, c: &ColumnState, scale: f32) -> f32 {
-        let base = match &self.resize {
-            Some(r) if r.depth == depth => r.live,
-            _ => c.width,
+        match &self.resize {
+            Some(r) if r.depth == depth => width::drawn(r.live, scale),
+            _ => {
+                let w = width::drawn(c.width, scale);
+                match c.limit {
+                    Some(limit) => w.min(limit.max(width::drawn(width::STANDARD, scale))),
+                    None => w,
+                }
+            }
+        }
+    }
+
+    /// Every open column at `base` points (an edge's release spreads its width), none narrowed.
+    pub(super) fn spread(&mut self, base: f32) {
+        for c in &mut self.columns {
+            c.width = base;
+            c.limit = None;
+        }
+    }
+
+    /// Column `depth` at `base` points, not narrowed (an autofit).
+    pub(super) fn set_column_width(&mut self, depth: usize, base: f32) {
+        if let Some(c) = self.columns.get_mut(depth) {
+            c.width = base;
+            c.limit = None;
+        }
+    }
+
+    /// The widths' share of a tick: a new text scale draws every column at its own width again
+    /// (dropping what narrowed it) and arms a narrowing; an armed narrowing narrows the open
+    /// columns wider than the area once an area arrives after it, or two ticks on with the
+    /// area it has (an area that didn't move). It lands at once, as Strata's clamp does. True
+    /// when a width changed.
+    pub(super) fn tick_widths(&mut self, look: &Look, tx: &mut Tx) -> bool {
+        let scale = width::scale(look);
+        let mut changed = false;
+        if self
+            .scale
+            .is_some_and(|was| (was - scale).abs() > f32::EPSILON)
+        {
+            for c in &mut self.columns {
+                changed |= c.limit.take().is_some();
+            }
+            self.narrow = Narrow::Armed(self.ticks, false);
+        }
+        self.scale = Some(scale);
+        let Narrow::Armed(at, arrived) = self.narrow else {
+            return changed;
         };
-        width::drawn(base, scale)
+        let Some(cap) = self.cap else {
+            return changed;
+        };
+        if !arrived && self.ticks < at + 2 {
+            return changed;
+        }
+        self.narrow = Narrow::Idle;
+        let floor = width::drawn(width::STANDARD, scale);
+        let mut narrowed = false;
+        for c in &mut self.columns {
+            if width::drawn(c.width, scale).min(c.limit.unwrap_or(f32::INFINITY)) > cap.max(floor) {
+                c.limit = Some(cap);
+                narrowed = true;
+            }
+        }
+        if narrowed {
+            tx.instant();
+        }
+        changed | narrowed
     }
 
     /// The reveal's share of a tick: within half a second of a reveal, while the strip's drawn
@@ -812,6 +918,7 @@ impl ColumnsState {
     pub fn reset(&mut self) {
         self.resize = None;
         self.edge_hover = None;
+        self.edge_lit = None;
         self.drag.reset();
     }
 

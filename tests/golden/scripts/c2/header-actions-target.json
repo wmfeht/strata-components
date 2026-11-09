@@ -73,6 +73,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "27 items",
                                               "key": "row-1000001",
                                               "name": "Documents",
                                               "position": 1,
@@ -85,6 +86,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "62 items",
                                               "key": "row-1000002",
                                               "name": "Pictures",
                                               "position": 2,
@@ -94,6 +96,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "40 items",
                                               "key": "row-1000003",
                                               "name": "Music",
                                               "position": 3,
@@ -103,6 +106,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "5 items",
                                               "key": "row-1000004",
                                               "name": "Projects",
                                               "position": 4,
@@ -112,6 +116,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "No items",
                                               "key": "row-1000005",
                                               "name": "Empty",
                                               "position": 5,
@@ -130,6 +135,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "100000 items",
                                               "key": "row-1000007",
                                               "name": "Big",
                                               "position": 7,
@@ -139,6 +145,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "5 items",
                                               "key": "row-1000008",
                                               "name": "deep",
                                               "position": 8,
@@ -148,6 +155,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "3.1 MB",
                                               "key": "row-1000009",
                                               "name": "notes.txt",
                                               "position": 9,
@@ -157,6 +165,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "8.3 MB",
                                               "key": "row-1000010",
                                               "name": "todo.md",
                                               "position": 10,
@@ -166,6 +175,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "4.9 MB",
                                               "key": "row-1000011",
                                               "name": "photo.jpg",
                                               "position": 11,
@@ -175,6 +185,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "5.1 MB",
                                               "key": "row-1000012",
                                               "name": "budget.ods",
                                               "position": 12,
@@ -184,6 +195,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "2.4 MB",
                                               "key": "row-1000013",
                                               "name": "report-final.pdf",
                                               "position": 13,
@@ -266,6 +278,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "8 items",
                                               "key": "row-2000001",
                                               "name": "Reports",
                                               "position": 1,
@@ -278,6 +291,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "6 items",
                                               "key": "row-2000002",
                                               "name": "Letters",
                                               "position": 2,
@@ -287,6 +301,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "5 items",
                                               "key": "row-2000003",
                                               "name": "Taxes",
                                               "position": 3,
@@ -296,6 +311,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "3.4 MB",
                                               "key": "row-2000004",
                                               "name": "cv.pdf",
                                               "position": 4,
@@ -305,6 +321,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "7.7 MB",
                                               "key": "row-2000005",
                                               "name": "budget-2026.ods",
                                               "position": 5,
@@ -314,6 +331,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "7.3 MB",
                                               "key": "row-2000006",
                                               "name": "Quarterly report for the infrastructure committee, final revision with all appendices.pdf",
                                               "position": 6,
@@ -323,6 +341,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "3.1 MB",
                                               "key": "row-2000007",
                                               "name": "letter.odt",
                                               "position": 7,
@@ -332,6 +351,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "7.1 MB",
                                               "key": "row-2000008",
                                               "name": "scan-0001.pdf",
                                               "position": 8,
@@ -341,6 +361,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "4.9 MB",
                                               "key": "row-2000009",
                                               "name": "scan-0002.pdf",
                                               "position": 9,
@@ -350,6 +371,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "1.9 MB",
                                               "key": "row-2000010",
                                               "name": "scan-0003.pdf",
                                               "position": 10,
@@ -359,6 +381,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "8.5 MB",
                                               "key": "row-2000011",
                                               "name": "scan-0004.pdf",
                                               "position": 11,
@@ -368,6 +391,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "8.4 MB",
                                               "key": "row-2000012",
                                               "name": "scan-0005.pdf",
                                               "position": 12,
@@ -377,6 +401,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "6.8 MB",
                                               "key": "row-2000013",
                                               "name": "scan-0006.pdf",
                                               "position": 13,
@@ -386,6 +411,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "4.8 MB",
                                               "key": "row-2000014",
                                               "name": "scan-0007.pdf",
                                               "position": 14,
@@ -395,6 +421,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "3.2 MB",
                                               "key": "row-2000015",
                                               "name": "scan-0008.pdf",
                                               "position": 15,
@@ -404,6 +431,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "4.0 MB",
                                               "key": "row-2000016",
                                               "name": "scan-0009.pdf",
                                               "position": 16,
@@ -413,6 +441,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "5.7 MB",
                                               "key": "row-2000017",
                                               "name": "scan-0010.pdf",
                                               "position": 17,
@@ -422,6 +451,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "7.7 MB",
                                               "key": "row-2000018",
                                               "name": "scan-0011.pdf",
                                               "position": 18,
@@ -431,6 +461,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "1.4 MB",
                                               "key": "row-2000019",
                                               "name": "scan-0012.pdf",
                                               "position": 19,
@@ -440,6 +471,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "4.2 MB",
                                               "key": "row-2000020",
                                               "name": "scan-0013.pdf",
                                               "position": 20,
@@ -449,6 +481,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "8.6 MB",
                                               "key": "row-2000021",
                                               "name": "scan-0014.pdf",
                                               "position": 21,
@@ -458,6 +491,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "7.2 MB",
                                               "key": "row-2000022",
                                               "name": "scan-0015.pdf",
                                               "position": 22,
@@ -467,6 +501,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "1.1 MB",
                                               "key": "row-2000023",
                                               "name": "scan-0016.pdf",
                                               "position": 23,
@@ -476,6 +511,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "7.3 MB",
                                               "key": "row-2000024",
                                               "name": "scan-0017.pdf",
                                               "position": 24,
@@ -485,6 +521,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "7.3 MB",
                                               "key": "row-2000025",
                                               "name": "scan-0018.pdf",
                                               "position": 25,
@@ -494,6 +531,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "2.1 MB",
                                               "key": "row-2000026",
                                               "name": "scan-0019.pdf",
                                               "position": 26,
@@ -503,6 +541,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "2.7 MB",
                                               "key": "row-2000027",
                                               "name": "scan-0020.pdf",
                                               "position": 27,
@@ -605,6 +644,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "1.4 MB",
                                               "key": "row-6000001",
                                               "name": "report-q0001.pdf",
                                               "position": 1,
@@ -614,6 +654,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "5.4 MB",
                                               "key": "row-6000002",
                                               "name": "report-q0002.pdf",
                                               "position": 2,
@@ -623,6 +664,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "8.5 MB",
                                               "key": "row-6000003",
                                               "name": "report-q0003.pdf",
                                               "position": 3,
@@ -632,6 +674,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "1.8 MB",
                                               "key": "row-6000004",
                                               "name": "report-q0004.pdf",
                                               "position": 4,
@@ -641,6 +684,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "1.0 MB",
                                               "key": "row-6000005",
                                               "name": "report-q0005.pdf",
                                               "position": 5,
@@ -650,6 +694,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "1.9 MB",
                                               "key": "row-6000006",
                                               "name": "report-q0006.pdf",
                                               "position": 6,
@@ -659,6 +704,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "3.2 MB",
                                               "key": "row-6000007",
                                               "name": "report-q0007.pdf",
                                               "position": 7,
@@ -668,6 +714,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "5.5 MB",
                                               "key": "row-6000008",
                                               "name": "report-q0008.pdf",
                                               "position": 8,

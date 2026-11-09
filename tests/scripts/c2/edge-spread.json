@@ -1,0 +1,28 @@
+{
+  "bullets": [
+    "browser/view-modes/columns: On release, the window's other open columns ease to the dragged width once"
+  ],
+  "scene": "c2-three-columns-light",
+  "events": [
+    {
+      "t": 0.2,
+      "type": "drag",
+      "key": "c2-col-1-edge",
+      "dx": 100,
+      "dy": 0,
+      "dur": 0.2
+    },
+    {
+      "t": 1.0,
+      "type": "move",
+      "x": 930,
+      "y": 14
+    }
+  ],
+  "expect": [
+    {
+      "key": "c2-intent",
+      "name": "Width 400"
+    }
+  ]
+}

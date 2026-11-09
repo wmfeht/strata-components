@@ -1,5 +1,7 @@
 //! [`ColumnSources`]: the host's listings, as data.
 
+use std::borrow::Cow;
+
 use crate::contract::{EntryId, EntrySource};
 
 /// The folders the strip shows, root first: one listing per column, kept by the host, which
@@ -38,4 +40,14 @@ pub trait ColumnSources {
     /// The entry in column `depth` whose folder column `depth + 1` shows: the open path. `None`
     /// for the last column, or when the next column shows something else (a search).
     fn open_child(&self, depth: usize) -> Option<EntryId>;
+
+    /// What column `depth`'s entry at `index` shows in its size badge, as the host words it:
+    /// "No items" or "12 items" for a folder whose count is known, a file's size. `None` (the
+    /// default) shows no badge: a folder whose count is unknown, a size not read yet. The
+    /// badge shows while the row is hovered, selected or on the open path, and with
+    /// [`ColumnsView::show_sizes`](super::ColumnsView::show_sizes) on; assistive technology
+    /// hears it as the row's description under the same setting.
+    fn badge(&self, _depth: usize, _index: usize) -> Option<Cow<'_, str>> {
+        None
+    }
 }

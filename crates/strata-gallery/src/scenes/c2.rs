@@ -21,9 +21,17 @@
 //!   columns as the view asks.
 //!
 //! It mirrors nothing (Up and Down open no child column): mirroring is Strata's.
+//!
+//! Rows show size badges (C2b): a folder's item count (Slow's is unknown until it has been
+//! listed, so it shows none till then) and
+//! a file's size made up from its name. `Demo::show_sizes` stands in for Strata's "Show sizes
+//! in Columns view". A rename (a slow second click) draws a stand-in editor, the row's name in
+//! an outline, until the selection or cursor moves.
+
+use std::borrow::Cow;
 
 use rune::{Cx, El, Key, KeyEvent, Tx, col, row, text};
-use strata_components::collection::element::Intent;
+use strata_components::collection::element::{Intent, LABEL, Slot};
 use strata_components::collection::keyboard::{KeySettings, Letters};
 use strata_components::collection::pointer::{ClickCount, ClickModes, PointerSettings};
 use strata_components::collection::selection::{CursorGone, Listing, SyncRule};
@@ -55,9 +63,10 @@ pub struct Listed {
     pub from: Option<EntryId>,
 }
 
-/// The open columns' listings, root first.
+/// The open columns' listings, root first, and whether Slow's item count is known yet (once
+/// it has been listed: a count that fills in late).
 #[derive(Debug, Default)]
-pub struct Listings(pub Vec<Listed>);
+pub struct Listings(pub Vec<Listed>, pub bool);
 
 impl ColumnSources for Listings {
     fn len(&self) -> usize {
@@ -77,6 +86,54 @@ impl ColumnSources for Listings {
     }
     fn open_child(&self, depth: usize) -> Option<EntryId> {
         self.0.get(depth + 1).and_then(|c| c.from)
+    }
+    fn badge(&self, depth: usize, index: usize) -> Option<Cow<'_, str>> {
+        let source = &self.0.get(depth)?.source;
+        if index >= source.len() {
+            return None;
+        }
+        let entry = source.entry(index);
+        if entry.kind.is_folder_like() {
+            count_of(entry.name, self.1).map(|n| Cow::Owned(items(n)))
+        } else {
+            Some(Cow::Owned(size_text(size_of(entry.name))))
+        }
+    }
+}
+
+/// How many entries folder `name` lists, when the page knows: Slow's only once it has been
+/// listed (`slow_known`).
+fn count_of(name: &str, slow_known: bool) -> Option<usize> {
+    match name {
+        "Slow" if !slow_known => None,
+        "Big" => Some(100_000),
+        _ => Some(folder(name).1.len()),
+    }
+}
+
+/// A folder's count as Strata words it.
+fn items(n: usize) -> String {
+    match n {
+        0 => "No items".to_owned(),
+        1 => "1 item".to_owned(),
+        n => format!("{n} items"),
+    }
+}
+
+/// A made-up size for file `name`, fixed by its name.
+fn size_of(name: &str) -> u64 {
+    let h = name.bytes().fold(1_469_598_103u64, |h, b| {
+        (h ^ u64::from(b)).wrapping_mul(1_099_511_628_211)
+    });
+    120 + h % 9_000_000
+}
+
+/// A size in decimal units, as Strata shows them.
+fn size_text(bytes: u64) -> String {
+    match bytes {
+        b if b < 1_000 => format!("{b} bytes"),
+        b if b < 1_000_000 => format!("{:.1} kB", b as f64 / 1e3),
+        b => format!("{:.1} MB", b as f64 / 1e6),
     }
 }
 
@@ -101,6 +158,10 @@ pub struct Demo {
     pub folder_clicks: ClickCount,
     /// What plain letters do in a column: passed on (Strata's default), or type-ahead.
     pub letters: Letters,
+    /// Strata's "Show sizes in Columns view".
+    pub show_sizes: bool,
+    /// The row whose stand-in rename editor is open: its column and entry.
+    pub renaming: Option<(usize, EntryId)>,
 }
 
 impl Default for Demo {
@@ -117,6 +178,8 @@ impl Default for Demo {
             hold: None,
             folder_clicks: ClickCount::One,
             letters: Letters::Pass,
+            show_sizes: true,
+            renaming: None,
         }
     }
 }
@@ -399,7 +462,10 @@ fn heard(g: &mut Gallery, intent: ColumnsIntent, tx: &mut Tx) {
                 format!("Clicked {name}")
             }
             Intent::BeginDrag { ids, .. } => format!("Dragging {} from column {depth}", ids.len()),
-            Intent::BeginRename { id } => format!("Renaming {}", d.name_of(depth, id)),
+            Intent::BeginRename { id } => {
+                d.renaming = Some((depth, id));
+                format!("Renaming {}", d.name_of(depth, id))
+            }
             Intent::ContextMenu { target, .. } => match target {
                 Some(id) => format!("Menu on {}", d.name_of(depth, id)),
                 None => format!("Menu on column {depth}"),
@@ -408,7 +474,11 @@ fn heard(g: &mut Gallery, intent: ColumnsIntent, tx: &mut Tx) {
             Intent::Edge(dir) => format!("Edge {dir:?} in column {depth}"),
             _ => format!("Other in column {depth}"),
         },
-        ColumnsIntent::Cursor { .. } | ColumnsIntent::Selection { .. } => return,
+        ColumnsIntent::Cursor { .. } | ColumnsIntent::Selection { .. } => {
+            // The stand-in editor closes when the selection or cursor moves.
+            d.renaming = None;
+            return;
+        }
         ColumnsIntent::EnterFolder { depth, id } => {
             let name = d.name_of(depth, id);
             d.open(&look, depth, id, Focus::FirstEntry, tx);
@@ -455,10 +525,27 @@ pub fn columns_view() -> ColumnsView<Gallery> {
             look: &g.look,
         },
     )
-    .collection(|g: &Gallery, _, c| {
+    .collection(|g: &Gallery, depth, c| {
         c.clock(|g: &Gallery| g.c2.clock)
             .settings(KeySettings::default().letters(g.c2.letters))
+            .rename(
+                move |g: &Gallery| g.c2.renaming.filter(|(d, _)| *d == depth).map(|(_, id)| id),
+                // A stand-in for C5's editor: the name, outlined.
+                Slot::pure(|_: &Gallery, rcx| {
+                    let kit = &rcx.look.kit;
+                    text(rcx.entry.name.to_owned())
+                        .key(LABEL)
+                        .a11y_hidden()
+                        .font(kit.ty.ui_compact)
+                        .color(kit.c.text_base)
+                        .border(1.0, kit.c.border_focus)
+                        .truncate()
+                        .shrink()
+                        .min_w(0.0)
+                }),
+            )
     })
+    .show_sizes(|g: &Gallery| g.c2.show_sizes)
     .pointer_settings(|g: &Gallery| {
         PointerSettings::default().modes(ClickModes::new(ClickCount::Two, g.c2.folder_clicks))
     })
@@ -626,6 +713,33 @@ fn wide_column(g: &mut Gallery, dark: bool) {
     open_path(g, &["Music"]);
 }
 
+/// Sizes in the badges: Documents on the open path in Home, two selected rows in Documents,
+/// the keyboard cursor on one of them.
+fn badges(g: &mut Gallery, dark: bool) {
+    start(g, dark);
+    open_path(g, &["Documents", "Reports"]);
+    let look = g.look.clone();
+    g.c2.columns.set_active(1, &look, &mut Tx::default());
+    let d = &mut g.c2;
+    let source = &d.listings.0[1].source;
+    let c = &mut d.columns.column_mut(1).expect("open").collection;
+    let taxes = source
+        .index_of(id_in("Documents", "Taxes"))
+        .expect("listed");
+    let cv = source
+        .index_of(id_in("Documents", "cv.pdf"))
+        .expect("listed");
+    let _ = c.selection.select_only(source, taxes);
+    let _ = c.selection.toggle(source, cv);
+    c.keyboard_moved();
+    c.note_selection(source);
+}
+
+fn sizes_off(g: &mut Gallery, dark: bool) {
+    badges(g, dark);
+    g.c2.show_sizes = false;
+}
+
 pub const SCENES: &[Scene] = &[
     ("c2-three-columns-light", |g| three_columns(g, false)),
     ("c2-three-columns-dark", |g| three_columns(g, true)),
@@ -643,6 +757,10 @@ pub const SCENES: &[Scene] = &[
     ("c2-hundred-k-dark", |g| hundred_k(g, true)),
     ("c2-wide-column-light", |g| wide_column(g, false)),
     ("c2-wide-column-dark", |g| wide_column(g, true)),
+    ("c2-badges-light", |g| badges(g, false)),
+    ("c2-badges-dark", |g| badges(g, true)),
+    ("c2-sizes-off-light", |g| sizes_off(g, false)),
+    ("c2-sizes-off-dark", |g| sizes_off(g, true)),
 ];
 
 /// Scenes for review with `--scene` only, kept out of the goldens.
@@ -745,6 +863,9 @@ pub fn poll(g: &mut Gallery, t: f64, tx: &mut Tx) -> bool {
                 c.due = None;
                 c.source = listing(&c.name);
                 c.version += 1;
+                if c.name == "Slow" {
+                    d.listings.1 = true;
+                }
                 d.columns.sync(
                     depth,
                     &d.listings.0[depth].source,

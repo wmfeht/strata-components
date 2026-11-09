@@ -827,22 +827,26 @@ mod c2 {
     fn dragging_an_edge_resizes_only_its_column_never_below_one_standard_column() {
         // browser/view-modes/columns: Dragging a column's right edge resizes only that column
         // while the pointer moves, never below 300 px. And: A resize ... is saved as
-        // `browser_column_width`; new columns open at that width and open columns keep theirs
-        // (the view hands the host the width; saving it is the host's).
+        // `browser_column_width`; new columns open at that width (the view hands the host the
+        // width; saving it is the host's). The release spreading it is C2b's (tests/c2b.rs).
         let mut rt = scene("c2-three-columns-light");
+        drag_edge(&mut rt, 1, -150.0, 0.0);
+        assert_eq!(width(&rt, 0), 300.0, "never below one standard column");
+        let (x, y) = rt.pointer().expect("pointer");
+        rt.pointer_up(x, y);
+        // Past the 400 ms in which a second press would fit the column (C2b).
+        settle(&mut rt, 30);
         drag_edge(&mut rt, 1, 100.0, 0.0);
         assert_eq!(width(&rt, 0), 400.0, "it follows the pointer");
-        assert_eq!(width(&rt, 1), 300.0, "the others keep theirs");
+        assert_eq!(
+            width(&rt, 1),
+            300.0,
+            "the others keep theirs while it moves"
+        );
         let (x, y) = rt.pointer().expect("pointer");
         rt.pointer_up(x, y);
         settle(&mut rt, 2);
         assert_eq!(rt.state.c2.intent, "Width 400");
-        assert_eq!(width(&rt, 2), 300.0, "open columns keep theirs");
-        drag_edge(&mut rt, 2, -150.0, 0.0);
-        assert_eq!(width(&rt, 1), 300.0, "never below one standard column");
-        let (x, y) = rt.pointer().expect("pointer");
-        rt.pointer_up(x, y);
-        settle(&mut rt, 2);
         // A new column opens at the width handed over.
         tap_name(&mut rt, &row("Reports", "report-q0001.pdf"));
         tap(&mut rt, &keys::title("c2-col-1"));

@@ -195,6 +195,8 @@ pub struct Shown {
     pub items_line: Option<String>,
     /// A transfer's dialog shows bytes and speed.
     pub transfer: bool,
+    /// A transfer's bytes as committed: "20 MB / 120 MB", which the dialog's bar describes.
+    pub bytes: Option<String>,
     pub subtitle: Option<String>,
     pub cancel_enabled: bool,
     /// The dialog's Cancel words.
@@ -1067,6 +1069,7 @@ impl Op {
             },
             items_line,
             transfer,
+            bytes: transfer.then(|| labels.bytes.clone()),
             subtitle,
             cancel_enabled: self.running(),
             cancel_words: if self.running() {

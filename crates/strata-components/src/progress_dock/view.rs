@@ -424,6 +424,18 @@ impl Bar {
         animations: bool,
         get_mut: fn(&mut S) -> &mut Dock,
     ) -> El {
+        self.progress_described(look, op, animations, get_mut, &op.shown.description)
+    }
+
+    /// [`Bar::progress`] with its own description.
+    pub(crate) fn progress_described<S: 'static>(
+        &self,
+        look: &Look,
+        op: &Op,
+        animations: bool,
+        get_mut: fn(&mut S) -> &mut Dock,
+        description: &str,
+    ) -> El {
         let shown = &op.shown;
         let fill = self.fill(look);
         let fill = match (op.shown.fraction, op.track) {
@@ -445,7 +457,7 @@ impl Bar {
                 }
             });
         let value = shown.fraction.zip(shown.value.clone());
-        self.wrapper(value, &shown.description).child(track)
+        self.wrapper(value, description).child(track)
     }
 
     /// A finished card's bar: the time left before it closes, shrinking by a tween while it

@@ -316,8 +316,8 @@ fn sample(kind: &Kind, elapsed: f64, hold: Option<f64>) -> (Sample, bool) {
     }
 }
 
-/// The jobs the dashboard scenes list: one running per item, one queued, one done with
-/// output, one failed.
+/// The jobs the dashboard scenes list: one running per item, one queued, two done (one with
+/// output, one without), one failed.
 fn sample_jobs() -> Vec<JobRow> {
     let mut resize = JobRow::new(4, "Resize images", JobStatus::Running, -12.4);
     resize.icon = IconName::Pictures;
@@ -333,11 +333,14 @@ fn sample_jobs() -> Vec<JobRow> {
     sums.folder = "~/Downloads".into();
     sums.output =
         "\u{1b}[32mok\u{1b}[0m iso.img.sha256\n\u{1b}[32mok\u{1b}[0m notes.txt.sha256".into();
+    let mut terminal = JobRow::new(5, "Open terminal here", JobStatus::Succeeded, -60.0);
+    terminal.ended_at = Some(-59.0);
+    terminal.folder = "~/Projects".into();
     let mut strip = JobRow::new(1, "Strip EXIF", JobStatus::Failed, -200.0);
     strip.ended_at = Some(-190.0);
     strip.folder = "Home".into();
     strip.error = Some("exiftool was not found".into());
-    vec![resize, rename, sums, strip]
+    vec![resize, rename, terminal, sums, strip]
 }
 
 macro_rules! pair {
@@ -642,6 +645,10 @@ fn window(g: &Gallery, look: &Look, jobs: Option<El>) -> El {
         }))
         .child(opener("delete", "Delete one folder", |d| {
             d.delete_one();
+        }))
+        .child(opener("delete-stuck", "Delete on a stalled device", |d| {
+            let id = d.delete_one();
+            d.stick(id);
         }))
         .child(opener("small-fast", "Small copy, 0.2 s", |d| {
             d.small(0.2);

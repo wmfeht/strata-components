@@ -119,7 +119,15 @@ impl<S: 'static> ProgressDialog<S> {
             height: DIALOG_BAR,
             label: shown.title.clone(),
         }
-        .progress(look, op, dock.animations(), self.get_mut);
+        .progress_described(look, op, dock.animations(), self.get_mut, &{
+            // The bytes show in a live label assistive technology doesn't read: the bar says
+            // them, as committed.
+            match &shown.bytes {
+                Some(b) if !shown.description.is_empty() => format!("{b} · {}", shown.description),
+                Some(b) => b.clone(),
+                None => shown.description.clone(),
+            }
+        });
 
         let mut header = row().w_full().gap(space.md).items_center();
         if shown.transfer {

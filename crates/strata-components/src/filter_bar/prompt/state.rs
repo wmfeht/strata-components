@@ -235,6 +235,9 @@ pub struct PromptState<K> {
     serial: u64,
     generation: u64,
     watch: FocusWatch,
+    /// The host keeps the prompt open while the field lacks the keyboard (the shortcut
+    /// reference has it).
+    held: bool,
 }
 
 impl<K> Default for PromptState<K> {
@@ -245,6 +248,7 @@ impl<K> Default for PromptState<K> {
             serial: 0,
             generation: 0,
             watch: FocusWatch::default(),
+            held: false,
         }
     }
 }
@@ -358,6 +362,8 @@ impl<K: Copy + PartialEq + std::fmt::Debug + 'static> PromptState<K> {
             deferred: false,
         });
         self.serial += 1;
+        // A listing asked for by an earlier prompt never lands in this one.
+        self.generation += 1;
         self.edit = TextEdit::new(text);
         match select {
             Some(r) if r.start <= r.end && r.end <= text.len() => {
@@ -384,6 +390,7 @@ impl<K: Copy + PartialEq + std::fmt::Debug + 'static> PromptState<K> {
             out.push(PromptIntent::CancelCompletion);
         }
         self.serial += 1;
+        self.generation += 1;
         self.edit = TextEdit::new("");
         self.watch.reset();
         out
@@ -416,8 +423,9 @@ impl<K: Copy + PartialEq + std::fmt::Debug + 'static> PromptState<K> {
         }
     }
 
-    /// An answer to a [`PromptIntent::Complete`]. One for an older generation, or with no
-    /// prompt open, is dropped. A choice the user made stays on its candidate while the
+    /// An answer to a [`PromptIntent::Complete`]. One for an older generation (every open,
+    /// close and edit starts a new one), with no prompt open, or for a prompt that lists no
+    /// candidates, is dropped. A choice the user made stays on its candidate while the
     /// candidate is still listed; otherwise the first is chosen. A `done` answer releases a
     /// submit waiting for it.
     pub fn deliver(&mut self, answer: Candidates) -> Polled<K> {
@@ -427,7 +435,7 @@ impl<K: Copy + PartialEq + std::fmt::Debug + 'static> PromptState<K> {
         let Some(o) = self.open.as_mut() else {
             return Polled::default();
         };
-        if answer.generation != generation {
+        if answer.generation != generation || o.spec.arrows != Arrows::Candidates {
             return Polled::default();
         }
         let kept = o
@@ -468,11 +476,19 @@ impl<K: Copy + PartialEq + std::fmt::Debug + 'static> PromptState<K> {
         }
     }
 
+    /// Keeps the prompt open while its field lacks the keyboard, or lets it close again: the
+    /// host holds it while the shortcut reference (F1, C19) has the keyboard, as Strata's
+    /// `abandoned` does. Released with the field still unfocused, the next tick closes it.
+    pub fn hold_open(&mut self, on: bool) {
+        self.held = on;
+    }
+
     /// One frame: a prompt whose field lost the keyboard (a clicked row, another pane) closes
-    /// ([`By::Blur`]), so its text never reaches a browsing command. Rune has no focus-change
-    /// hook (Rune draft U-C6-3), so this notices a frame later.
+    /// ([`By::Blur`]), so its text never reaches a browsing command, unless the host holds it
+    /// open ([`PromptState::hold_open`]). Rune has no focus-change hook (Rune draft U-C6-3),
+    /// so this notices a frame later.
     pub fn tick(&mut self) -> Polled<K> {
-        if self.open.is_none() || !self.watch.lost(self.edit.focused) {
+        if self.open.is_none() || self.held || !self.watch.lost(self.edit.focused) {
             return Polled::default();
         }
         self.dismiss(By::Blur)
@@ -508,8 +524,9 @@ impl<K: Copy + PartialEq + std::fmt::Debug + 'static> PromptState<K> {
         out
     }
 
-    /// The user changed the text: a new serial, the hint and refusal go, a waiting submit is
-    /// dropped, and a prompt with candidates asks for a new listing.
+    /// The user changed the text (Tab's write included): a new serial, the hint and refusal
+    /// go, a waiting submit is dropped, the user's choice is forgotten (Strata's
+    /// `forget_candidate_step`), and a prompt with candidates asks for a new listing.
     pub(crate) fn edited(&mut self) -> Polled<K> {
         let serial = self.serial + 1;
         let Some(o) = self.open.as_mut() else {
@@ -519,6 +536,7 @@ impl<K: Copy + PartialEq + std::fmt::Debug + 'static> PromptState<K> {
         o.hint = None;
         o.invalid = false;
         o.deferred = false;
+        o.stepped = false;
         let (kind, candidates) = (o.kind, o.spec.arrows == Arrows::Candidates);
         let mut out = Polled::changed();
         out.push(PromptIntent::Edited {
@@ -566,7 +584,12 @@ impl<K: Copy + PartialEq + std::fmt::Debug + 'static> PromptState<K> {
                 let delta = if ev.key == Key::Up { -1 } else { 1 };
                 Some(self.step(delta))
             }
-            Key::Tab if bare && o.spec.legend.as_ref().is_some_and(|l| l.complete.is_some()) => {
+            // Shift+Tab moves focus back, as GTK's does.
+            Key::Tab
+                if bare
+                    && !m.shift
+                    && o.spec.legend.as_ref().is_some_and(|l| l.complete.is_some()) =>
+            {
                 let Some(insert) = o.items.get(o.chosen).map(|c| c.insert.clone()) else {
                     return Some(Polled::default());
                 };

@@ -297,3 +297,160 @@ fn repeats_of_enter_and_escape_do_nothing() {
     assert_eq!(st.key(&press(Key::Escape), true), Some(Polled::default()));
     assert!(st.is_open());
 }
+
+// Review round 1, B1: a listing asked for by a prompt that has since closed must not land in a
+// later prompt. Without candidates, `rename ›` would submit a stale folder as its choice.
+#[test]
+fn a_stale_batch_never_lands_in_a_later_prompt() {
+    let mut st = PromptState::new();
+    let g = query(&st.open(P::Go, PromptSpec::go(), "", None));
+    let _ = st.key(&press(Key::Escape), false);
+    let _ = st.open(P::Rename, PromptSpec::rename(), "notes.txt", None);
+    let out = st.deliver(Candidates {
+        generation: g,
+        items: folders(&["stale"]),
+        done: true,
+    });
+    assert_eq!(out, Polled::default());
+    assert!(st.candidates().is_empty());
+    let out = st.key(&press(Key::Enter), false).expect("taken");
+    assert_eq!(
+        submit(&out).map(|s| s.1),
+        Some(None),
+        "no candidate is chosen"
+    );
+
+    // A prompt closed and opened again of the same kind asks afresh: the old answer is stale.
+    let g = query(&st.open(P::Go, PromptSpec::go(), "", None));
+    let _ = st.close();
+    let g2 = query(&st.open(P::Go, PromptSpec::go(), "", None));
+    assert_ne!(g, g2);
+    assert_eq!(
+        st.deliver(Candidates {
+            generation: g,
+            items: folders(&["stale"]),
+            done: true,
+        }),
+        Polled::default()
+    );
+}
+
+// Review round 1, B2: Strata forgets the user's choice on every change of the text, Tab's
+// write included (`forget_candidate_step`), so an Enter before the next batch never sends the
+// typed text to a folder chosen for other text.
+#[test]
+fn an_edit_or_a_tab_forgets_the_choice() {
+    let mut st = PromptState::new();
+    let g = query(&st.open(P::Go, PromptSpec::go(), "~/d", None));
+    let _ = st.deliver(Candidates {
+        generation: g,
+        items: folders(&["dev", "docs"]),
+        done: true,
+    });
+    let _ = st.key(&press(Key::Down), false);
+    assert!(st.stepped());
+    st.edit.text = "/etc".into();
+    let _ = st.edited();
+    let out = st.key(&press(Key::Enter), false).expect("taken");
+    let (text, _, stepped, settled) = submit(&out).expect("a submit");
+    assert_eq!(text, "/etc");
+    assert!(!stepped, "the choice was for other text");
+    assert!(!settled, "the new listing hasn't come");
+
+    let g = query(&st.open(P::Go, PromptSpec::go(), "~/d", None));
+    let _ = st.deliver(Candidates {
+        generation: g,
+        items: folders(&["dev", "docs"]),
+        done: true,
+    });
+    let _ = st.key(&press(Key::Down), false);
+    let _ = st.key(&press(Key::Tab), false);
+    assert_eq!(st.text(), "~/docs/");
+    assert!(!st.stepped(), "Tab's write is a change too");
+}
+
+// GTK's Shift+Tab moves focus back; it completes nothing.
+#[test]
+fn shift_tab_completes_nothing() {
+    let mut st = PromptState::new();
+    let g = query(&st.open(P::Go, PromptSpec::go(), "~/d", None));
+    let _ = st.deliver(Candidates {
+        generation: g,
+        items: folders(&["dev"]),
+        done: true,
+    });
+    let shift_tab = KeyEvent {
+        key: Key::Tab,
+        mods: Mods {
+            shift: true,
+            ..Mods::default()
+        },
+    };
+    assert_eq!(st.key(&shift_tab, false), None, "the key goes on");
+    assert_eq!(st.text(), "~/d");
+}
+
+// A hint for older text is dropped while the prompt is still open, as a late check's is.
+#[test]
+fn a_hint_for_older_text_is_dropped() {
+    let mut st = PromptState::new();
+    let _ = st.open(P::Go, PromptSpec::go(), "", None);
+    let asked = st.serial();
+    st.edit.text = "~/x".into();
+    let _ = st.edited();
+    assert!(!st.show_hint(asked, Some("No matching folders".into())));
+    assert_eq!(st.hint(), None);
+    assert!(st.show_hint(st.serial(), Some("Searching…".into())));
+    assert_eq!(st.hint(), Some("Searching…"));
+}
+
+// An edit drops a submit waiting for the listing: the listing that finishes then submits
+// nothing.
+#[test]
+fn an_edit_drops_a_waiting_submit() {
+    let mut st = PromptState::new();
+    let _ = st.open(P::Go, PromptSpec::go(), "~/d", None);
+    assert!(st.wait_until_settled(st.serial()));
+    st.edit.text = "~/do".into();
+    let g = query(&st.edited());
+    let out = st.deliver(Candidates {
+        generation: g,
+        items: folders(&["docs"]),
+        done: true,
+    });
+    assert!(
+        submit(&out).is_none(),
+        "the edit dropped the waiting submit"
+    );
+}
+
+// Review round 1: Strata keeps a footer prompt open while the shortcut reference has the
+// keyboard (F1 from the prompt), and closes it if the keyboard is elsewhere once the
+// reference lets go.
+#[test]
+fn a_held_prompt_survives_losing_the_keyboard_until_released() {
+    let mut st = PromptState::new();
+    let _ = st.open(P::Filter, PromptSpec::filter(), "rep", None);
+    let _ = st.tick();
+    st.hold_open(true);
+    st.edit.focused = false;
+    assert_eq!(st.tick(), Polled::default());
+    assert!(st.is_open(), "held while the reference has the keyboard");
+    // The reference closes and gives the keyboard back: the prompt stays.
+    st.edit.focused = true;
+    st.hold_open(false);
+    assert_eq!(st.tick(), Polled::default());
+    assert!(st.is_open());
+    // Held again, and released with the keyboard elsewhere: it closes.
+    st.hold_open(true);
+    st.edit.focused = false;
+    let _ = st.tick();
+    st.hold_open(false);
+    let out = st.tick();
+    assert!(out.intents.contains(&PromptIntent::Dismissed {
+        kind: P::Filter,
+        text: "rep".into(),
+        by: By::Blur
+    }));
+    assert!(!st.is_open());
+}

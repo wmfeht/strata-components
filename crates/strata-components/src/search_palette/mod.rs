@@ -9,12 +9,14 @@
 //! **Rune dev 5d421fd: partly.** C15's modal shell (`El::modal`, `backdrop_blur`, presence
 //! motion), core `text_input` (`on_input_key`, `on_secondary_press`, `active_descendant`),
 //! `virtual_rows` with `on_visible_rows` (and the set size and positions Rune gives virtual
-//! rows), `reveal_selected`, `live_region`, `truncate_middle` on rich text, `Tx::wake_after`
-//! and `rune::Latest` cover it. Missing: the combobox role on an input (U-C6-1), focusing an
-//! element from code (#173; here the leaving frame), a `Tx` in a modal's dismissal (U-C17-2),
-//! input-method events in scripts (U-C6-7). Rune `dev` past the pin (11 commits, to 0cde17e)
-//! adds `Tx::clock`/`Tx::wake_at` (c650fe0) and a tooltip state machine (0cde17e); neither is
-//! adopted here.
+//! rows), `Tx::scroll_to_y` and `Tx::scroll_into_view_in`, `live_region`, `truncate_middle`
+//! on rich text, `Tx::wake_after` and `rune::Latest` cover it. Missing: the combobox role on an
+//! input (U-C6-1), focusing an element from code (#173; here the leaving frame), a `Tx` in a
+//! modal's dismissal (U-C17-2), virtual rows that show content added above at offset 0
+//! (U-C17-3) and `reveal_selected` on rows built by index (U-C17-4), both worked around with
+//! scroll requests, and input-method events in scripts (U-C6-7). Rune `dev` past the pin (43
+//! commits) adds `Tx::clock`/`Tx::wake_at` (c650fe0) and a tooltip state machine (0cde17e);
+//! neither is adopted here, and U-C17-3 and U-C17-4 are unchanged there.
 //!
 //! # Hosting
 //!
@@ -33,7 +35,8 @@
 //! //                (no roots: s.palette.unavailable("No local search locations available."))
 //! // Ctrl+Shift+K:  route(s.palette.toggle(PaletteMode::jump()))
 //! // PaletteIntent::Query(q): search; each batch -> s.palette.deliver(Answer::new(q.generation,
-//! //                every result so far)), the last `.done()`, `.partial(causes)` if it stopped early.
+//! //                every result so far), tx), the last `.done()`, `.partial(causes)` if it
+//! //                stopped early. The `Tx` scrolls the list in the commit that draws the batch.
 //! //                One-shot answers can come through `rune::Latest`; a walk streams over a channel.
 //! // Open { id, new_tab, .. } / Reveal { id }: navigate, preview, reveal (Strata's policy).
 //! // ResultMenu { id, at }: C21's menu with "Open containing folder" -> s.palette.reveal(&id, tx).
@@ -56,8 +59,15 @@
 //!   clears them at once and shows the idle words.
 //! - **The highlight.** A changed (trimmed) query highlights its first result. A same-query
 //!   batch keeps the highlight on its result by id, else at its place, clamped (Strata's
-//!   `restore_selection`). A new highlight scrolls into view; a batch that keeps it leaves the
-//!   rows where the reader has them (Rune keeps the visible row's key).
+//!   `restore_selection`).
+//! - **Scrolling as answers land** ([`PaletteState::deliver`], Strata's `restore_scroll` with its
+//!   `navigation_started`): a new query's answer scrolls the list to the top, where its
+//!   highlighted first result is. Until the user moves the highlight in this query, a batch
+//!   keeps the list's pixel offset (0 at the start), so better results it puts above the first
+//!   row show; Rune's virtual rows would keep the old first row in place (U-C17-3), so the
+//!   palette asks for an instant scroll to the old offset in the batch's commit, which wins.
+//!   Once the user has moved it, a batch that moves the highlighted row reveals it, so Enter
+//!   never opens a row they can't see. An arrow reveals its row from the key handler.
 //! - **States** ([`Phase`]): idle, loading ("Searching…"), results, no results (the empty-query
 //!   words for the jump's history), error ([`PaletteState::fail`]) and unavailable
 //!   ([`PaletteState::unavailable`]: the field takes neither text nor focus, the panel keeps the
@@ -125,13 +135,14 @@
 //! | When indexing stops early, the footer shows "Partial results"; its description… | script `partial-results`; golden `c17-partial` (a11y: the description) |
 //! | Hovering Partial results shows a tooltip…; complete results clear the tooltip | test `the_partial_notice_shows_its_causes_on_hover_until_results_are_complete` |
 //! | While indexing adds results, the highlighted result stays selected by path and unchanged rows are not rebuilt | script `highlight-by-path`; unit `a_same_query_batch_keeps_the_highlight_on_its_result`, `rows_build_again_only_when_their_result_or_highlight_changes` |
-//! | Up and Down move the highlight while the caret stays in the query field… | scripts `arrows`, `arrows-second`; test `a_resting_pointer_never_moves_the_highlight` |
-//! | When the first result is preselected, one Down highlights the second result | script `arrows-second`; unit `a_new_query_highlights_its_first_result_and_arrows_stop_at_the_ends` |
+//! | (the same bullet) the list's scroll as batches land | tests `a_batch_above_the_first_row_shows_at_the_top_until_the_user_moves`, `the_streamed_best_result_shows_in_every_frame`, `a_moved_highlight_stays_in_view_when_a_batch_pushes_it_down` (every frame of a resting window); unit `answers_scroll_as_strata_restores_them` |
+//! | Up and Down move the highlight while the caret stays in the query field… | scripts `arrows`, `arrows-second`; tests `up_and_down_leave_the_caret_where_it_was`, `a_resting_pointer_never_moves_the_highlight` |
+//! | When the first result is preselected, one Down highlights the second result | script `arrows-second`; unit `a_new_query_highlights_its_first_result_and_arrows_stop_at_the_ends`; test `a_new_query_s_highlighted_first_result_shows_after_arrowing_down` (a new query scrolls to the top: coordinator ruling) |
 //! | Enter or a single click on a result opens it and closes search | scripts `enter-opens`, `click-opens` |
 //! | With an input method composing…, Enter that the input method passes back… opens the highlighted result | test `an_enter_after_the_composition_commits_opens_the_highlighted_result` (scripts have no input-method events: U-C6-7) |
 //! | Alt+Enter, or right-click → Open containing folder, closes search and opens the result's parent… | scripts `reveal-alt-enter`, `reveal-menu` (the menu is a stand-in for C21's; the parent and selection are Strata's) |
 //! | Alt+Enter with Hyper or Meta held also opens the containing folder | script `reveal-alt-super-enter` (Rune reports those as Super) |
-//! | Escape, or a click outside the dialog panel, closes search | scripts `escape-closes`, `click-outside-closes` |
+//! | Escape, or a click outside the dialog panel, closes search | scripts `escape-closes`, `click-outside-closes`; test `shift_escape_closes_as_escape_does` (Strata's `ESCAPE_ANY`) |
 //! | With a pinyin input method composing…, Escape cancels only the composition… | test `escape_while_composing_keeps_the_palette_open` |
 //! | Closing search with Escape, Ctrl+K, or a click outside the panel returns focus to its opener… | scripts `escape-closes`, `click-outside-closes`, `ctrl-k-toggles` |
 //! | Opening a result, or Open containing folder, hands focus to the revealed item… | scripts `open-hands-focus`, `reveal-hands-focus`; test `opening_a_result_hands_focus_to_the_view_in_a_resting_window` (the host names the view; the item inside it is Strata's) |
@@ -139,7 +150,7 @@
 //! | Pressing Ctrl+Shift+K while the search palette is open closes it | script `jump-toggle`; unit `the_toggle_closes_whatever_mode_is_open` |
 //! | Opened with Ctrl+Shift+K, the field's accessible name and placeholder… | script `jump-opens`; golden `c17-jump` |
 //! | Arrow keys choose a row, and Enter opens the chosen folder | script `jump-enter-opens` |
-//! | Before any folder is recorded, the palette shows "No folder history yet" | script `jump-history-empty`; golden `c17-jump-empty` |
+//! | Before any folder is recorded, the palette shows "No folder history yet" | script `jump-history-empty`; golden `c17-jump-empty`; test `the_jump_lists_its_history_in_the_frame_it_opens` (the page answers the jump at once, as Strata does, so no "Searching…" frame) |
 //! | A query that matches no visited folder shows "No matching folders" | script `jump-no-match` |
 //! | Closing the palette with Escape returns focus to the control that opened it… | script `jump-escape` |
 //! | Every search covers the global roots…; roots recomputed each open; a drive mounted inside Home appears once | **Strata** (the roots; the palette asks again on every open) |
@@ -160,8 +171,11 @@
 //! `an_answer_for_a_superseded_query_is_dropped_and_the_old_results_stay_until_the_new_land`),
 //! each state reads its own words (test `each_state_reads_its_own_words`; goldens `c17-loading`,
 //! `c17-error`), the new-tab chords and middle click (test
-//! `ctrl_enter_and_a_middle_click_open_in_a_new_tab`), and the count's announcements (unit
-//! `the_count_is_announced_at_the_first_results_and_when_done`).
+//! `ctrl_enter_and_a_middle_click_open_in_a_new_tab`), a held Enter opens nothing, even one
+//! held through loading (test `a_held_enter_opens_nothing_even_through_loading`), and the
+//! count's announcements (unit `the_count_is_announced_at_the_first_results_and_when_done`;
+//! test `a_new_query_announces_no_count_until_its_first_answer`: nothing is announced for the
+//! old list's size).
 //!
 //! Perf (`tests/perf.rs`, ignored, perf profile): at 1,000 and 10,000 results an arrow step, a
 //! delivery, a streamed batch and a keystroke stay within their bars (4, 8, 8 and 8 ms at p95).
@@ -219,6 +233,29 @@
 //!   #173 (`Tx::focus`; here the leaving frame), U-C6-7 (no input-method events in scripts:
 //!   in-process tests), U-C25-3 (scripts can't see a drawn image), #203 (a `virtual_rows` count
 //!   change re-reads every key: a 10,000-result batch is the slowest figure, about 4 ms).
+//! - **U-C17-3 (draft, not filed): `virtual_rows` keeps its first visible row at offset 0.**
+//!   `El::scroll_anchor`'s docs (`el/scroll.rs:126-133`) say anchoring holds "only while the
+//!   viewport is … scrolled off its top … at the very top new content above shows", and that
+//!   `virtual_rows` lists anchor "this way"; but a `virtual_rows` list at offset 0 that gets rows
+//!   inserted above its first row keeps that row at the top, scrolling the new ones out above
+//!   the viewport. A search list streaming better results first hides them though the user
+//!   never scrolled. Repro, headless (strata-spikes/c17-probes/probe_reveal.rs): a 200 pt
+//!   viewport over `virtual_rows` of 30 rows `b00..b29`, 20 pt each, at offset 0; one commit
+//!   later the same rows with `a0`, `a1` in front: `a0` is drawn at y = −40, above the
+//!   viewport, and `b00` stays at y = 0. Ask: skip
+//!   the anchor at offset 0, as the docs say, or an opt-out. Searched upstream ("scroll_anchor",
+//!   "virtual_rows anchor", "overflow-anchor", "first visible row"): none. Here:
+//!   `PaletteState::deliver` scrolls to the old offset in the same commit.
+//! - **U-C17-4 (draft, not filed): `reveal_selected` does nothing for rows built by index.** At
+//!   the pin, `runtime/commit/measure.rs:531` checks `focus.reveal_selected` only in the branch
+//!   for rows handed over as children (`virtualize`), not for `virtual_rows`' index-built rows,
+//!   so a changed `focus_selected` row never scrolls into view. Repro, headless (same file): a
+//!   200 pt viewport over 100 rows of 20 pt with `.reveal_selected(true)`, row `i` built
+//!   `.focus_selected(i == s.selected)`; set `selected = 60`: with the rows as `virtualize`
+//!   children, row 60 is revealed at y = 180; built by index with `virtual_rows`, it is never
+//!   mounted and the viewport stays at 0. Ask: the same reveal for index-built rows (their keys are known). Searched upstream
+//!   ("reveal_selected", "virtual_rows reveal"): none. Here: an arrow reveals its row with
+//!   `Tx::scroll_into_view_in`, and `deliver` scrolls for answers.
 //!
 //! # Follow-ups
 //!
@@ -226,8 +263,6 @@
 //! - One field shared with C18's filter bar and footer prompts, once both have merged.
 //! - One candidates model shared with C18's `go ›` prompt (the same answer shape).
 //! - A corner-down-left icon on W2d's row, for the open hint.
-//! - After a batch reorders rows, a highlight the user moved isn't scrolled back into view
-//!   unless its key changed (Strata scrolls it back): `deliver` has no `Tx`.
 
 mod data;
 mod field;

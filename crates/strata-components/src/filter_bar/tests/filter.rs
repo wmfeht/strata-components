@@ -349,3 +349,46 @@ fn tenxer_search_results_open_the_cursor_or_the_top_result() {
         "the cursor, though nothing is selected"
     );
 }
+
+// Review round 2: before any results show for the text (inside the host's debounce, or after
+// `restart`), nothing is offered as the top result, so Enter follows Strata's per-mode rule at
+// once: search results open their cursor, or the top result; in place, the first selected.
+#[test]
+fn before_any_results_show_enter_follows_the_mode_rule() {
+    let src = source(&["a", "b", "c"]);
+    let mut sel = Selection::new();
+    let mut st = FilterState::new();
+    let _ = st.open_with("x", crate::collection::selection::Position::default());
+    assert_eq!(
+        st.target(r(&src, &sel)),
+        Some(id(1)),
+        "search results: the top result"
+    );
+    let _ = sel.move_cursor(&src, 2, crate::collection::selection::AnchorRule::Move);
+    assert_eq!(
+        st.target(r(&src, &sel)),
+        Some(id(3)),
+        "search results: the cursor"
+    );
+
+    let mut st = FilterState::new();
+    st.set_shows(Shows::InPlace);
+    let _ = st.open_with("x", crate::collection::selection::Position::default());
+    assert_eq!(st.target(r(&src, &sel)), None, "in place, nothing selected");
+    let _ = sel.select_only(&src, 1);
+    assert_eq!(
+        st.target(r(&src, &sel)),
+        Some(id(2)),
+        "in place: the first selected"
+    );
+
+    // After a restart the same holds.
+    let mut st = FilterState::new();
+    let _ = typed(&mut st, "x");
+    st.restart();
+    assert_eq!(
+        st.target(r(&src, &sel)),
+        Some(id(2)),
+        "the cursor, with no query shown"
+    );
+}

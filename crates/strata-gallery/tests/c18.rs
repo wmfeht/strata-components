@@ -330,4 +330,32 @@ mod c18 {
         assert!(!rt.state.c18.prompt.stepped());
         assert!(rt.state.c18.prompt.is_open());
     }
+
+    // Review round 2, SF3: a field menu whose prompt closes from code (a submit, leaving the
+    // mode) closes at the next poll (`FieldMenu::check`), and the prompt's hold goes with it.
+    #[test]
+    fn a_prompt_closed_under_its_field_menu_closes_the_menu() {
+        let mut rt = mount("c18-tenxer-light");
+        typ(&mut rt, "/");
+        typ(&mut rt, "rep");
+        key(
+            &mut rt,
+            Key::Function(10),
+            Mods {
+                shift: true,
+                ..Mods::default()
+            },
+        );
+        run(&mut rt, 0.2);
+        assert!(rt.state.c18.fields.is_open(), "the menu opened");
+        assert!(rt.state.c18.prompt.is_held());
+        let _ = rt.state.c18.prompt.close();
+        run(&mut rt, 0.1);
+        assert!(
+            !rt.state.c18.fields.is_open(),
+            "the menu closed with its field"
+        );
+        assert!(!rt.state.c18.prompt.is_held());
+        assert_eq!(rt.state.c18.log, "Prompt menu closed");
+    }
 }

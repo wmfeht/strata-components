@@ -155,6 +155,16 @@ fn a_chosen_candidate_survives_later_batches_and_a_stale_answer_is_dropped() {
         done: false,
     });
     assert_eq!(st.chosen().map(|c| c.id.as_str()), Some("b"));
+    assert!(st.stepped(), "the choice is still the user's");
+    // A third batch: the choice holds again, at its new place.
+    let _ = st.deliver(Candidates {
+        generation: g,
+        items: folders(&["b", "c", "a"]),
+        done: true,
+    });
+    assert_eq!(st.chosen().map(|c| c.id.as_str()), Some("b"));
+    assert_eq!(st.chosen_index(), Some(0));
+    assert!(st.stepped());
 
     st.edit.text = "x".into();
     let next = query(&st.edited());
@@ -452,5 +462,25 @@ fn a_held_prompt_survives_losing_the_keyboard_until_released() {
         text: "rep".into(),
         by: By::Blur
     }));
+    assert!(!st.is_open());
+}
+
+// Review round 2: closing a prompt drops the host's hold, so the next prompt closes on a blur
+// even if the host never released it (a menu closed with its prompt).
+#[test]
+fn closing_a_prompt_drops_its_hold() {
+    let mut st = PromptState::new();
+    let _ = st.open(P::Find, PromptSpec::find(), "rep", None);
+    st.hold_open(true);
+    let _ = st.close();
+    let _ = st.open(P::Find, PromptSpec::find(), "", None);
+    let _ = st.tick();
+    st.edit.focused = false;
+    let out = st.tick();
+    assert!(
+        out.intents
+            .iter()
+            .any(|i| matches!(i, PromptIntent::Dismissed { by: By::Blur, .. }))
+    );
     assert!(!st.is_open());
 }

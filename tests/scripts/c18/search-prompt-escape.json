@@ -1,7 +1,6 @@
 {
   "bullets": [
-    "integration/10xer-mode/search: Esc from a nonempty prompt keeps the hits; Esc from an empty prompt cancels.",
-    "integration/10xer-mode/search: Pressing `s` while hits are showing pre-fills that query."
+    "integration/10xer-mode/search: Esc from a nonempty prompt keeps the hits; Esc from an empty prompt cancels."
   ],
   "scene": "c18-tenxer-light",
   "events": [

@@ -837,3 +837,28 @@ fn ctrl_a_over_a_full_selection_does_not_make_a_later_shift_click_copy_everythin
     command(&mut rt, 'c');
     assert_eq!(clip.text().as_deref(), Some(&narrowed));
 }
+
+#[test]
+fn copy_source_copies_a_display_equation_source() {
+    let mut d = doc(vec![Unit::new(
+        UnitKind::Media {
+            list_depth: None,
+            media: Media::Equation {
+                source: "e^{i\\pi} + 1 = 0".into(),
+                display: true,
+            },
+        },
+        "",
+    )]);
+    d.set_media(0, MediaState::Ready(image(40)));
+    let mut rt = runtime_with(d, None);
+    let clip = clipboard::memory();
+    rt.use_clipboard(&clip);
+    let b = rect(&rt, "doc-u0/copy");
+    click(&mut rt, (b[0] + b[2] / 2.0, b[1] + b[3] / 2.0));
+    settle(&mut rt);
+    assert_eq!(
+        clip.text().as_deref().map(String::as_str),
+        Some("e^{i\\pi} + 1 = 0")
+    );
+}

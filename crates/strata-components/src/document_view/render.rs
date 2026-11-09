@@ -496,8 +496,7 @@ fn code<S: 'static>(
         } else {
             &ctx.labels.copy_code
         };
-        let copy: String = block_code(st, i);
-        panel = panel.child(copy_button(ctx, i, copied, label, copy, "copy"));
+        panel = panel.child(copy_button(ctx, i, copied, label, block_code, "copy"));
     }
     panel
 }
@@ -515,14 +514,15 @@ fn block_code(st: &DocumentState, first: usize) -> String {
     out.strip_suffix('\n').map(str::to_owned).unwrap_or(out)
 }
 
-/// A Copy button pinned to the top right of its block: copies `copy`, then shows its check
-/// and `label` (the copied form) until [`DocumentState::tick`] turns it back.
+/// A Copy button pinned to the top right of its block: copies what `copy` reads from the
+/// state for `unit`, when pressed (not on every build), then shows its check and `label` (the
+/// copied form) until [`DocumentState::tick`] turns it back.
 fn copy_button<S: 'static>(
     ctx: &Rc<Ctx<S>>,
     unit: usize,
     copied: bool,
     label: &str,
-    copy: String,
+    copy: fn(&DocumentState, usize) -> String,
     key: &str,
 ) -> El {
     let p = &ctx.paint;
@@ -541,8 +541,9 @@ fn copy_button<S: 'static>(
         .hover(p.hover)
         .child(icon(if copied { p.check } else { p.copy }, p.icon).color(p.muted))
         .on_press_tx(move |s: &mut S, tx| {
-            tx.copy(copy.clone());
-            (get_mut)(s).mark_copied(unit);
+            let st = get_mut(s);
+            tx.copy(copy(st, unit));
+            st.mark_copied(unit);
             tx.wake_after(super::state::COPIED_FOR);
         })
 }
@@ -593,27 +594,30 @@ fn media_el<S: 'static>(
             ));
         }
     };
-    let copy = match media {
-        Media::Diagram { source } => Some((source, &ctx.labels.copy_diagram)),
-        Media::Equation {
-            source,
-            display: true,
-        } => Some((source, &ctx.labels.copy_equation)),
+    let label = match media {
+        Media::Diagram { .. } => Some(&ctx.labels.copy_diagram),
+        Media::Equation { display: true, .. } => Some(&ctx.labels.copy_equation),
         _ => None,
     };
     let mut out = col().w_full().child(shown);
-    if let Some((source, label)) = copy {
+    if let Some(label) = label {
         let copied = st.copied.is_some_and(|(at, _)| at == i);
-        out = out.pr(p.icon + 16.0).child(copy_button(
-            ctx,
-            i,
-            copied,
-            label,
-            source.to_string(),
-            "copy",
-        ));
+        out = out
+            .pr(p.icon + 16.0)
+            .child(copy_button(ctx, i, copied, label, media_source, "copy"));
     }
     out
+}
+
+/// A diagram's or an equation's source, for Copy source.
+fn media_source(st: &DocumentState, unit: usize) -> String {
+    match &st.document().units[unit].kind {
+        UnitKind::Media {
+            media: Media::Diagram { source } | Media::Equation { source, .. },
+            ..
+        } => source.to_string(),
+        _ => String::new(),
+    }
 }
 
 /// A table drawn static (D1): content-sized columns from an estimate of each column's widest

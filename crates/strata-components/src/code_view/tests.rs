@@ -212,6 +212,21 @@ fn a_row_measured_in_view_holds_the_thumb() {
 }
 
 #[test]
+fn the_last_row_s_end_in_view_puts_the_thumb_at_the_bottom() {
+    let p = bar(100);
+    let mut heights = vec![10.0; 100];
+    scroll(&p, 850.0, &heights);
+    assert!(p.progress() < 1.0);
+    // Rows below measure shorter while the content holds: the last row's end comes into
+    // view, so the thumb goes to the bottom, though nothing moved forward.
+    for h in &mut heights[90..] {
+        *h = 5.0;
+    }
+    scroll(&p, 850.0, &heights);
+    assert_eq!(p.progress(), 1.0);
+}
+
+#[test]
 fn a_row_measured_below_never_moves_the_thumb_back() {
     let p = bar(100);
     let mut heights = vec![10.0; 100];

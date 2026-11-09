@@ -70,7 +70,10 @@ pub struct LocationBar<'a, S> {
 
 impl<'a, S: 'static> LocationBar<'a, S> {
     /// The bar keyed `key` for the folder `trail` names, drawn from `state` (reached again in
-    /// handlers through `access`), reporting to `on_intent`.
+    /// handlers through `access`), reporting to `on_intent`. Every handler calls the
+    /// `on_intent` of the latest view, so it may capture state the view reads: suggestion rows,
+    /// memoised while their list shows, read it from `state` when pressed rather than keeping
+    /// the one they were built with.
     pub fn new(
         key: impl Into<String>,
         look: &'a Look,

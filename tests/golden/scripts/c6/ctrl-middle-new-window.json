@@ -53,10 +53,32 @@
                               "children": [
                                 {
                                   "actions": [
+                                    "click",
+                                    "focus",
                                     "scroll-into-view"
                                   ],
-                                  "description": "~/Downloads",
-                                  "name": "Downloads",
+                                  "description": "~/Projects",
+                                  "key": "c6-loc-crumb-1",
+                                  "name": "Projects",
+                                  "role": "button"
+                                }
+                              ],
+                              "key": "c6-loc-item-1",
+                              "name": "Projects",
+                              "position": 2,
+                              "role": "list-item"
+                            },
+                            {
+                              "actions": [
+                                "scroll-into-view"
+                              ],
+                              "children": [
+                                {
+                                  "actions": [
+                                    "scroll-into-view"
+                                  ],
+                                  "description": "~/Projects/strata",
+                                  "name": "strata",
                                   "role": "label"
                                 },
                                 {
@@ -70,16 +92,16 @@
                                   "role": "button"
                                 }
                               ],
-                              "key": "c6-loc-item-1",
-                              "name": "Downloads",
-                              "position": 2,
+                              "key": "c6-loc-item-2",
+                              "name": "strata",
+                              "position": 3,
                               "role": "list-item"
                             }
                           ],
-                          "key": "c6-loc-trail-1",
+                          "key": "c6-loc-trail-0",
                           "name": "Path",
                           "role": "list",
-                          "setSize": 2
+                          "setSize": 3
                         }
                       ],
                       "key": "c6-loc",
@@ -112,7 +134,7 @@
                     },
                     {
                       "key": "c6-log",
-                      "name": "Open ~/Downloads",
+                      "name": "New window ~/Projects",
                       "role": "label"
                     }
                   ],

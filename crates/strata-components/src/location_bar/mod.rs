@@ -40,6 +40,8 @@
 //!   and keep their natural width, so a deep path scrolls rather than squeezes.
 //! - A press on a separator, the current label or the empty space after the crumbs opens the
 //!   entry; a secondary press anywhere opens the hierarchy menu under the bar at the press's x.
+//!   The Menu key or Shift+F10 on a focused crumb opens it too: Rune hands the key to the
+//!   strip's secondary-press handler at the crumb's left, so the menu opens there, under the bar.
 //!   An ancestor's label is dim, and takes the text colour under the pointer or a drag.
 //! - The wheel scrolls the crumbs sideways and the edges fade over hidden crumbs; C24's overflow
 //!   bar sits in its own row under them, shown on hover or scroll.
@@ -109,7 +111,7 @@
 //! | The hierarchy menu marks as current the folder the bar names | script `hierarchy-menu`; golden `c6-menu` (a11y: checked) |
 //! | In Columns…; Switching from Columns…; Switching back… (3) | **Strata**: which folder it passes as the trail |
 //! | Middle-clicking an ancestor crumb… opens it in a new, active tab | script `middle-click-new-tab` (the intent; tabs are Strata's and C7's) |
-//! | Ctrl+middle-click or Shift+middle-click… opens that folder in a new window | test `ctrl_or_shift_middle_click_opens_a_window` (script pointer events drop modifiers at this rev) |
+//! | Ctrl+middle-click or Shift+middle-click… opens that folder in a new window | scripts `ctrl-middle-new-window`, `shift-middle-new-window` (a script holds the modifier with `{"hold": "ctrl"}`) |
 //! | In a file chooser, middle-clicking a crumb opens nothing | test `a_chooser_s_middle_click_opens_nothing` ([`LocationBar::open_in_new`]) |
 //! | Middle-clicking the current crumb opens no tab | script `middle-click-new-tab` |
 //! | Parent breadcrumbs accept file drops; Dropping… before 750 ms transfers… without navigating | script `drop-on-crumb` |
@@ -136,7 +138,7 @@
 //! | Tab inserts the highlighted suggestion, the only suggestion, or a longer common prefix and closes the popover; Down reopens it | scripts `tab-inserts-highlighted`, `tab-inserts-only`, `tab-common-prefix-down-reopens`; unit `tab_takes_the_common_prefix_then_cycles` |
 //! | A key added to `focus_next` or `focus_previous`… completes the path as Tab does | script `complete-key` (the page passes F7 to [`LocationBar::complete_keys`]) |
 //! | When Tab has nothing longer to insert, it highlights the next suggestion instead | script `tab-cycles` |
-//! | Enter on a highlighted suggestion opens that folder | scripts `enter-on-suggestion`, `click-suggestion`; test `a_resting_pointer_never_moves_the_highlight`; unit `a_click_takes_its_suggestion_even_while_keys_wait` |
+//! | Enter on a highlighted suggestion opens that folder | script `enter-on-suggestion`; test `a_resting_pointer_never_moves_the_highlight` |
 //! | The popover does not appear while the breadcrumbs are showing | script `no-popover-on-crumbs`; unit `a_late_or_stale_answer_is_dropped` |
 //! | While the typed folder is being listed, the previous suggestions stay… | scripts `previous-stay-while-listing`, `stale-result-dropped`; unit `an_answer_for_another_generation_or_text_is_dropped` |
 //! | Tab pressed during the listing waits for its list… they then run in order | scripts `deferred-keys`, `deferred-down-then-enter`; units `keys_during_a_listing_wait_and_run_in_order`, `a_tab_that_relists_carries_the_rest_to_the_new_listing` |
@@ -146,6 +148,13 @@
 //! | Refocusing the window does not reopen suggestions; the next text change shows them again | tests `refocusing_keeps_a_list_closed_by_deactivation_closed`, `a_listing_pending_at_deactivation_is_cancelled_and_refocus_reopens_nothing` |
 //! | Hiding the location entry closes the popover and cancels a pending listing | **partial**: test `dismissing_closes_the_list_and_cancels_the_listing`; when it hides is Strata's |
 //! | Switching tabs closes the previous tab's suggestions…; In the portal file chooser, focusing another window… | **Strata** (one state per tab; the chooser host forwards its window's activation) |
+//!
+//! A click on a suggestion opens it at once (test
+//! `a_kept_suggestion_row_reports_through_the_latest_handler`, unit
+//! `a_click_takes_its_suggestion_even_while_keys_wait`); no bullet names it. A hovered
+//! crumb takes the text colour (test `a_hovered_crumb_takes_the_text_colour`), as Strata's
+//! `.breadcrumb:hover` does; the Menu key and Shift+F10 open the hierarchy menu from a focused
+//! crumb (test `the_menu_key_on_a_crumb_opens_the_hierarchy_menu`); neither has a bullet.
 //!
 //! Also `app/accessibility`: crumbs carry no tooltip, and a crumb's full path is its accessible
 //! description (golden `c6-short`, a11y). A paste asks for suggestions as typing does (test
@@ -232,9 +241,9 @@
 //!   entry shows its menu there. An in-app field menu is C21's to give (known; probe in
 //!   `strata-spikes/c6-probes/r1/w4/rclick.*`).
 //! - Reused: U-C1e-6 (no clock in `Tx`: the host's `tick`), C15's `Tx::focus` draft (the host
-//!   gives its view the keyboard after a cancel), U3 (a drag's paths only at the drop), and
-//!   U-C1b-1 (script pointer events drop modifiers: still so at this rev, probe P6b; fixed at
-//!   dev 4805095).
+//!   gives its view the keyboard after a cancel) and U3 (a drag's paths only at the drop).
+//!   U-C1b-1 (script pointer events dropped modifiers, probe P6b at 78d22ed) is fixed at the
+//!   current pin, 5d421fd (4805095): scripts hold them with `{"hold": "ctrl"}`.
 
 mod build;
 mod completion;

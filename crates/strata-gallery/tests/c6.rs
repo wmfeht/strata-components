@@ -1,8 +1,8 @@
-//! C6's page in process: what scripts can't reach (an input method composing, modifiers on a
-//! middle click, the crumbs' scroll position, the overflow bar's fade, every frame of a reopen),
-//! and window activation, on a host of the test's own whose root hears it (the gallery's root
-//! is shared, so its pages can't). The scripts in `tests/scripts/c6/` check the rest. Each test
-//! names the bullets it covers.
+//! C6's page in process: what scripts can't reach (an input method composing, a key repeat, the
+//! crumbs' scroll position and text colour, the overflow bar's fade, every frame of a reopen,
+//! the wakes of a window at rest), and window activation, on a host of the test's own whose
+//! root hears it (the gallery's root is shared, so its pages can't). The scripts in
+//! `tests/scripts/c6/` check the rest. Each test names the bullets it covers.
 
 mod c6 {
     use rune::{
@@ -124,30 +124,6 @@ mod c6 {
         assert!(bar.editing(), "the entry stays open");
         assert!(bar.entry_focused(), "and keeps the keyboard");
         assert_ne!(rt.state.c6.log, "Cancelled");
-    }
-
-    // browser/navigation/location-bar: "Ctrl+middle-click or Shift+middle-click on an ancestor
-    // crumb opens that folder in a new window." Scripts' pointer events carry no modifiers.
-    #[test]
-    fn ctrl_or_shift_middle_click_opens_a_window() {
-        for mods in [
-            Mods {
-                ctrl: true,
-                ..Mods::default()
-            },
-            Mods {
-                shift: true,
-                ..Mods::default()
-            },
-        ] {
-            let mut rt = mount("c6-short-light");
-            middle_click(&mut rt, &crumb(1), mods);
-            assert_eq!(rt.state.c6.log, "New window ~/Projects", "{mods:?}");
-            assert_eq!(
-                rt.state.c6.cwd, "/home/demo/Projects/strata",
-                "nothing navigates"
-            );
-        }
     }
 
     // browser/navigation/location-bar: "In a file chooser, middle-clicking a crumb opens
@@ -377,6 +353,9 @@ mod c6 {
         delay: u32,
         /// How many suggestions each answer holds: `f00/`, `f01/`, … (two by default).
         count: usize,
+        /// Captured by the view's intent handler: what it hears is tagged with the value it had
+        /// when the view last ran.
+        tag: u32,
     }
 
     impl Host {
@@ -420,7 +399,15 @@ mod c6 {
             &h.trail,
             &h.bar,
             |h: &mut Host| &mut h.bar,
-            |h: &mut Host, i, _: &mut Tx| h.hear(i),
+            {
+                let tag = h.tag;
+                move |h: &mut Host, i, _: &mut Tx| {
+                    if matches!(i, LocationIntent::Submit { .. }) {
+                        h.heard.push(format!("tag {tag}"));
+                    }
+                    h.hear(i)
+                }
+            },
         )
         .build(cx, &mut layer);
         rune_kit::root(
@@ -658,5 +645,109 @@ mod c6 {
                 .find(|e| e.focused)
                 .map(|e| e.path.clone())
         );
+    }
+
+    // Review round 2: a host's intent handler that captures state the view reads must be the
+    // one from the latest view, even from a suggestion row kept by its memo since the list came.
+    #[test]
+    fn a_kept_suggestion_row_reports_through_the_latest_handler() {
+        let mut rt = host(0);
+        typ(&mut rt, "/a");
+        run(&mut rt, 0.1);
+        assert!(rt.state.bar.suggestions_open());
+        rt.update(|h, _| h.tag = 7);
+        run(&mut rt, 0.1);
+        let (x, y) = centre(&rt, "loc-option-1");
+        rt.pointer_move(x, y);
+        rt.pointer_down(x, y);
+        rt.pointer_up(x, y);
+        run(&mut rt, 0.1);
+        assert!(
+            rt.state.heard.iter().any(|h| h == "tag 7"),
+            "{:?}",
+            rt.state.heard
+        );
+        assert!(
+            rt.state.heard.iter().any(|h| h.contains("/aBeta/")),
+            "{:?}",
+            rt.state.heard
+        );
+    }
+
+    // Strata's crumbs are dim until the pointer is over one (`.breadcrumb:hover`): the hovered
+    // crumb's label takes the text colour, and gives it back when the pointer leaves.
+    #[test]
+    fn a_hovered_crumb_takes_the_text_colour() {
+        let colour = |rt: &Runtime<Gallery>, label: &str| {
+            rt.elements()
+                .into_iter()
+                .find(|e| e.text.as_deref() == Some(label) && !e.exiting)
+                .and_then(|e| e.text_color)
+                .unwrap_or_else(|| panic!("no label {label}"))
+        };
+        let mut rt = mount("c6-short-light");
+        let c = rt.state.look.kit.c;
+        assert_eq!(colour(&rt, "Projects"), c.text_weak);
+        let (x, y) = centre(&rt, &crumb(1));
+        rt.pointer_move(x, y);
+        run(&mut rt, 0.6);
+        assert_eq!(
+            colour(&rt, "Projects"),
+            c.text_base,
+            "lit under the pointer"
+        );
+        assert_eq!(colour(&rt, "~"), c.text_weak, "the others stay dim");
+        let (x, y) = centre(&rt, "c6-files");
+        rt.pointer_move(x, y);
+        run(&mut rt, 0.6);
+        assert_eq!(colour(&rt, "Projects"), c.text_weak, "dim again");
+    }
+
+    // A held Escape cancels once: its repeats, arriving after the entry closed or while it
+    // reopens, never cancel an edit.
+    #[test]
+    fn a_repeated_escape_cancels_nothing() {
+        let mut rt = mount("c6-short-light");
+        key(&mut rt, Key::Command('l'), ctrl());
+        run(&mut rt, 0.1);
+        rt.repeat_key(KeyEvent {
+            key: Key::Escape,
+            mods: Mods::default(),
+        });
+        run(&mut rt, 0.1);
+        assert!(
+            rt.state.c6.bar.editing(),
+            "a repeat alone leaves the entry open"
+        );
+        assert_ne!(rt.state.c6.log, "Cancelled");
+    }
+
+    // The Menu key, or Shift+F10, on a focused crumb opens the hierarchy menu, as a secondary
+    // press on the bar does: Rune hands it to the strip's secondary-press handler at the
+    // crumb's left, so it opens there, under the bar.
+    #[test]
+    fn the_menu_key_on_a_crumb_opens_the_hierarchy_menu() {
+        for (k, mods) in [
+            (Key::ContextMenu, Mods::default()),
+            (
+                Key::Function(10),
+                Mods {
+                    shift: true,
+                    ..Mods::default()
+                },
+            ),
+        ] {
+            let mut rt = mount("c6-short-light");
+            key(&mut rt, Key::Tab, Mods::default());
+            key(&mut rt, Key::Tab, Mods::default());
+            assert!(
+                element(&rt, &crumb(0)).is_some_and(|e| e.focused),
+                "Tab reaches the first crumb"
+            );
+            key(&mut rt, k.clone(), mods);
+            run(&mut rt, 0.2);
+            assert!(rt.state.c6.bar.menu().is_some(), "{k:?} opens the menu");
+            assert!(element(&rt, &format!("{LOC}-menu-item0")).is_some());
+        }
     }
 }

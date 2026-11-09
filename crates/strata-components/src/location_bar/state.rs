@@ -1,5 +1,8 @@
 //! [`LocationBarState`]: the bar's state, held by the host and reached by accessor.
 
+use std::any::Any;
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::time::Duration;
 
 use rune::{TextEdit, Tx};
@@ -94,6 +97,30 @@ pub struct LocationBarState {
     trail_generation: u64,
     pub(crate) feed: ScrollFeed,
     pub(crate) bar: Bar,
+    pub(crate) handler: HandlerSlot,
+}
+
+/// The bar's intent handler as the latest view built it. Suggestion rows are memoised, so a
+/// row kept since its list came would otherwise call the handler from the view that first
+/// built it; they read it from here when pressed instead. Type-erased, as the state isn't
+/// generic over the app's.
+#[derive(Clone, Default)]
+pub(crate) struct HandlerSlot(Rc<RefCell<Option<Rc<dyn Any>>>>);
+
+impl HandlerSlot {
+    pub fn set<T: 'static>(&self, handler: T) {
+        *self.0.borrow_mut() = Some(Rc::new(handler));
+    }
+
+    pub fn get<T: Clone + 'static>(&self) -> Option<T> {
+        self.0.borrow().as_ref()?.downcast_ref::<T>().cloned()
+    }
+}
+
+impl std::fmt::Debug for HandlerSlot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("HandlerSlot")
+    }
 }
 
 impl Default for LocationBarState {
@@ -113,6 +140,7 @@ impl Default for LocationBarState {
             trail_generation: 0,
             feed: ScrollFeed::new(),
             bar: Bar::new(),
+            handler: HandlerSlot::default(),
         }
     }
 }

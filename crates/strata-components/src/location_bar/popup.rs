@@ -10,6 +10,7 @@ use strata_kit::look::Look;
 
 use super::build::{Access, Ctx, Emit, field_key, option_key, route};
 use super::data::Candidate;
+use super::state::HandlerSlot;
 use crate::contract::MatchedText;
 
 /// The most rows the list shows before it scrolls (Strata's 280 px over 32 px rows).
@@ -26,6 +27,9 @@ pub(super) fn view<S: 'static>(cx: &Ctx<'_, S>, width: f32, layer: &mut Vec<El>)
     // rebuilt only when its list, its highlight or the look changes, so an arrow step builds
     // two rows, not the whole list.
     let list = cx.state.suggestions_generation();
+    // A row kept by its memo calls the handler this view hands the slot, not the one it was
+    // built with.
+    cx.state.handler.set(cx.emit.clone());
     let look_key = look_key(look);
     let mut rows = col()
         .key("rows")
@@ -38,7 +42,7 @@ pub(super) fn view<S: 'static>(cx: &Ctx<'_, S>, width: f32, layer: &mut Vec<El>)
         rows = rows.child(memo(
             option_key(cx.key, i),
             (list, i, n, is_active, look_key),
-            || suggestion(look, c, i, n, is_active, cx.access, cx.emit),
+            || suggestion(look, c, i, n, is_active, cx.access, &cx.state.handler),
         ));
     }
     let viewport = col()
@@ -83,10 +87,10 @@ fn suggestion<S: 'static>(
     n: usize,
     active: bool,
     access: Access<S>,
-    emit: &Emit<S>,
+    handler: &HandlerSlot,
 ) -> El {
     let k = &look.kit;
-    let emit = emit.clone();
+    let handler = handler.clone();
     let label = MatchedText::new(c.label.clone(), c.matched.iter().cloned())
         .font(k.ty.ui_compact)
         .truncate(true)
@@ -115,7 +119,9 @@ fn suggestion<S: 'static>(
         .hover(k.c.hover)
         .on_press_tx(move |s: &mut S, tx: &mut Tx| {
             let polled = access(s).choose(i);
-            route(&emit, s, polled, tx);
+            if let Some(emit) = handler.get::<Emit<S>>() {
+                route(&emit, s, polled, tx);
+            }
         })
         .child(
             icon(look.icon(c.icon), look.icon_size.md)

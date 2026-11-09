@@ -221,9 +221,10 @@
 //!
 //! - **U-C3-1: two-line middle truncation.** `max_lines(n)` ends its last line with "…", and
 //!   `truncate_middle` makes text one line, whichever comes last winning, so a file name over
-//!   two lines can't keep its end. Repro: in a 120 pt column, `text(long).max_lines(2)` (33 pt
-//!   tall), `.max_lines(2).truncate_middle()` (17 pt: one line) and
-//!   `.truncate_middle().max_lines(2)` (33 pt, cut at the end). Ask: an elision mode that
+//!   two lines can't keep its end. Repro (probed at 78d22ed and 5d421fd): in a 120 pt column,
+//!   `text(long).max_lines(2)` (two lines, 32.5 pt at 5d421fd), `.max_lines(2).truncate_middle()`
+//!   (16.25 pt: one line) and `.truncate_middle().max_lines(2)` (two lines, cut at the end). Ask:
+//!   an elision mode that
 //!   combines with `max_lines` (`.max_lines(2).elide_middle()`), cutting between graphemes.
 //! - **U-C3-2: per-element tooltip timing.** `El::help`'s delay is the window's
 //!   (`HelpLook::delay`), a press hides a tooltip until the pointer leaves the element, and a
@@ -235,8 +236,9 @@
 //! - **U-C3-3: modified wheels over a scroll view's content.** `on_wheel` is offered from the
 //!   element under the pointer up to the nearest scroll view, so an ancestor of a scroll view
 //!   never hears a wheel over its content (C1e's `Collection::on_wheel` sits on the viewport
-//!   for it). Repro: `col().on_wheel(..)` around a `.scroll(..)` viewport; a Ctrl+Shift wheel
-//!   over the content reaches the viewport's handler (2 of 2) and the outer one 0 of 2. Ask: a
+//!   for it). Repro (probed at 78d22ed and 5d421fd): `col().on_wheel(..)` around a
+//!   `.scroll(..)` viewport; a Ctrl+Shift wheel over the content reaches the viewport's handler
+//!   (2 of 2) and the outer one 0 of 2. Ask: a
 //!   capture-phase `on_wheel`, or let ancestors claim a modified wheel, as GTK's capture phase
 //!   does.
 //!

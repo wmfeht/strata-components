@@ -839,4 +839,26 @@ mod adapter {
         let [_, _, w, h] = m.drawn_rect();
         assert_eq!(w * h, 0.0, "nothing drawn");
     }
+
+    #[test]
+    fn a_key_that_takes_the_view_holds_the_edge_scroll_until_the_pointer_moves() {
+        // C1d's S-B (C2's E6): after `yield_scroll`, ticks glide no more until the band's
+        // pointer next moves.
+        let mut sel = Selection::new();
+        let mut m = Marquee::new();
+        with_cx(&mut sel, None, 0.0, |cx| {
+            m.begin(at_row(2), Mods::default(), cx);
+            m.moved(Point::new(300.0, VIEW - 1.0), cx);
+        });
+        let (_, effects) = with_cx(&mut sel, None, 1.0 / 60.0, |cx| m.tick(cx));
+        assert_eq!(glides(&effects), 1, "it glides at the edge");
+        assert!(m.yield_scroll(), "it was moving the view");
+        let (_, effects) = with_cx(&mut sel, None, 2.0 / 60.0, |cx| m.tick(cx));
+        assert_eq!(glides(&effects), 0, "held after the key");
+        with_cx(&mut sel, None, 3.0 / 60.0, |cx| {
+            m.moved(Point::new(300.0, VIEW - 2.0), cx);
+        });
+        let (_, effects) = with_cx(&mut sel, None, 4.0 / 60.0, |cx| m.tick(cx));
+        assert_eq!(glides(&effects), 1, "again once the pointer moves");
+    }
 }

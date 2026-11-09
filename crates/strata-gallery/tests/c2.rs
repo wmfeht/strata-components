@@ -733,16 +733,44 @@ mod c2 {
     #[test]
     fn a_click_on_empty_space_keeps_the_columns_scroll() {
         // browser/view-modes/columns: Clicking empty space in a column keeps that column's
-        // vertical scroll position instead of returning to the selected row.
-        let mut rt = scene("c2-hundred-k-light");
-        let before = listing_offset(&rt, 1);
-        assert!(before > 1_000.0);
-        tap(&mut rt, &keys::blank("c2"));
-        let [x, y, w, h] = info(&rt, "c2-slot-2").expect("Big").visible;
-        // The blank strip beside Big's rows: its right margin.
-        click_at(&mut rt, x + w - 3.0, y + h / 2.0);
+        // vertical scroll position instead of returning to the selected row. A column with blank
+        // space below its rows can't be scrolled here, so the press reveals nothing in any
+        // column: Documents, scrolled away from its selected row, stays where it is while a
+        // click below Reports' rows takes effect.
+        let mut rt = scene("c2-three-columns-light");
+        rt.update(|g, tx| {
+            let key = g.c2.columns.column_key(1).unwrap();
+            tx.scroll_to_instant(
+                strata_components::collection::element::viewport_path(&key),
+                0.0,
+                10_000.0,
+            );
+        });
+        settle(&mut rt, 5);
+        let documents = listing_offset(&rt, 1);
+        assert!(documents > 100.0, "{documents}");
+        assert_eq!(
+            selected(&rt, 1),
+            [id("Documents", "Reports")],
+            "out of view"
+        );
+        let [x, y, w, h] = info(&rt, &row("Reports", "report-q0008.pdf"))
+            .expect("the last row")
+            .visible;
+        // Blank space below Reports' last row.
+        click_at(&mut rt, x + w / 2.0, y + h + 60.0);
         settle(&mut rt, 10);
-        assert_eq!(listing_offset(&rt, 1), before);
+        assert_eq!(
+            selected(&rt, 2),
+            [id("Reports", "report-q0001.pdf")],
+            "the click took effect: Reports' first visible entry"
+        );
+        assert_eq!(
+            listing_offset(&rt, 1),
+            documents,
+            "Documents keeps its scroll"
+        );
+        assert_eq!(listing_offset(&rt, 2), 0.0);
     }
 
     #[test]
@@ -1224,6 +1252,231 @@ mod c2 {
             node(&rt, &keys::blank("c2")).is_none(),
             "{:?}",
             node(&rt, &keys::blank("c2"))
+        );
+    }
+
+    #[test]
+    fn a_press_in_another_column_cancels_a_pending_slow_click_rename() {
+        // browser/view-modes/columns: A slow second click on the name of a selected, open
+        // folder still starts a rename (and a press in another column before it comes cancels
+        // it, as Strata's cancel_click_rename does).
+        let mut rt = scene("c2-three-columns-light");
+        tap_name(&mut rt, &row("Home", "Documents"));
+        tap(&mut rt, &keys::title("c2-col-3"));
+        settle(&mut rt, 40);
+        assert_ne!(rt.state.c2.intent, "Renaming Documents");
+    }
+
+    #[test]
+    fn right_into_a_child_column_with_no_cursor_lands_on_its_first_entry() {
+        // browser/view-modes/columns (and C1c's keyboard bullets in Columns): Right goes into the
+        // open child column, with the cursor on its first entry when it has none.
+        let mut rt = scene("c2-three-columns-light");
+        tap(&mut rt, &keys::title("c2-col-2"));
+        assert_eq!(cursor(&rt, 2), None);
+        key(&mut rt, Key::Right);
+        assert_eq!(rt.state.c2.columns.active(), 2);
+        assert_eq!(cursor(&rt, 2), Some(id("Reports", "report-q0001.pdf")));
+        assert_eq!(selected(&rt, 2), [id("Reports", "report-q0001.pdf")]);
+    }
+
+    #[test]
+    fn back_to_an_ancestor_scrolls_the_came_from_folder_into_view() {
+        // browser/view-modes/columns: Back, Forward, or Alt+Up to an ancestor selects the folder
+        // you came from, at any depth, with the cursor on it (scrolled into view).
+        let mut rt = scene("c2-hundred-k-light");
+        let folder = id("Big", "entry-050001");
+        let [x, y, _, h] = info(&rt, &format!("row-{folder}")).expect("row").visible;
+        click_at(&mut rt, x + 18.0, y + h / 2.0);
+        settle(&mut rt, 20);
+        assert!(path(&rt).ends_with("Big/entry-050001"), "{}", path(&rt));
+        rt.update(|g, tx| {
+            let key = g.c2.columns.column_key(1).unwrap();
+            tx.scroll_to_instant(
+                strata_components::collection::element::viewport_path(&key),
+                0.0,
+                0.0,
+            );
+        });
+        settle(&mut rt, 5);
+        assert_eq!(listing_offset(&rt, 1), 0.0);
+        press(
+            &mut rt,
+            Key::Up,
+            Mods {
+                alt: true,
+                ..Mods::default()
+            },
+        );
+        settle(&mut rt, 40);
+        assert_eq!(cursor(&rt, 1), Some(folder));
+        assert!(
+            info(&rt, &format!("row-{folder}")).is_some(),
+            "its row is on screen"
+        );
+        assert!(
+            listing_offset(&rt, 1) > 1_000_000.0,
+            "{}",
+            listing_offset(&rt, 1)
+        );
+    }
+
+    #[test]
+    fn a_drop_clears_the_wash_even_when_the_binder_sends_no_leave() {
+        // operations/drag-and-drop/column-autoscroll: The column under a held file drag shows an
+        // accent wash (and a drop ends it). A binder such as X2's tells the view where the drag
+        // is through `drag_over` and may send no leave before the drop.
+        let mut rt = scene("c2-three-columns-light");
+        let v = rt.state.c2.columns.column(1).unwrap().collection.viewport();
+        let at = (v.x + v.w / 2.0, v.y + 300.0);
+        rt.state
+            .c2
+            .columns
+            .drag_over(Some(strata_components::contract::Point::new(at.0, at.1)));
+        settle(&mut rt, 3);
+        assert_eq!(rt.state.c2.columns.drop_column(), Some(1));
+        assert!(info(&rt, &keys::wash("c2-col-2")).is_some());
+        rt.drop_files(vec!["/tmp/a.txt".into()], Some(at));
+        settle(&mut rt, 3);
+        assert_eq!(rt.state.c2.intent, "Dropped 1 into Documents");
+        assert_eq!(rt.state.c2.columns.drop_column(), None);
+        assert!(info(&rt, &keys::wash("c2-col-2")).is_none());
+    }
+
+    #[test]
+    fn the_wash_clears_when_the_drag_leaves_the_column_for_the_blank_strip() {
+        // operations/drag-and-drop/column-autoscroll: The highlight ... clears when the drag
+        // leaves the column.
+        let mut rt = scene("c2-three-columns-light");
+        let v = rt.state.c2.columns.column(1).unwrap().collection.viewport();
+        drag_files(&mut rt, v.x + v.w / 2.0, v.y + 300.0);
+        settle(&mut rt, 3);
+        assert_eq!(rt.state.c2.columns.drop_column(), Some(1));
+        let (bx, by) = at(&rt, &keys::blank("c2"));
+        rt.drag_files_to(Some((bx, by)));
+        settle(&mut rt, 3);
+        assert_eq!(
+            rt.state.c2.columns.drop_column(),
+            None,
+            "over the blank strip"
+        );
+        assert!(info(&rt, &keys::wash("c2-col-2")).is_none());
+        rt.drag_files_leave();
+        rt.frame(DT);
+    }
+
+    #[test]
+    fn a_closed_column_fades_as_it_narrows() {
+        // browser/view-modes/columns: A column closed with nothing replacing it narrows and fades
+        // out over 220 ms.
+        let mut rt = scene("c2-three-columns-light");
+        rt.update(|g, tx| {
+            let look = g.look.clone();
+            g.c2.listings.0.truncate(2);
+            g.c2.columns.truncate(2, &look, tx);
+        });
+        settle(&mut rt, 4);
+        let leaving = rt
+            .elements()
+            .into_iter()
+            .find(|e| e.exiting && e.key.as_deref() == Some("c2-slot-3"))
+            .expect("Reports' column leaves on a transition");
+        assert!(
+            leaving.opacity > 0.0 && leaving.opacity < 1.0,
+            "fading: {}",
+            leaving.opacity
+        );
+        let (bx, ..) = at(&rt, &keys::blank("c2"));
+        assert!(
+            bx < 900.0,
+            "the slot narrows: the blank strip moved left to {bx}"
+        );
+    }
+
+    #[test]
+    fn a_middle_press_in_another_column_leaves_the_active_column() {
+        // browser/view-modes/columns: the active column changes with primary and secondary
+        // presses; a middle press (a new tab, autoscroll) leaves it.
+        let mut rt = scene("c2-three-columns-light");
+        assert_eq!(rt.state.c2.columns.active(), 1);
+        let [x, y, _, h] = info(&rt, &row("Home", "Music")).expect("row").visible;
+        rt.button_down(x + 40.0, y + h / 2.0, rune::PointerButton::Middle);
+        rt.frame(DT);
+        rt.button_up(x + 40.0, y + h / 2.0, rune::PointerButton::Middle);
+        settle(&mut rt, 2);
+        assert_eq!(rt.state.c2.intent, "New tab for Music");
+        assert_eq!(rt.state.c2.columns.active(), 1);
+    }
+
+    #[test]
+    fn type_ahead_finds_an_entry_in_the_active_column_only() {
+        // C1c's type-ahead, opt-in, in the column that holds the cursor.
+        let mut rt = scene("c2-three-columns-light");
+        rt.state.c2.letters = strata_components::collection::keyboard::Letters::TypeAhead;
+        tap(&mut rt, &keys::title("c2-col-1"));
+        key(&mut rt, Key::Text("t".into()));
+        assert_eq!(cursor(&rt, 0), Some(id("Home", "todo.md")));
+        assert_eq!(
+            selected(&rt, 1),
+            [id("Documents", "Reports")],
+            "Documents untouched"
+        );
+    }
+
+    #[test]
+    fn a_sibling_fades_in_its_place_and_a_new_column_slides_in() {
+        // browser/view-modes/columns: With a folder open, opening a sibling fades the new column
+        // in where the old one stood, with no 24 px slide. Deeper columns of the old branch
+        // shrink away. (What is drawn a few frames in.)
+        let mut rt = scene("c2-three-columns-light");
+        let home = id_in("Home", "Pictures");
+        let old_x = info(&rt, "c2-slot-2").expect("Documents' shell").rect[0];
+        rt.update(|g, tx| {
+            let look = g.look.clone();
+            let d = &mut g.c2;
+            d.listings.0.truncate(1);
+            let _ = home;
+            let listed = strata_gallery::scenes::c2::Listed {
+                name: "Pictures".into(),
+                source: strata_gallery::scenes::c2::listing_of("Pictures"),
+                version: 1,
+                due: None,
+                from: Some(home),
+            };
+            d.listings.0.push(listed);
+            d.columns.swap_from(
+                1,
+                strata_components::columns::Opening::new(
+                    &d.listings.0[1].source,
+                    strata_components::collection::selection::Listing::Complete,
+                ),
+                strata_components::columns::Focus::Column,
+                &look,
+                tx,
+            );
+        });
+        settle(&mut rt, 3);
+        let body = info(&rt, "c2-col-4-body").expect("the new body");
+        assert!(body.opacity < 1.0, "fading in: {}", body.opacity);
+        assert_eq!(
+            body.rect[0], old_x,
+            "where the old one stood, with no slide"
+        );
+        assert!(
+            rt.elements()
+                .iter()
+                .any(|e| e.exiting && e.key.as_deref() == Some("c2-slot-3")),
+            "Reports shrinks away"
+        );
+        // A new column after the last slides in from the left as it fades.
+        tap_name(&mut rt, &row("Pictures", "Holidays"));
+        rt.frame(DT);
+        let shell = info(&rt, "c2-slot-5").expect("the new shell");
+        assert!(shell.opacity < 1.0);
+        assert!(
+            shell.rect[0] < 600.0,
+            "it slides from the left: {}",
+            shell.rect[0]
         );
     }
 }

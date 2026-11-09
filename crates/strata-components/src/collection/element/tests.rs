@@ -2973,15 +2973,8 @@ fn a_key_that_moves_the_cursor_during_a_bands_edge_scroll_keeps_its_reveal() {
         key: Key::Down,
         mods: Mods::default(),
     });
-    for f in 0..60 {
+    for _ in 0..60 {
         rt.frame(1.0 / 60.0);
-        if std::env::var("SB_DEBUG").is_ok() {
-            let band = rt.state.coll.controllers.marquee.as_ref().unwrap().active();
-            eprintln!(
-                "frame {f}: offset {} band {band}",
-                rt.state.coll.scroll_offset()
-            );
-        }
     }
     let s = &rt.state;
     let moved = s.coll.selection.cursor_index(&s.src).unwrap();

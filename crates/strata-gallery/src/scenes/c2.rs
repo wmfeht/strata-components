@@ -24,6 +24,7 @@
 
 use rune::{Cx, El, Key, KeyEvent, Tx, col, row, text};
 use strata_components::collection::element::Intent;
+use strata_components::collection::keyboard::{KeySettings, Letters};
 use strata_components::collection::pointer::{ClickCount, ClickModes, PointerSettings};
 use strata_components::collection::selection::{CursorGone, Listing, SyncRule};
 use strata_components::columns::{
@@ -98,6 +99,8 @@ pub struct Demo {
     pub hold: Option<(usize, f32, f32)>,
     /// Folders open on one click (the default in Columns) or two.
     pub folder_clicks: ClickCount,
+    /// What plain letters do in a column: passed on (Strata's default), or type-ahead.
+    pub letters: Letters,
 }
 
 impl Default for Demo {
@@ -113,6 +116,7 @@ impl Default for Demo {
             scroll_y: None,
             hold: None,
             folder_clicks: ClickCount::One,
+            letters: Letters::Pass,
         }
     }
 }
@@ -275,6 +279,11 @@ fn listing(name: &str) -> ListSource {
             })
             .collect(),
     )
+}
+
+/// Folder `name`'s listing, for tests that open it themselves.
+pub fn listing_of(name: &str) -> ListSource {
+    listing(name)
 }
 
 /// The id of the entry named `name` in folder `parent`.
@@ -446,7 +455,10 @@ pub fn columns_view() -> ColumnsView<Gallery> {
             look: &g.look,
         },
     )
-    .collection(|_: &Gallery, _, c| c.clock(|g: &Gallery| g.c2.clock))
+    .collection(|g: &Gallery, _, c| {
+        c.clock(|g: &Gallery| g.c2.clock)
+            .settings(KeySettings::default().letters(g.c2.letters))
+    })
     .pointer_settings(|g: &Gallery| {
         PointerSettings::default().modes(ClickModes::new(ClickCount::Two, g.c2.folder_clicks))
     })

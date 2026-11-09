@@ -377,6 +377,7 @@ pub(super) fn fit<S: 'static>(shared: &Shared<S>, resolved: &Resolved, s: &S, de
                     state: RowState::default(),
                     look,
                     scope: &shared.key,
+                    hover_live: false,
                 };
                 let cell = f(s, &rcx);
                 match cell.as_text() {

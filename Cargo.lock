@@ -3070,6 +3070,7 @@ dependencies = [
  "strata-kit",
  "syntect",
  "two-face",
+ "unicode-segmentation",
 ]
 
 [[package]]

@@ -203,6 +203,12 @@ impl CollectionState {
         self.hover_live
     }
 
+    /// How many entries each line holds, as the last build or layout worked it out: 1 for a
+    /// list, the tiles a row for a grid (C3's count, for C25's `Viewport::per_line`).
+    pub fn per_line(&self) -> usize {
+        self.per_line.get()
+    }
+
     /// The layout key the scroll offset is remembered under: see [`ScrollMemo`].
     pub fn layout_key(&self) -> u64 {
         self.layout

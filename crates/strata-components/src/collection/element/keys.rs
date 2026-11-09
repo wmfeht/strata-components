@@ -71,14 +71,14 @@ pub fn part_path(scope: &str, id: EntryId, part: &str) -> String {
 }
 
 /// The full key path of the entry at `index` in the collection keyed `scope`, whose lines
-/// hold `per_line` entries each: `row_path` for one per line, else the cell under its line
-/// (`{scope}/viewport/rows/line-{first}/row-{id}`).
-pub(super) fn entry_path(
-    scope: &str,
-    source: &dyn EntrySource,
-    index: usize,
-    per_line: usize,
-) -> String {
+/// hold `per_line` entries each ([`CollectionState::per_line`]): `row_path` for one per line,
+/// else the cell under its line (`{scope}/viewport/rows/line-{first}/row-{id}`). A grid's
+/// paths change when it reflows to another count.
+///
+/// Used by: C1e (the active descendant), C3 (tile paths for X2's drop zones), scripts.
+///
+/// [`CollectionState::per_line`]: super::CollectionState::per_line
+pub fn entry_path(scope: &str, source: &dyn EntrySource, index: usize, per_line: usize) -> String {
     let id = source.id_at(index);
     if per_line <= 1 {
         return row_path(scope, id);

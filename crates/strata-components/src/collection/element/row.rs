@@ -77,6 +77,10 @@ pub struct RowCx<'a> {
     pub look: &'a Look,
     /// The collection's key.
     pub scope: &'a str,
+    /// Whether the item draws hover now: off after keyboard navigation until the pointer
+    /// moves. The row's own hover follows it; a bare item's content slot follows it itself
+    /// (`Collection::bare_items`).
+    pub hover_live: bool,
 }
 
 type BuildFn<S> = Rc<dyn Fn(&S, &RowCx<'_>) -> El>;
@@ -229,6 +233,8 @@ pub(super) struct Frame {
     pub config_key: u64,
     pub row_height: f32,
     pub per_line: usize,
+    /// The space left and right of a line of several entries (`Lines::inset`).
+    pub inset: f32,
     pub len: usize,
     /// Drawn in groups under header lines: rows state their own place in the set.
     pub grouped: bool,
@@ -275,6 +281,10 @@ pub(super) fn config_key<S>(cfg: &Config<S>) -> u64 {
     cfg.label.is_some().hash(&mut h);
     cfg.content.is_some().hash(&mut h);
     cfg.describe.is_some().hash(&mut h);
+    // Hashed only when set, so every collection without bare items keeps its rows' versions.
+    if cfg.bare_items {
+        true.hash(&mut h);
+    }
     h.finish()
 }
 
@@ -301,6 +311,9 @@ pub(super) fn build_line<S: 'static>(
     let (src, _) = (cfg.get)(s);
     let first = src.id_at(start);
     let mut el = row().key(line_key(first, per)).w_full().h(frame.row_height);
+    if frame.inset > 0.0 {
+        el = el.px(frame.inset);
+    }
     if let Some(role) = cfg.roles.line {
         el = el.role(role);
     }
@@ -339,6 +352,7 @@ fn build_item<S: 'static>(cfg: &Rc<Config<S>>, frame: &Frame, s: &S, index: usiz
         state,
         look,
         scope: &cfg.key,
+        hover_live: frame.hover_live,
     };
     if state.renaming {
         return item(cfg, frame, s, &rcx);
@@ -404,6 +418,27 @@ fn item<S: 'static>(cfg: &Rc<Config<S>>, frame: &Frame, s: &S, rcx: &RowCx<'_>) 
             .child(label_el),
     };
 
+    let mut opacity: f32 = 1.0;
+    if state.marks.cut {
+        opacity = opacity.min(tokens::cut_opacity(look));
+    }
+    if state.marks.dragging {
+        opacity = opacity.min(tokens::drag_opacity(look));
+    }
+    if cfg.bare_items {
+        // The content slot's element is the item: no box of the row's own around it (a grid
+        // mounts a line of these in one frame, and each element costs).
+        let mut item = content
+            .key(row_key(id))
+            .role(cfg.roles.item)
+            .label(entry.name)
+            .focus_selected(state.selected)
+            .h(frame.row_height);
+        if opacity < 1.0 {
+            item = item.opacity(opacity);
+        }
+        return finish_item(cfg, frame, s, rcx, item);
+    }
     let mut inner = row()
         .w_full()
         .h_full()
@@ -422,19 +457,12 @@ fn item<S: 'static>(cfg: &Rc<Config<S>>, frame: &Frame, s: &S, rcx: &RowCx<'_>) 
     } else if state.drop_target || state.marks.enter_target {
         inner = inner.outline(OUTLINE, -OUTLINE, kit.c.text_accent);
     }
-    let mut opacity: f32 = 1.0;
-    if state.marks.cut {
-        opacity = opacity.min(tokens::cut_opacity(look));
-    }
-    if state.marks.dragging {
-        opacity = opacity.min(tokens::drag_opacity(look));
-    }
     if opacity < 1.0 {
         inner = inner.opacity(opacity);
     }
     inner = inner.child(content);
 
-    let mut outer = row()
+    let outer = row()
         .key(row_key(id))
         .role(cfg.roles.item)
         .label(entry.name)
@@ -442,6 +470,19 @@ fn item<S: 'static>(cfg: &Rc<Config<S>>, frame: &Frame, s: &S, rcx: &RowCx<'_>) 
         .h(frame.row_height)
         .px(tokens::row_inset(look))
         .child(inner);
+    finish_item(cfg, frame, s, rcx, outer)
+}
+
+/// An item's width in its line, its place in the set, its description and its drop zone.
+fn finish_item<S: 'static>(
+    cfg: &Rc<Config<S>>,
+    frame: &Frame,
+    s: &S,
+    rcx: &RowCx<'_>,
+    mut outer: El,
+) -> El {
+    let entry = rcx.entry;
+    let id = entry.id;
     outer = if frame.per_line > 1 {
         outer.w(0.0).grow(1.0)
     } else {

@@ -20,6 +20,7 @@
 //!   from the edited line until the parse state matches its cache again (C10a). The field
 //!   draws the spans of a window of lines around the viewport, moved in 128-line steps, so
 //!   scrolling within it doesn't reshape the field (U-C10b-1).
+//! - **Ctrl+Tab** and Ctrl+Shift+Tab move focus out, as GtkTextView's do.
 //! - **The field menu** is C21's [`FieldMenu`](crate::context_menu::FieldMenu), through
 //!   [`CodeEditor::menu`]: a core `text_input` takes `on_secondary_press`, which rune-kit's
 //!   `TextArea` doesn't (U-C21-2).
@@ -44,13 +45,17 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use rune::{
-    Align, El, Key, KeyEvent, PointerPress, ScrollSpec, TextEdit, Tx, col, row, text, text_input,
+    Align, El, Key, KeyEvent, Mods, PointerPress, ScrollSpec, TextEdit, Tx, col, row, text,
+    text_input,
 };
 use strata_kit::look::Look;
 
 use super::highlight::{CodeDoc, Highlighter, LineEdit, Mode, OVERSCAN, Source};
 use super::render::{Paint, gutter_width};
 use super::rows::{TAB, columns_of};
+
+/// The focus ring's width: rune-kit's text fields draw theirs 1 pt wide, just inside.
+const FIELD_RING: f32 = 1.0;
 
 /// The field draws the spans of lines in windows this many lines long.
 const SPAN_PAGE: usize = 128;
@@ -68,6 +73,8 @@ pub struct EditorState {
     line: Rc<Cell<f32>>,
     /// The lines whose colours the field draws.
     window: Range<usize>,
+    /// Ctrl+Tab sent a Tab to move focus on: the editor lets that one Tab pass.
+    tab_out: bool,
 }
 
 impl std::fmt::Debug for EditorState {
@@ -104,6 +111,7 @@ impl EditorState {
             height: Rc::default(),
             line: Rc::new(Cell::new(1.0)),
             window,
+            tab_out: false,
         }
     }
 
@@ -137,11 +145,9 @@ impl EditorState {
     /// it from the host's poll. True when the view changed.
     pub fn poll(&mut self) -> bool {
         let mut changed = self.doc.poll();
-        let line = self.line.get().max(1.0);
-        let top = (self.offset.get() / line).floor().max(0.0) as usize;
-        let shown = (self.height.get() / line).ceil() as usize + 1;
         let n = self.doc.line_count();
-        let want = top.min(n)..(top + shown).min(n);
+        let shown = self.shown_lines();
+        let want = shown.start..(shown.end + 1).min(n);
         if !(self.window.start <= want.start && want.end <= self.window.end) {
             self.window = window_for(want, n);
             self.doc.show(self.window.clone());
@@ -159,6 +165,15 @@ impl EditorState {
     /// The colour spans the field draws, in bytes of the text.
     pub fn spans(&self) -> Vec<rune::Span> {
         self.doc.text_spans(self.window.clone())
+    }
+
+    /// The lines the viewport shows, as of its last scroll report.
+    pub fn shown_lines(&self) -> Range<usize> {
+        let line = self.line.get().max(1.0);
+        let top = (self.offset.get() / line).floor().max(0.0) as usize;
+        let shown = (self.height.get() / line).ceil() as usize;
+        let n = self.doc.line_count();
+        top.min(n)..(top + shown).min(n)
     }
 
     /// Whether line `line`'s colours may still change after an edit.
@@ -352,7 +367,7 @@ impl<S: 'static> CodeEditor<S> {
             .selection_color(paint.selection)
             .min_w(width)
             .on_edit(move |s: &mut S| &mut get_mut(s).edit)
-            .on_input_key(move |s: &mut S, ev: &KeyEvent, _tx: &mut Tx| key_in(get_mut(s), ev))
+            .on_input_key(move |s: &mut S, ev: &KeyEvent, tx: &mut Tx| key_in(get_mut(s), ev, tx))
             .on_input_change(move |s: &mut S, _tx: &mut Tx| get_mut(s).edited())
             .spans(st.spans());
         if let Some(menu) = menu {
@@ -391,27 +406,49 @@ impl<S: 'static> CodeEditor<S> {
             })
             .child(content);
         let k = &look.kit;
-        let border = if st.edit.focused {
-            k.c.border_focus
-        } else {
-            k.c.border_base
-        };
-        col()
+        let mut frame = col()
             .key(st.key.clone())
             .w_full()
             .h_full()
             .min_h(rows as f32 * line + paint.pad)
             .fill(paint.surface)
             .radius(look.round(k.radius.sm))
-            .border(1.0, border)
             .clip_soft(look.round(k.radius.sm))
-            .child(viewport)
+            .child(viewport);
+        // rune-kit's text field frame (`TextArea`'s shell): its input elevation (the ring the
+        // theme gives fields) at rest, and its focus ring while the field has focus.
+        if st.edit.focused {
+            frame = frame.outline(FIELD_RING, -FIELD_RING, k.c.border_focus);
+        } else {
+            for s in k.shadow_layers(k.elevation.input()) {
+                frame = frame.box_shadow(s);
+            }
+        }
+        frame
     }
 }
 
 /// The editor's own keys, before the field's.
-fn key_in(st: &mut EditorState, ev: &KeyEvent) -> bool {
+fn key_in(st: &mut EditorState, ev: &KeyEvent, tx: &mut Tx) -> bool {
     let m = ev.mods;
+    if ev.key == Key::Tab && std::mem::take(&mut st.tab_out) {
+        // The Tab Ctrl+Tab sent: Rune moves focus with it.
+        return false;
+    }
+    // Ctrl+Tab and Ctrl+Shift+Tab move focus on, as they do out of a GtkTextView, whose Tab
+    // types. Rune moves focus only on an unmodified Tab, so the chord sends one (C18's
+    // precedent), which the editor lets through.
+    if ev.key == Key::Tab && (m.ctrl || m.cmd) && !m.alt && !m.logo {
+        st.tab_out = true;
+        tx.send_key(KeyEvent {
+            key: Key::Tab,
+            mods: Mods {
+                shift: m.shift,
+                ..Mods::default()
+            },
+        });
+        return true;
+    }
     if m.ctrl || m.cmd || m.alt || m.logo {
         return false;
     }

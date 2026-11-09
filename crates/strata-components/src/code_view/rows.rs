@@ -32,12 +32,12 @@ pub(crate) struct Rows {
     line_starts: Vec<usize>,
     /// The most columns any row takes, tabs expanded.
     pub columns: usize,
-    /// The rows with the most characters, widest first: a fallback face (CJK) can draw them
-    /// wider than their columns, so the view measures these.
+    /// The rows that draw widest by [`width_of`]'s estimate, widest first: a fallback face
+    /// (CJK, emoji) draws them wider than their columns, so the view measures these.
     pub widest: Vec<usize>,
 }
 
-/// How many of the longest rows the view measures for its unwrapped width.
+/// How many of the widest rows the view measures for its unwrapped width.
 const MEASURED: usize = 6;
 
 impl Rows {
@@ -64,15 +64,15 @@ impl Rows {
             }
         }
         let mut columns = 0;
-        let mut by_chars: Vec<(usize, usize)> = Vec::new();
+        let mut by_width: Vec<(usize, usize)> = Vec::new();
         for (i, r) in rows.iter().enumerate() {
             let s = &text[r.start..r.end];
             columns = columns.max(columns_of(s));
-            let n = s.chars().count();
-            if by_chars.len() < MEASURED || n > by_chars[by_chars.len() - 1].0 {
-                by_chars.push((n, i));
-                by_chars.sort_by_key(|&(n, _)| std::cmp::Reverse(n));
-                by_chars.truncate(MEASURED);
+            let n = width_of(s);
+            if by_width.len() < MEASURED || n > by_width[by_width.len() - 1].0 {
+                by_width.push((n, i));
+                by_width.sort_by_key(|&(n, _)| std::cmp::Reverse(n));
+                by_width.truncate(MEASURED);
             }
         }
         Rows {
@@ -80,7 +80,7 @@ impl Rows {
             rows,
             line_starts,
             columns,
-            widest: by_chars.into_iter().map(|(_, i)| i).collect(),
+            widest: by_width.into_iter().map(|(_, i)| i).collect(),
         }
     }
 
@@ -159,6 +159,20 @@ fn split(text: &str, start: usize, end: usize, line: usize, rows: &mut Vec<Row>)
         line,
         cont,
     });
+}
+
+/// An estimate of how wide `s` draws, in columns of the mono face: East Asian wide
+/// characters and emoji take two (`unicode-width`), tabs run to the next [`TAB`] stop, and
+/// control characters one. It only ranks rows for measuring; the width itself is measured.
+pub(crate) fn width_of(s: &str) -> usize {
+    use unicode_width::UnicodeWidthChar;
+    s.chars().fold(0, |col, ch| {
+        if ch == '\t' {
+            col + TAB - col % TAB
+        } else {
+            col + ch.width().unwrap_or(1)
+        }
+    })
 }
 
 /// The columns `s` takes, each tab running to the next [`TAB`] stop.

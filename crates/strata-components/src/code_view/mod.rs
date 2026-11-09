@@ -62,7 +62,8 @@
 //! - **Keys** in the document: Ctrl+A, Ctrl+C after it, Ctrl+Home and Ctrl+End to the ends,
 //!   and plain Left back to the listing ([`CodeIntent::Leave`]).
 //! - **Accessibility.** The root is a `document` named by [`CodeLabels::document`]; each
-//!   mounted row's text is a text node holding the line (Rune exposes mounted rows only); the
+//!   mounted row's text is a text node holding the line (Rune exposes mounted rows only), an
+//!   empty one named [`CodeLabels::blank`] ("Blank", as Orca reads an empty line); the
 //!   gutter is hidden; the position bar is a slider (Rune has no scroll-bar role, U-C10b-3)
 //!   reading "Line N of M".
 //!
@@ -98,33 +99,36 @@
 //!   below): Rune reads every row's key on a list's first commit (Rune issue #203, as C1e
 //!   reports for its 100,000 rows). The jump to the end and scrolling stay within it.
 //! - **D11** A triple-click on a row of a line split at 2 KiB selects that row, not the whole
-//!   line (Rune's triple-click takes one text's paragraph).
+//!   line (Rune's triple-click takes one text's paragraph: U-C10b-6).
 //! - **D12** A drag that starts past the end of a line copies from the next line's start,
 //!   without the break after the first line: Rune's selection report leaves out a text
-//!   whose selected part is empty, so the start can't be told from it.
+//!   whose selected part is empty, so the start can't be told from it (U-C10b-7).
 //! - **D13** The position bar's accessible value follows scrolling in steps of a
 //!   two-hundredth of the text (so a scroll runs the view at most 200 times), and exactly
 //!   after a step from the keyboard or assistive technology.
 //!
 //! # Measured
 //!
-//! `tests/perf.rs`, perf profile, NVIDIA, two runs at load average 28 on 24 cores, on
-//! `tests/fixtures/code/rust-50k.rs` (50,000 lines, 1.8 MB) with the highlighter thread
-//! colouring as it scrolls:
+//! `tests/perf.rs`, perf profile, NVIDIA, two runs at load average 13 to 17 on 24 cores
+//! (review round 1), on `tests/fixtures/code/rust-50k.rs` (50,000 lines, 1.8 MB) with the
+//! highlighter thread colouring as it scrolls:
 //!
 //! | | Wrap on | Wrap off |
 //! | --- | --- | --- |
-//! | First frame (one commit, D10) | 13.8–14.2 ms | 15.3 ms |
-//! | Ctrl+End, the jump and the 10 frames after it | p95 2.8–2.9 ms, none over 8 ms | p95 3.3–3.4 ms, none over 8 ms |
-//! | 600 wheel frames at 120 Hz, 48 pt each | p50 1.1–1.2, p95 1.6, max 2.2 ms, none over 8 ms | p50 0.5, p95 1.6–1.7, max 3.1 ms, none over 8 ms |
-//! | 120 thumb-drag frames over the whole track | p95 6.9–8.0 ms, 0 and 5 over 8 ms | p95 7.5–7.7 ms, 0 and 3 over 8 ms |
-//! | Find "fn" (2,210 matches), first query | 2.0 ms | 2.0 ms |
-//! | Ctrl+A then Ctrl+C, from the model | 43 ms, 1,847,325 of 1,847,325 bytes | 42 ms |
+//! | First frame (one commit, D10) | 14.0–15.0 ms | 14.5–15.7 ms |
+//! | Ctrl+End, the jump and the 10 frames after it | p95 3.0–3.1 ms, none over 8 ms | p95 3.5–4.0 ms, none over 8 ms |
+//! | 600 wheel frames at 120 Hz, 48 pt each | p50 0.8–1.1, p95 1.6–1.8, max 2.5 ms, none over 8 ms | p50 0.5–1.1, p95 1.7–1.8, max 3.0 ms, none over 8 ms |
+//! | 120 thumb-drag frames over the whole track | p95 7.4–8.3 ms, 1 and 16 over 8 ms | p95 7.8–8.1 ms, 0 and 8 over 8 ms |
+//! | Find "fn" (2,210 matches), the first query | 2.0 ms | 2.0–2.1 ms |
+//! | Find " " (469,465 matches) | 4.5–7.4 ms | 7.2–7.5 ms |
+//! | Ctrl+A then Ctrl+C, from the model | 42–44 ms, 1,847,325 of 1,847,325 bytes | 47 ms |
 //!
 //! A thumb drag's frames over 8 ms are C24's U-C24-8: a scroll request past the mounted rows
 //! runs the view and commits several times in a frame, where the wheel moving as far
 //! doesn't. `RUNE_COMMIT_BUDGET_MS=8` reports no commit over budget while scrolling or after
-//! the jump.
+//! the jump. Find runs in the handler that edits the query: one handler of up to 7.5 ms for a
+//! query matching nearly every other byte of 1.8 MB, which a keystroke in the find field pays
+//! once; splitting it across frames would leave the count wrong in between, so it isn't.
 //!
 //! # Rune drafts (not filed)
 //!
@@ -148,6 +152,29 @@
 //! - **U-C10b-5** A keystroke in a multi-line `text_input` reshapes its whole text: about
 //!   19 ms per key in a 153 KB, 5,000-line field with no spans (probe P3, perf profile).
 //!   Ask: shape a field by paragraph and reuse the unchanged paragraphs' layouts.
+//! - **U-C10b-6** A triple-click selects one text's paragraph, even inside a selection group:
+//!   an app that draws one logical line as several texts (a line split for layout, as here
+//!   past 2 KiB) can't have the triple-click take the whole line. Repro: a selection group of
+//!   two selectable texts, "aaa" and "bbb", side by side in a row; triple-click "aaa":
+//!   `Runtime::selected_text()` is "aaa". Ask: let a group mark texts as parts of one
+//!   paragraph (or take the paragraph across texts that share a row key), so a triple-click
+//!   selects them all.
+//! - **U-C10b-7** A selection's report leaves out an end text whose selected part is empty:
+//!   a drag that starts past the end of one text and goes on into the next reports only the
+//!   texts from the next one on, so `selection_copy` can't tell that it started on the first
+//!   and that the break after it belongs to the copy. Repro: a selection group of two
+//!   selectable texts "one" and "two" in a column; press right of "one"'s end and drag into
+//!   "two": `TextSelection::texts()` holds "two" alone (with C10b's probe, the copy loses the
+//!   "\n"). Ask: report the start text with its empty range at its end (`is_selected` false
+//!   but its range kept), as the end text's range is.
+//! - **U-C10b-8** An element removed while it holds a drag gets no `Phase::Up`, nor a
+//!   cancelled one: its `on_drag_any` hears the Down and the moves, then nothing. A bar whose
+//!   preview closes mid-drag stays held (here its trough stayed tinted, review round 1). C10b
+//!   ends the drag on the next build that finds the bar wasn't laid out. Repro: an element with
+//!   `on_drag_any` recording phases, shown while `s.open`; press on it, move, set `s.open =
+//!   false`, frame, release: the handler heard Down and Move only. Related: U-C24-4 (a modal
+//!   mounted mid-drag drops the capture the same way). Ask: end a removed element's capture
+//!   with a cancelled `Up`, as Escape does mid-drag.
 //!
 //! Shared with C11: R1 (`select_text` within one text), R2 (no caret in selectable text), R4
 //! (copy collection cap), R5.
@@ -198,6 +225,10 @@ pub struct CodeLabels {
     pub position: String,
     /// The position bar's value: `{line}` and `{lines}` are replaced.
     pub line_of: String,
+    /// An empty line's name. GtkSourceView exposes its buffer as one text, where Orca reads
+    /// an empty line as "blank"; each line here is a text of its own, and an empty text
+    /// with no name reads as nothing, so it takes this.
+    pub blank: String,
 }
 
 impl Default for CodeLabels {
@@ -206,6 +237,7 @@ impl Default for CodeLabels {
             document: "Source".into(),
             position: "Document position".into(),
             line_of: "Line {line} of {lines}".into(),
+            blank: "Blank".into(),
         }
     }
 }
@@ -241,7 +273,7 @@ impl<S: 'static> CodeView<S> {
         self
     }
 
-    pub fn build(self, s: &S, look: &Look, _cx: &mut Cx<S>) -> El {
+    pub fn build(self, s: &S, look: &Look, cx: &mut Cx<S>) -> El {
         let CodeView {
             get,
             get_mut,
@@ -259,6 +291,12 @@ impl<S: 'static> CodeView<S> {
             .line_numbers()
             .then(|| gutter_width(rows.lines(), paint.mono, paint.pad));
         let bar_look = BarLook::app(look);
+        // A bar the last frame didn't lay out was taken away (the preview closed, or the text
+        // stopped overflowing): Rune sends a removed element no Up, so a drag it held ends
+        // here (U-C10b-8).
+        if cx.layout_with(&format!("{key}-position"), |_| ()).is_none() {
+            st.position.end_drag();
+        }
         st.position.configure(
             position::Keys {
                 scroll: scroll_key.clone(),
@@ -274,6 +312,7 @@ impl<S: 'static> CodeView<S> {
             paint,
             gutter,
             wrap,
+            blank: labels.blank.clone(),
         });
         let content = st.content();
         let rows_ctx = ctx.clone();
@@ -371,8 +410,10 @@ impl<S: 'static> CodeView<S> {
 }
 
 /// The list's width with wrap off: the widest row's columns in the mono face's advance, or
-/// the widest rows as measured, if a fallback face draws them wider (probe P1: CJK rows
-/// widen the list when they mount, which this keeps from happening).
+/// the rows estimated widest as measured, if a fallback face draws them wider (probe P1 and
+/// review 1: CJK and emoji rows widen the list when they mount, which this keeps from
+/// happening). Rows are ranked by their drawn width's estimate, not their length, so a short
+/// row of wide characters is among them.
 fn unwrapped_width(st: &CodeState, paint: &Paint, gutter: f32) -> f32 {
     let rows = st.rows();
     let adv = rune::text::advance("0000000000", paint.mono) / 10.0;
@@ -493,6 +534,9 @@ fn key_in<S: 'static>(
         tx.select_all_text(st.list_key());
         return true;
     }
+    // Without this Ctrl+C still copies the whole text (`selection_copy` answers from the
+    // model), but only after Rune has built up to 10,000 unbuilt rows to collect the
+    // selection it then ignores: 59 ms against 42 to 47 ms on the 50,000-line fixture.
     if ev.is_command('c') && plain && st.all_selected() {
         tx.copy(st.copy_all());
         return true;

@@ -37,13 +37,38 @@ fn a_long_line_splits_as_strata_s_source_preview_does() {
 
 #[test]
 fn a_split_never_cuts_a_character() {
-    let text = "é".repeat(3000);
-    let r = rows(&text);
-    assert!(r.len() > 1);
-    for i in 0..r.len() {
-        assert!(r.source(i).len() <= CHUNK);
-        assert!(r.source(i).chars().all(|c| c == 'é'));
+    // 2,048 is a multiple of neither 3 nor 4, so a cut at the byte count lands inside one.
+    for ch in ['€', '😀'] {
+        let text = ch.to_string().repeat(1500);
+        let r = rows(&text);
+        assert!(r.len() > 1);
+        let mut joined = String::new();
+        for i in 0..r.len() {
+            assert!(r.source(i).len() <= CHUNK);
+            assert!(r.source(i).chars().all(|c| c == ch));
+            joined.push_str(r.source(i));
+        }
+        assert_eq!(joined, text);
     }
+}
+
+#[test]
+fn a_split_line_s_colours_move_to_each_row() {
+    use rune::Span;
+    let red = rune::Color::BLACK;
+    let blue = rune::Color::WHITE;
+    // A line's spans, with one in its second 2 KiB row and one across the cut.
+    let line = vec![
+        Span::new(0, 10).color(red),
+        Span::new(2040, 2060).color(blue),
+        Span::new(3000, 3010).color(red),
+    ];
+    let first = super::render::row_spans(line.clone(), 0..CHUNK);
+    let second = super::render::row_spans(line, CHUNK..2 * CHUNK);
+    let ends = |v: &[Span]| v.iter().map(|s| (s.start, s.end)).collect::<Vec<_>>();
+    assert_eq!(ends(&first), [(0, 10), (2040, 2048)]);
+    assert_eq!(ends(&second), [(0, 12), (952, 962)], "relative to the row");
+    assert_eq!(second[0].color, Some(blue));
 }
 
 #[test]
@@ -174,6 +199,19 @@ fn the_position_is_rows_not_offsets() {
 }
 
 #[test]
+fn a_row_measured_in_view_holds_the_thumb() {
+    let p = bar(100);
+    let mut heights = vec![10.0; 100];
+    scroll(&p, 450.0, &heights);
+    let before = p.progress();
+    // A row inside the viewport measures taller: fewer rows show, which alone would move
+    // the progress, but the content's top holds, so the thumb does too.
+    heights[53] = 40.0;
+    scroll(&p, 450.0, &heights);
+    assert_eq!(p.progress(), before);
+}
+
+#[test]
 fn a_row_measured_below_never_moves_the_thumb_back() {
     let p = bar(100);
     let mut heights = vec![10.0; 100];
@@ -224,4 +262,9 @@ fn tab_and_shift_tab_follow_gtksourceview() {
     e.set_caret(2);
     outdent(&mut e);
     assert_eq!((e.text.as_str(), e.range()), ("x", (1, 1)));
+    // A caret inside the line moves back with its text.
+    let mut e = TextEdit::new("    abc");
+    e.set_caret(6);
+    outdent(&mut e);
+    assert_eq!((e.text.as_str(), e.range()), ("abc", (2, 2)));
 }

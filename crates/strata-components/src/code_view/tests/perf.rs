@@ -184,7 +184,7 @@ fn preview(wrap: bool) {
 
     // Find over the whole text.
     let mut finds = Vec::new();
-    for q in ["fn", "self", "zzz_none"] {
+    for q in ["fn", "self", " ", "zzz_none"] {
         let mut total = 0;
         let t = Instant::now();
         rt.update(|h, _| {

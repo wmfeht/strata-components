@@ -58,6 +58,8 @@ pub(crate) struct Ctx<S> {
     /// The gutter's width, or none with line numbers off.
     pub gutter: Option<f32>,
     pub wrap: bool,
+    /// An empty line's accessible name.
+    pub blank: String,
 }
 
 /// The digits' width for `lines` lines in `style`, with the gutter's gap.
@@ -69,7 +71,7 @@ pub(crate) fn gutter_width(lines: usize, style: TextStyle, pad: f32) -> f32 {
 
 /// Line `line`'s colours cut to the row's bytes `row` (relative to the line), relative to the
 /// row.
-fn row_spans(spans: Vec<Span>, row: Range<usize>) -> Vec<Span> {
+pub(crate) fn row_spans(spans: Vec<Span>, row: Range<usize>) -> Vec<Span> {
     let (a, b) = (row.start as u32, row.end as u32);
     spans
         .into_iter()
@@ -116,6 +118,11 @@ pub(crate) fn build_row<S: 'static>(ctx: &Rc<Ctx<S>>, s: &S, i: usize) -> El {
         .selectable(true)
         .selection_color(p.selection)
         .text_highlights(highlights);
+    let t = if src.is_empty() {
+        t.label(ctx.blank.clone())
+    } else {
+        t
+    };
     let t = if ctx.wrap {
         // Code breaks inside a token too long for the pane, not past its edge.
         t.wrap_anywhere().w_full()

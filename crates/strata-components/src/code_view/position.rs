@@ -308,6 +308,18 @@ impl Position {
         i.thumb.snap([inset, start, look.thumb_width, len]);
     }
 
+    /// Ends a drag the bar's element can no longer end: it was removed, so no Up comes. The
+    /// trough goes back to rest at once.
+    pub fn end_drag(&self) {
+        let i = &self.0;
+        if i.dragging.replace(false) | i.over.replace(false) {
+            i.pending.set(None);
+            if let Some(look) = i.look.get() {
+                i.fill.snap(look.trough);
+            }
+        }
+    }
+
     pub fn hover(&self, inside: bool) {
         self.0.over.set(inside);
         self.tint();

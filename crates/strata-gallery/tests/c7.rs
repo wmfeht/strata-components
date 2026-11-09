@@ -79,20 +79,32 @@ mod c7 {
 
     /// Steps a resting window for at most `limit` seconds: a frame each 1/60 s while something
     /// animates (a window draws then), else only at each requested wake, none in between.
-    /// Returns the clock it stopped at.
+    /// Returns the clock it stopped at. For what needs motion to land (a reveal's glide); a
+    /// timer's test steps with [`wake_until`], since a held file drag keeps `animating` true.
     fn rest(rt: &mut Runtime<Gallery>, limit: f64) -> f64 {
-        rest_until(rt, limit, |_| false)
+        steps(rt, limit, true, |_| false)
     }
 
-    /// [`rest`], stopping at the first frame after which `done` holds.
-    fn rest_until(rt: &mut Runtime<Gallery>, limit: f64, done: impl Fn(&Gallery) -> bool) -> f64 {
+    /// Steps only at the wakes the page asked for, none in between and none for motion, for at
+    /// most `limit` seconds, stopping at the first frame after which `done` holds: a timer that
+    /// asks for no wake never fires (review 2).
+    fn wake_until(rt: &mut Runtime<Gallery>, limit: f64, done: impl Fn(&Gallery) -> bool) -> f64 {
+        steps(rt, limit, false, done)
+    }
+
+    fn steps(
+        rt: &mut Runtime<Gallery>,
+        limit: f64,
+        motion: bool,
+        done: impl Fn(&Gallery) -> bool,
+    ) -> f64 {
         let start = rt.state.c7.now;
         for _ in 0..400 {
             let now = rt.state.c7.now;
             if now - start > limit || done(&rt.state) {
                 break;
             }
-            if rt.animating {
+            if motion && rt.animating {
                 rt.frame(FRAME);
                 continue;
             }
@@ -118,16 +130,20 @@ mod c7 {
     // the hover, with one wake asked from the hover, never ended).
     #[test]
     fn the_hover_selects_a_tab_in_a_resting_window() {
-        let mut rt = mount("c7-several-light");
-        let at = centre(&rt, &tab(2));
-        rt.drag_files(vec!["/home/demo/report.pdf".into()], Some(at));
-        rt.frame(FRAME);
-        let arrived = rt.state.c7.now;
-        let stopped = rest_until(&mut rt, 3.0, |g| !g.c7.log.is_empty());
-        assert_eq!(rt.state.c7.log, "Select Documents (spring)");
-        assert_eq!(rt.state.c7.active, Some(TabId(2)));
-        let took = stopped - arrived;
-        assert!((0.4..0.55).contains(&took), "after {took:.3} s");
+        for animations in [true, false] {
+            let mut rt = mount_with("c7-several-light", |g| g.look.animations = animations);
+            let at = centre(&rt, &tab(2));
+            rt.drag_files(vec!["/home/demo/report.pdf".into()], Some(at));
+            rt.frame(FRAME);
+            let arrived = rt.state.c7.now;
+            // Only at wakes: a held file drag keeps the runtime animating, which a frame per
+            // 1/60 s would follow, hiding a timer that asked for no wake (review 2).
+            let stopped = wake_until(&mut rt, 3.0, |g| !g.c7.log.is_empty());
+            assert_eq!(rt.state.c7.log, "Select Documents (spring)");
+            assert_eq!(rt.state.c7.active, Some(TabId(2)));
+            let took = stopped - arrived;
+            assert!((0.44..0.5).contains(&took), "after {took:.3} s");
+        }
     }
 
     // browser/tabs: "A Trash or Recent tab also refuses file drags: it neither accents nor

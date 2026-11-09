@@ -418,24 +418,6 @@ fn item<S: 'static>(cfg: &Rc<Config<S>>, frame: &Frame, s: &S, rcx: &RowCx<'_>) 
             .child(label_el),
     };
 
-    let mut inner = row().w_full().h_full().clip_soft(0.0);
-    if !cfg.bare_items {
-        inner = inner
-            .radius(tokens::row_radius(look))
-            .px(look.space.xs)
-            .center_y();
-        if state.selected || state.drop_target {
-            inner = inner.fill(rune_kit::TableStyle::from_kit(kit).selected);
-        }
-        if frame.hover_live {
-            inner = inner.hover(kit.c.hover);
-        }
-        if state.cursor_shown {
-            inner = inner.outline(OUTLINE, -OUTLINE, kit.c.border_focus);
-        } else if state.drop_target || state.marks.enter_target {
-            inner = inner.outline(OUTLINE, -OUTLINE, kit.c.text_accent);
-        }
-    }
     let mut opacity: f32 = 1.0;
     if state.marks.cut {
         opacity = opacity.min(tokens::cut_opacity(look));
@@ -443,21 +425,66 @@ fn item<S: 'static>(cfg: &Rc<Config<S>>, frame: &Frame, s: &S, rcx: &RowCx<'_>) 
     if state.marks.dragging {
         opacity = opacity.min(tokens::drag_opacity(look));
     }
+    if cfg.bare_items {
+        // The content slot draws the item: no box of the row's own around it.
+        let body = if opacity < 1.0 {
+            content.opacity(opacity)
+        } else {
+            content
+        };
+        let outer = row()
+            .key(row_key(id))
+            .role(cfg.roles.item)
+            .label(entry.name)
+            .focus_selected(state.selected)
+            .h(frame.row_height)
+            .child(body);
+        return finish_item(cfg, frame, s, rcx, outer);
+    }
+    let mut inner = row()
+        .w_full()
+        .h_full()
+        .radius(tokens::row_radius(look))
+        .px(look.space.xs)
+        .center_y()
+        .clip_soft(0.0);
+    if state.selected || state.drop_target {
+        inner = inner.fill(rune_kit::TableStyle::from_kit(kit).selected);
+    }
+    if frame.hover_live {
+        inner = inner.hover(kit.c.hover);
+    }
+    if state.cursor_shown {
+        inner = inner.outline(OUTLINE, -OUTLINE, kit.c.border_focus);
+    } else if state.drop_target || state.marks.enter_target {
+        inner = inner.outline(OUTLINE, -OUTLINE, kit.c.text_accent);
+    }
     if opacity < 1.0 {
         inner = inner.opacity(opacity);
     }
     inner = inner.child(content);
 
-    let mut outer = row()
+    let outer = row()
         .key(row_key(id))
         .role(cfg.roles.item)
         .label(entry.name)
         .focus_selected(state.selected)
         .h(frame.row_height)
+        .px(tokens::row_inset(look))
         .child(inner);
-    if !cfg.bare_items {
-        outer = outer.px(tokens::row_inset(look));
-    }
+    finish_item(cfg, frame, s, rcx, outer)
+}
+
+/// An item's width in its line, its place in the set, its description and its drop zone.
+fn finish_item<S: 'static>(
+    cfg: &Rc<Config<S>>,
+    frame: &Frame,
+    s: &S,
+    rcx: &RowCx<'_>,
+    mut outer: El,
+) -> El {
+    let entry = rcx.entry;
+    let id = entry.id;
     outer = if frame.per_line > 1 {
         outer.w(0.0).grow(1.0)
     } else {

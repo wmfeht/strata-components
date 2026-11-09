@@ -385,9 +385,22 @@ fn drag_out_three_types(display: Display) {
     let mark = press_on(&s, &demo, "tile");
     s.input().path(to.at(0.5, 0.5));
     demo.wait(mark, "the drag starting", |v| v["ev"] == "drag-start");
-    wait_peer(&peer, "the drag entering the peer", |e| {
+    let entered = wait_peer(&peer, "the drag entering the peer", |e| {
         matches!(e, Event::DropEnter { .. })
     });
+    // The in-process token: on X11 only with a payload (other clients see it); on Wayland on
+    // every drag, where it marks the drag as ours when it enters our windows.
+    let Event::DropEnter { mimes: listed, .. } = entered else {
+        unreachable!()
+    };
+    let token = |m: &String| m.starts_with("application/x-local-drag;id=");
+    let others: Vec<&String> = listed.iter().filter(|m| !token(m)).collect();
+    assert_eq!(others, mimes(&offers), "{listed:?}");
+    let tokens = listed.iter().filter(|m| token(m)).count();
+    match display {
+        Display::X11 => assert_eq!(tokens, 0, "no payload, no token on X11: {listed:?}"),
+        _ => assert_eq!(tokens, 1, "{listed:?}"),
+    }
     let peer_mark = peer.line_count();
     s.input().button(false);
     // The peer reads them all at once, and on X11 they finish in any order.
@@ -1072,5 +1085,97 @@ fn x11_drag_icon_is_a_dnd_window_for_the_drags_life() {
         );
         std::thread::sleep(Duration::from_millis(20));
     }
+    demo.quit();
+}
+
+// ---- review round 2 ----
+
+/// R2-B2: the threshold is crossed with the pointer already over the peer (one jump), so the
+/// drag never enters the app's windows. Rune's capture must still end while the button is
+/// held (the peer's answer is the compositor's proof), not wait for sway's focus bounce at
+/// the drop; and afterwards no Escape reached the app.
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn wayland_capture_ends_for_a_drag_that_never_enters_our_windows() {
+    let s = Session::start();
+    let demo = Demo::start(&s, Display::Wayland, false);
+    let (peer, to) = peer_beside(&s, Display::Wayland, &demo);
+    demo.offer(&[Offer::text(TEXT, "off")], &["copy"], None, None);
+    peer.accept_drops(&[TEXT], &[Action::Copy], Action::Copy);
+    let mark = press_on(&s, &demo, "manual");
+    s.input().pointer_move(to.at(0.5, 0.5));
+    demo.wait(mark, "the drag starting", |v| v["ev"] == "drag-start");
+    wait_peer(&peer, "the drag entering the peer", |e| {
+        matches!(e, Event::DropEnter { .. })
+    });
+    let (_, up) = demo.wait(mark, "the capture ending, button held", |v| {
+        v["ev"] == "manual-phase" && v["phase"] == "Up"
+    });
+    assert_eq!(up["cancelled"], true, "{up}");
+    assert_eq!(up["owned"], true, "{up}");
+    let entered = demo.lines().iter().skip(mark).any(|v| v["ev"] == "hover");
+    assert!(
+        !entered,
+        "the drag was meant never to enter the app's window"
+    );
+    s.input().button(false);
+    wait_peer(&peer, "the drop", |e| matches!(e, Event::Dropped { .. }));
+    demo.wait(mark, "the outcome", |v| v["ev"] == "drag-end");
+    let escapes = demo
+        .lines()
+        .iter()
+        .filter(|v| v["ev"] == "key" && v["key"] == "Escape")
+        .count();
+    assert_eq!(escapes, 0, "P1's Escape reached the app");
+    demo.quit();
+}
+
+/// R2-B2's last case: a drag that starts over no surface at all (one jump into sway's outer
+/// gap around the window) gets no proof: nothing enters the app's windows and no target
+/// answers. It is released there: the capture still ends once the drag has (by sway's focus
+/// change at the drop, or failing that P1's late Escape), no Escape reaches the app, and
+/// hover comes back.
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn wayland_a_drag_over_nothing_ends_its_capture_after_it_ends() {
+    let s = Session::start();
+    let demo = Demo::start(&s, Display::Wayland, false);
+    // Outer gaps leave bare desktop around the tiled window: nothing there to enter.
+    let before = demo.settle(&s, "main").content.width;
+    s.sway_command("gaps outer current set 150");
+    let deadline = Instant::now() + timeout();
+    while demo.settle(&s, "main").content.width >= before - 1.0 {
+        assert!(
+            Instant::now() < deadline,
+            "the gaps never shrank the window"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    demo.offer(&[Offer::text(TEXT, "nowhere")], &["copy"], None, None);
+    let mark = press_on(&s, &demo, "manual");
+    s.input().pointer_move((40.0, 40.0));
+    demo.wait(mark, "the drag starting", |v| v["ev"] == "drag-start");
+    s.input().button(false);
+    let (_, end) = demo.wait(mark, "the outcome", |v| v["ev"] == "drag-end");
+    assert_eq!(end["outcome"], "cancelled", "{end}");
+    let (_, up) = demo.wait(mark, "the capture ending after the drag", |v| {
+        v["ev"] == "manual-phase" && v["phase"] == "Up"
+    });
+    assert_eq!(up["owned"], true, "{up}");
+    let hover_mark = demo.app.line_count();
+    let plain = demo.at(&s, "main", "plain", 0.5, 0.5);
+    s.point_until(plain, || {
+        demo.lines()
+            .iter()
+            .skip(hover_mark)
+            .any(|v| v["ev"] == "plain-hover" && v["over"] == true)
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    let escapes = demo
+        .lines()
+        .iter()
+        .filter(|v| v["ev"] == "key" && v["key"] == "Escape")
+        .count();
+    assert_eq!(escapes, 0, "P1's Escape reached the app");
     demo.quit();
 }

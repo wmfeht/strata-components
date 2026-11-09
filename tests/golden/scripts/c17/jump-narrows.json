@@ -19,7 +19,7 @@
                             "replace-selected-text",
                             "set-text-selection"
                           ],
-                          "activeDescendant": "c17-palette-option-%2Fhome%2Fdemo%2FProjects%2Fstrata",
+                          "activeDescendant": "c17-palette-option-0",
                           "description": "Folders previously visited in Strata",
                           "key": "c17-palette-field",
                           "name": "Jump to a folder…",
@@ -62,7 +62,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FProjects%2Fstrata",
+                              "key": "c17-palette-option-0",
                               "name": "/home/demo/Projects/strata",
                               "position": 1,
                               "role": "list-box-option",
@@ -76,7 +76,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FPictures%2FTrips",
+                              "key": "c17-palette-option-1",
                               "name": "/home/demo/Pictures/Trips",
                               "position": 2,
                               "role": "list-box-option"
@@ -87,7 +87,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FProjects%2Fstrata%2Fsrc",
+                              "key": "c17-palette-option-2",
                               "name": "/home/demo/Projects/strata/src",
                               "position": 3,
                               "role": "list-box-option"
@@ -98,7 +98,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FProjects%2Fstrata%2Fdocs",
+                              "key": "c17-palette-option-3",
                               "name": "/home/demo/Projects/strata/docs",
                               "position": 4,
                               "role": "list-box-option"

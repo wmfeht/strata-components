@@ -19,7 +19,7 @@
                             "replace-selected-text",
                             "set-text-selection"
                           ],
-                          "activeDescendant": "c17-palette-option-%2Fhome%2Fdemo%2FProjects%2Fstrata%2FREADME.md",
+                          "activeDescendant": "c17-palette-option-2",
                           "description": "Search locations:\n/home/demo\n/run/media/demo/USB\nRemote shares are not included.",
                           "key": "c17-palette-field",
                           "name": "Search files and folders…",
@@ -67,7 +67,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FDocuments%2FReports",
+                              "key": "c17-palette-option-0",
                               "name": "/home/demo/Documents/Reports",
                               "position": 1,
                               "role": "list-box-option"
@@ -78,7 +78,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FProjects%2Frune%2FREADME.md",
+                              "key": "c17-palette-option-1",
                               "name": "/home/demo/Projects/rune/README.md",
                               "position": 2,
                               "role": "list-box-option"
@@ -89,7 +89,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FProjects%2Fstrata%2FREADME.md",
+                              "key": "c17-palette-option-2",
                               "name": "/home/demo/Projects/strata/README.md",
                               "position": 3,
                               "role": "list-box-option",
@@ -103,7 +103,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FDocuments%2FReports%2Freport-notes.md",
+                              "key": "c17-palette-option-3",
                               "name": "/home/demo/Documents/Reports/report-notes.md",
                               "position": 4,
                               "role": "list-box-option"
@@ -114,7 +114,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FPictures",
+                              "key": "c17-palette-option-4",
                               "name": "/home/demo/Pictures",
                               "position": 5,
                               "role": "list-box-option"
@@ -125,7 +125,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FDocuments%2Freading-list.txt",
+                              "key": "c17-palette-option-5",
                               "name": "/home/demo/Documents/reading-list.txt",
                               "position": 6,
                               "role": "list-box-option"
@@ -136,7 +136,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FPictures%2Freceipt-scan.jpg",
+                              "key": "c17-palette-option-6",
                               "name": "/home/demo/Pictures/receipt-scan.jpg",
                               "position": 7,
                               "role": "list-box-option"
@@ -147,7 +147,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FDocuments%2FReports%2Freport-march.pdf",
+                              "key": "c17-palette-option-7",
                               "name": "/home/demo/Documents/Reports/report-march.pdf",
                               "position": 8,
                               "role": "list-box-option"
@@ -158,7 +158,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FProjects%2Frune",
+                              "key": "c17-palette-option-8",
                               "name": "/home/demo/Projects/rune",
                               "position": 9,
                               "role": "list-box-option"
@@ -169,7 +169,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FDocuments%2FReports%2Freport-january.pdf",
+                              "key": "c17-palette-option-9",
                               "name": "/home/demo/Documents/Reports/report-january.pdf",
                               "position": 10,
                               "role": "list-box-option"
@@ -180,7 +180,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FDocuments%2FReports%2Freport-february.pdf",
+                              "key": "c17-palette-option-10",
                               "name": "/home/demo/Documents/Reports/report-february.pdf",
                               "position": 11,
                               "role": "list-box-option"
@@ -191,7 +191,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FDocuments%2FReports%2Fannual-report-2025.pdf",
+                              "key": "c17-palette-option-11",
                               "name": "/home/demo/Documents/Reports/annual-report-2025.pdf",
                               "position": 12,
                               "role": "list-box-option"
@@ -202,7 +202,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FProjects%2Fstrata%2Fdocs%2Fpreferences.md",
+                              "key": "c17-palette-option-12",
                               "name": "/home/demo/Projects/strata/docs/preferences.md",
                               "position": 13,
                               "role": "list-box-option"
@@ -213,7 +213,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FPictures%2Fscreenshot-2026-11-01.png",
+                              "key": "c17-palette-option-13",
                               "name": "/home/demo/Pictures/screenshot-2026-11-01.png",
                               "position": 14,
                               "role": "list-box-option"
@@ -224,7 +224,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FProjects%2Fstrata%2Fsrc%2Ffolder_picker.rs",
+                              "key": "c17-palette-option-14",
                               "name": "/home/demo/Projects/strata/src/folder_picker.rs",
                               "position": 15,
                               "role": "list-box-option"
@@ -235,7 +235,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FProjects%2Fstrata%2Fsrc%2Fsearch_session.rs",
+                              "key": "c17-palette-option-15",
                               "name": "/home/demo/Projects/strata/src/search_session.rs",
                               "position": 16,
                               "role": "list-box-option"
@@ -246,7 +246,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FProjects%2Fstrata%2Fnotes-for-release.md",
+                              "key": "c17-palette-option-16",
                               "name": "/home/demo/Projects/strata/notes-for-release.md",
                               "position": 17,
                               "role": "list-box-option"
@@ -257,7 +257,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FDocuments%2Fquarterly-summary.md",
+                              "key": "c17-palette-option-17",
                               "name": "/home/demo/Documents/quarterly-summary.md",
                               "position": 18,
                               "role": "list-box-option"
@@ -268,7 +268,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FDocuments%2Fquarterly-summary.txt",
+                              "key": "c17-palette-option-18",
                               "name": "/home/demo/Documents/quarterly-summary.txt",
                               "position": 19,
                               "role": "list-box-option"
@@ -279,7 +279,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FDocuments%2FArchive%2F2019%2Ftax-returns-and-supporting-documents-for-the-household%2Fscanned-originals-from-the-accountant",
+                              "key": "c17-palette-option-19",
                               "name": "/home/demo/Documents/Archive/2019/tax-returns-and-supporting-documents-for-the-household/scanned-originals-from-the-accountant",
                               "position": 20,
                               "role": "list-box-option"
@@ -290,7 +290,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FDocuments%2FArchive%2F2019%2Ftax-returns-and-supporting-documents-for-the-household%2Fscanned-originals-from-the-accountant%2Freceipt-bundle-final-version-two-signed-and-countersigned-by-everyone-involved.pdf",
+                              "key": "c17-palette-option-20",
                               "name": "/home/demo/Documents/Archive/2019/tax-returns-and-supporting-documents-for-the-household/scanned-originals-from-the-accountant/receipt-bundle-final-version-two-signed-and-countersigned-by-everyone-involved.pdf",
                               "position": 21,
                               "role": "list-box-option"

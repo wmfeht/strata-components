@@ -89,6 +89,11 @@ pub struct PaletteState {
     pub(crate) bar: Bar,
     /// The list's scroll position as it last reported it.
     pub(crate) feed: ScrollFeed,
+    /// The offset at the last tick, and whether it moved between the last two: a fling or a
+    /// wheel's motion in flight, which a batch's reveal leaves alone (Strata's
+    /// `interaction_revision`).
+    settled: Cell<f32>,
+    moving: Cell<bool>,
     /// The palette's key as the latest view built it, for the scroll requests an answer makes.
     pub(crate) key: RefCell<String>,
     pub(crate) handler: HandlerSlot,
@@ -148,11 +153,6 @@ impl PaletteState {
     /// The results shown.
     pub fn items(&self) -> &[PaletteItem] {
         self.model.shown()
-    }
-
-    /// The rows' version: changes whenever the shown results do.
-    pub(crate) fn revision(&self) -> u64 {
-        self.model.revision()
     }
 
     /// The highlighted result.
@@ -251,19 +251,17 @@ impl PaletteState {
         };
         let key = self.key.borrow();
         let results = super::results_key(&key);
+        // Reveals only: "just far enough", and a wheel or a fling wins over them (Rune), so a
+        // batch never undoes the user's scroll. Rows are keyed by place, so keeping the offset
+        // takes no request at all.
         match follow {
             // Not built yet: nothing to scroll.
             _ if key.is_empty() => {}
-            Follow::Stay => {}
-            Follow::Top => tx.scroll_to_y(results, 0.0),
-            // Rune's virtual rows keep their first visible row where it is, at offset 0 too
-            // (Rune draft U-C17-3); a scroll in the same commit wins over that.
-            Follow::Keep => tx.scroll_to_y(results, self.feed.get().offset[1]),
-            Follow::Reveal(i) => {
-                if let Some(it) = self.items().get(i) {
-                    tx.scroll_into_view_in(results, super::option_key(&key, &it.id));
-                }
-            }
+            Follow::Stay | Follow::Keep => {}
+            Follow::Top => tx.scroll_into_view_in(results, super::option_key(&key, 0)),
+            // A list the user is scrolling (a fling, a wheel's motion) keeps moving.
+            Follow::Reveal(_) if self.moving.get() => {}
+            Follow::Reveal(i) => tx.scroll_into_view_in(results, super::option_key(&key, i)),
         }
         Polled::changed()
     }
@@ -296,6 +294,8 @@ impl PaletteState {
     /// One frame: ends the leaving frame once the view built it, and hands over intents
     /// raised where no `Tx` reached.
     pub fn tick(&mut self) -> Polled {
+        let offset = self.feed.get().offset[1];
+        self.moving.set(offset != self.settled.replace(offset));
         let mut out = Polled::default();
         if self.leaving.mode.is_some() && self.leaving.built.get() {
             self.leaving = Leaving::default();

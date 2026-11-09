@@ -38,7 +38,8 @@
   ],
   "expect": [
     {
-      "key": "c17-palette-option-%2Fhome%2Fdemo%2FDownloads%2Fnotes-export.zip",
+      "key": "c17-palette-option-4",
+      "name": "/home/demo/Downloads/notes-export.zip",
       "states": [
         "selected"
       ]

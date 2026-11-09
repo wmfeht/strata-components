@@ -36,7 +36,8 @@
       "name": "Jump to a folder"
     },
     {
-      "key": "c17-palette-option-%2Fhome%2Fdemo%2FProjects%2Fstrata",
+      "key": "c17-palette-option-0",
+      "name": "/home/demo/Projects/strata",
       "states": [
         "selected"
       ]

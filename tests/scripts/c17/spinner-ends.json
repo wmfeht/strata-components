@@ -27,7 +27,8 @@
       "absent": true
     },
     {
-      "key": "c17-palette-option-%2Fhome%2Fdemo%2FDocuments%2Fnotes.md",
+      "key": "c17-palette-option-1",
+      "name": "/home/demo/Documents/notes.md",
       "states": [
         "selected"
       ]

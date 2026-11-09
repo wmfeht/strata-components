@@ -45,8 +45,7 @@ pub(super) fn field<S: 'static>(
         field = field.description(d.clone());
     }
     if let Some(i) = state.highlighted().filter(|_| editable) {
-        let id = &state.items()[i].id;
-        field = field.active_descendant(super::option_key(&cx.key, id));
+        field = field.active_descendant(super::option_key(&cx.key, i));
     }
     if !editable {
         return field;
@@ -136,8 +135,8 @@ pub(super) fn on_key(
             let mut polled = Polled::default();
             if st.step(delta) {
                 polled.changed = true;
-                if let Some(it) = st.highlighted_item() {
-                    tx.scroll_into_view_in(results, super::option_key(key, &it.id));
+                if let Some(i) = st.highlighted() {
+                    tx.scroll_into_view_in(results, super::option_key(key, i));
                 }
             }
             (polled, true)

@@ -366,13 +366,6 @@ fn a_right_click_highlights_its_result_and_asks_for_the_menu() {
     );
 }
 
-#[test]
-fn option_keys_escape_slashes_and_percents() {
-    assert_eq!(option_key("p", "/home/u"), "p-option-%2Fhome%2Fu");
-    assert_eq!(option_key("p", "a%2Fb"), "p-option-a%252Fb");
-    assert_ne!(option_key("p", "a/b"), option_key("p", "a%2Fb"));
-}
-
 struct Host {
     look: Look,
     palette: PaletteState,

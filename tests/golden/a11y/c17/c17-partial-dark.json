@@ -19,7 +19,7 @@
                             "replace-selected-text",
                             "set-text-selection"
                           ],
-                          "activeDescendant": "c17-palette-option-%2Fhome%2Fdemo%2FPictures%2FTrips",
+                          "activeDescendant": "c17-palette-option-0",
                           "description": "Search locations:\n/home/demo\n/run/media/demo/USB\nRemote shares are not included.",
                           "key": "c17-palette-field",
                           "name": "Search files and folders…",
@@ -62,7 +62,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FPictures%2FTrips",
+                              "key": "c17-palette-option-0",
                               "name": "/home/demo/Pictures/Trips",
                               "position": 1,
                               "role": "list-box-option",
@@ -76,7 +76,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FPictures%2FTrips%2Ftrip-photo-001.jpg",
+                              "key": "c17-palette-option-1",
                               "name": "/home/demo/Pictures/Trips/trip-photo-001.jpg",
                               "position": 2,
                               "role": "list-box-option"
@@ -87,7 +87,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FPictures%2FTrips%2Ftrip-photo-002.jpg",
+                              "key": "c17-palette-option-2",
                               "name": "/home/demo/Pictures/Trips/trip-photo-002.jpg",
                               "position": 3,
                               "role": "list-box-option"
@@ -98,7 +98,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FPictures%2FTrips%2Ftrip-photo-003.jpg",
+                              "key": "c17-palette-option-3",
                               "name": "/home/demo/Pictures/Trips/trip-photo-003.jpg",
                               "position": 4,
                               "role": "list-box-option"
@@ -109,7 +109,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FPictures%2FTrips%2Ftrip-photo-004.jpg",
+                              "key": "c17-palette-option-4",
                               "name": "/home/demo/Pictures/Trips/trip-photo-004.jpg",
                               "position": 5,
                               "role": "list-box-option"
@@ -120,7 +120,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FPictures%2FTrips%2Ftrip-photo-005.jpg",
+                              "key": "c17-palette-option-5",
                               "name": "/home/demo/Pictures/Trips/trip-photo-005.jpg",
                               "position": 6,
                               "role": "list-box-option"
@@ -131,7 +131,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FPictures%2FTrips%2Ftrip-photo-006.jpg",
+                              "key": "c17-palette-option-6",
                               "name": "/home/demo/Pictures/Trips/trip-photo-006.jpg",
                               "position": 7,
                               "role": "list-box-option"
@@ -142,7 +142,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FPictures%2FTrips%2Ftrip-photo-007.jpg",
+                              "key": "c17-palette-option-7",
                               "name": "/home/demo/Pictures/Trips/trip-photo-007.jpg",
                               "position": 8,
                               "role": "list-box-option"
@@ -153,7 +153,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FPictures%2FTrips%2Ftrip-photo-008.jpg",
+                              "key": "c17-palette-option-8",
                               "name": "/home/demo/Pictures/Trips/trip-photo-008.jpg",
                               "position": 9,
                               "role": "list-box-option"
@@ -164,7 +164,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FPictures%2FTrips%2Ftrip-photo-009.jpg",
+                              "key": "c17-palette-option-9",
                               "name": "/home/demo/Pictures/Trips/trip-photo-009.jpg",
                               "position": 10,
                               "role": "list-box-option"
@@ -175,7 +175,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FPictures%2FTrips%2Ftrip-photo-010.jpg",
+                              "key": "c17-palette-option-10",
                               "name": "/home/demo/Pictures/Trips/trip-photo-010.jpg",
                               "position": 11,
                               "role": "list-box-option"
@@ -186,7 +186,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FPictures%2FTrips%2Ftrip-photo-011.jpg",
+                              "key": "c17-palette-option-11",
                               "name": "/home/demo/Pictures/Trips/trip-photo-011.jpg",
                               "position": 12,
                               "role": "list-box-option"
@@ -197,7 +197,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FPictures%2FTrips%2Ftrip-photo-012.jpg",
+                              "key": "c17-palette-option-12",
                               "name": "/home/demo/Pictures/Trips/trip-photo-012.jpg",
                               "position": 13,
                               "role": "list-box-option"
@@ -208,7 +208,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FPictures%2FTrips%2Ftrip-photo-013.jpg",
+                              "key": "c17-palette-option-13",
                               "name": "/home/demo/Pictures/Trips/trip-photo-013.jpg",
                               "position": 14,
                               "role": "list-box-option"
@@ -219,7 +219,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FPictures%2FTrips%2Ftrip-photo-014.jpg",
+                              "key": "c17-palette-option-14",
                               "name": "/home/demo/Pictures/Trips/trip-photo-014.jpg",
                               "position": 15,
                               "role": "list-box-option"
@@ -230,7 +230,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FPictures%2FTrips%2Ftrip-photo-015.jpg",
+                              "key": "c17-palette-option-15",
                               "name": "/home/demo/Pictures/Trips/trip-photo-015.jpg",
                               "position": 16,
                               "role": "list-box-option"
@@ -241,7 +241,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FPictures%2FTrips%2Ftrip-photo-016.jpg",
+                              "key": "c17-palette-option-16",
                               "name": "/home/demo/Pictures/Trips/trip-photo-016.jpg",
                               "position": 17,
                               "role": "list-box-option"
@@ -252,7 +252,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FPictures%2FTrips%2Ftrip-photo-017.jpg",
+                              "key": "c17-palette-option-17",
                               "name": "/home/demo/Pictures/Trips/trip-photo-017.jpg",
                               "position": 18,
                               "role": "list-box-option"
@@ -263,7 +263,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FPictures%2FTrips%2Ftrip-photo-018.jpg",
+                              "key": "c17-palette-option-18",
                               "name": "/home/demo/Pictures/Trips/trip-photo-018.jpg",
                               "position": 19,
                               "role": "list-box-option"
@@ -274,7 +274,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FPictures%2FTrips%2Ftrip-photo-019.jpg",
+                              "key": "c17-palette-option-19",
                               "name": "/home/demo/Pictures/Trips/trip-photo-019.jpg",
                               "position": 20,
                               "role": "list-box-option"
@@ -285,7 +285,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FPictures%2FTrips%2Ftrip-photo-020.jpg",
+                              "key": "c17-palette-option-20",
                               "name": "/home/demo/Pictures/Trips/trip-photo-020.jpg",
                               "position": 21,
                               "role": "list-box-option"

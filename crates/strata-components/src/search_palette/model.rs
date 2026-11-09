@@ -48,7 +48,7 @@ pub(crate) enum Follow {
     /// A new query: back to the top, where its highlighted first result is.
     Top,
     /// The same query, the highlight untouched: keep the list's pixel offset, so results a
-    /// batch puts above the first row show (Rune would keep the old first row in place).
+    /// batch puts above the rows in view show. Rows keyed by place keep it with no request.
     Keep,
     /// The same query, after the user moved the highlight: keep the highlighted row, at this
     /// index now, in view.
@@ -67,8 +67,6 @@ pub(crate) struct Model {
     shown: Vec<PaletteItem>,
     /// The (trimmed) text the shown results answer.
     shown_text: Option<String>,
-    /// Bumped by every answer that changes what shows: the rows' version.
-    revision: u64,
     highlighted: Option<usize>,
     /// The user moved the highlight since the query last changed (Strata's
     /// `navigation_started`).
@@ -89,17 +87,12 @@ impl Model {
     pub fn reset(&mut self) {
         *self = Self {
             generation: self.generation.wrapping_add(1),
-            revision: self.revision.wrapping_add(1),
             ..Self::default()
         };
     }
 
     pub fn generation(&self) -> u64 {
         self.generation
-    }
-
-    pub fn revision(&self) -> u64 {
-        self.revision
     }
 
     pub fn shown(&self) -> &[PaletteItem] {
@@ -155,9 +148,6 @@ impl Model {
     }
 
     fn clear(&mut self) {
-        if !self.shown.is_empty() || self.shown_text.is_some() {
-            self.revision = self.revision.wrapping_add(1);
-        }
         self.shown.clear();
         self.shown_text = None;
         self.highlighted = None;
@@ -200,9 +190,6 @@ impl Model {
             )
         };
         let changed = self.shown != answer.items || query_changed;
-        if changed {
-            self.revision = self.revision.wrapping_add(1);
-        }
         let n = answer.items.len();
         self.shown = answer.items;
         self.shown_text = Some(trimmed);

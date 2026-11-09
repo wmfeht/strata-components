@@ -61,7 +61,7 @@ pub(super) struct Ctx<S> {
 ///
 /// Keys: `{key}-dialog` (role `dialog`, named by the mode's title), `{key}-combobox` (the
 /// group around the field), [`field_key`](super::field_key), `{key}-busy` (the spinner), [`results_key`] (the
-/// listbox), [`option_key`](super::option_key) (each result), `{key}-status` (the status, a polite live region,
+/// listbox), [`option_key`](super::option_key) (each row, by place), `{key}-status` (the status, a polite live region,
 /// hidden while results show, when it says their count), `{key}-partial`, `{key}-footer`.
 pub struct SearchPalette<S> {
     key: String,
@@ -354,13 +354,14 @@ fn results<S: 'static>(
         .virtual_rows(
             state.items().len(),
             look.row.palette,
-            move |s: &S, i| option_key(&key_rows.key, &get(s).items()[i].id).into(),
+            move |_: &S, i| option_key(&key_rows.key, i).into(),
             move |s: &S, i| build_rows.row(s, i),
         )
-        // How the list scrolls as answers land is `PaletteState::deliver`'s; arrows reveal
-        // their row from the field's key handler. (`reveal_selected` does nothing for rows
-        // built by index at the pin: Rune draft U-C17-4.)
-        .virtual_rows_version((cx.key.as_str(), state.revision()));
+        // Keyed by place (see `option_key`), so the keys never change for a given count. How
+        // the list scrolls as answers land is `PaletteState::deliver`'s; arrows reveal their
+        // row from the field's key handler. (`reveal_selected` does nothing for rows built by
+        // index at the pin: Rune draft U-C17-4.)
+        .virtual_rows_version(cx.key.as_str());
     if let Some(f) = on_visible {
         list = list.on_visible_rows(move |s: &mut S, r| f(s, r));
     }
@@ -420,8 +421,9 @@ impl<S: 'static> Rows<S> {
             store.version(key).hash(&mut h);
             step.hash(&mut h);
         }
-        let key = option_key(&self.key, &item.id);
-        rune::memo::memo_with_hash(key, h.finish(), || {
+        // The memo follows the result, not its place, so a row a batch moves isn't built again.
+        let memo = format!("{}-result-{}", self.key, item.id);
+        rune::memo::memo_with_hash(memo, h.finish(), || {
             let pic = thumb.map(|(store, _, key)| store.thumb(key));
             result_row(self, item, active, pic.as_ref(), &state.handler)
         })

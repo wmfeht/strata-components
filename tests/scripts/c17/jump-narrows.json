@@ -12,20 +12,26 @@
   ],
   "expect": [
     {
-      "key": "c17-palette-option-%2Fhome%2Fdemo%2FProjects%2Fstrata",
+      "key": "c17-palette-option-0",
+      "name": "/home/demo/Projects/strata",
       "states": [
         "selected"
       ]
     },
     {
-      "key": "c17-palette-option-%2Fhome%2Fdemo%2FProjects%2Fstrata%2Fsrc"
+      "key": "c17-palette-option-1",
+      "name": "/home/demo/Pictures/Trips"
     },
     {
-      "key": "c17-palette-option-%2Fhome%2Fdemo%2FMusic",
-      "absent": true
+      "key": "c17-palette-option-2",
+      "name": "/home/demo/Projects/strata/src"
     },
     {
-      "key": "c17-palette-option-%2Fhome%2Fdemo%2FDownloads",
+      "key": "c17-palette-option-3",
+      "name": "/home/demo/Projects/strata/docs"
+    },
+    {
+      "key": "c17-palette-option-4",
       "absent": true
     }
   ]

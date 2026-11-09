@@ -269,7 +269,7 @@ mod c17 {
         let mut rt = mount("c17-results-light");
         run(&mut rt, 1.0);
         let second = ids(&rt)[1].clone();
-        let (x, y) = centre(&rt, &option_key(KEY, &second));
+        let (x, y) = centre(&rt, &row_key(&rt, &second));
         rt.pointer_move(x, y);
         rt.button_down(x, y, PointerButton::Middle);
         rt.frame(FRAME);
@@ -322,7 +322,7 @@ mod c17 {
         let mut rt = mount("c17-results-light");
         run(&mut rt, 1.0);
         let third = ids(&rt)[3].clone();
-        let (x, y) = centre(&rt, &option_key(KEY, &third));
+        let (x, y) = centre(&rt, &row_key(&rt, &third));
         rt.pointer_move(x, y);
         run(&mut rt, 0.2);
         assert_eq!(rt.state.c17.palette.highlighted(), Some(0));
@@ -378,7 +378,7 @@ mod c17 {
         let Some(vp) = element(rt, &format!("{KEY}-results")).map(|e| e.rect) else {
             return false;
         };
-        element(rt, &option_key(KEY, id)).is_some_and(|e| {
+        element(rt, &row_key(rt, id)).is_some_and(|e| {
             e.rect[1] >= vp[1] - 0.5 && e.rect[1] + e.rect[3] <= vp[1] + vp[3] + 0.5
         })
     }
@@ -391,9 +391,23 @@ mod c17 {
         (0..n).map(|i| item(&format!("{prefix}{i:02}"))).collect()
     }
 
+    /// The key of result `id`'s row: rows are keyed by place.
+    fn row_key(rt: &Runtime<Gallery>, id: &str) -> String {
+        let items = rt.state.c17.palette.items();
+        let i = items.iter().position(|it| it.id == id);
+        i.map_or_else(|| format!("{KEY}-no-row"), |i| option_key(KEY, i))
+    }
+
     /// A resting palette on a query whose answers the test delivers itself.
     fn synthetic() -> Runtime<Gallery> {
-        let mut rt = resting("c17-closed-light");
+        synthetic_with(true)
+    }
+
+    /// The same, with reduced motion `reduced` (off, a fling decays over frames).
+    fn synthetic_with(reduced: bool) -> Runtime<Gallery> {
+        let mut rt = mount("c17-closed-light");
+        rt.set_system_reduced_motion(reduced);
+        run(&mut rt, 0.5);
         press(&mut rt, Key::Command('k'), ctrl(false));
         rt.update(|g, _| {
             let _ = g.c17.palette.set_query("zz-probe");
@@ -630,5 +644,319 @@ mod c17 {
         press(&mut rt, Key::Command('k'), ctrl(true));
         assert_eq!(rt.state.c17.palette.phase(), Some(Phase::Results));
         assert_eq!(status(&rt), Some("10 results".into()));
+    }
+
+    /// The list's scroll offset, from the first mounted row (rows are one height).
+    fn offset(rt: &Runtime<Gallery>) -> f32 {
+        let vp = element(rt, &format!("{KEY}-results"))
+            .expect("the list")
+            .rect;
+        for (i, it) in rt.state.c17.palette.items().iter().enumerate() {
+            if let Some(e) = element(rt, &row_key(rt, &it.id)) {
+                return vp[1] - e.rect[1] + i as f32 * e.rect[3];
+            }
+        }
+        f32::NAN
+    }
+
+    /// Moves the pointer over the list and draws a frame, ready to wheel or fling there.
+    fn over_list(rt: &mut Runtime<Gallery>) -> (f32, f32) {
+        let r = element(rt, &format!("{KEY}-results"))
+            .expect("the list")
+            .rect;
+        let (x, y) = (r[0] + r[2] / 2.0, r[1] + r[3] / 2.0);
+        rt.pointer_move(x, y);
+        rt.frame(FRAME);
+        (x, y)
+    }
+
+    fn settle(rt: &mut Runtime<Gallery>) {
+        for _ in 0..30 {
+            rt.frame(FRAME);
+        }
+    }
+
+    fn highlighted(rt: &Runtime<Gallery>) -> Option<String> {
+        rt.state
+            .c17
+            .palette
+            .highlighted_item()
+            .map(|i| i.id.clone())
+    }
+
+    // Review round 2, B1 repro 1: a wheel and a same-query batch in one frame. The batch never
+    // undoes the wheel.
+    #[test]
+    fn a_batch_in_a_wheel_s_frame_keeps_the_wheel_s_scroll() {
+        for reduced in [true, false] {
+            let mut rt = synthetic_with(reduced);
+            land(&mut rt, named("b", 60), |_| {});
+            let (x, y) = over_list(&mut rt);
+            rt.wheel(x, y, -200.0);
+            let mut more = named("b", 60);
+            more.push(item("z0"));
+            land(&mut rt, more, |_| {});
+            assert!(
+                (offset(&rt) - 200.0).abs() < 1.0,
+                "reduced motion {reduced}: the batch undid the wheel, offset {}",
+                offset(&rt)
+            );
+        }
+    }
+
+    // Review round 2, B1 repro 2: a batch and a Down in one frame, after wheeling the highlight
+    // off screen: the arrow's reveal wins, in every frame.
+    #[test]
+    fn an_arrow_in_a_batch_s_frame_reveals_its_row() {
+        let mut rt = synthetic();
+        land(&mut rt, named("b", 60), |_| {});
+        let (x, y) = over_list(&mut rt);
+        rt.wheel(x, y, -800.0);
+        settle(&mut rt);
+        let mut more = named("b", 60);
+        more.push(item("zz"));
+        rt.update(move |g, tx| {
+            let generation = g.c17.palette.generation();
+            let _ = g.c17.palette.deliver(Answer::new(generation, more), tx);
+        });
+        rt.key(KeyEvent {
+            key: Key::Down,
+            mods: Mods::default(),
+        });
+        for _ in 0..30 {
+            rt.frame(FRAME);
+            assert_eq!(highlighted(&rt).as_deref(), Some("b01"));
+            assert!(
+                visible(&rt, "b01"),
+                "b01 out of view at offset {}",
+                offset(&rt)
+            );
+        }
+    }
+
+    // Review round 2, B1 repro 3: a new query's answer and a second batch in one poll, after a
+    // wheel: the list goes to the top, its first result shown.
+    #[test]
+    fn a_new_query_s_answers_in_one_poll_scroll_to_the_top() {
+        let mut rt = synthetic();
+        land(&mut rt, named("b", 60), |_| {});
+        let (x, y) = over_list(&mut rt);
+        rt.wheel(x, y, -600.0);
+        settle(&mut rt);
+        rt.update(|g, tx| {
+            let _ = g.c17.palette.set_query("zz-new");
+            g.c17.worker.clear();
+            let generation = g.c17.palette.generation();
+            let _ = g
+                .c17
+                .palette
+                .deliver(Answer::new(generation, named("c", 40)), tx);
+            let _ = g
+                .c17
+                .palette
+                .deliver(Answer::new(generation, named("c", 50)), tx);
+        });
+        for _ in 0..30 {
+            rt.frame(FRAME);
+            assert!(visible(&rt, "c00"), "c00 hidden at offset {}", offset(&rt));
+        }
+        assert!(offset(&rt).abs() < 1.0);
+    }
+
+    // Review round 2, B1: a batch mid-fling neither stops nor moves the fling, before the user
+    // moved the highlight and after (a batch's reveal waits for the list to stop).
+    #[test]
+    fn a_batch_mid_fling_leaves_the_fling_alone() {
+        for moved in [false, true] {
+            let (mid, alone) = fling(false, moved);
+            let (_, batched) = fling(true, moved);
+            assert!(
+                alone > mid + 100.0,
+                "moved {moved}: the fling ran on: {mid} -> {alone}"
+            );
+            assert!(
+                (batched - alone).abs() < 1.0,
+                "moved {moved}: a batch changed the fling: {batched} against {alone}"
+            );
+        }
+    }
+
+    /// A fling over 200 rows, with a batch five frames in if `with_batch`, after a Down if
+    /// `moved`: the offsets five frames in and when it stops.
+    fn fling(with_batch: bool, moved: bool) -> (f32, f32) {
+        {
+            let mut rt = synthetic_with(false);
+            land(&mut rt, named("b", 200), |_| {});
+            if moved {
+                press(&mut rt, Key::Down, Mods::default());
+                settle(&mut rt);
+            }
+            let (x, y) = over_list(&mut rt);
+            rt.fling(x, y, -3000.0);
+            for _ in 0..5 {
+                rt.frame(FRAME);
+            }
+            let mid = offset(&rt);
+            if with_batch {
+                // Rows added above: a moved highlight's row moves, so its reveal is due.
+                let mut more = vec![item("a0")];
+                more.extend(named("b", 200));
+                rt.update(move |g, tx| {
+                    let generation = g.c17.palette.generation();
+                    let _ = g.c17.palette.deliver(Answer::new(generation, more), tx);
+                });
+            }
+            for _ in 0..90 {
+                rt.frame(FRAME);
+            }
+            (mid, offset(&rt))
+        }
+    }
+
+    // Review round 2, SF1: an arrow reveals its row, in every frame (reduced motion: no glide).
+    #[test]
+    fn arrows_keep_the_highlighted_row_in_view() {
+        let mut rt = synthetic();
+        land(&mut rt, named("b", 60), |_| {});
+        for i in 1..=14 {
+            press(&mut rt, Key::Down, Mods::default());
+            let id = format!("b{i:02}");
+            assert!(
+                visible(&rt, &id),
+                "{id} out of view at offset {}",
+                offset(&rt)
+            );
+        }
+    }
+
+    // Review round 2, SF2: before the user moves the highlight, a batch adding rows above keeps
+    // a non-zero offset (Strata's restore_scroll).
+    #[test]
+    fn a_batch_keeps_a_wheeled_offset_until_the_user_moves() {
+        let mut rt = synthetic();
+        land(&mut rt, named("b", 60), |_| {});
+        let (x, y) = over_list(&mut rt);
+        rt.wheel(x, y, -200.0);
+        rt.frame(FRAME);
+        let before = offset(&rt);
+        assert!(
+            (before - 200.0).abs() < 1.0,
+            "the wheel scrolled to {before}"
+        );
+        let mut more = vec![item("a0"), item("a1")];
+        more.extend(named("b", 60));
+        land(&mut rt, more, |rt| {
+            assert!(
+                (offset(rt) - before).abs() < 1.0,
+                "offset {} not kept",
+                offset(rt)
+            );
+        });
+    }
+
+    // Review round 2, SF3 (ruling: follow Strata): after the user moved the highlight, any
+    // changed batch reveals the highlighted row, even one that leaves its index alone.
+    #[test]
+    fn after_moving_any_changed_batch_reveals_the_highlighted_row() {
+        let mut rt = synthetic();
+        land(&mut rt, named("b", 60), |_| {});
+        for _ in 0..3 {
+            press(&mut rt, Key::Down, Mods::default());
+        }
+        let (x, y) = over_list(&mut rt);
+        rt.wheel(x, y, -800.0);
+        settle(&mut rt);
+        assert!(!visible(&rt, "b03"), "wheeled away");
+        let mut more = named("b", 60);
+        more.push(item("zz"));
+        land(&mut rt, more, |_| {});
+        assert!(
+            visible(&rt, "b03"),
+            "b03 out of view at offset {}",
+            offset(&rt)
+        );
+    }
+
+    // Review round 2, SF4 (ruling: follow Strata): after the user moved the highlight, rows a
+    // batch adds above at offset 0 stay visible while the highlighted row would stay in view.
+    #[test]
+    fn after_moving_rows_added_above_show_while_the_highlight_stays_in_view() {
+        let mut rt = synthetic();
+        land(&mut rt, named("b", 30), |_| {});
+        press(&mut rt, Key::Down, Mods::default());
+        settle(&mut rt);
+        let mut more = vec![item("a0"), item("a1")];
+        more.extend(named("b", 30));
+        land(&mut rt, more, |rt| {
+            assert!(visible(rt, "a0"), "a0 hidden at offset {}", offset(rt));
+            assert!(visible(rt, "b01"), "the highlight left the view");
+        });
+    }
+
+    // Review round 2, a nit: while an input method composes, Up and Down are its own; the
+    // highlight stays.
+    #[test]
+    fn arrows_while_composing_leave_the_highlight() {
+        let mut rt = mount("c17-results-light");
+        run(&mut rt, 1.0);
+        rt.ime(Ime::Preedit("ni".into(), None));
+        rt.frame(FRAME);
+        press(&mut rt, Key::Down, Mods::default());
+        assert_eq!(rt.state.c17.palette.highlighted(), Some(0));
+    }
+
+    // Review round 2, B1: after the user moved the highlight, a batch the page's poll delivers
+    // while a wheel's scroll is still landing leaves it alone: the tick sees the list move and
+    // the batch's reveal waits (Strata's interaction_revision). A batch handed over in the
+    // wheel's own frame, before the wheel is applied, still reveals (see the module docs).
+    #[test]
+    fn after_moving_a_batch_during_a_wheel_keeps_the_wheel_s_scroll() {
+        let mut rt = synthetic();
+        land(&mut rt, named("b", 60), |_| {});
+        press(&mut rt, Key::Down, Mods::default());
+        settle(&mut rt);
+        let (x, y) = over_list(&mut rt);
+        rt.wheel(x, y, -400.0);
+        rt.frame(FRAME);
+        let mut more = vec![item("a0")];
+        more.extend(named("b", 60));
+        rt.update(move |g, _| {
+            let generation = g.c17.palette.generation();
+            g.c17
+                .worker
+                .push((g.c17.now, Answer::new(generation, more)));
+        });
+        settle(&mut rt);
+        assert_eq!(rt.state.c17.palette.items()[0].id, "a0", "the batch landed");
+        assert!(
+            (offset(&rt) - 400.0).abs() < 1.0,
+            "the batch undid the wheel: offset {}",
+            offset(&rt)
+        );
+    }
+
+    // Review round 2 (mutant S7): a new query starts unmoved, as Strata's begin_query clears
+    // navigation_started. After arrowing in the old query, the new one's batches keep the
+    // offset, so results added above its first rows show rather than the list chasing its
+    // highlight.
+    #[test]
+    fn a_new_query_starts_unmoved_after_arrowing_in_the_old_one() {
+        let mut rt = synthetic();
+        land(&mut rt, named("b", 30), |_| {});
+        for _ in 0..3 {
+            press(&mut rt, Key::Down, Mods::default());
+        }
+        rt.update(|g, _| {
+            let _ = g.c17.palette.set_query("zz-other");
+            g.c17.worker.clear();
+        });
+        rt.frame(FRAME);
+        land(&mut rt, named("c", 30), |_| {});
+        let mut more = named("a", 12);
+        more.extend(named("c", 30));
+        land(&mut rt, more, |rt| {
+            assert!(visible(rt, "a00"), "a00 hidden at offset {}", offset(rt));
+        });
+        assert_eq!(highlighted(&rt).as_deref(), Some("c00"));
     }
 }

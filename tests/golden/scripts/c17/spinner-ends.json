@@ -19,7 +19,7 @@
                             "replace-selected-text",
                             "set-text-selection"
                           ],
-                          "activeDescendant": "c17-palette-option-%2Fhome%2Fdemo%2FDocuments%2Fnotes.md",
+                          "activeDescendant": "c17-palette-option-1",
                           "description": "Search locations:\n/home/demo\n/run/media/demo/USB\nRemote shares are not included.",
                           "key": "c17-palette-field",
                           "name": "Search files and folders…",
@@ -62,7 +62,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FDocuments%2FNotes",
+                              "key": "c17-palette-option-0",
                               "name": "/home/demo/Documents/Notes",
                               "position": 1,
                               "role": "list-box-option"
@@ -73,7 +73,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FDocuments%2Fnotes.md",
+                              "key": "c17-palette-option-1",
                               "name": "/home/demo/Documents/notes.md",
                               "position": 2,
                               "role": "list-box-option",
@@ -87,7 +87,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FProjects%2Frune%2Fnotes.txt",
+                              "key": "c17-palette-option-2",
                               "name": "/home/demo/Projects/rune/notes.txt",
                               "position": 3,
                               "role": "list-box-option"
@@ -98,7 +98,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FDocuments%2FReports%2Freport-notes.md",
+                              "key": "c17-palette-option-3",
                               "name": "/home/demo/Documents/Reports/report-notes.md",
                               "position": 4,
                               "role": "list-box-option"
@@ -109,7 +109,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FDownloads%2Fnotes-export.zip",
+                              "key": "c17-palette-option-4",
                               "name": "/home/demo/Downloads/notes-export.zip",
                               "position": 5,
                               "role": "list-box-option"
@@ -120,7 +120,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FProjects%2Fstrata%2Fnotes-for-release.md",
+                              "key": "c17-palette-option-5",
                               "name": "/home/demo/Projects/strata/notes-for-release.md",
                               "position": 6,
                               "role": "list-box-option"
@@ -131,7 +131,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FDocuments%2FNotes%2Fmeeting-notes.md",
+                              "key": "c17-palette-option-6",
                               "name": "/home/demo/Documents/Notes/meeting-notes.md",
                               "position": 7,
                               "role": "list-box-option"
@@ -142,7 +142,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FDocuments%2FArchive%2F2019%2Ftax-returns-and-supporting-documents-for-the-household%2Fscanned-originals-from-the-accountant%2Freceipt-bundle-final-version-two-signed-and-countersigned-by-everyone-involved.pdf",
+                              "key": "c17-palette-option-7",
                               "name": "/home/demo/Documents/Archive/2019/tax-returns-and-supporting-documents-for-the-household/scanned-originals-from-the-accountant/receipt-bundle-final-version-two-signed-and-countersigned-by-everyone-involved.pdf",
                               "position": 8,
                               "role": "list-box-option"
@@ -153,7 +153,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FDocuments%2FNotes%2Fideas.md",
+                              "key": "c17-palette-option-8",
                               "name": "/home/demo/Documents/Notes/ideas.md",
                               "position": 9,
                               "role": "list-box-option"
@@ -164,7 +164,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FDocuments%2FNotes%2Ftodo.txt",
+                              "key": "c17-palette-option-9",
                               "name": "/home/demo/Documents/Notes/todo.txt",
                               "position": 10,
                               "role": "list-box-option"
@@ -175,7 +175,7 @@
                                 "context-menu",
                                 "scroll-into-view"
                               ],
-                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FDocuments%2FArchive%2F2019%2Ftax-returns-and-supporting-documents-for-the-household%2Fscanned-originals-from-the-accountant",
+                              "key": "c17-palette-option-10",
                               "name": "/home/demo/Documents/Archive/2019/tax-returns-and-supporting-documents-for-the-household/scanned-originals-from-the-accountant",
                               "position": 11,
                               "role": "list-box-option"

@@ -190,15 +190,14 @@ impl FilterState {
     }
 
     /// Opens the bar on `text` with the keyboard in it, the caret after it: a printable key
-    /// typed in the listing with Type to search on. Already open, `text` goes after the query
-    /// (keys typed in the frame before the field takes the keyboard). `before` is the listing's
-    /// selection now (`Selection::position`), which closing the filter gives back. Asks for the
-    /// query.
+    /// typed in the listing with Type to search on. Already open (the key came from a result),
+    /// `text` replaces the query, as Strata's `show_filter_with_query` does. `before` is the
+    /// listing's selection now (`Selection::position`), which closing the filter gives back.
+    /// Asks for the query.
     pub fn open_with(&mut self, text: &str, before: Position) -> Polled {
         let mut out = self.open();
-        let typed = format!("{}{text}", self.edit.text);
-        self.edit = TextEdit::new(typed.as_str());
-        self.edit.set_caret(typed.len());
+        self.edit = TextEdit::new(text);
+        self.edit.set_caret(text.len());
         self.edit.focused = true;
         out.merge(self.text_changed(|| before));
         out

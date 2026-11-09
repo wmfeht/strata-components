@@ -80,9 +80,7 @@ impl Tracker {
     /// What Enter opens: the top result while it is offered, else the first selected result
     /// in display order.
     pub fn target(&self, r: Results<'_>, tenxer: bool) -> Option<EntryId> {
-        if self.query.is_none() {
-            return None;
-        }
+        self.query.as_ref()?;
         let rows = !r.source.is_empty();
         if self.offers_top(rows, !r.selection.is_empty(), tenxer) {
             return Some(r.source.id_at(0));

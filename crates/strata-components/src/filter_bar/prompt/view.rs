@@ -318,7 +318,7 @@ impl<S: 'static, K: Copy + PartialEq + std::fmt::Debug + 'static> FooterPrompt<S
             .key(format!("{}-legend", self.key))
             .w_full()
             .px(look.space.sm)
-            .pt(look.space.xs)
+            .py(look.space.xs)
             .gap(look.space.md)
             .items_center()
             .a11y_hidden();

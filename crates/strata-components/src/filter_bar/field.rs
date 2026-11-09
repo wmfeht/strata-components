@@ -61,7 +61,8 @@ pub(super) fn input<S: 'static>(
     h: &Handlers<S>,
 ) -> El {
     let k = &look.kit;
-    let ink = if spec.invalid {
+    // A refused text turns red only where the theme says so, as rune-kit's fields do.
+    let ink = if spec.invalid && k.invalid_text {
         k.c.danger.fg
     } else {
         k.c.text_base

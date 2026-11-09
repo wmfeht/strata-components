@@ -40,10 +40,15 @@ impl Flash {
         self.shown.as_ref().map(|(t, _)| t.as_str())
     }
 
-    /// Shows `words` for [`FLASH_FOR`] from the next tick. Empty words clear it.
-    pub fn show(&mut self, words: impl Into<String>) {
+    /// Shows `words` for [`FLASH_FOR`] from the next tick, and asks for a wake on `tx` so that
+    /// tick comes in a window at rest too: a key handler has no clock, and without a wake no
+    /// poll would follow it to stamp the time. Empty words clear it.
+    pub fn show(&mut self, words: impl Into<String>, tx: &mut Tx) {
         let words = words.into();
         self.shown = (!words.is_empty()).then_some((words, Since::Pending));
+        if self.shown.is_some() {
+            tx.wake_after(Duration::ZERO);
+        }
     }
 
     /// Clears it at once.

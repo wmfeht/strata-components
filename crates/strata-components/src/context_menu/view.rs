@@ -61,6 +61,8 @@ struct Row {
     key: String,
     path: Vec<usize>,
     submenu: bool,
+    /// Its submenu has a sensitive row for the keyboard to move to.
+    enterable: bool,
 }
 
 impl<S: 'static> Render<'_, S> {
@@ -205,10 +207,15 @@ impl<S: 'static> Render<'_, S> {
                         mi = mi.on_select_tx(move |s: &mut S, tx: &mut Tx| select(s, &at, tx));
                     }
                 }
+                let enterable = item
+                    .submenu
+                    .as_deref()
+                    .is_some_and(|sub| super::model::items(sub).any(|i| i.enabled));
                 rows.push(Row {
                     key,
                     path: here,
                     submenu: item.submenu.is_some(),
+                    enterable,
                 });
                 out.push(MenuEntry::item(mi));
                 n += 1;
@@ -223,6 +230,8 @@ impl<S: 'static> Render<'_, S> {
         let kit = &look.kit;
         let mut e = surface
             .radius(look.round(RADIUS))
+            // rune-kit's floating elevation already rings the surface in `border_base`, which
+            // is the edge that shows; this lies under it, for a kit whose elevation has none.
             .border(1.0, kit.c.border_base);
         if look.glow.on {
             e = e.shadow(
@@ -250,7 +259,6 @@ impl<S: 'static> Render<'_, S> {
             open: self.on_submenu.clone(),
             entering: self.entering.clone(),
             close_to: self.close_to.clone(),
-            dismiss: self.on_dismiss.clone(),
         };
         e.on_key(move |s: &mut S, ev: &KeyEvent, tx: &mut Tx| {
             menu_key(s, ev, tx, depth, &rows, &hands)
@@ -263,16 +271,19 @@ struct Hands<S> {
     open: Submenu<S>,
     entering: Entering<S>,
     close_to: CloseTo<S>,
-    dismiss: Dismiss<S>,
 }
 
-/// The surface `depth` levels in heard `ev`: Right, Enter and Space on a submenu's row open
-/// it and send a Tab, which Rune's focus moves into it, the next focus group in the menu's
-/// modal (a submenu of its own modal would move the keyboard too, but then swallows a press
-/// outside it, so a click on the parent's rows would run nothing); Left in a submenu closes it; Escape in a submenu closes the
-/// whole menu (the top level's Escape is its modal's); Tab and Shift+Tab move as Down and Up
-/// do, wrapping, as GTK's menus move (Rune's Tab leaves a focus group whole); Ctrl+A stays in
-/// the menu.
+/// The surface `depth` levels in heard `ev`:
+///
+/// - Right, Enter and Space on a submenu's row open it and send a Tab, which Rune's focus moves
+///   into it, the next focus group in the menu's modal. (A submenu of its own modal would move
+///   the keyboard too, but swallows a press outside it, so a click on the parent's rows would
+///   run nothing.) A submenu with no sensitive row opens with the keyboard left on its row.
+/// - Left in a submenu closes it. Escape anywhere is the top menu's modal's: it closes the
+///   whole menu.
+/// - Tab and Shift+Tab move as Down and Up do, wrapping, as GTK's menus move (Rune's Tab
+///   leaves a focus group whole).
+/// - Ctrl+A stays in the menu.
 fn menu_key<S>(
     s: &mut S,
     ev: &KeyEvent,
@@ -308,14 +319,21 @@ fn menu_key<S>(
             (hands.close_to)(s, depth - 1);
             return true;
         }
-        Key::Escape if depth > 0 => {
-            (hands.dismiss)(s);
-            return true;
-        }
+        // Escape in a submenu needs no arm: the top menu's modal takes it and closes the
+        // whole menu.
         _ => return false,
     }
+    // A surface hears only its own rows' keys: a submenu is the layer's, not a child of its
+    // parent's surface.
     match focused {
-        Some(row) if row.submenu && row.path.len() == depth + 1 => {
+        // A submenu with no sensitive row opens, so its rows show, but the keyboard stays on
+        // its row: the Tab would find no row there and leave the menu, for the top level's
+        // first row (Rune's `tab_order` takes the next group's selected or first member).
+        Some(row) if row.submenu && !row.enterable => {
+            (hands.open)(s, row.path.clone(), false);
+            true
+        }
+        Some(row) if row.submenu => {
             if (hands.open)(s, row.path.clone(), true) {
                 tx.send_key(KeyEvent {
                     key: Key::Tab,

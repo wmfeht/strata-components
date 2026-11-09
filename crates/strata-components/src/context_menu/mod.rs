@@ -80,7 +80,10 @@
 //!   menu's modal); its `focus_return` brings the keyboard back to its row as it closes. So
 //!   the parent's rows stay clickable, and a press outside both closes the whole menu. (A
 //!   submenu of its own modal would take the keyboard as well, but swallows a press outside
-//!   it: a click on the parent's Copy would run nothing.)
+//!   it: a click on the parent's Copy would run nothing.) A submenu with no sensitive row
+//!   opens too, so its greyed rows show, but the keyboard stays on its row: it has nowhere to
+//!   go there, and the Tab would leave the menu (Rune's `tab_order` takes the next group's
+//!   selected or first member, and a group of insensitive rows has none).
 //! - Tab and Shift+Tab move as Down and Up, as GTK's menus do (Rune's Tab leaves a focus group).
 //! - Ctrl+A stays in the menu, so the window's Select All doesn't run under it.
 //!
@@ -90,9 +93,11 @@
 //!
 //! # Look
 //!
-//! rune-kit's compact menu, with Strata's corners (9 pt, at the look's roundness), a 1 pt
-//! `border_base` border and, with the element glow on, the look's glow. rune-kit's floating
-//! elevation stays under it: an El's shadows can't be cleared. Field menus are the same
+//! rune-kit's compact menu, with Strata's corners (9 pt, at the look's roundness) and, with the
+//! element glow on, the look's glow. The 1 pt edge that shows is rune-kit's floating
+//! elevation's ring, in `border_base`; C21's own 1 pt `border_base` border lies under it and
+//! adds nothing visible. The elevation's shadow stays under the glow: an El's shadows can't be
+//! cleared. Field menus are the same
 //! surface. Rows hover and highlight in `kit.c.hover`, as `Kit::interactive` paints.
 //!
 //! # Coverage
@@ -112,16 +117,16 @@
 //! | With nothing selected, Menu or Shift+F10 opens the active pane's background menu | script `background`; unit `the_keyboard_anchor_…` |
 //! | A keyboard-opened item menu anchors to the entry… right edge… center in List | unit `the_keyboard_anchor_…`, `a_cursor_out_of_view_…`; test `the_menu_key_reveals_…`; golden `c21-keyboard-anchor` |
 //! | While a text input has focus, Menu and Shift+F10 open the input's text-editing menu… | script `field-keys`; unit `menu_and_shift_f10_in_a_focused_field_…`, `chords_in_a_field_…` (Rune's chords: Shift+Menu opens it, Super+Menu doesn't). Partial: core text fields only (U-C21-2) |
-//! | With a menu open, a secondary click on another entry… opens that entry's menu in one click | **Partial**: the click closes the menu only. A press on the menu's scrim reaches nothing under it (U-C21-6), and reopening at the entry needs a C1e seam (`secondary_press_at`, a follow-up) |
+//! | With a menu open, a secondary click on another entry… opens that entry's menu in one click | **Not met**: the click does nothing; the menu stays open on its old target (unit `a_right_click_outside_an_open_menu_…`). The menu's scrim takes no secondary press and nothing under it hears one (U-C21-6); reopening at the entry would also need a C1e seam (`secondary_press_at`, a follow-up) |
 //! | A button release that reaches a menu… before any press inside it is ignored | script `release-without-press` (on the menu and on a submenu's row); unit `a_release_without_a_press_…` |
-//! | Pressing the secondary button, moving onto a menu row, and releasing does not run the row… | the same |
+//! | Pressing the secondary button, moving onto a menu row, and releasing does not run the row… | the same: the secondary press lands outside the open menu (where it does nothing, as above), moves onto a row and is released there; the row doesn't run |
 //! | After that, a full click on a menu row runs it | the same |
 //! | A menu opens with keyboard focus on its first visible action… | script `first-focus`; unit `the_menu_opens_with_the_keyboard_…`; test `a_right_click_menu_has_the_keyboard_…`. **Partial**: after a pointer input the first arrow shows the highlight before moving (deviation); focus stays while Open With… is replaced in place (unit `a_model_update_that_replaces_…`), but a row added above the focused one moves it (U-C21-5) |
 //! | Up and Down move between enabled actions, skipping separators and wrapping…; Home and End… | script `menu-keys`; unit `up_and_down_skip_…` |
 //! | Enter or Space activates the focused action and closes the menu | scripts `menu-keys`, `space-activates`; unit `enter_and_space_…` |
 //! | Escape closes the menu, keeps the selection, and returns focus… | script `escape`; unit `escape_closes_the_menu_…` |
 //! | Ctrl+A while a menu is open leaves the menu open | script `ctrl-a`; unit `ctrl_a_leaves_the_menu_open` (a window Ctrl+A binding under the menu doesn't run) |
-//! | On a submenu row…, Right, Space, or Enter opens the submenu with its first action focused | script `submenu-keys`; unit `right_opens_a_submenu_…`, `with_a_keyboard_opened_submenu_…` (the parent's rows still click; a press outside both closes the menu) |
+//! | On a submenu row…, Right, Space, or Enter opens the submenu with its first action focused | script `submenu-keys`; unit `right_opens_a_submenu_…`, `with_a_keyboard_opened_submenu_…` (the parent's rows still click; a press outside both closes the menu), `right_on_a_nested_submenu_…`, `right_on_a_submenu_with_no_sensitive_row_…`, `tab_inside_a_keyboard_opened_submenu_…` |
 //! | Left in a submenu closes only the submenu and refocuses its row… | script `submenu-left`; unit `right_opens_a_submenu_…` |
 //! | In the file chooser's menus, Up, Down, Tab, and Shift+Tab move… and wrap | script `chooser-tab` (every menu moves so) |
 //! | Actions hidden for the current target leave no empty group or doubled separator | unit `an_empty_section_draws_no_separator_or_label` |
@@ -137,7 +142,7 @@
 //! | A menu's height is capped at the monitor height less 16 px… | **Partial**: the window's height less 16 pt (U14) |
 //! | That menu extends past the window when needed and stays fully on screen | **Not met**: menus stay in the window (U14) |
 //! | A keyboard-opened background menu is not held inside the window… | **Not met** (U14) |
-//! | Menu rows are frameless on the theme surface, framed by a 1 px border, 9 px corners, and an accent glow… | goldens. **Partial**: rune-kit's elevation shadow stays under the glow |
+//! | Menu rows are frameless on the theme surface, framed by a 1 px border, 9 px corners, and an accent glow… | goldens (the 1 px edge is rune-kit's elevation ring; C21's border under it changes nothing visible). **Partial**: rune-kit's elevation shadow stays under the glow |
 //! | Right-click menus in text inputs use the same surface… as file menus… | script `field-edit`; goldens `c21-field`, `c21-field-empty`; unit `a_right_click_on_a_field_…` |
 //! | Text-input menu styling covers the filter and search fields, location entry, inline rename… | script `field-stand-in` (C5's intent's shape). **Partial**: rune-kit's text inputs get none until U-C21-2 (C6's entry, C17, C18, C20); text previews are selectable text, whose menu is Rune's (macOS only) |
 //!
@@ -170,6 +175,10 @@
 //!   on the first row when that key is now a separator or a label. Replacing a row in place
 //!   keeps it ([`ContextMenuState::update_model`]). Strata's multi-selection Open, added above
 //!   Open With… once the lookup ends, moves it: reserve its row (insensitive) until then.
+//! - A text field's menu chords are Rune's (`context_menu_key`), not the collection's: Menu
+//!   opens the field menu plain or with Shift, and not with Super (Hyper, Meta), where a
+//!   collection's Menu opens with Super and not with Shift.
+//! - A submenu with no sensitive row opens from the keys with the keyboard left on its row.
 //! - After a pointer input, the menu's first row has the keyboard but no visible highlight:
 //!   the first arrow shows it there, and only the next moves (rune-kit's NSMenu model; Rune
 //!   decides it from whether the last input was a key). GTK moves on the first arrow.
@@ -202,9 +211,10 @@
 //!   focused one moves the keyboard. Ask: `MenuItem::key`. Its menu-name half is U-C6-8 (extend
 //!   it; C21 names the surface it finds in the layer).
 //! - **U-C21-6 (draft, not filed)** A secondary press on an open menu's outside scrim reaches
-//!   nothing: `secondary_target` asks only the topmost hit and its ancestors, so the entry
-//!   under the scrim can't open its menu in the same click. Ask: let the scrim pass a secondary
-//!   press through, or dismiss and replay it.
+//!   nothing: `secondary_target` asks only the topmost hit and its ancestors, and the scrim
+//!   has no `on_secondary_press`. So it doesn't even dismiss the menu, which stays open on its
+//!   old target, and the entry under the scrim can't open its menu in the same click. Ask: let
+//!   the scrim pass a secondary press through, or dismiss and replay it.
 //! - **U14** (S5, not filed): popup surfaces for menus. Cited for the placement bullets.
 //! - rune-kit's layer order. C21 finds the surfaces it adjusts by the order `Menu::build` pushes
 //!   them (`[scrim, point, surface, submenus…]`), since an El's key can't be read once built;

@@ -101,7 +101,8 @@ pub struct Item {
     pub danger: bool,
     /// False draws the row insensitive: it takes no focus and no press.
     pub enabled: bool,
-    /// A check item, showing the check when `Some(true)`.
+    /// A check item, showing the check when `Some(true)`. A checked row takes the menu's
+    /// first focus (rune-kit's `focus_selected`), as a popup opens on its current choice.
     pub checked: Option<bool>,
     /// A submenu: its sections open beside the row.
     pub submenu: Option<Vec<Section>>,
@@ -165,7 +166,8 @@ impl Item {
         self
     }
 
-    /// A check item, checked when `on`.
+    /// A check item, checked when `on`. A checked row takes the menu's first focus
+    /// (rune-kit's `focus_selected`).
     pub fn checked(mut self, on: bool) -> Self {
         self.checked = Some(on);
         self

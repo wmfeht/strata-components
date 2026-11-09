@@ -28,6 +28,10 @@ struct Host {
     gone: bool,
     /// The window's Ctrl+A ran: the view's Select All, as Strata binds it.
     selected_all: bool,
+    /// The field menu is for read-only fields.
+    read_only: bool,
+    /// The field menu pastes through the host's own paste: what it got.
+    own_paste: Option<Vec<String>>,
 }
 
 impl Host {
@@ -45,6 +49,8 @@ impl Host {
             undo: false,
             gone: false,
             selected_all: false,
+            read_only: false,
+            own_paste: None,
         }
     }
 }
@@ -79,7 +85,7 @@ fn edit(s: &Host, f: u8) -> Option<&TextEdit> {
 }
 
 fn fields(s: &Host) -> FieldMenu<Host, u8> {
-    FieldMenu::new(
+    let mut m = FieldMenu::new(
         "f",
         |s: &Host| &s.fields,
         |s: &mut Host| &mut s.fields,
@@ -88,7 +94,16 @@ fn fields(s: &Host) -> FieldMenu<Host, u8> {
     )
     .undo(s.undo)
     .on_change(|s: &mut Host, _, _| s.changed += 1)
-    .on_close(|s: &mut Host, _| s.closed += 1)
+    .on_close(|s: &mut Host, _| s.closed += 1);
+    if s.read_only {
+        m = m.read_only();
+    }
+    if s.own_paste.is_some() {
+        m = m.on_paste(|s: &mut Host, _, text: &str, _| {
+            s.own_paste.get_or_insert_default().push(text.to_owned())
+        });
+    }
+    m
 }
 
 fn view(s: &Host, _: &mut Cx<Host>) -> El {
@@ -1125,4 +1140,268 @@ fn a_model_update_that_replaces_a_row_in_place_keeps_the_keyboard_on_its_action(
         live(&rt, "m-item4").unwrap().focusable,
         "Open With… is sensitive now"
     );
+}
+
+// --- Review round 2 ---
+
+/// Open, Send to ▸ (Desktop, More ▸ (X, Y), Mail), Copy: a submenu two levels in, its rows
+/// sensitive when `enabled`.
+///
+/// | key | row |
+/// | --- | --- |
+/// | m-item0 | Open |
+/// | m-item1 | Send to (m-item1-sub-item0 Desktop, -item1 More, -item2 Mail) |
+/// | m-item1-sub-item1-sub-item0, -item1 | X, Y |
+/// | m-item2 | Copy |
+fn nested(enabled: bool) -> MenuModel {
+    MenuModel::new().section(Section::new([
+        Item::new("open", "Open"),
+        Item::submenu(
+            "send",
+            "Send to",
+            [Section::new([
+                Item::new("desktop", "Desktop"),
+                Item::submenu(
+                    "more",
+                    "More",
+                    [Section::new([
+                        Item::new("x", "X").enabled(enabled),
+                        Item::new("y", "Y").enabled(enabled),
+                    ])],
+                ),
+                Item::new("mail", "Mail"),
+            ])],
+        ),
+        Item::new("copy", "Copy"),
+    ]))
+}
+
+fn opened_with(m: MenuModel) -> Runtime<Host> {
+    let mut rt = runtime();
+    key(&mut rt, Key::Tab);
+    rt.update(|s, _| {
+        s.menu.open(
+            MenuTarget::Entry(EntryId::new(4)),
+            Point::new(60.0, 40.0),
+            m,
+        )
+    });
+    step(&mut rt);
+    rt
+}
+
+#[test]
+fn right_on_a_submenu_with_no_sensitive_row_opens_it_and_keeps_the_keyboard_on_its_row() {
+    // SF-B: the Tab that moves the keyboard into a submenu would find no row there, and Rune's
+    // Tab would leave the menu's chain for the top level's first row.
+    let mut rt = opened_with(nested(false));
+    key(&mut rt, Key::Down);
+    key(&mut rt, Key::Right);
+    key(&mut rt, Key::Down);
+    assert_eq!(
+        focused(&rt).as_deref(),
+        Some("m-item1-sub-item1"),
+        "on More"
+    );
+    key(&mut rt, Key::Right);
+    assert_eq!(
+        rt.state.menu.submenu(),
+        [1, 1],
+        "More's rows show, insensitive"
+    );
+    assert_eq!(
+        focused(&rt).as_deref(),
+        Some("m-item1-sub-item1"),
+        "the keyboard stays on More"
+    );
+    key(&mut rt, Key::Down);
+    assert_eq!(
+        focused(&rt).as_deref(),
+        Some("m-item1-sub-item2"),
+        "and moves on to Mail"
+    );
+}
+
+#[test]
+fn right_on_a_nested_submenu_with_sensitive_rows_moves_into_it() {
+    let mut rt = opened_with(nested(true));
+    key(&mut rt, Key::Down);
+    key(&mut rt, Key::Right);
+    key(&mut rt, Key::Down);
+    key(&mut rt, Key::Right);
+    assert_eq!(focused(&rt).as_deref(), Some("m-item1-sub-item1-sub-item0"));
+    key(&mut rt, Key::Left);
+    assert_eq!(focused(&rt).as_deref(), Some("m-item1-sub-item1"));
+    assert_eq!(rt.state.menu.submenu(), [1]);
+}
+
+#[test]
+fn tab_inside_a_keyboard_opened_submenu_moves_as_down() {
+    // The Tab the keys sent to enter the submenu is Rune's; the next is the menu's Down again.
+    let mut rt = opened_with(nested(true));
+    key(&mut rt, Key::Down);
+    key(&mut rt, Key::Right);
+    assert_eq!(focused(&rt).as_deref(), Some("m-item1-sub-item0"));
+    key(&mut rt, Key::Tab);
+    assert_eq!(focused(&rt).as_deref(), Some("m-item1-sub-item1"));
+    key(&mut rt, Key::Tab);
+    assert_eq!(focused(&rt).as_deref(), Some("m-item1-sub-item2"));
+}
+
+#[test]
+fn ctrl_tab_and_modified_arrows_leave_the_menu_alone() {
+    let ctrl = Mods {
+        ctrl: true,
+        cmd: true,
+        ..Mods::default()
+    };
+    let shift = Mods {
+        shift: true,
+        ..Mods::default()
+    };
+    let mut rt = opened_with(nested(true));
+    press(&mut rt, Key::Tab, ctrl);
+    assert_eq!(
+        focused(&rt).as_deref(),
+        Some("m-item0"),
+        "Ctrl+Tab isn't a Down"
+    );
+    key(&mut rt, Key::Down);
+    press(&mut rt, Key::Right, shift);
+    press(&mut rt, Key::Enter, ctrl);
+    assert!(
+        rt.state.menu.submenu().is_empty(),
+        "Shift+Right and Ctrl+Enter open nothing"
+    );
+    assert_eq!(focused(&rt).as_deref(), Some("m-item1"));
+}
+
+#[test]
+fn the_chooser_minimum_counts_a_submenu_two_levels_in() {
+    // More's rows are far wider than Send to's, so the window must fit Send to beside it.
+    let model = MenuModel::new().section(Section::new([
+        Item::new("open", "Open the selected file and more"),
+        Item::submenu(
+            "send",
+            "Send to",
+            [Section::new([
+                Item::new("d", "Desktop"),
+                Item::submenu(
+                    "more",
+                    "More",
+                    [Section::new([
+                        Item::new("x", "A compressed archive in the same folder as the file"),
+                        Item::new("y", "Y").description("Pair a device first"),
+                        Item::new("z", "Z"),
+                        Item::new("w", "W"),
+                    ])],
+                ),
+            ])],
+        ),
+    ]));
+    let mut rt = runtime();
+    rt.update(|s, _| {
+        s.menu.open(
+            MenuTarget::Background,
+            Point::new(10.0, 10.0),
+            model.clone(),
+        );
+        s.menu.open_submenu(&[1, 1]);
+    });
+    step(&mut rt);
+    let w = |k: &str| live(&rt, k).unwrap_or_else(|| panic!("no {k}")).rect;
+    let (top, sub, sub2) = (
+        w("m-menu"),
+        w("m-item1-sub-menu"),
+        w("m-item1-sub-item1-sub-menu"),
+    );
+    assert!(
+        top[2] > sub[2] + 20.0 && sub2[2] > top[2],
+        "{top:?} {sub:?} {sub2:?}"
+    );
+    let m = chooser_minimum(&[model], &rt.state.look);
+    assert_eq!(m.width, sub[2] + 2.0 * sub2[2] + 16.0);
+    assert_eq!(m.height, sub2[3] + 16.0, "the deeper submenu is the taller");
+}
+
+#[test]
+fn a_hosts_own_paste_gets_the_text_instead_of_the_field() {
+    let (mut rt, _) = with_clipboard(Some("pasted"));
+    rt.update(|s, _| s.own_paste = Some(Vec::new()));
+    step(&mut rt);
+    secondary(&mut rt, "field");
+    tap(&mut rt, "f-item2");
+    step(&mut rt);
+    assert_eq!(
+        rt.state.own_paste.as_deref(),
+        Some(&["pasted".to_owned()][..])
+    );
+    assert_eq!(
+        rt.state.edit.text, "hello world",
+        "the field itself is untouched"
+    );
+    assert_eq!(rt.state.changed, 0, "on_change is the host's to call");
+}
+
+#[test]
+fn a_read_only_fields_menu_only_copies_and_selects() {
+    let (mut rt, _) = with_clipboard(Some("x"));
+    rt.update(|s, _| {
+        s.read_only = true;
+        s.edit.set_selection(0, 5);
+    });
+    step(&mut rt);
+    secondary(&mut rt, "field");
+    assert_eq!(
+        enabled(&rt),
+        names(&[
+            ("Cut", false),
+            ("Copy", true),
+            ("Paste", false),
+            ("Delete", false),
+            ("Select All", true),
+        ])
+    );
+}
+
+#[test]
+fn a_clipboard_read_for_an_earlier_menu_is_dropped() {
+    // The first menu's read is out when a second menu opens (the host opened it without a
+    // read, as a scene does): the empty answer is the first menu's, not this one's.
+    let (mut rt, _) = with_clipboard(None);
+    rt.update(|s, tx| {
+        fields(s).open(s, 0, Point::new(10.0, 10.0), tx);
+        s.fields.open(1, Point::new(10.0, 40.0));
+    });
+    step(&mut rt);
+    assert_eq!(rt.state.fields.field(), Some(1));
+    assert_eq!(rt.state.fields.clipboard(), Clipboard::Unknown);
+}
+
+#[test]
+fn a_right_click_outside_an_open_menu_leaves_it_open_on_its_target() {
+    // Bullet 184 is not met: the scrim takes no secondary press (U-C21-6), so the menu
+    // neither retargets nor closes.
+    let mut rt = opened();
+    rt.secondary_down(W - 10.0, H - 10.0);
+    step(&mut rt);
+    rt.secondary_up(W - 10.0, H - 10.0);
+    step(&mut rt);
+    assert!(rt.state.menu.is_open());
+    assert_eq!(
+        rt.state.menu.target(),
+        Some(&MenuTarget::Entry(EntryId::new(4)))
+    );
+    assert_eq!(rt.state.dismissed, 0);
+}
+
+#[test]
+fn a_checked_row_takes_the_menus_first_focus() {
+    let m = MenuModel::new().section(Section::new([
+        Item::new("a", "Name").checked(false),
+        Item::new("b", "Size").checked(true),
+        Item::new("c", "Date").checked(false),
+    ]));
+    let rt = opened_with(m);
+    assert_eq!(focused(&rt).as_deref(), Some("m-item1"));
 }

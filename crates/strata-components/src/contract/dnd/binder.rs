@@ -188,6 +188,7 @@ impl<S: 'static> Dnd<S> {
 
     /// `el`, keyed `key`, as a drop target for `zone`. Pass the key the element has (it is set
     /// again, so the two can't differ), unique in the window or inside its scope.
+    #[cfg_attr(debug_assertions, track_caller)]
     pub fn drop_zone_keyed(&self, el: El, key: impl Into<ElementKey>, zone: DropZone<S>) -> El {
         let key = key.into();
         let el = el.key(key.key());
@@ -196,6 +197,7 @@ impl<S: 'static> Dnd<S> {
 
     /// `el`, keyed `key`, as a drag source for `source`. Pass the key the element has (it is
     /// set again, so the two can't differ), unique in the window or inside its scope.
+    #[cfg_attr(debug_assertions, track_caller)]
     pub fn drag_source_keyed(
         &self,
         el: El,

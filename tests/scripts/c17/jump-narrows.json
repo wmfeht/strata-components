@@ -1,0 +1,32 @@
+{
+  "bullets": [
+    "browser/navigation/folder-jump: Typing narrows the list to visited folders whose name or path fuzzily matches the text."
+  ],
+  "scene": "c17-jump-light",
+  "events": [
+    {
+      "t": 0.2,
+      "type": "type",
+      "text": "str"
+    }
+  ],
+  "expect": [
+    {
+      "key": "c17-palette-option-%2Fhome%2Fdemo%2FProjects%2Fstrata",
+      "states": [
+        "selected"
+      ]
+    },
+    {
+      "key": "c17-palette-option-%2Fhome%2Fdemo%2FProjects%2Fstrata%2Fsrc"
+    },
+    {
+      "key": "c17-palette-option-%2Fhome%2Fdemo%2FMusic",
+      "absent": true
+    },
+    {
+      "key": "c17-palette-option-%2Fhome%2Fdemo%2FDownloads",
+      "absent": true
+    }
+  ]
+}

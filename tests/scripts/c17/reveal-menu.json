@@ -1,0 +1,32 @@
+{
+  "bullets": [
+    "browser/search: Alt+Enter, or right-click"
+  ],
+  "scene": "c17-results-light",
+  "events": [
+    {
+      "t": 0.3,
+      "type": "secondary-click",
+      "key": "c17-palette-option-%2Fhome%2Fdemo%2FDocuments%2FReports%2Freport-notes.md"
+    },
+    {
+      "t": 0.6,
+      "type": "tap",
+      "key": "c17-menu-reveal"
+    }
+  ],
+  "expect": [
+    {
+      "key": "c17-log",
+      "name": "Revealed /home/demo/Documents/Reports/report-notes.md in its folder"
+    },
+    {
+      "key": "c17-palette-dialog",
+      "absent": true
+    },
+    {
+      "key": "c17-menu",
+      "absent": true
+    }
+  ]
+}

@@ -1,0 +1,245 @@
+{
+  "children": [
+    {
+      "children": [
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [
+                        {
+                          "actions": [
+                            "click",
+                            "focus",
+                            "context-menu",
+                            "set-value",
+                            "replace-selected-text",
+                            "set-text-selection"
+                          ],
+                          "activeDescendant": "c17-palette-option-%2Fhome%2Fdemo%2FDocuments%2Fnotes.md",
+                          "description": "Search locations:\n/home/demo\n/run/media/demo/USB\nRemote shares are not included.",
+                          "key": "c17-palette-field",
+                          "name": "Search files and folders…",
+                          "placeholder": "Search files and folders…",
+                          "role": "text-input",
+                          "states": [
+                            "focused"
+                          ],
+                          "value": "notes"
+                        }
+                      ],
+                      "key": "c17-palette-combobox",
+                      "name": "Search files and folders…",
+                      "role": "combo-box",
+                      "states": [
+                        "expanded"
+                      ]
+                    }
+                  ],
+                  "key": "c17-palette-bar",
+                  "role": "group"
+                },
+                {
+                  "children": [
+                    {
+                      "actions": [
+                        "scroll-up",
+                        "scroll-down",
+                        "set-scroll-offset"
+                      ],
+                      "children": [
+                        {
+                          "actions": [
+                            "scroll-into-view"
+                          ],
+                          "children": [
+                            {
+                              "actions": [
+                                "click",
+                                "context-menu",
+                                "scroll-into-view"
+                              ],
+                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FDocuments%2FNotes",
+                              "name": "/home/demo/Documents/Notes",
+                              "position": 1,
+                              "role": "list-box-option"
+                            },
+                            {
+                              "actions": [
+                                "click",
+                                "context-menu",
+                                "scroll-into-view"
+                              ],
+                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FDocuments%2Fnotes.md",
+                              "name": "/home/demo/Documents/notes.md",
+                              "position": 2,
+                              "role": "list-box-option",
+                              "states": [
+                                "selected"
+                              ]
+                            },
+                            {
+                              "actions": [
+                                "click",
+                                "context-menu",
+                                "scroll-into-view"
+                              ],
+                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FProjects%2Frune%2Fnotes.txt",
+                              "name": "/home/demo/Projects/rune/notes.txt",
+                              "position": 3,
+                              "role": "list-box-option"
+                            },
+                            {
+                              "actions": [
+                                "click",
+                                "context-menu",
+                                "scroll-into-view"
+                              ],
+                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FDocuments%2FReports%2Freport-notes.md",
+                              "name": "/home/demo/Documents/Reports/report-notes.md",
+                              "position": 4,
+                              "role": "list-box-option"
+                            },
+                            {
+                              "actions": [
+                                "click",
+                                "context-menu",
+                                "scroll-into-view"
+                              ],
+                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FDownloads%2Fnotes-export.zip",
+                              "name": "/home/demo/Downloads/notes-export.zip",
+                              "position": 5,
+                              "role": "list-box-option"
+                            },
+                            {
+                              "actions": [
+                                "click",
+                                "context-menu",
+                                "scroll-into-view"
+                              ],
+                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FProjects%2Fstrata%2Fnotes-for-release.md",
+                              "name": "/home/demo/Projects/strata/notes-for-release.md",
+                              "position": 6,
+                              "role": "list-box-option"
+                            },
+                            {
+                              "actions": [
+                                "click",
+                                "context-menu",
+                                "scroll-into-view"
+                              ],
+                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FDocuments%2FNotes%2Fmeeting-notes.md",
+                              "name": "/home/demo/Documents/Notes/meeting-notes.md",
+                              "position": 7,
+                              "role": "list-box-option"
+                            },
+                            {
+                              "actions": [
+                                "click",
+                                "context-menu",
+                                "scroll-into-view"
+                              ],
+                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FDocuments%2FArchive%2F2019%2Ftax-returns-and-supporting-documents-for-the-household%2Fscanned-originals-from-the-accountant%2Freceipt-bundle-final-version-two-signed-and-countersigned-by-everyone-involved.pdf",
+                              "name": "/home/demo/Documents/Archive/2019/tax-returns-and-supporting-documents-for-the-household/scanned-originals-from-the-accountant/receipt-bundle-final-version-two-signed-and-countersigned-by-everyone-involved.pdf",
+                              "position": 8,
+                              "role": "list-box-option"
+                            },
+                            {
+                              "actions": [
+                                "click",
+                                "context-menu",
+                                "scroll-into-view"
+                              ],
+                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FDocuments%2FNotes%2Fideas.md",
+                              "name": "/home/demo/Documents/Notes/ideas.md",
+                              "position": 9,
+                              "role": "list-box-option"
+                            },
+                            {
+                              "actions": [
+                                "click",
+                                "context-menu",
+                                "scroll-into-view"
+                              ],
+                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FDocuments%2FNotes%2Ftodo.txt",
+                              "name": "/home/demo/Documents/Notes/todo.txt",
+                              "position": 10,
+                              "role": "list-box-option"
+                            },
+                            {
+                              "actions": [
+                                "click",
+                                "context-menu",
+                                "scroll-into-view"
+                              ],
+                              "key": "c17-palette-option-%2Fhome%2Fdemo%2FDocuments%2FArchive%2F2019%2Ftax-returns-and-supporting-documents-for-the-household%2Fscanned-originals-from-the-accountant",
+                              "name": "/home/demo/Documents/Archive/2019/tax-returns-and-supporting-documents-for-the-household/scanned-originals-from-the-accountant",
+                              "position": 11,
+                              "role": "list-box-option"
+                            }
+                          ],
+                          "key": "c17-palette-rows",
+                          "role": "group",
+                          "setSize": 11
+                        }
+                      ],
+                      "key": "c17-palette-results",
+                      "name": "Search results",
+                      "role": "list-box",
+                      "states": [
+                        "clips"
+                      ]
+                    },
+                    {
+                      "key": "c17-palette-status",
+                      "name": "11 results",
+                      "role": "status",
+                      "states": [
+                        "live-polite"
+                      ]
+                    }
+                  ],
+                  "key": "c17-palette-body",
+                  "role": "group"
+                },
+                {
+                  "children": [
+                    {
+                      "name": "↑↓  navigate",
+                      "role": "label"
+                    },
+                    {
+                      "name": "↵  open",
+                      "role": "label"
+                    },
+                    {
+                      "name": "Alt+Enter  open containing folder",
+                      "role": "label"
+                    }
+                  ],
+                  "key": "c17-palette-footer",
+                  "role": "group"
+                }
+              ],
+              "key": "c17-palette-dialog",
+              "name": "Search files and folders",
+              "role": "dialog",
+              "states": [
+                "modal"
+              ]
+            }
+          ],
+          "key": "kit-root",
+          "role": "group"
+        }
+      ],
+      "key": "gallery",
+      "role": "group"
+    }
+  ],
+  "name": "Strata components",
+  "role": "window"
+}

@@ -1163,7 +1163,22 @@ fn x11_on_quit_shuts_down_and_hands_the_clipboard_over() {
         (&json!("on-quit"), &json!("Saved")),
         "{down}"
     );
-    manager.wait_event("manager-saved", |e| matches!(e, Event::ManagerSaved { .. }));
+    let saved = manager.wait_event("manager-saved", |e| matches!(e, Event::ManagerSaved { .. }));
+    let Event::ManagerSaved { saved, refused } = saved else {
+        unreachable!()
+    };
+    assert_eq!(
+        (saved, refused),
+        (vec![UTF8.to_owned()], Vec::<String>::new())
+    );
+    let reader = s.peer(Display::X11);
+    assert_eq!(
+        reader
+            .read(Selection::Clipboard, Via::X11, UTF8)
+            .text
+            .as_deref(),
+        Some("kept")
+    );
 }
 
 // ---- 12. Through Xwayland (XW) ----

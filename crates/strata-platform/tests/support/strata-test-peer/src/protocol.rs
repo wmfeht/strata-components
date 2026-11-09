@@ -114,8 +114,10 @@ pub enum Command {
     Export,
     /// X11 only: become the session's clipboard manager (take `CLIPBOARD_MANAGER`). An owner
     /// that hands `CLIPBOARD` over (`SAVE_TARGETS`, naming its types in the request's
-    /// property) has them all taken in one `MULTIPLE` conversion, INCR included; the peer then
-    /// answers, reports [`Event::ManagerSaved`], and takes `CLIPBOARD` with what it saved. With
+    /// property) has them all taken in one `MULTIPLE` conversion, INCR included, asked exactly
+    /// as gsd-clipboard and xfsettingsd ask it (into the property `MULTIPLE`, each pair
+    /// `(target, target)`). As they do, the peer takes `CLIPBOARD` once the `MULTIPLE` lands,
+    /// then answers the owner when every part is in, and reports [`Event::ManagerSaved`]. With
     /// `answer: false` it takes `CLIPBOARD_MANAGER` and never answers, so the owner's wait
     /// runs out.
     ClipboardManager {

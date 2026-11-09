@@ -1262,7 +1262,10 @@ impl X {
             .send_event(false, r.requestor, EventMask::NO_EVENT, notify);
     }
 
-    /// An owner hands `CLIPBOARD` over: take every type it names in one `MULTIPLE`.
+    /// An owner hands `CLIPBOARD` over: take every type it names in one `MULTIPLE`, asked as
+    /// gsd-clipboard and xfsettingsd ask (`clipboard-manager.c`, `save_targets`): into the
+    /// property `MULTIPLE` itself, each pair `(target, target)`, so each type lands in a
+    /// property named after it.
     fn start_save(&mut self, r: &SelectionRequestEvent) -> Result<(), String> {
         if r.property == x11rb::NONE {
             return Err("no property names the types to save".into());
@@ -1279,8 +1282,7 @@ impl X {
         let mut parts = Vec::with_capacity(targets.len());
         let mut pairs = Vec::with_capacity(targets.len() * 2);
         for target in targets {
-            self.next_property += 1;
-            let property = self.atom(&format!("STRATA_PEER_{}", self.next_property))?;
+            let property = target;
             pairs.extend([target, property]);
             parts.push(SavedPart {
                 mime: self.atom_name(target),
@@ -1289,8 +1291,7 @@ impl X {
                 data: None,
             });
         }
-        self.next_property += 1;
-        let multi = self.atom(&format!("STRATA_PEER_{}", self.next_property))?;
+        let multi = self.atoms.MULTIPLE;
         self.conn
             .change_property32(
                 PropMode::REPLACE,
@@ -1364,10 +1365,22 @@ impl X {
                 part.data = Some(data);
             }
         }
+        // As gsd: take CLIPBOARD now, while INCR parts may still be coming, and answer the
+        // owner once they are all in.
+        let clipboard = self.atoms.CLIPBOARD;
+        match self.server_time() {
+            Ok(time) => {
+                if let Err(e) = self.own(clipboard, Vec::new(), time) {
+                    out::error(format!("taking the saved clipboard: {e}"));
+                }
+            }
+            Err(e) => out::error(format!("taking the saved clipboard: {e}")),
+        }
         self.save_if_done();
     }
 
-    /// Every part is in: answer the owner, say what was saved, and take `CLIPBOARD` with it.
+    /// Every part is in: serve it from `CLIPBOARD` (taken when the `MULTIPLE` landed), answer
+    /// the owner, and say what was saved.
     fn save_if_done(&mut self) {
         if self
             .saving
@@ -1399,6 +1412,9 @@ impl X {
                 _ => refused.push(part.mime),
             }
         }
+        if let Some(owned) = self.owned.get_mut(&self.atoms.CLIPBOARD) {
+            owned.offers = offers;
+        }
         let notify = SelectionNotifyEvent {
             response_type: SELECTION_NOTIFY_EVENT,
             sequence: 0,
@@ -1413,15 +1429,6 @@ impl X {
             .send_event(false, saving.requestor, EventMask::NO_EVENT, notify);
         let _ = self.conn.flush();
         out::event(Event::ManagerSaved { saved, refused });
-        let clipboard = self.atoms.CLIPBOARD;
-        match self.server_time() {
-            Ok(time) => {
-                if let Err(e) = self.own(clipboard, offers, time) {
-                    out::error(format!("taking the saved clipboard: {e}"));
-                }
-            }
-            Err(e) => out::error(format!("taking the saved clipboard: {e}")),
-        }
     }
 
     // ---- XDND ----

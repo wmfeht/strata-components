@@ -61,8 +61,11 @@
 //!   once for a double-click, timed by the host's clock against
 //!   [`DocumentState::set_double_click_interval`].
 //! - **Accessibility.** The root is a `document`; headings carry their level, list items are
-//!   `listitem`s, quotes `blockquote`s, code `code`, images `img` named by their alt text,
-//!   tables `table`, `row`, `columnheader` and `cell`. Rune exposes the mounted rows only.
+//!   `listitem`s with their nesting level, quotes `blockquote`s, code `code`, images `img`
+//!   named by their alt text, tables `table`, `row`, `columnheader` and `cell`. Rune exposes
+//!   the mounted rows only. List items have no `list` around them: each unit is its own
+//!   virtual row, and `El::virtual_rows` takes no element between the list and its rows, so
+//!   nothing can group a run of them.
 //!
 //! # Deviations
 //!
@@ -79,7 +82,7 @@
 //! - **D6** Spans are byte ranges: [`Unit::from_char_spans`] converts Strata's.
 //! - **D7** With wrap off, each row scrolls sideways on its own: virtual rows lay out at the
 //!   viewport's width inside a sideways viewport, so one scroll for the whole document can't
-//!   reach the widest row (probe P1).
+//!   reach the widest row (probe P1, R7).
 //! - **D8** Find skips image alt text and rules, which Strata's find reads.
 //! - **D9** A double-click or a Shift-click on a link selects nothing (R6). The link opens as
 //!   Strata's does: on a plain click, once for a double-click (a second click within the
@@ -115,6 +118,11 @@
 //!   double-click on it selects no word, and a Shift-click on it doesn't extend the selection
 //!   (probe P2 and review 1). The handler hears the modifiers (`Tx::mods`), so an app can at
 //!   least keep the link shut, as C11 does.
+//! - **R7** (draft, not filed) Virtual rows inside a sideways viewport (`scroll_x` around the
+//!   vertical viewport, or `scroll_xy`) lay out at the viewport's width: an unwrapped row wider
+//!   than it is cut, and the sideways viewport never scrolls, since the list reports no wider
+//!   content (probe P1: a 2,000-character row at 788 points in an 800-point viewport, the
+//!   sideways offset stuck at 0). A document can't scroll its widest line into view as one.
 
 mod copy;
 mod find;

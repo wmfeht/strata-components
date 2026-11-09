@@ -21,7 +21,8 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::time::{Duration, Instant};
 
 use strata_test_peer::protocol::{
-    Action, Backend, Command, Event, Exported, Mapped, Offer, Request, Selection, Targets, Via,
+    Action, Backend, Command, Event, Exported, Mapped, Offer, Request, Selection, Targets,
+    TypedWindow, Via,
 };
 use x11rb::connection::Connection as _;
 use x11rb::protocol::Event as XEvent;
@@ -42,7 +43,7 @@ x11rb::atom_manager! {
         _NET_WM_NAME, _NET_WM_PID, _NET_CLIENT_LIST, STRATA_PEER_TIME,
         XdndAware, XdndProxy, XdndTypeList, XdndSelection, XdndEnter, XdndPosition,
         XdndStatus, XdndLeave, XdndDrop, XdndFinished, XdndActionCopy, XdndActionMove,
-        XdndActionAsk,
+        XdndActionAsk, XdndActionList, XdndActionLink,
     }
 }
 
@@ -118,12 +119,16 @@ struct DropPolicy {
     mimes: Vec<String>,
     actions: Vec<Action>,
     preferred: Action,
+    read_all: bool,
+    ask_answer: Option<Action>,
 }
 
 struct DropIn {
     source: Window,
     mime: Option<String>,
     action: Option<Action>,
+    /// Every type to read at the drop (the accepted one first).
+    reads: Vec<String>,
 }
 
 /// A drop target under the drag: the window, where its messages go (it or its `XdndProxy`),
@@ -170,6 +175,9 @@ struct X {
     /// The time of the press that is still held, if any.
     press_time: Option<u32>,
     drop_policy: Option<DropPolicy>,
+    /// A drop's reads still out, by its source, and whether every one so far arrived: the
+    /// drop finishes when the last one does.
+    drop_left: HashMap<Window, (usize, bool)>,
     drop: Option<DropIn>,
     drag: Option<DragOut>,
     proxy: Option<Proxy>,
@@ -268,6 +276,7 @@ pub fn run() -> Result<(), String> {
         map_retry: None,
         press_time: None,
         drop_policy: None,
+        drop_left: HashMap::new(),
         drop: None,
         drag: None,
         proxy: None,
@@ -430,11 +439,15 @@ impl X {
                 mimes,
                 actions,
                 preferred,
+                read_all,
+                ask_answer,
             } => {
                 self.drop_policy = (!mimes.is_empty()).then_some(DropPolicy {
                     mimes,
                     actions,
                     preferred,
+                    read_all,
+                    ask_answer,
                 });
                 out::ok(id);
                 Ok(())
@@ -452,6 +465,7 @@ impl X {
                 );
                 Ok(())
             }
+            Command::WindowsOfType { ty } => self.windows_of_type(&ty).map(|w| out::value(id, w)),
         };
         if let Err(e) = result {
             out::reply(id, Err(e));
@@ -483,6 +497,49 @@ impl X {
             .and_then(|c| c.reply().ok())
             .map(|r| String::from_utf8_lossy(&r.name).into_owned())
             .unwrap_or_default()
+    }
+
+    /// The root's children whose `_NET_WM_WINDOW_TYPE` lists `ty`.
+    fn windows_of_type(&self, ty: &str) -> Result<Vec<TypedWindow>, String> {
+        let (prop, want) = (self.atom("_NET_WM_WINDOW_TYPE")?, self.atom(ty)?);
+        let tree = self
+            .conn
+            .query_tree(self.root)
+            .map_err(err)?
+            .reply()
+            .map_err(err)?;
+        let mut out = Vec::new();
+        for w in tree.children {
+            let listed = self
+                .conn
+                .get_property(false, w, prop, AtomEnum::ATOM, 0, 16)
+                .ok()
+                .and_then(|c| c.reply().ok())
+                .and_then(|r| r.value32().map(|mut v| v.any(|a| a == want)))
+                .unwrap_or(false);
+            if !listed {
+                continue;
+            }
+            let geo = self
+                .conn
+                .get_geometry(w)
+                .map_err(err)?
+                .reply()
+                .map_err(err)?;
+            let attrs = self
+                .conn
+                .get_window_attributes(w)
+                .map_err(err)?
+                .reply()
+                .map_err(err)?;
+            out.push(TypedWindow {
+                xid: w,
+                width: geo.width,
+                height: geo.height,
+                mapped: attrs.map_state == x11rb::protocol::xproto::MapState::VIEWABLE,
+            });
+        }
+        Ok(out)
     }
 
     /// The first 32-bit value of a window property, if it has one.
@@ -518,11 +575,12 @@ impl X {
             Action::Copy => self.atoms.XdndActionCopy,
             Action::Move => self.atoms.XdndActionMove,
             Action::Ask => self.atoms.XdndActionAsk,
+            Action::Link => self.atoms.XdndActionLink,
         }
     }
 
     fn action_of(&self, atom: Atom) -> Option<Action> {
-        [Action::Copy, Action::Move, Action::Ask]
+        [Action::Copy, Action::Move, Action::Ask, Action::Link]
             .into_iter()
             .find(|a| self.action_atom(*a) == atom)
     }
@@ -737,6 +795,16 @@ impl X {
                 self.atoms.XdndTypeList,
                 AtomEnum::ATOM,
                 &types,
+            )
+            .map_err(err)?;
+        let listed: Vec<Atom> = actions.iter().map(|a| self.action_atom(*a)).collect();
+        self.conn
+            .change_property32(
+                PropMode::REPLACE,
+                self.win,
+                self.atoms.XdndActionList,
+                AtomEnum::ATOM,
+                &listed,
             )
             .map_err(err)?;
         // The drag's selection carries the time of the press that started it.
@@ -1074,15 +1142,32 @@ impl X {
                 mime,
                 action,
             } => {
-                let accepted = data.is_ok();
-                let action_atom = action
-                    .filter(|_| accepted)
-                    .map_or(x11rb::NONE, |a| self.action_atom(a));
-                self.message(
-                    source,
-                    self.atoms.XdndFinished,
-                    [self.win, u32::from(accepted), action_atom, 0, 0],
-                );
+                let left = self.drop_left.entry(source).or_insert((1, true));
+                left.0 = left.0.saturating_sub(1);
+                left.1 &= data.is_ok();
+                let (last, accepted) = (left.0 == 0, left.1);
+                if last {
+                    self.drop_left.remove(&source);
+                }
+                // An ask drop is settled with the policy's answer.
+                let action = match action {
+                    Some(Action::Ask) => self
+                        .drop_policy
+                        .as_ref()
+                        .and_then(|p| p.ask_answer)
+                        .or(action),
+                    other => other,
+                };
+                if last {
+                    let action_atom = action
+                        .filter(|_| accepted)
+                        .map_or(x11rb::NONE, |a| self.action_atom(a));
+                    self.message(
+                        source,
+                        self.atoms.XdndFinished,
+                        [self.win, u32::from(accepted), action_atom, 0, 0],
+                    );
+                }
                 match data {
                     Ok(d) => out::event(Event::Dropped {
                         mime,
@@ -1152,10 +1237,21 @@ impl X {
             .drop_policy
             .as_ref()
             .and_then(|p| p.mimes.iter().find(|m| mimes.contains(m)).cloned());
+        let reads = match (&mime, &self.drop_policy) {
+            (Some(_), Some(p)) if p.read_all => p
+                .mimes
+                .iter()
+                .filter(|m| mimes.contains(m))
+                .cloned()
+                .collect(),
+            (Some(m), _) => vec![m.clone()],
+            _ => Vec::new(),
+        };
         self.drop = Some(DropIn {
             source,
             mime,
             action: None,
+            reads,
         });
         out::event(Event::DropEnter { mimes, proxied });
     }
@@ -1193,21 +1289,24 @@ impl X {
 
     fn drop_drop(&mut self, l: [u32; 5]) {
         let Some(d) = self.drop.take() else { return };
-        let Some(mime) = d.mime else {
+        if d.mime.is_none() {
             self.message(d.source, self.atoms.XdndFinished, [self.win, 0, 0, 0, 0]);
             return;
-        };
-        let target = match self.atom(&mime) {
-            Ok(t) => t,
-            Err(e) => return out::error(e),
-        };
-        let why = Conversion::Drop {
-            source: d.source,
-            mime,
-            action: d.action,
-        };
-        if let Err(e) = self.convert_at(self.atoms.XdndSelection, target, why, l[2]) {
-            out::error(e);
+        }
+        self.drop_left.insert(d.source, (d.reads.len(), true));
+        for mime in d.reads {
+            let target = match self.atom(&mime) {
+                Ok(t) => t,
+                Err(e) => return out::error(e),
+            };
+            let why = Conversion::Drop {
+                source: d.source,
+                mime,
+                action: d.action,
+            };
+            if let Err(e) = self.convert_at(self.atoms.XdndSelection, target, why, l[2]) {
+                out::error(e);
+            }
         }
     }
 

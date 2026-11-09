@@ -29,8 +29,35 @@ Nothing is released yet. The first release is planned for milestone M1 with the 
 
 - One cargo feature per shim, each gating its own module: `dnd`, `clipboard`, `csd`,
   `foreign-parent`, `settings`, `icon-theme`, `media-audio`, `single-instance` and `glib-bridge`.
-  Apart from `glib-bridge`, `csd`, `settings` and `single-instance`, the modules are
+  Apart from `dnd`, `glib-bridge`, `csd`, `settings` and `single-instance`, the modules are
   placeholders until their work packages land.
+- `dnd`: system drag and drop on Wayland (`wl_data_device`) and X11 (XDND 5), mirroring Rune's
+  `drag_out` and `on_drop_files` with any MIME types. Each window has a `Dnd`, attached from
+  `App::on_window`.
+  - `Dnd::drag_source` with a `DragSource`: a `DragItem` of MIME types made lazily, the actions
+    it allows (narrowed by Ctrl and Shift), an icon (`DragIcon::image`, or `DragIcon::snapshot`
+    of a view, rendered off the UI thread), and the outcome in `on_end`. `Dnd::start_drag` and
+    `Dnd::owns` start one from an element's own `on_drag`; `Dnd::cancel_drag` cancels it.
+  - `Dnd::drop_target` with a `DropTarget`: the types it reads (the first offered, or all),
+    hover, move (in the target's points) and reject hooks, reads while hovering (`peek`), the
+    action by GTK's modifier rule unless the target's `action` picks it, and asks answered
+    after the drop (`on_ask`).
+  - `DragItem::local` and `DropTarget::local`: a typed payload between the app's own windows,
+    with nothing serialized.
+  - On Wayland, Rune's capture of the press ends once the compositor has taken the pointer
+    (a synthetic Escape, a workaround for draft U10), and only while the pressed element is
+    still mounted where it was. A drag no proof reaches keeps the capture until the
+    window's next press or focus change. Keep a drag's source mounted at the same path,
+    with its `on_drag`, until the drag ends, and don't open a modal as it starts: the module
+    docs list every path where the capture stays held or an Escape reaches the app. On X11
+    a release before the drag's XI2 events were selected still ends the drag.
+  - Every Wayland drag lists `application/x-local-drag;id=<counter>.<nonce>` (no process
+    id), which other clients see; on X11 only a drag with a local payload does.
+  - `Dnd::start_drag` takes the phase and the element's key.
+  - Call `dnd::shutdown()` before `Tx::quit` or `AppHandle::quit` and in the last window's
+    `on_close`; once the pinned Rune has `App::on_quit`, there too (it doesn't run when the
+    last window closes). A drag from another app takes the compositor's action. X11's
+    source shows no cursor feedback. Link is X11 only.
 - `glib-bridge`: a GLib main loop for Rune apps. `GlibThread::start` runs a fresh `MainContext`
   on its own thread and wakes the app's `poll` as answers land in its state.
   - `Glib::spawn` runs a GIO future there, and its output lands in a `Task`.

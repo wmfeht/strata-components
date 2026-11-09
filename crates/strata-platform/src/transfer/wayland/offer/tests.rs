@@ -161,6 +161,54 @@ fn after_a_settled_drop_set_actions_is_refused() {
     assert_eq!(s.finish(), Ok(true), "the copy stands");
 }
 
+/// P0's review, S1: after the drop, the settled action may be confirmed as `(a, a)` before
+/// finish, and that is the only other request let through.
+#[test]
+fn after_the_drop_the_settled_action_may_be_confirmed() {
+    let (copy, mv) = (Action::Copy.bits(), Action::Move.bits());
+    let mut s = DropState::new(3);
+    s.on_source_actions(copy | mv);
+    s.accept(Some("text/plain"), &offered()).expect("accept");
+    s.set_actions(copy | mv, mv).expect("before the drop");
+    s.on_action(mv);
+    s.on_drop();
+    assert_eq!(s.settled(), Some(Action::Move));
+    assert!(s.set_actions(mv, mv).is_ok(), "confirming move");
+    assert!(
+        s.set_actions(mv, 0).is_err(),
+        "a confirmation names its action"
+    );
+    assert!(
+        s.set_actions(copy, copy).is_err(),
+        "another action isn't a confirmation"
+    );
+    assert_eq!(
+        s.settled(),
+        Some(Action::Move),
+        "the confirmation changes nothing"
+    );
+    assert_eq!(s.finish(), Ok(true));
+}
+
+#[test]
+fn an_action_the_source_lacks_or_ask_is_never_confirmed() {
+    let (copy, mv, ask) = (Action::Copy.bits(), Action::Move.bits(), Action::Ask.bits());
+    let mut s = DropState::new(3);
+    s.on_source_actions(copy | ask);
+    s.accept(Some("text/plain"), &offered()).expect("accept");
+    s.on_action(ask);
+    s.on_drop();
+    assert_eq!(s.settled(), None, "ask isn't settled");
+    assert!(s.set_actions(ask, ask).is_err(), "ask isn't confirmed");
+    // A move the source never offered, as an action event might claim.
+    let mut s = DropState::new(3);
+    s.on_source_actions(copy);
+    s.accept(Some("text/plain"), &offered()).expect("accept");
+    s.on_action(mv);
+    s.on_drop();
+    assert!(s.set_actions(mv, mv).is_err());
+}
+
 // ---- DropState against wlroots' data_offer_choose_action (review round 3) ----
 
 const ASK: u32 = 4;

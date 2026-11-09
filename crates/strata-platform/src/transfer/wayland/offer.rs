@@ -222,6 +222,12 @@ impl DropState {
                 self.action = Some(actions);
                 return Ok(());
             }
+            // Confirming the settled action, as `(a, a)`: wlroots then chooses `a` again, so
+            // the compositor's record can't drift from ours through an action event still in
+            // flight at the drop (P0's review, S1).
+            if single && offered && preferred == actions && self.action == Some(actions) {
+                return Ok(());
+            }
             return Err(
                 "after the drop, set_actions only answers an ask: one action the source offers",
             );
@@ -269,6 +275,19 @@ impl DropState {
 
     pub(crate) fn dropped(&self) -> bool {
         self.dropped
+    }
+
+    /// The action the compositor settled on, if it is one `finish` takes: neither none nor
+    /// ask.
+    pub(crate) fn settled(&self) -> Option<Action> {
+        self.action
+            .filter(|a| *a != Action::Ask.bits())
+            .and_then(Action::from_bits)
+    }
+
+    /// The source's actions, when known.
+    pub(crate) fn source_actions(&self) -> Option<u32> {
+        self.source_actions
     }
 }
 
@@ -350,9 +369,10 @@ impl DragOffer {
     /// The actions this target takes, and the one it prefers. Send it on enter and on motion,
     /// before the drop.
     ///
-    /// After the drop it is refused, with one exception: answering a drop whose action is ask
-    /// with a single action, not ask, that the source offers (`DragActions::source`). That
-    /// settles the drop, and `finish` works. A refused answer changes nothing: a drop left on
+    /// After the drop it is refused, with two exceptions: answering a drop whose action is ask
+    /// with a single action, not ask, that the source offers (`DragActions::source`), which
+    /// settles the drop so `finish` works; and confirming the settled action as `(a, a)`
+    /// ([`DragOffer::confirm_action`]). A refused answer changes nothing: a drop left on
     /// ask stays on ask, and its `finish` is refused for good (the compositor would take it as
     /// a protocol error). Read the data and drop the offer instead.
     pub fn set_actions(&self, actions: &[Action], preferred: Option<Action>) -> Result<(), Error> {
@@ -396,6 +416,33 @@ impl DragOffer {
         finish_read(r, limits, Box::new(done));
     }
 
+    /// The action the compositor settled on for this drag, when it is one a drop can finish
+    /// with (not none, not ask).
+    pub fn settled_action(&self) -> Option<Action> {
+        self.with_state(|s| s.settled())
+    }
+
+    /// After the drop, sends `set_actions(a, a)` for the settled action `a`, so the
+    /// compositor and this offer agree on it before [`DragOffer::finish`] (an action event
+    /// may still have been in flight at the drop). The action confirmed, or None when there
+    /// is nothing to confirm (an offer older than version 3, or no settled action).
+    pub fn confirm_action(&self) -> Result<Option<Action>, Error> {
+        // Without known source actions (wlroots' all-ones) the request would be refused, and
+        // the drop finishes on the action it has.
+        let settled = self.with_state(|s| {
+            s.settled().filter(|a| {
+                s.version >= 3
+                    && s.dropped()
+                    && s.source_actions().is_some_and(|x| x & a.bits() != 0)
+            })
+        });
+        let Some(a) = settled else {
+            return Ok(None);
+        };
+        self.set_actions(&[a], Some(a))?;
+        Ok(Some(a))
+    }
+
     /// Ends the drop once its reads are done: the source learns the drop succeeded.
     pub fn finish(&self) -> Result<(), Error> {
         self.on_ui()?;
@@ -410,6 +457,16 @@ impl DragOffer {
         drop(cell);
         self.0.home.flush();
         Ok(())
+    }
+
+    /// Gives up on the drop without finishing it: the proxy is destroyed, and the source
+    /// hears `cancelled`. For a drop the app refuses after it landed (P1).
+    #[cfg(feature = "dnd")]
+    pub fn abandon(&self) {
+        if self.0.home.here() {
+            self.close();
+            self.0.home.flush();
+        }
     }
 
     pub(super) fn is(&self, id: &ObjectId) -> bool {

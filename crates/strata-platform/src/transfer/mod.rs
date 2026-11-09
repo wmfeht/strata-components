@@ -66,9 +66,9 @@ mod error;
 mod event;
 mod gate;
 pub mod mime;
-mod pipe;
-mod wayland;
-mod x11;
+pub(crate) mod pipe;
+pub(crate) mod wayland;
+pub(crate) mod x11;
 
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
@@ -149,6 +149,10 @@ enum Backend {
     X11(x11::X11),
 }
 
+/// Runs at [`Transfer::shutdown`], on the UI thread, before anything is torn down.
+#[cfg(feature = "dnd")]
+pub(crate) type BeforeShutdown = Box<dyn FnOnce(&Transfer) + Send>;
+
 struct Hub {
     /// The thread that attached: the UI thread.
     ui: std::thread::ThreadId,
@@ -156,6 +160,10 @@ struct Hub {
     windows: Arc<Mutex<Vec<WindowHandle>>>,
     subs: Subscribers,
     backend: Backend,
+    /// What modules built on the substrate (P1) must tear down first: their own objects on
+    /// winit's display, and properties they set on the app's windows.
+    #[cfg(feature = "dnd")]
+    before_shutdown: Mutex<Vec<BeforeShutdown>>,
 }
 
 /// The process's substrate. Never dropped: [`Transfer::shutdown`] takes it out.
@@ -215,6 +223,8 @@ impl Transfer {
             windows,
             subs,
             backend,
+            #[cfg(feature = "dnd")]
+            before_shutdown: Mutex::new(Vec::new()),
         });
         *hub = Some(h.clone());
         Ok((Transfer(h), true))
@@ -363,6 +373,14 @@ impl Transfer {
             return Ok(false);
         };
         drop(slot);
+        #[cfg(feature = "dnd")]
+        {
+            let hooks = std::mem::take(&mut *lock(&hub.before_shutdown));
+            let t = Transfer(hub.clone());
+            for hook in hooks {
+                hook(&t);
+            }
+        }
         match &hub.backend {
             Backend::Wayland { shared, own } => {
                 for c in [shared, own].into_iter().flatten() {
@@ -372,6 +390,29 @@ impl Transfer {
             Backend::X11(x) => x.shutdown(),
         }
         Ok(true)
+    }
+}
+
+/// What P1 (`dnd`) builds on: the connection on winit's display, the X11 actor, the app's
+/// windows, and a hook before the teardown.
+#[cfg(feature = "dnd")]
+impl Transfer {
+    /// The Wayland connection on winit's display, if bound.
+    pub(crate) fn shared_conn(&self) -> Option<&Arc<wayland::Conn>> {
+        self.shared()
+    }
+
+    /// The X11 side, on X11.
+    pub(crate) fn x11(&self) -> Option<&x11::X11> {
+        match &self.0.backend {
+            Backend::X11(x) => Some(x),
+            Backend::Wayland { .. } => None,
+        }
+    }
+
+    /// Runs `f` at [`Transfer::shutdown`], on the UI thread, before the substrate tears down.
+    pub(crate) fn before_shutdown(&self, f: BeforeShutdown) {
+        lock(&self.0.before_shutdown).push(f);
     }
 }
 

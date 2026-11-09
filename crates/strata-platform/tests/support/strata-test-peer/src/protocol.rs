@@ -86,7 +86,8 @@ pub enum Command {
         mime: String,
     },
     /// Starts a drag from the peer's own window. Needs a press on it that is still held
-    /// ([`Event::PointerButton`]): the session's input peer presses, then drags.
+    /// ([`Event::PointerButton`]): the session's input peer presses, then drags. On X11 it
+    /// proposes the first of `actions` and lists them all in `XdndActionList`.
     DragStart {
         offers: Vec<Offer>,
         actions: Vec<Action>,
@@ -97,12 +98,26 @@ pub enum Command {
         mimes: Vec<String>,
         actions: Vec<Action>,
         preferred: Action,
+        /// At the drop, read every one of `mimes` the drag offers, in order, each reported
+        /// as its own [`Event::Dropped`], before finishing; not just the first.
+        #[serde(default)]
+        read_all: bool,
+        /// A drop left on ask is settled with this action before it finishes (Wayland:
+        /// `set_actions(a, a)`; X11: `XdndFinished` with it).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ask_answer: Option<Action>,
     },
     /// X11 only: point the window's `XdndProxy` at a window on a second connection, so drag
     /// messages must go to the proxy ([`Event::DropEnter`] says which way they came).
     DropProxy,
     /// Exports the peer's window for another client to parent to ([`Exported`]).
     Export,
+    /// X11 only: the root window's children whose `_NET_WM_WINDOW_TYPE` lists `ty` (an atom
+    /// name such as `_NET_WM_WINDOW_TYPE_DND`), with their size and map state
+    /// ([`TypedWindow`]).
+    WindowsOfType {
+        ty: String,
+    },
     /// Wayland: an `xdg_activation_v1` token for the peer's window, made with the serial of its
     /// last keyboard enter or press ([`ActivationToken`]), for a test to hand another process
     /// as `XDG_ACTIVATION_TOKEN` (P8). Map the window and give it focus first.
@@ -139,6 +154,8 @@ pub enum Action {
     Copy,
     Move,
     Ask,
+    /// X11 only: Wayland's data device has no link action, and offers none.
+    Link,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -240,6 +257,15 @@ pub struct Targets {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Exported {
     pub handle: String,
+}
+
+/// One window in the reply to [`Command::WindowsOfType`].
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TypedWindow {
+    pub xid: u32,
+    pub width: u16,
+    pub height: u16,
+    pub mapped: bool,
 }
 
 /// The reply to [`Command::ActivationToken`].

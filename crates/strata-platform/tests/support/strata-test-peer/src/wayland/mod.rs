@@ -273,17 +273,22 @@ impl St {
                 mimes,
                 actions,
                 preferred,
+                read_all,
+                ask_answer,
             } => {
                 self.drop_policy = (!mimes.is_empty()).then_some(data::DropPolicy {
                     mimes,
                     actions,
                     preferred,
+                    read_all,
+                    ask_answer,
                 });
                 out::ok(id);
                 Ok(())
             }
             Command::DropProxy => Err("XdndProxy is X11's; a Wayland peer has none".into()),
             Command::Export => self.export(id),
+            Command::WindowsOfType { .. } => Err("window types are X11's".into()),
             Command::ActivationToken => self.activation_token(id),
         };
         if let Err(e) = result {

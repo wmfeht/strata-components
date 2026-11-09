@@ -198,8 +198,10 @@ with a header the runner checks:
 }
 ```
 
-Modifier flags (`shift`, `ctrl`, `alt`, `cmd`) reach key and wheel events only: at Rune `78d22ed`
-a pointer event (`tap`, `down`, `drag`) ignores them, so test a modified click in process.
+Modifier flags (`shift`, `ctrl`, `alt`, `cmd`) reach key and wheel events only: a pointer event
+(`tap`, `down`, `drag`) ignores them. To hold a modifier through pointer events, use Rune's
+`{"t": 0.3, "hold": "ctrl"}` event (any of `shift`, `ctrl`, `alt`, `super`, `cmd`, joined with
+`+`), and `{"hold": ""}` to let go (Rune `4805095`).
 
 | Key | Rule |
 | --- | --- |

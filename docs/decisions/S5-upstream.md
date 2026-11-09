@@ -1063,6 +1063,10 @@ Scripts are the one gap at `78d22ed`: a script has no event that holds a modifie
 to scripts, so it closes with the next Rune bump. Until then, W1's copy-or-move tests hold
 modifiers in process with `physical_input`, not in scripts.
 
+**2026-11-08, Rune `dev` `5d421fd` (the new pin): U-C1b-1 fixed by `4805095`.** A gallery script
+with `{"hold": "ctrl"}` before a `tap` on `c1-ten-rows-light` adds the row to the selection ("2
+items selected"); without the hold the tap replaces it.
+
 ## Considered, no draft
 
 | Topic | Why no draft |

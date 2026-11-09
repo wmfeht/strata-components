@@ -83,7 +83,9 @@
 //!   (`app/dialogs`: "Closing a dialog by keyboard as a dialog chained on it opens…", the
 //!   no-ring half, unverified in Strata). Rune has no way to clear keyboard focus mode.
 //! - Rune doesn't clamp a long frame's step in presence motion to 33 ms (`app/dialogs`: "A
-//!   frame longer than 33 ms…", unverified in Strata).
+//!   frame longer than 33 ms…", unverified in Strata). Since Rune `aea4606`, motion that a late
+//!   frame starts holds its first pose for the overrun instead of jumping, but motion already
+//!   running still takes the whole step.
 //! - Up and Down don't move focus between body controls by position (`app/dialogs`: "With
 //!   focus outside a text field, an unmodified arrow key…", unverified). Left and Right move
 //!   along the footer, and Down opens a focused select, which is Rune's own.

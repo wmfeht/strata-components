@@ -40,7 +40,7 @@ Each release tag supports exactly one Rune rev. Pin that rev, in full, beside th
 
 | Tag | Rune rev | Rust | Released |
 | --- | --- | --- | --- |
-| Unreleased (`main`) | [`78d22ed8eef60d76ac3f322ffc5883f3fcbc57f5`](https://github.com/anomalyco/rune/commit/78d22ed8eef60d76ac3f322ffc5883f3fcbc57f5) | 1.99.1 | — |
+| Unreleased (`main`) | [`5d421fd908ba19b760b93a3dcf821e159ec1d4d7`](https://github.com/anomalyco/rune/commit/5d421fd908ba19b760b93a3dcf821e159ec1d4d7) | 1.99.1 | — |
 
 ## Pinning a release
 
@@ -50,13 +50,13 @@ digits of the Rune rev the release supports. Pin the tag, and pin Rune at that s
 
 ```toml
 [dependencies]
-rune = { git = "https://github.com/anomalyco/rune", rev = "78d22ed8eef60d76ac3f322ffc5883f3fcbc57f5" }
-strata-platform = { git = "https://github.com/wmfeht/strata-components", tag = "strata-platform-v0.1.0+rune.78d22ed", features = ["glib-bridge"] }
+rune = { git = "https://github.com/anomalyco/rune", rev = "5d421fd908ba19b760b93a3dcf821e159ec1d4d7" }
+strata-platform = { git = "https://github.com/wmfeht/strata-components", tag = "strata-platform-v0.1.0+rune.5d421fd", features = ["glib-bridge"] }
 ```
 
 The tag shown is an example; take a real one from [Supported Rune revs](#supported-rune-revs).
 
-- **Copy the rev exactly, all 40 digits.** Cargo treats `rev = "78d22ed"` and the full rev as two
+- **Copy the rev exactly, all 40 digits.** Cargo treats `rev = "5d421fd"` and the full rev as two
   different sources. It then builds Rune twice, and this crate's Rune types don't match your
   app's. `cargo tree -e normal --prefix none --format '{p}' --color never | grep '^rune v' | sort -u`
   must print one Rune, ignoring the ` (*)` cargo adds to repeats.

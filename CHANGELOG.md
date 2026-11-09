@@ -19,11 +19,27 @@ removed in the next minor release.
 
 ## [Unreleased]
 
-Rune: [`78d22ed`](https://github.com/anomalyco/rune/commit/78d22ed8eef60d76ac3f322ffc5883f3fcbc57f5)
-(`78d22ed8eef60d76ac3f322ffc5883f3fcbc57f5`) · Rust 1.99.1
+Rune: [`5d421fd`](https://github.com/anomalyco/rune/commit/5d421fd908ba19b760b93a3dcf821e159ec1d4d7)
+(`5d421fd908ba19b760b93a3dcf821e159ec1d4d7`) · Rust 1.99.1
 
 Nothing is released yet. The first release is planned for milestone M1 with the `csd`,
 `settings`, `single-instance` and `glib-bridge` features.
+
+### Changed
+
+- Rune `78d22ed` → `5d421fd` (`dev`, 2026-11-08), on the same Rust. What matters to the shims:
+  - A covered Wayland window's due `wake_after` timer now runs, at most 250 ms late, instead of
+    the loop spinning at full CPU and running no `poll` while it waits for a frame the
+    compositor never sends (Rune `39301f6`, #324). A `glib-bridge` answer still runs `poll`
+    only when the window draws, so while a Wayland window is fully covered it waits for the
+    window to show or for the app's next timer (Rune #139). `settings` and the transfer
+    substrate post through `AppHandle` and land while covered, as before.
+  - `csd`: a right-click on a text field in the header no longer opens the window menu. Rune
+    routes a field's secondary click to its own field menu, which Linux can't show, so without
+    the field's own `on_secondary_press` it focuses the field, moves its caret and shows
+    nothing.
+  - Rune now opens fontconfig at run time for installed font families, and adds
+    `yeslogic-fontconfig-sys` (MIT) and a second `roxmltree` (MIT or Apache-2.0) to the build.
 
 ### Added
 

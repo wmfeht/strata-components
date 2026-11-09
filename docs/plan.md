@@ -8,7 +8,7 @@ Strata can move off GTK 4.
 | Input | Version |
 | --- | --- |
 | Strata | `lgse/strata` at `5738aad808ea4cc4671516bc569d85f862664809`, the feature map's watermark (151 nodes, release v1.1.1) |
-| Rune | `anomalyco/rune` `dev` at `78d22ed8eef60d76ac3f322ffc5883f3fcbc57f5` (2026-11-07), crates `rune`, `rune-kit`, `rune-motion`, `rune-fx` |
+| Rune | `anomalyco/rune` `dev` at `5d421fd908ba19b760b93a3dcf821e159ec1d4d7` (2026-11-08), crates `rune`, `rune-kit`, `rune-motion`, `rune-fx` |
 | Feature map | `wmfeht/strata-feature-map`. Node ids below (`browser/view-modes/columns`) are its ids. |
 
 Rune is pre-release: pin a `dev` rev and move it on purpose. Rune takes no pull requests;

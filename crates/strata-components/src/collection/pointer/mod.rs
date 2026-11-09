@@ -161,7 +161,8 @@
 //! # Tests
 //!
 //! `tests.rs` holds one test per bullet the machine decides; `tests/element.rs` drives it
-//! through the element, with modifiers held, which Rune scripts can't hold. The page scripts in
+//! through the element, with modifiers held in process (written before Rune scripts could hold
+//! them with `{"hold": …}`, Rune `4805095`). The page scripts in
 //! `tests/scripts/c1/` use the page's default settings (two clicks open everything).
 //! `middle-dragged` checks only the dragged half of its bullet: the page's intent label can't
 //! count tabs, so the double middle click is `a_double_middle_click_opens_one_tab_and_a_dragged_one_none`.

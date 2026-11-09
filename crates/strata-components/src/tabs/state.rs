@@ -3,11 +3,12 @@
 
 use std::time::Duration;
 
-use rune::{Live, Tx};
+use rune::Tx;
 use rune_kit::shell::TabDragState;
 
 use super::data::{TabId, TabsData, TitleFormat, window_title};
 use super::intent::{DropSite, TabsIntent, Via};
+use super::probe::{Probe, Reveal};
 use super::{scroll_key, tab_key};
 use crate::contract::dnd::DropHover;
 
@@ -39,21 +40,8 @@ struct LeftLanding {
 /// How many ticks a left gap's slot outlives its leave: a frame or two.
 const LEFT_LANDING_TICKS: u8 = 2;
 
-/// Where tab 0 and the strip drew, for the wheel's sideways mapping (`wheel.rs`).
-#[derive(Clone)]
-pub(super) struct WheelProbe {
-    pub(super) strip: Live<[f32; 4]>,
-    pub(super) first: Live<[f32; 4]>,
-}
-
-impl Default for WheelProbe {
-    fn default() -> Self {
-        WheelProbe {
-            strip: Live::new([0.0; 4]),
-            first: Live::new([0.0; 4]),
-        }
-    }
-}
+/// Ticks a reveal waits for its tab to draw before it gives up.
+const REVEAL_TICKS: u8 = 3;
 
 /// What a tick asks of the host: the intents to route, and whether the state changed.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -82,7 +70,9 @@ pub struct BrowserTabsState {
     spring: Option<Spring>,
     title: Option<String>,
     active: Option<TabId>,
-    pub(super) wheel: WheelProbe,
+    /// A newly active tab to bring clear of the edge fades, and the ticks it has waited.
+    reveal: Option<(TabId, u8)>,
+    pub(super) probe: Probe,
 }
 
 impl Default for BrowserTabsState {
@@ -105,7 +95,8 @@ impl BrowserTabsState {
             spring: None,
             title: None,
             active: None,
-            wheel: WheelProbe::default(),
+            reveal: None,
+            probe: Probe::default(),
         }
     }
 
@@ -182,10 +173,18 @@ impl BrowserTabsState {
                 }
             }
         }
+        self.reveal_step(tx);
         if data.active != self.active {
             self.active = data.active;
+            self.reveal = None;
             if let Some(id) = data.active {
                 tx.scroll_into_view_in(scroll_key(&self.key), tab_key(&self.key, id));
+                // A strip at rest (no drag: a press already revealed the tab it lifts) brings it
+                // a fade's width clear of the edges once it has drawn (U-C7-7).
+                if self.drag.phase == rune_kit::shell::TabDragPhase::Idle {
+                    self.reveal = Some((id, 0));
+                    tx.wake_after(Duration::ZERO);
+                }
             }
         }
         let title = window_title(
@@ -197,6 +196,26 @@ impl BrowserTabsState {
             out.intents.push(TabsIntent::Title(title));
         }
         out
+    }
+
+    /// Brings the tab a reveal waits on clear of the edge fades, once it has drawn: Rune's
+    /// `scroll_into_view_in` stops at the edge, under the fade, and a horizontal viewport has no
+    /// scroll margin (U-C7-7). Reads the strip's offset from its markers (`probe.rs`).
+    fn reveal_step(&mut self, tx: &mut Tx) {
+        let Some((id, waited)) = self.reveal else {
+            return;
+        };
+        match self.probe.reveal(id) {
+            Reveal::Pending if waited < REVEAL_TICKS => {
+                self.reveal = Some((id, waited + 1));
+                tx.wake_after(Duration::ZERO);
+            }
+            Reveal::Pending | Reveal::Clear => self.reveal = None,
+            Reveal::To(x) => {
+                self.reveal = None;
+                tx.scroll_to_instant(scroll_key(&self.key), x, 0.0);
+            }
+        }
     }
 
     /// A drag reached or left tab `id`. `arm` is the spring delay when this drag may select

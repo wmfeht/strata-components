@@ -55,6 +55,9 @@
 //! drop tint, Strata's 3 point accent underline on the active tab (shared between tabs with
 //! `El::matched`, so it slides; it jumps with animations off), its drop zone, and the wheel's
 //! sideways mapping (`wheel.rs`). Tab keys carry the strip's key ([`tab_key`]: `t-<key>-<id>`).
+//! Hidden markers report where the strip, tab 0 and the active tab drew (`probe.rs`), so the
+//! wheel can read the strip's offset and a newly active tab can be revealed clear of the edge
+//! fades, which Rune can't do from the outside (U-C7-2, U-C7-7).
 //!
 //! # Drops and the spring
 //!
@@ -80,7 +83,11 @@
 //!   tints nor selects a tab. Over the strip its moves place rune-kit's incoming gap where it
 //!   would open; only the zone holding the gap closes it, so moving from a tab to the gap
 //!   beside it keeps it open. Its drop is [`TabsIntent::OpenTabs`] at the gap, or at the end on
-//!   New tab. While such a drag runs anywhere in the window, the host says so with
+//!   New tab. Both real binders report a zone's leave before its drop (W1's `Left`: left,
+//!   moved, or dropped), so a leave closes the gap at once, as a cancel needs, and keeps its
+//!   slot for the drop that may follow; the next accepting hover, or two ticks, drop it
+//!   (review 1). Only a strip whose host set [`BrowserTabs::opens_tabs`] follows drag moves:
+//!   following them asks for a frame on each motion. While such a drag runs anywhere in the window, the host says so with
 //!   [`BrowserTabsState::set_open_drag`] and New tab shows its tint.
 //!
 //! **The host keeps every tab's view mounted while a drag runs.** A spring shows another tab
@@ -151,14 +158,14 @@
 //! | Dropping a tab on the New tab button moves it to the right end | script `reorder-to-end` |
 //! | During a sidebar row drag or a folder-only drag, a strip of two or more tabs marks an insertion line after the last tab | **partial**: New tab lights while the host says such a drag runs ([`BrowserTabsState::set_open_drag`], golden `c7-new-tab-drop`); the gap opens only over the strip, as opening it at the end would reflow every tab on every folder drag (owner's ruling) |
 //! | Folder-only drags from Columns, Icons, and List…; from the preview header and Ctrl+F results… (2) | **Strata**, X2 (drag sources) |
-//! | Over the strip, that line moves to the gap nearest the pointer. Releasing opens… at that gap | test `a_drag_that_opens_tabs_places_a_gap_and_opens_there`, `a_leave_from_a_tab_after_the_strip_took_the_drag_keeps_the_gap` (a binder like X2's; Rune's reads paths only at the drop) |
+//! | Over the strip, that line moves to the gap nearest the pointer. Releasing opens… at that gap | tests `a_drag_that_opens_tabs_places_a_gap_and_opens_there`, `a_drop_in_the_gap_between_tabs_opens_there_after_its_leave`, `a_leave_from_a_tab_after_the_strip_took_the_drag_keeps_the_gap` (a binder like X2's, leave then drop; Rune's reads paths only at the drop) |
 //! | A drag of several folders opens one tab per folder, in drag order… | **partial**: [`TabsIntent::OpenTabs`] carries the drop and its index; opening is the host's |
 //! | With one tab the strip stays hidden during these drags; dropping on the header's New tab button opens the tab | script `drop-on-new-tab` ([`NewTabButton`]; hiding the strip is the host's) |
 //! | The New tab button under a sidebar, folder, or tab drag shows an accent tint | test `new_tab_lights_and_opens_a_drag_that_opens_tabs_at_the_end`; golden `c7-new-tab-drop` (PNG) |
 //! | A folder-only drag released over a tab header opens a new tab and moves or copies nothing… | test `a_drag_that_opens_tabs_places_a_gap_and_opens_there` |
 //! | A folder-only drag held over a tab does not select it | test `a_drag_that_opens_tabs_places_a_gap_and_opens_there`; unit `nothing_springs_unarmed_or_for_a_tab_now_active_or_gone` |
 //! | Dropping a sidebar row… changes neither the sidebar order nor the pins | **Strata**, C8 |
-//! | Folders dragged from another application are not opened as tabs; dropped on a tab header, they transfer… | **partial**: the host's [`BrowserTabs::opens_tabs`] decides; script `drop-on-tab` drops a folder with a file |
+//! | Folders dragged from another application are not opened as tabs; dropped on a tab header, they transfer… | script `foreign-folder-not-a-tab` (the host's [`BrowserTabs::opens_tabs`] decides; the page's stand-in tells its own drags by a path prefix) |
 //! | While a modal dialog is open, drops on the strip or the New tab button open and move no tabs | **Strata** (Rune routes no drop outside a modal) |
 //! | Escape during a file drag in Columns, List, or Icons…; also cancels a drag from the preview header… (2) | P1, X2 |
 //! | Escape during a tab drag, a sidebar row drag, or a folder drag from a listing cancels it… | script `reorder-escape` (a tab drag); the others are X2's, whose binder reports a leave: test `a_leave_closes_the_gap` |
@@ -168,12 +175,12 @@
 //! | With Show close button off, the window-close button stays hidden… | **Strata**, X1 |
 //! | A 3 px accent underline slides to the selected tab, and jumps without sliding when animations are disabled | test `the_underline_slides_and_jumps_with_animations_off`; golden `c7-several` (PNG) |
 //! | When the strip is wider than the window, the wheel scrolls it horizontally and no scrollbar is shown | test `a_vertical_wheel_scrolls_an_overflowing_strip_sideways` (a workaround: `wheel.rs`, U-C7-2); golden `c7-overflow` (PNG) |
-//! | Selecting a tab scrolls it into view | test `a_tab_selected_from_the_keyboard_scrolls_into_view` (a press reveals its tab in rune-kit); a tab revealed at an end sits under the edge fade (U-C7-7) |
+//! | Selecting a tab scrolls it into view | tests `a_tab_selected_from_the_keyboard_scrolls_into_view`, `a_revealed_tab_is_clear_of_the_edge_fades` (a fade's width clear of either edge: `probe.rs`, U-C7-7) |
 //! | Selecting the last tab also scrolls the New tab button into view | golden `c7-overflow` (PNG): New tab sits outside the scrolling, always shown |
 //! | Hovering an inactive tab accents its label; its X turns accent only while the pointer is over the X itself | **deliberate change**: rune-kit's hover wash and ghost close button (U-C7-3) |
 //! | Assistive technologies read the strip as a tab list named "Tabs", and each X as "Close tab". Each tab reads as its name, with the active one selected | golden `c7-several` (a11y) |
 //! | A tab is named after its active directory…; The Home, Trash… names follow the interface language; SMB…; Photos…; awaits…; keeps its name…; Columns presses… (10) | **Strata** (names are data) |
-//! | Names longer than 22 characters are ellipsized | unit `names_past_22_characters_end_in_an_ellipsis`; golden `c7-several` (a11y: the whole name; PNG: the label) |
+//! | Names longer than 22 characters are ellipsized | unit `names_past_22_characters_end_in_an_ellipsis`; test `the_narrowest_tab_still_shows_about_ten_characters`; golden `c7-several` (a11y: the whole name; PNG: the label) |
 //! | A window whose active tab is at folder `docs` is titled `docs — Strata`, with an em dash | script `title`; unit `the_title_carries_the_whole_name_or_the_app_alone` |
 //! | Navigating the active tab, or selecting another tab, retitles the window… | script `title`; test `selecting_a_tab_retitles_the_window`; unit `the_title_is_emitted_once_per_change_of_the_active_tab` |
 //! | A window with no folder open and no location awaited is titled "Strata" | unit `the_title_carries_the_whole_name_or_the_app_alone` |
@@ -205,8 +212,10 @@
 //! - **Reorder lifts the tab** and its neighbours step aside, with no insertion line (as C8).
 //! - **A drag that opens tabs opens a gap** where the tab will land, rune-kit's incoming gap,
 //!   and the tabs give up a share of their width for it; Strata draws an accent line.
-//! - **Widths:** tabs share the strip from 224 points down to 96 (`tabs.tab.min_width`, so a
-//!   tab always shows its name), then the strip scrolls with faded edges. Strata's tabs take
+//! - **Widths:** tabs share the strip from 224 points down to room for about 10 characters of
+//!   their label beside the icon and the close button (`tabs.tab.min_width`: 136 points at the
+//!   default type, growing with the text size), then the strip scrolls with faded edges. Names
+//!   longer than that fade at the tab's end. Owner item: the widths. Strata's tabs take
 //!   their label's width. The 22-character label is kept as well.
 //! - **Each tab shows its location's icon**, which rune-kit's lead slot would otherwise fill
 //!   with an empty box; the number badges take its place while they show (Strata's sit after
@@ -254,8 +263,10 @@
 //!   (`window_title` is `pub(crate)`); tests read the window's accessible name.
 //! - **U-C7-7 (draft, not filed)** rune-kit: a horizontal TabStrip's viewport has no scroll
 //!   margin (its vertical one has `scroll_margin(fade)`), so a tab revealed at an end, by a
-//!   press or `scroll_into_view_in`, lands under the edge fade, half hidden (golden
-//!   `c7-overflow`). Ask: the same margin across.
+//!   press or `scroll_into_view_in`, lands under the edge fade, half hidden. Ask: the same
+//!   margin across. Here: the tick reveals a newly active tab a fade's width clear of either
+//!   edge with `scroll_to_instant`, from the offset its markers read (`probe.rs`), a frame after
+//!   it drew; a tab pressed to start a drag is left to rune-kit's reveal.
 //! - Reused: U-C1e-6 (no clock in `Tx`: [`BrowserTabsState::tick`]), U3 (a drag's paths only at
 //!   the drop: under Rune's binder a drag that opens tabs is told only then, and opens after the
 //!   tab it dropped on), U-P1-1 (zones found by key), U-C6-5.
@@ -266,6 +277,7 @@ mod data;
 mod drops;
 mod intent;
 mod new_tab;
+mod probe;
 mod state;
 mod wheel;
 

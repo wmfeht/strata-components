@@ -130,9 +130,6 @@ pub(super) fn tab<S: 'static>(
         let offer = offer.clone();
         (cx.emit)(s, TabsIntent::DropHover { site, hover, offer }, tx);
     })
-    .on_move(move |s: &mut S, point, _: &mut Tx| {
-        access(s).open_moved(site, [point.window_x, point.window_y]);
-    })
     .on_reject(move |s: &mut S, _, _: &mut Tx| access(s).drag_ended())
     .action(move |s: &S, offer, mods| {
         let cx = &action_cx;
@@ -144,7 +141,19 @@ pub(super) fn tab<S: 'static>(
             None => default_action(offer, mods),
         }
     });
-    Some(zone)
+    Some(follow_moves(cx, zone, site))
+}
+
+/// `zone`, placing the gap as a drag that opens tabs moves over it. Only for a host with such
+/// drags: a zone that follows moves asks for a frame on each motion of every drag over it.
+fn follow_moves<S: 'static>(cx: &Ctx<S>, zone: DropZone<S>, site: DropSite) -> DropZone<S> {
+    if cx.opens.is_none() {
+        return zone;
+    }
+    let access = cx.access;
+    zone.on_move(move |s: &mut S, point, _: &mut Tx| {
+        access(s).open_moved(site, [point.window_x, point.window_y]);
+    })
 }
 
 /// The zone of the New tab button (`site` [`DropSite::NewTab`]) or of the strip
@@ -155,7 +164,7 @@ pub(super) fn opener<S: 'static>(cx: &Ctx<S>, site: DropSite) -> DropZone<S> {
     let hover_cx = cx.clone();
     let action_cx = cx.clone();
     let access = cx.access;
-    DropZone::new(move |s: &mut S, dropped, tx: &mut Tx| {
+    let zone = DropZone::new(move |s: &mut S, dropped, tx: &mut Tx| {
         let cx = &drop_cx;
         let landing = (cx.access)(s).landing();
         (cx.access)(s).drag_ended();
@@ -183,9 +192,11 @@ pub(super) fn opener<S: 'static>(cx: &Ctx<S>, site: DropSite) -> DropZone<S> {
         let offer = offer.clone();
         (cx.emit)(s, TabsIntent::DropHover { site, hover, offer }, tx);
     })
-    .on_move(move |s: &mut S, point, _: &mut Tx| {
-        access(s).open_moved(site, [point.window_x, point.window_y]);
-    })
     .on_reject(move |s: &mut S, _, _: &mut Tx| access(s).drag_ended())
-    .action(move |s: &S, offer, _| action_cx.opens(s, offer).then_some(DropAction::Copy))
+    .action(move |s: &S, offer, _| action_cx.opens(s, offer).then_some(DropAction::Copy));
+    // New tab opens at the end, wherever the drag is over it.
+    match site {
+        DropSite::Strip => follow_moves(cx, zone, site),
+        _ => zone,
+    }
 }

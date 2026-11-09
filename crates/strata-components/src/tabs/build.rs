@@ -12,12 +12,18 @@ use super::data::{LABEL_CHARS, TabId, TabsData, elide_end};
 use super::drops::{self, Access, ActionFn, Ctx, Emit, OpensFn};
 use super::intent::{DropSite, TabsIntent, Via};
 use super::new_tab::{self, TabsLabels};
+use super::probe::Probe;
 use super::{BrowserTabsState, scroll_key, wheel};
 use crate::contract::dnd::{Dnd, DropAction, DropHover, DropOffer};
 
-/// rune-kit's tab pill radius (its private `RADIUS` at the pinned rev), so a drop tint on the
-/// tab's slot lines up with the pill drawn over it.
+/// rune-kit's tab pill radius, its private `RADIUS` at the pinned rev
+/// (`rune-kit/src/shell/tab_strip/tab.rs:11`), so a drop tint on the tab's slot lines up with
+/// the pill drawn over it. Check it at each Rune bump.
 const PILL_RADIUS: f32 = 6.0;
+
+/// The box rune-kit draws a tab's avatar in (`row().key("avatar").size(16.0, 16.0)`,
+/// `rune-kit/src/shell/tab_strip/tab.rs:205` at the pinned rev): a badge fills it.
+const AVATAR_BOX: f32 = 16.0;
 
 /// How many tabs carry a number badge: Ctrl+Shift+1 to 9, then 0 for the tenth.
 const BADGED: usize = 10;
@@ -193,8 +199,9 @@ impl<'a, S: 'static> BrowserTabs<'a, S> {
                     tint: (drop == Some((DropSite::Tab(tab.id), DropHover::Accepting)))
                         .then(|| slot::drop_fill(look)),
                     underline: active.then(|| underline.clone()),
-                    first: (i == 0).then(|| self.state.wheel.clone()),
-                    wheel: self.state.wheel.clone(),
+                    first: i == 0,
+                    active: active.then_some(tab.id),
+                    probe: self.state.probe.clone(),
                     scroll: scroll.clone(),
                     zone: drops::tab(&zones, tab.id, i, tab.accepts, active),
                     dnd: self.dnd.clone(),
@@ -221,21 +228,25 @@ impl<'a, S: 'static> BrowserTabs<'a, S> {
             .label(self.labels.list.clone().into_owned())
             .drag_state(&self.state.drag, self.drag)
             .tear_out(self.tear.then(TearOutSpec::default));
-        let strip = if self.new_tab {
+        let (strip, trailing) = if self.new_tab {
             let width = cx
                 .layout_size(&super::new_tab_key(&key))
                 .map_or(look.frame.control, |z| z[0]);
             let button = new_tab::button(&zones, self.state, &self.dnd, &self.labels, look);
-            strip.trailing_action(button).trailing_width(width)
+            let strip = strip.trailing_action(button).trailing_width(width);
+            (strip, width + slot::tab_gap(look))
         } else {
-            strip
+            (strip, 0.0)
         };
+        self.state
+            .probe
+            .built(slot::fade_width(look), trailing, data.active);
         let strip = handlers(strip, &key, &self.emit, self.tear);
         let root = match layer {
             Some(layer) => strip.build_layered(&look.kit, layer),
             None => strip.build(&look.kit),
         };
-        let root = root.child(wheel::strip_marker(&self.state.wheel));
+        let root = root.children(self.state.probe.root_markers());
         let root = self
             .dnd
             .drop_zone(root, drops::opener(&zones, DropSite::Strip));
@@ -347,9 +358,10 @@ struct Dress<S: 'static> {
     name: String,
     tint: Option<Color>,
     underline: Option<Underline>,
-    /// Tab 0 carries the wheel's marker.
-    first: Option<super::state::WheelProbe>,
-    wheel: super::state::WheelProbe,
+    /// Tab 0 carries a marker for the strip's offset, and the active tab one for its reveal.
+    first: bool,
+    active: Option<TabId>,
+    probe: Probe,
     scroll: String,
     zone: Option<crate::contract::dnd::DropZone<S>>,
     dnd: Dnd<S>,
@@ -364,10 +376,13 @@ impl<S: 'static> Dress<S> {
         if let Some(line) = &self.underline {
             tab = tab.child(line.el());
         }
-        if let Some(probe) = &self.first {
-            tab = tab.child(wheel::first_marker(probe));
+        if self.first {
+            tab = tab.child(self.probe.first_marker());
         }
-        tab = wheel::sideways::<S>(tab, &self.wheel, self.scroll);
+        if let Some(id) = self.active {
+            tab = tab.child(self.probe.active_marker(id));
+        }
+        tab = wheel::sideways::<S>(tab, &self.probe, self.scroll);
         match self.zone {
             Some(zone) => self.dnd.drop_zone(tab, zone),
             None => tab,
@@ -381,8 +396,9 @@ fn badge(i: usize, look: &Look) -> El {
     let font = look.kit.ty.text_xsmall_medium;
     row()
         .key("badge")
-        .size(16.0, 16.0)
-        .radius(3.0)
+        .size(AVATAR_BOX, AVATAR_BOX)
+        // Strata's `.tab-key-hint` corner, scaled with the look's roundness.
+        .radius(look.round(3.0))
         .center()
         .fill(slot::badge_fill(look))
         .child(text(digit).font(font).color(slot::badge_text(look)))

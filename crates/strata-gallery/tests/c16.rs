@@ -195,6 +195,48 @@ mod c16 {
         }
     }
 
+    // operations/progress/dock: "Hovering … a completed card pauses its countdown": a card
+    // that finishes under a resting pointer hears no new enter (Rune fires on_hover_change on
+    // changes only), so it starts its countdown paused, as Strata's does (review 1, B1).
+    #[test]
+    fn a_card_that_finishes_under_a_resting_pointer_stays_paused() {
+        for animations in [true, false] {
+            let mut rt = mount_with("c16-idle-light", |g| {
+                if !animations {
+                    still(g)
+                }
+            });
+            tap(&mut rt, "c16-start-copy");
+            run(&mut rt, 0.3);
+            let (x, y) = centre(&rt, "c16-dock-card-1");
+            rt.pointer_move(x, y);
+            for _ in 0..600 {
+                if rt.state.c16.dock.op(1).and_then(|o| o.ended()).is_some() {
+                    break;
+                }
+                rt.frame(FRAME);
+            }
+            assert_eq!(card(&rt.state, 1).as_deref(), Some("Copy complete"));
+            wake_until(&mut rt, 30.0, |g| g.c16.dock.op(1).is_none());
+            assert!(
+                card(&rt.state, 1).is_some(),
+                "animations {animations}: it closed"
+            );
+            let words = rt
+                .state
+                .c16
+                .dock
+                .op(1)
+                .unwrap()
+                .shown
+                .ended
+                .clone()
+                .unwrap()
+                .words;
+            assert_eq!(words, "paused");
+        }
+    }
+
     // operations/progress/dock: "The pin button, 'Keep notification', keeps a completed card
     // open and shows 'pinned' until it is dismissed."
     #[test]

@@ -494,3 +494,25 @@ fn the_jobs_clock_ticks_each_second_only_while_open_with_a_running_job() {
     st.tick(5.0, &rows, &mut tx);
     assert!(st.due().is_none());
 }
+
+#[test]
+fn a_card_that_finishes_under_the_pointer_starts_its_countdown_paused() {
+    let mut dock = Dock::new();
+    let mut tx = Tx::default();
+    dock.start(1, copy(1), &mut tx);
+    dock.tick(0.0, &mut tx);
+    // The pointer arrives while the copy runs and rests there: Rune sends no second enter.
+    dock.hover(1, true, &mut tx);
+    dock.progress(1, transfer(10, 40, 1, 4), 0.5, &mut tx);
+    dock.complete(1, "Copy complete", &mut tx);
+    wake_to_wake(&mut dock, 1.0, 30.0);
+    let op = dock.op(1).expect("the hovered card stays");
+    assert_eq!(op.shown.ended.as_ref().unwrap().words, "paused");
+    dock.hover(1, false, &mut tx);
+    let end = wake_to_wake(&mut dock, 40.0, 10.0);
+    assert!(dock.op(1).is_none());
+    assert!(
+        (end - 40.0 - 5.0 - FADE).abs() < 1e-6,
+        "the whole 5 s: {end}"
+    );
+}

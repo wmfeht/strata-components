@@ -275,6 +275,11 @@ pub struct Op {
     pub(crate) countdown_bar: Option<Tween<[f32; 4]>>,
     /// The fade before the card goes.
     pub(crate) fade: Option<Tween<f32>>,
+    /// The pointer is over the card, in every phase: Rune reports a hover only when it
+    /// changes, so a card that ends under a resting pointer hears no new enter and starts
+    /// its countdown paused from this (Strata's `completion.rs` tracks motion enter
+    /// throughout).
+    hovered: bool,
 }
 
 impl std::fmt::Debug for Op {
@@ -457,6 +462,7 @@ impl Dock {
             sample: None,
             rate: RateMeter::new(),
             phase: Phase::Running,
+            hovered: false,
             title,
             shown: Shown::default(),
             live: CardLive::default(),
@@ -577,7 +583,11 @@ impl Dock {
         }
         op.phase = Phase::Ended {
             kind,
-            countdown: Countdown::new(shown_for, animations),
+            countdown: {
+                let mut c = Countdown::new(shown_for, animations);
+                c.set_hovered(op.hovered);
+                c
+            },
         };
         op.publish(&words);
         op.shown = op.derive(&words);
@@ -665,11 +675,14 @@ impl Dock {
         ended
     }
 
-    /// The pointer moved onto or off card `id`: a finished card's countdown pauses.
+    /// The pointer moved onto or off card `id`, in any phase: a finished card's countdown
+    /// pauses, and a card that finishes under the pointer starts paused. True when a
+    /// countdown changed.
     pub fn hover(&mut self, id: OpId, hovered: bool, tx: &mut Tx) -> bool {
         let Some(op) = self.op_mut(id) else {
             return false;
         };
+        op.hovered = hovered;
         let Phase::Ended { countdown, .. } = &mut op.phase else {
             return false;
         };

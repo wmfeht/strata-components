@@ -141,6 +141,8 @@ fn refuse_all(rx: &Receiver<Cmd>) {
 struct Shared {
     offers: HashMap<Selection, SelectionOffer>,
     owned: HashSet<u64>,
+    /// Takes asked for and not yet settled: the actor waits for their server timestamp.
+    taking: HashSet<u64>,
 }
 
 /// The way into the actor, from any thread.
@@ -271,6 +273,7 @@ impl X11 {
             return Err(Error::Refused("a source with no types"));
         }
         let id = SourceId::next();
+        lock(&self.shared).taking.insert(id.get());
         let own = Cmd::Own {
             selection,
             id,
@@ -280,10 +283,12 @@ impl X11 {
         Ok(id)
     }
 
-    /// Gives up the selection `source` holds, if it still holds it. True if it held one when
-    /// asked; the actor then gives it up and [`Event::SourceCancelled`] follows.
+    /// Gives up the selection `source` holds, if it still holds it, or cancels its take if it
+    /// still waits for its timestamp. True if it held one or was about to when asked; the
+    /// actor then gives it up and [`Event::SourceCancelled`] follows.
     pub(crate) fn clear_selection(&self, source: SourceId) -> Result<bool, Error> {
-        if !self.owns(source) {
+        let pending = lock(&self.shared).taking.contains(&source.get());
+        if !self.owns(source) && !pending {
             return Ok(false);
         }
         self.mailbox
@@ -467,6 +472,7 @@ impl Actor {
         {
             let mut shared = lock(&self.shared);
             shared.owned.clear();
+            shared.taking.clear();
             shared.offers.clear();
         }
         self.events.push(Event::Failed { message });

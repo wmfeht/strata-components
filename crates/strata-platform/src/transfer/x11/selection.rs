@@ -49,12 +49,20 @@ pub(super) struct Owning {
     sel: Atom,
     id: SourceId,
     spec: SourceSpec,
+    /// Cleared before its timestamp came: skipped when it does. It keeps its place, as each
+    /// take's timestamp arrives in the order the takes were asked.
+    cancelled: bool,
 }
 
 #[cfg(feature = "dnd")]
 impl Owning {
     pub(super) fn new(sel: Atom, id: SourceId, spec: SourceSpec) -> Owning {
-        Owning { sel, id, spec }
+        Owning {
+            sel,
+            id,
+            spec,
+            cancelled: false,
+        }
     }
 
     pub(super) fn sel(&self) -> Atom {
@@ -173,7 +181,12 @@ impl Actor {
                 spec,
             } => {
                 let sel = self.selection_atom(selection);
-                self.take_with_server_time(Owning { sel, id, spec });
+                self.take_with_server_time(Owning {
+                    sel,
+                    id,
+                    spec,
+                    cancelled: false,
+                });
             }
             Cmd::Read {
                 selection,
@@ -229,7 +242,9 @@ impl Actor {
 
     fn property(&mut self, e: PropertyNotifyEvent) {
         if e.window == self.win && e.atom == self.atoms.TRANSFER_TIME {
-            if let Some(owning) = self.owning.pop_front() {
+            if let Some(owning) = self.owning.pop_front()
+                && !owning.cancelled
+            {
                 self.own(owning, e.time);
             }
             return;
@@ -269,6 +284,7 @@ impl Actor {
     }
 
     fn own(&mut self, o: Owning, time: u32) {
+        lock(&self.shared).taking.remove(&o.id.get());
         let sel = o.sel;
         let _ = self.conn.set_selection_owner(self.win, sel, time);
         let ours = self
@@ -301,6 +317,13 @@ impl Actor {
     /// Gives up whichever selection source `id` holds, with the time it was taken (ICCCM:
     /// never `CurrentTime`).
     fn disown(&mut self, id: SourceId) {
+        // A take still waiting for its timestamp is cancelled, and never happens.
+        if let Some(o) = self.owning.iter_mut().find(|o| o.id == id && !o.cancelled) {
+            o.cancelled = true;
+            lock(&self.shared).taking.remove(&id.get());
+            self.events.push(Event::SourceCancelled { source: id });
+            return;
+        }
         let Some(sel) = self
             .owned
             .iter()

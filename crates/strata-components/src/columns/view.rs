@@ -262,6 +262,10 @@ impl<S: 'static> ColumnsView<S> {
         for serial in serials {
             changed |= collection(&self.sh, s, serial).tick(s, tx);
         }
+        {
+            let p = (self.sh.parts_mut)(s);
+            p.state.tick_reveal(now, p.look, tx);
+        }
         changed | drive(&self.sh, s, now, tx)
     }
 
@@ -617,7 +621,7 @@ pub(super) fn strip_key<S: 'static>(
     };
     if collection(sh, s, serial).key(s, event, tx) {
         let p = (sh.parts_mut)(s);
-        p.state.reveal(p.look, tx);
+        p.state.reveal_after_rows(p.look, tx);
         return true;
     }
     let m = event.mods;

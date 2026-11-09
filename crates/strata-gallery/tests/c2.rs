@@ -1128,4 +1128,33 @@ mod c2 {
             "the strip stays on the active column"
         );
     }
+
+    #[test]
+    fn a_keyboard_reveal_glides_the_strip() {
+        // browser/view-modes/columns: A keyboard move reveals a column clipped by up to 4 px
+        // fully (on the view's reveal glide, not by the row's own reveal jumping the strip).
+        let mut rt = scene("c2-overflow-light");
+        tap(&mut rt, &keys::title("c2-col-7"));
+        let end = strip_offset(&rt);
+        rt.update(|_, tx| tx.scroll_to_instant(keys::strip("c2"), 0.0, 0.0));
+        settle(&mut rt, 5);
+        assert_eq!(strip_offset(&rt), 0.0);
+        rt.key(KeyEvent {
+            key: Key::Down,
+            mods: Mods::default(),
+        });
+        rt.frame(DT);
+        rt.frame(DT);
+        let early = strip_offset(&rt);
+        assert!(
+            early > 0.0 && early < end - 50.0,
+            "gliding: {early} of {end}"
+        );
+        settle(&mut rt, 40);
+        assert!(
+            (strip_offset(&rt) - end).abs() < 0.5,
+            "{} vs {end}",
+            strip_offset(&rt)
+        );
+    }
 }

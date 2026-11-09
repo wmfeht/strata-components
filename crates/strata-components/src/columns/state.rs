@@ -172,6 +172,15 @@ pub struct ColumnsState {
     /// clears every column, rather than picking what it selects.
     pub(super) press_was_active: bool,
     bar_mode: crate::scroll::BarMode,
+    /// The host's clock at the last tick.
+    pub(super) now: f64,
+    /// A reveal that waits for the next tick: a row's reveal jumped the strip this frame, which
+    /// is held where it was, and the view's own reveal glides it from there.
+    pub(super) reveal_next: bool,
+    /// When the last reveal was asked for, and the strip's drawn width then: while the strip's
+    /// width changes soon after (a drawer opening in the same handler, a width spring), the
+    /// reveal is worked out again.
+    pub(super) revealed: Option<(f64, f32)>,
 }
 
 impl std::fmt::Debug for ColumnsState {
@@ -187,6 +196,10 @@ impl std::fmt::Debug for ColumnsState {
 
 /// The reveal's glide: about Strata's 220 ms `emphasized_deceleration`.
 pub(super) const REVEAL: Spring = Spring::new(0.22, 0.0);
+
+/// How long after a reveal a change of the strip's width works it out again, in seconds: a
+/// drawer slides open in 260 ms.
+const RECHECK: f64 = 0.5;
 
 impl ColumnsState {
     /// No columns yet. `key` is the view's key (its strip's, and the start of every column's);
@@ -214,6 +227,9 @@ impl ColumnsState {
             opened: None,
             press_was_active: false,
             bar_mode: crate::scroll::BarMode::Overlay,
+            now: 0.0,
+            reveal_next: false,
+            revealed: None,
         }
     }
 
@@ -414,7 +430,7 @@ impl ColumnsState {
             Focus::FirstEntry => {
                 self.set_active_quiet(depth);
                 self.place_first(depth, open.source, open.listing, tx);
-                self.reveal(look, tx);
+                self.reveal_after_rows(look, tx);
             }
         }
     }
@@ -522,7 +538,7 @@ impl ColumnsState {
             column.collection.note_selection(source);
             column.collection.reveal(&key, source, index, tx);
         }
-        self.reveal(look, tx);
+        self.reveal_after_rows(look, tx);
     }
 
     /// Brings column `depth` in step with its listing after it changed
@@ -664,6 +680,49 @@ impl ColumnsState {
         width::drawn(base, scale)
     }
 
+    /// [`ColumnsState::reveal`] after a row of a column was revealed in the same transaction (a
+    /// key, a placed cursor). The row's reveal (`scroll_into_view_in`) scrolls every viewport
+    /// around the row, the strip included, at once, and a glide asked for in the same frame
+    /// would start from where that left the strip. So the strip is held where it was drawn this
+    /// frame (an offset request, which Rune applies after reveals), and the view's reveal glides
+    /// it from there on the next tick. Rune's scoped reveal can't be kept to its own viewport's
+    /// axis (Rune draft U-C2-4).
+    pub(super) fn reveal_after_rows(&mut self, _look: &Look, tx: &mut Tx) {
+        if self.strip.w > 0.0 && !self.columns.is_empty() {
+            tx.scroll_to_instant(keys::strip(&self.key), self.strip_offset(), 0.0);
+            self.reveal_next = true;
+            tx.wake_after(std::time::Duration::ZERO);
+        } else {
+            self.reveal_after_layout = true;
+        }
+    }
+
+    /// The reveal's share of a tick: a reveal waiting from the last frame, and a recent reveal
+    /// worked out again while the strip's drawn width moves (the reveal is worked out from the
+    /// width the strip had, and a glide is clamped to the strip's extent as it springs).
+    pub(super) fn tick_reveal(&mut self, now: f64, look: &Look, tx: &mut Tx) {
+        self.now = now;
+        if std::mem::take(&mut self.reveal_next) {
+            self.reveal(look, tx);
+            return;
+        }
+        let Some((at, drawn)) = self.revealed else {
+            return;
+        };
+        if now - at > RECHECK {
+            self.revealed = None;
+            return;
+        }
+        let page = self.strip_feed.get().drawn[0];
+        if (page - drawn).abs() > 0.5 {
+            self.reveal(look, tx);
+            if let Some((_, w)) = self.revealed.as_mut() {
+                *w = page;
+            }
+            tx.wake_after(std::time::Duration::ZERO);
+        }
+    }
+
     /// Scrolls the strip so the active column shows, as Strata's `ColumnSpan::reveal_target`
     /// does: a column clipped even a little comes fully into view, one that shows stays, and
     /// one wider than the strip that fills it stays. The columns after it (a mirrored child)
@@ -675,6 +734,9 @@ impl ColumnsState {
             return;
         }
         self.reveal_after_layout = false;
+        if !matches!(self.revealed, Some((at, _)) if at == self.now) {
+            self.revealed = Some((self.now, self.strip_feed.get().drawn[0]));
+        }
         let spans = self.spans(look);
         let active = self.active.min(spans.len() - 1);
         let (left, right) = spans[active];

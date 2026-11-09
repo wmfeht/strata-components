@@ -7,31 +7,36 @@
 //! so a `done` with no `selection` event since means the write was dropped. Without focus no
 //! echo comes either way, and the write isn't judged.
 
-/// The writes waiting for their sync, by source id, each with whether a `selection` event has
-/// arrived since.
+use std::collections::VecDeque;
+
+/// The writes waiting for their sync, oldest first, each with whether a `selection` event has
+/// answered it. The compositor handles each write and then its sync, in order, so a
+/// `selection` event between two syncs' answers belongs to the oldest write still waiting.
 #[derive(Debug, Default)]
 pub(super) struct Echoes {
-    waiting: Vec<(u64, bool)>,
+    waiting: VecDeque<(u64, bool)>,
 }
 
 impl Echoes {
     /// A write by `source` went out with a sync after it.
     pub(super) fn arm(&mut self, source: u64) {
-        self.waiting.push((source, false));
+        self.waiting.push_back((source, false));
     }
 
-    /// The data device heard a `selection` event: every write waiting has had its answer.
+    /// The data device heard a `selection` event: the oldest write waiting has its answer.
     pub(super) fn selection(&mut self) {
-        for (_, seen) in &mut self.waiting {
+        // Even a second event before the oldest's sync answers: another client's copy then,
+        // which says nothing of the writes after it.
+        if let Some((_, seen)) = self.waiting.front_mut() {
             *seen = true;
         }
     }
 
     /// The sync after `source`'s write came back: true when the write was dropped, as no
-    /// `selection` event came between them.
+    /// `selection` event answered it.
     pub(super) fn done(&mut self, source: u64) -> bool {
         match self.waiting.iter().position(|(s, _)| *s == source) {
-            Some(i) => !self.waiting.swap_remove(i).1,
+            Some(i) => self.waiting.remove(i).is_some_and(|(_, seen)| !seen),
             None => false,
         }
     }

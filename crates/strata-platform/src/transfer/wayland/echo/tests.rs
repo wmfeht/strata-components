@@ -33,3 +33,26 @@ fn a_sync_for_a_write_never_armed_says_nothing() {
     assert!(e.done(3));
     assert!(!e.done(3), "each sync answers once");
 }
+
+#[test]
+fn with_two_writes_in_flight_one_echo_answers_only_the_first() {
+    // The compositor handles each write, then its sync, in order: the first write's echo
+    // arrives before its sync's answer, and says nothing about the second write.
+    let mut e = Echoes::default();
+    e.arm(1);
+    e.arm(2);
+    e.selection();
+    assert!(!e.done(1), "the first took");
+    assert!(e.done(2), "the second was dropped");
+}
+
+#[test]
+fn a_second_event_before_the_first_sync_answers_no_later_write() {
+    let mut e = Echoes::default();
+    e.arm(1);
+    e.arm(2);
+    e.selection();
+    e.selection();
+    assert!(!e.done(1));
+    assert!(e.done(2), "the second write had no echo of its own");
+}

@@ -150,14 +150,17 @@ mod c22 {
             point(&mut rt, &item(2));
             wake_until(&mut rt, 1.0, |g| open(g).is_some());
             rt.frame(FRAME);
+            let serial = rt.state.c22.peek.target().unwrap().serial;
             point(&mut rt, &card_key(ICONS));
             wake_until(&mut rt, 1.0, |_| false);
             assert_eq!(open(&rt.state), Some(id(2)), "the card holds it");
 
-            // Back onto its folder, then off the card: still open.
+            // Back onto its folder, then off the card: the same peek stays, never closed.
             point(&mut rt, &item(2));
             wake_until(&mut rt, 1.0, |_| false);
             assert_eq!(open(&rt.state), Some(id(2)), "its folder holds it again");
+            assert_eq!(rt.state.c22.peek.target().unwrap().serial, serial);
+            assert_eq!(rt.state.c22.events, [format!("open Music #{serial}")]);
 
             point_away(&mut rt);
             let took = wake_until(&mut rt, 1.0, |g| open(g).is_none());
@@ -202,12 +205,12 @@ mod c22 {
         command(&mut rt, 'p');
         wake_until(&mut rt, 2.0, |_| false);
         assert_eq!(open(&rt.state), None);
-        // On again with the pointer still there: the row's wait starts over (its handler
-        // came back, and Rune counts the pointer as arriving).
+        // On again with the pointer still there: nothing, as in Strata, whose peek starts only
+        // from the pointer arriving on a folder (coordinator ruling; c22_round1 checks the
+        // arrival).
         command(&mut rt, 'p');
-        let took = wake_until(&mut rt, 2.0, |g| open(g).is_some());
-        assert!((0.48..0.52).contains(&took), "after {took:.3} s");
-        assert_eq!(open(&rt.state), Some(id(3)));
+        wake_until(&mut rt, 2.0, |_| false);
+        assert_eq!(open(&rt.state), None);
     }
 
     // preview/quick-preview/folder-peek: "Columns never shows a folder peek, whatever the saved
@@ -257,8 +260,18 @@ mod c22 {
         assert_eq!((t.folder, t.origin), (id(2), Origin::Keyboard));
         wake_until(&mut rt, 1.0, |g| g.c22.peeked.status == PeekStatus::Ready);
         rt.frame(FRAME);
-        let tree = format!("{:?}", rt.accessibility_tree());
-        assert!(tree.contains("Polite"), "a live region: {tree}");
+        let tree = rt.accessibility_tree();
+        let card = tree
+            .nodes
+            .iter()
+            .map(|(_, n)| n)
+            .find(|n| n.label() == Some("Folder peek"))
+            .expect("the card's group");
+        assert_eq!(
+            format!("{:?}", card.live()),
+            "Some(Polite)",
+            "the card itself"
+        );
         point_away(&mut rt);
         wake_until(&mut rt, 1.0, |_| false);
         assert_eq!(open(&rt.state), Some(id(2)), "the pointer doesn't close it");
@@ -295,5 +308,274 @@ mod c22 {
         rt.frame(FRAME);
         assert_eq!(rt.state.c22.heard, "Open Music");
         assert_eq!(open(&rt.state), None);
+    }
+
+    mod round1 {
+        //! Review round 1: what assistive technology and the pointer must not see.
+
+        use rune::runtime::ElementInfo;
+        use rune::{Env, Key, KeyEvent, Mods, Runtime};
+        use strata_components::collection::element::{row_key, viewport_path};
+        use strata_components::contract::{EntryId, EntrySource};
+        use strata_components::folder_peek::{PeekStatus, card_key};
+        use strata_gallery::scenes::c22::{ICONS, LIST, lengthen};
+        use strata_gallery::{Gallery, scenes};
+
+        const FRAME: f64 = 1.0 / 60.0;
+
+        fn mount_with(name: &str, change: impl FnOnce(&mut Gallery)) -> Runtime<Gallery> {
+            let scene = scenes::all_scenes()
+                .into_iter()
+                .find(|(n, _)| *n == name)
+                .map(|(_, f)| f)
+                .unwrap_or_else(|| panic!("no scene {name}"));
+            let mut g = Gallery::default();
+            scene(&mut g);
+            change(&mut g);
+            let env = Env::new(g.dark, 1.0);
+            let mut rt = strata_gallery::runtime(g, env);
+            rt.frame(0.0);
+            for _ in 0..60 {
+                rt.frame(FRAME);
+            }
+            rt
+        }
+
+        fn element(rt: &Runtime<Gallery>, key: &str) -> Option<ElementInfo> {
+            rt.elements()
+                .into_iter()
+                .find(|e| e.key.as_deref() == Some(key) && !e.exiting)
+        }
+
+        fn centre(rt: &Runtime<Gallery>, key: &str) -> (f32, f32) {
+            let [x, y, w, h] = element(rt, key)
+                .unwrap_or_else(|| panic!("no element {key}"))
+                .visible;
+            (x + w / 2.0, y + h / 2.0)
+        }
+
+        fn point(rt: &mut Runtime<Gallery>, key: &str) {
+            let (x, y) = centre(rt, key);
+            rt.pointer_move(x, y);
+            rt.frame(FRAME);
+        }
+
+        fn command(rt: &mut Runtime<Gallery>, c: char) {
+            rt.key(KeyEvent {
+                key: Key::Command(c),
+                mods: Mods::default(),
+            });
+            rt.frame(FRAME);
+        }
+
+        /// As `c22::wake_until`: frames only at the wakes asked for.
+        fn wake_until(
+            rt: &mut Runtime<Gallery>,
+            limit: f64,
+            done: impl Fn(&Gallery) -> bool,
+        ) -> f64 {
+            let start = rt.state.c22.clock;
+            for _ in 0..400 {
+                let now = rt.state.c22.clock;
+                if now - start > limit || done(&rt.state) {
+                    break;
+                }
+                if rt.has_pending_input() {
+                    rt.frame(FRAME);
+                    continue;
+                }
+                let Some(deadline) = rt.wake_deadline() else {
+                    break;
+                };
+                if deadline - start > limit {
+                    break;
+                }
+                rt.frame((deadline - now).max(0.001));
+            }
+            rt.state.c22.clock - start
+        }
+
+        fn open(g: &Gallery) -> Option<EntryId> {
+            g.c22.peek.target().map(|t| t.folder)
+        }
+
+        fn item(n: u64) -> String {
+            row_key(EntryId::new(n))
+        }
+
+        // B1. preview/quick-preview/folder-peek: "When neither side fits, the popover overlays the
+        // viewport's trailing edge." The viewport is the pane the person sees, not the columns'
+        // width C4 scrolls sideways inside it.
+        #[test]
+        fn a_trailing_edge_card_stays_inside_a_sideways_scrolled_pane() {
+            for (pane, scroll) in [(400.0, 150.0), (300.0, 0.0)] {
+                let mut rt = mount_with("c22-list-light", |g| {
+                    g.c22.pane = Some(pane);
+                    g.c22.scroll_x = Some(scroll);
+                });
+                for _ in 0..30 {
+                    rt.frame(FRAME);
+                }
+                point(&mut rt, &item(2));
+                wake_until(&mut rt, 1.0, |g| open(g).is_some());
+                rt.frame(FRAME);
+                let card = element(&rt, &card_key(LIST)).expect("a card").rect;
+                assert!(
+                    card[0] >= 0.0 && card[0] + card[2] <= pane,
+                    "pane {pane}, scrolled {scroll}: card {card:?}"
+                );
+            }
+        }
+
+        // B1. preview/quick-preview/folder-peek: "A viewport narrower than 256 px opens no peek."
+        #[test]
+        fn a_pane_narrower_than_the_card_peeks_nothing() {
+            let mut rt = mount_with("c22-narrow-light", |_| {});
+            point(&mut rt, &item(2));
+            wake_until(&mut rt, 1.5, |_| false);
+            assert_eq!(open(&rt.state), None);
+        }
+
+        // B2. A folder under a menu's scrim, or under the menu, never peeks.
+        #[test]
+        fn rows_under_a_menu_and_its_scrim_never_peek() {
+            let mut rt = mount_with("c22-list-light", |_| {});
+            command(&mut rt, 'm');
+            point(&mut rt, &item(9));
+            point(&mut rt, &item(3));
+            wake_until(&mut rt, 1.5, |_| false);
+            assert_eq!(open(&rt.state), None, "through the scrim");
+            point(&mut rt, "c22-menu");
+            wake_until(&mut rt, 1.5, |_| false);
+            assert_eq!(open(&rt.state), None, "through the menu");
+        }
+
+        // B3. preview/quick-preview/folder-peek: "Starting or ending a drag cancels a pending peek
+        // and closes an open one": a drag from outside the collection, dropped on a folder.
+        #[test]
+        fn a_drag_from_elsewhere_dropped_on_a_folder_peeks_nothing() {
+            let mut rt = mount_with("c22-list-light", |_| {});
+            let (sx, sy) = centre(&rt, "c22-drag-source");
+            let (tx, ty) = centre(&rt, &item(3));
+            rt.pointer_move(sx, sy);
+            rt.frame(FRAME);
+            rt.pointer_down(sx, sy);
+            rt.frame(FRAME);
+            for i in 1..=20 {
+                let t = i as f32 / 20.0;
+                rt.pointer_move(sx + (tx - sx) * t, sy + (ty - sy) * t);
+                rt.frame(FRAME);
+            }
+            rt.pointer_up(tx, ty);
+            rt.frame(FRAME);
+            wake_until(&mut rt, 1.5, |_| false);
+            assert_eq!(rt.state.c22.heard, "Dropped");
+            assert_eq!(open(&rt.state), None);
+            // Moving inside the folder it was dropped on is no arrival.
+            rt.pointer_move(tx + 3.0, ty);
+            rt.frame(FRAME);
+            wake_until(&mut rt, 1.5, |_| false);
+            assert_eq!(open(&rt.state), None);
+        }
+
+        // SF1. The card's own close delay: from the card straight to blank space.
+        #[test]
+        fn leaving_the_card_for_blank_space_closes_80_ms_later() {
+            for animations in [true, false] {
+                let mut rt = mount_with("c22-icons-light", |g| g.look.animations = animations);
+                point(&mut rt, &item(2));
+                wake_until(&mut rt, 1.0, |g| open(g).is_some());
+                rt.frame(FRAME);
+                point(&mut rt, &card_key(ICONS));
+                wake_until(&mut rt, 1.0, |_| false);
+                rt.pointer_move(200.0, 600.0);
+                rt.frame(FRAME);
+                let took = wake_until(&mut rt, 1.0, |g| open(g).is_none());
+                assert!((0.06..0.1).contains(&took), "closed after {took:.3} s");
+            }
+        }
+
+        // SF2 (coordinator ruling: Strata). A peek starts only from the pointer arriving on a
+        // folder: peeking on again with the pointer parked shows nothing, moving inside the row
+        // doesn't count, and leaving and coming back does.
+        #[test]
+        fn peeking_on_again_with_the_pointer_parked_waits_for_an_arrival() {
+            let mut rt = mount_with("c22-list-light", |_| {});
+            command(&mut rt, 'p');
+            point(&mut rt, &item(3));
+            wake_until(&mut rt, 1.0, |_| false);
+            command(&mut rt, 'p');
+            wake_until(&mut rt, 2.0, |_| false);
+            assert_eq!(open(&rt.state), None, "parked");
+            let (x, y) = centre(&rt, &item(3));
+            rt.pointer_move(x + 4.0, y);
+            rt.frame(FRAME);
+            wake_until(&mut rt, 2.0, |_| false);
+            assert_eq!(open(&rt.state), None, "a move inside the row");
+            // Off it for longer than its 80 ms leave delay (a quicker out and back is no leave to
+            // Rune), then back.
+            point(&mut rt, &item(9));
+            wake_until(&mut rt, 0.3, |_| false);
+            point(&mut rt, &item(3));
+            let took = wake_until(&mut rt, 2.0, |g| open(g).is_some());
+            assert_eq!(open(&rt.state), Some(EntryId::new(3)), "an arrival");
+            assert!((0.48..0.52).contains(&took), "after {took:.3} s");
+        }
+
+        // SF3. A peek whose folder's row scrolls out of view closes, with the pointer on the card
+        // (the row's own leave came long before).
+        #[test]
+        fn a_peek_closes_when_its_row_scrolls_out_of_view() {
+            let mut rt = mount_with("c22-list-light", |g| lengthen(&mut g.c22, 400));
+            point(&mut rt, &item(2));
+            wake_until(&mut rt, 1.0, |g| open(g).is_some());
+            rt.frame(FRAME);
+            point(&mut rt, &card_key(LIST));
+            wake_until(&mut rt, 0.5, |_| false);
+            assert_eq!(open(&rt.state), Some(EntryId::new(2)));
+            // Out of view, still mounted (Rune keeps rows past the viewport).
+            rt.update(|_, tx| tx.scroll_to_instant(viewport_path(LIST), 0.0, 150.0));
+            rt.frame(FRAME);
+            rt.frame(FRAME);
+            assert!(element(&rt, &item(2)).is_some(), "still mounted");
+            assert_eq!(open(&rt.state), None, "clipped out of view");
+        }
+
+        // SF3. A keyboard peek too, when the row leaves the tree.
+        #[test]
+        fn a_keyboard_peek_closes_when_its_row_is_scrolled_away() {
+            let mut rt = mount_with("c22-list-light", |g| {
+                lengthen(&mut g.c22, 400);
+                let d = &mut g.c22;
+                d.list.selection.select_only(&d.home, 1);
+            });
+            rt.key(KeyEvent {
+                key: Key::Text("i".into()),
+                mods: Mods::default(),
+            });
+            rt.frame(FRAME);
+            assert_eq!(open(&rt.state), Some(EntryId::new(2)));
+            rt.update(|_, tx| tx.scroll_to_instant(viewport_path(LIST), 0.0, 6_000.0));
+            rt.frame(FRAME);
+            rt.frame(FRAME);
+            assert!(element(&rt, &item(2)).is_none(), "unmounted");
+            assert_eq!(open(&rt.state), None);
+        }
+
+        // A result for a peek no longer open is dropped by its serial.
+        #[test]
+        fn a_listing_for_a_closed_peek_is_dropped_by_its_serial() {
+            let mut rt = mount_with("c22-list-light", |_| {});
+            point(&mut rt, &item(6));
+            wake_until(&mut rt, 1.0, |g| open(g).is_some());
+            point(&mut rt, &item(2));
+            wake_until(&mut rt, 1.0, |g| open(g) == Some(EntryId::new(2)));
+            wake_until(&mut rt, 3.0, |g| g.c22.stale > 0);
+            let d = &rt.state.c22;
+            assert_eq!(d.stale, 1, "Slow's result came for a closed peek");
+            assert_eq!(d.peeked.name, "Music");
+            assert_eq!(d.peeked.status, PeekStatus::Ready);
+            assert_eq!(d.peeked.rows.len(), 3);
+        }
     }
 }

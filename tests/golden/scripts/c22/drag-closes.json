@@ -18,8 +18,19 @@
                 },
                 {
                   "key": "c22-heard",
-                  "name": "Dragging 1 items",
+                  "name": "Dragging 1 items, peek closed",
                   "role": "label"
+                },
+                {
+                  "children": [
+                    {
+                      "name": "Drag me",
+                      "role": "label"
+                    }
+                  ],
+                  "key": "c22-drag-source",
+                  "name": "Drag me",
+                  "role": "button"
                 },
                 {
                   "actions": [

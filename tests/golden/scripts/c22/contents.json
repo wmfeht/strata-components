@@ -22,6 +22,17 @@
                   "role": "label"
                 },
                 {
+                  "children": [
+                    {
+                      "name": "Drag me",
+                      "role": "label"
+                    }
+                  ],
+                  "key": "c22-drag-source",
+                  "name": "Drag me",
+                  "role": "button"
+                },
+                {
                   "actions": [
                     "scroll-up",
                     "scroll-down",
@@ -768,81 +779,69 @@
                 {
                   "children": [
                     {
-                      "children": [
-                        {
-                          "key": "peek-heading",
-                          "name": "Projects",
-                          "role": "heading"
-                        }
-                      ],
-                      "key": "peek-header",
-                      "role": "group"
+                      "key": "peek-heading",
+                      "name": "Projects",
+                      "role": "heading"
                     },
                     {
                       "children": [
                         {
-                          "children": [
-                            {
-                              "key": "peek-row-10000",
-                              "name": "src",
-                              "position": 1,
-                              "role": "list-item"
-                            },
-                            {
-                              "key": "peek-row-10001",
-                              "name": "docs",
-                              "position": 2,
-                              "role": "list-item"
-                            },
-                            {
-                              "key": "peek-row-10002",
-                              "name": "assets",
-                              "position": 3,
-                              "role": "list-item"
-                            },
-                            {
-                              "key": "peek-row-10003",
-                              "name": "file-03.txt",
-                              "position": 4,
-                              "role": "list-item"
-                            },
-                            {
-                              "key": "peek-row-10004",
-                              "name": "file-04.txt",
-                              "position": 5,
-                              "role": "list-item"
-                            },
-                            {
-                              "key": "peek-row-10005",
-                              "name": "file-05.txt",
-                              "position": 6,
-                              "role": "list-item"
-                            },
-                            {
-                              "key": "peek-row-10006",
-                              "name": "file-06.txt",
-                              "position": 7,
-                              "role": "list-item"
-                            },
-                            {
-                              "key": "peek-row-10007",
-                              "name": "file-07.txt",
-                              "position": 8,
-                              "role": "list-item"
-                            }
-                          ],
-                          "key": "peek-rows",
-                          "role": "list",
-                          "setSize": 8
+                          "key": "peek-row-10000",
+                          "name": "src",
+                          "position": 1,
+                          "role": "list-item"
                         },
                         {
-                          "key": "peek-more",
-                          "name": "and 12 more",
-                          "role": "label"
+                          "key": "peek-row-10001",
+                          "name": "docs",
+                          "position": 2,
+                          "role": "list-item"
+                        },
+                        {
+                          "key": "peek-row-10002",
+                          "name": "assets",
+                          "position": 3,
+                          "role": "list-item"
+                        },
+                        {
+                          "key": "peek-row-10003",
+                          "name": "file-03.txt",
+                          "position": 4,
+                          "role": "list-item"
+                        },
+                        {
+                          "key": "peek-row-10004",
+                          "name": "file-04.txt",
+                          "position": 5,
+                          "role": "list-item"
+                        },
+                        {
+                          "key": "peek-row-10005",
+                          "name": "file-05.txt",
+                          "position": 6,
+                          "role": "list-item"
+                        },
+                        {
+                          "key": "peek-row-10006",
+                          "name": "file-06.txt",
+                          "position": 7,
+                          "role": "list-item"
+                        },
+                        {
+                          "key": "peek-row-10007",
+                          "name": "file-07.txt",
+                          "position": 8,
+                          "role": "list-item"
                         }
                       ],
-                      "key": "peek-body",
-                      "role": "group"
+                      "key": "peek-rows",
+                      "role": "list",
+                      "setSize": 8
+                    },
+                    {
+                      "key": "peek-more",
+                      "name": "and 12 more",
+                      "role": "label"
                     }
                   ],
                   "key": "folder-peek",

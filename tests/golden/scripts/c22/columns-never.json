@@ -22,6 +22,17 @@
                   "role": "label"
                 },
                 {
+                  "children": [
+                    {
+                      "name": "Drag me",
+                      "role": "label"
+                    }
+                  ],
+                  "key": "c22-drag-source",
+                  "name": "Drag me",
+                  "role": "button"
+                },
+                {
                   "actions": [
                     "focus"
                   ],

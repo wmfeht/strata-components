@@ -22,6 +22,17 @@
                   "role": "label"
                 },
                 {
+                  "children": [
+                    {
+                      "name": "Drag me",
+                      "role": "label"
+                    }
+                  ],
+                  "key": "c22-drag-source",
+                  "name": "Drag me",
+                  "role": "button"
+                },
+                {
                   "actions": [
                     "scroll-up",
                     "scroll-down",
@@ -768,34 +779,22 @@
                 {
                   "children": [
                     {
-                      "children": [
-                        {
-                          "key": "peek-heading",
-                          "name": "Locked",
-                          "role": "heading"
-                        }
-                      ],
-                      "key": "peek-header",
-                      "role": "group"
+                      "key": "peek-heading",
+                      "name": "Locked",
+                      "role": "heading"
                     },
                     {
                       "children": [
                         {
-                          "children": [
-                            {
-                              "name": "Unable to read this directory",
-                              "role": "label"
-                            },
-                            {
-                              "name": "Permission denied",
-                              "role": "label"
-                            }
-                          ],
-                          "key": "peek-error",
-                          "role": "group"
+                          "name": "Unable to read this directory",
+                          "role": "label"
+                        },
+                        {
+                          "name": "Permission denied",
+                          "role": "label"
                         }
                       ],
-                      "key": "peek-body",
+                      "key": "peek-error",
                       "role": "group"
                     }
                   ],

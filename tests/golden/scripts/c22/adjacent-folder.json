@@ -22,6 +22,17 @@
                   "role": "label"
                 },
                 {
+                  "children": [
+                    {
+                      "name": "Drag me",
+                      "role": "label"
+                    }
+                  ],
+                  "key": "c22-drag-source",
+                  "name": "Drag me",
+                  "role": "button"
+                },
+                {
                   "actions": [
                     "scroll-up",
                     "scroll-down",
@@ -768,52 +779,40 @@
                 {
                   "children": [
                     {
-                      "children": [
-                        {
-                          "key": "peek-heading",
-                          "name": "Photos",
-                          "role": "heading"
-                        }
-                      ],
-                      "key": "peek-header",
-                      "role": "group"
+                      "key": "peek-heading",
+                      "name": "Photos",
+                      "role": "heading"
                     },
                     {
                       "children": [
                         {
-                          "children": [
-                            {
-                              "key": "peek-row-10000",
-                              "name": "IMG_0101.jpg",
-                              "position": 1,
-                              "role": "list-item"
-                            },
-                            {
-                              "key": "peek-row-10001",
-                              "name": "IMG_0102.jpg",
-                              "position": 2,
-                              "role": "list-item"
-                            },
-                            {
-                              "key": "peek-row-10002",
-                              "name": "IMG_0103.jpg",
-                              "position": 3,
-                              "role": "list-item"
-                            },
-                            {
-                              "key": "peek-row-10003",
-                              "name": "IMG_0104.jpg",
-                              "position": 4,
-                              "role": "list-item"
-                            }
-                          ],
-                          "key": "peek-rows",
-                          "role": "list",
-                          "setSize": 4
+                          "key": "peek-row-10000",
+                          "name": "IMG_0101.jpg",
+                          "position": 1,
+                          "role": "list-item"
+                        },
+                        {
+                          "key": "peek-row-10001",
+                          "name": "IMG_0102.jpg",
+                          "position": 2,
+                          "role": "list-item"
+                        },
+                        {
+                          "key": "peek-row-10002",
+                          "name": "IMG_0103.jpg",
+                          "position": 3,
+                          "role": "list-item"
+                        },
+                        {
+                          "key": "peek-row-10003",
+                          "name": "IMG_0104.jpg",
+                          "position": 4,
+                          "role": "list-item"
                         }
                       ],
-                      "key": "peek-body",
-                      "role": "group"
+                      "key": "peek-rows",
+                      "role": "list",
+                      "setSize": 4
                     }
                   ],
                   "key": "folder-peek",

@@ -13,6 +13,7 @@
 //! | --- | --- |
 //! | Ctrl+1, Ctrl+2, Ctrl+3 | List, Icons, Columns |
 //! | Ctrl+P | Folder peeking on or off |
+//! | Ctrl+M | A stand-in menu, its scrim over the window |
 //! | `i` | The keyboard peek at the cursor's folder (Strata's 10xer `i`) |
 //! | Escape | Closes an open peek first |
 
@@ -105,6 +106,12 @@ const HOME: &[(&str, bool)] = &[
 ];
 
 fn home() -> Vec<ListEntry> {
+    home_with(0)
+}
+
+/// Home with `extra` more folders after its entries, for a list long enough to scroll its
+/// rows out of the mounted range.
+fn home_with(extra: usize) -> Vec<ListEntry> {
     HOME.iter()
         .enumerate()
         .map(|(i, (name, folder))| {
@@ -115,7 +122,20 @@ fn home() -> Vec<ListEntry> {
             };
             ListEntry::new(EntryId::new(1 + i as u64), *name, kind, icon)
         })
+        .chain((0..extra).map(|i| {
+            ListEntry::new(
+                EntryId::new(1_000 + i as u64),
+                format!("Folder {i:03}"),
+                EntryKind::Folder,
+                "folder",
+            )
+        }))
         .collect()
+}
+
+/// Makes Home `extra` folders longer (the page's tests scroll it).
+pub fn lengthen(d: &mut Demo, extra: usize) {
+    d.home = ListSource::new(home_with(extra));
 }
 
 /// What the fake lister answers for folder `name`: the rows, the status and the more count.
@@ -192,8 +212,19 @@ pub struct Peeked {
     pub status: PeekStatus,
     pub rows: ListSource,
     pub more: Option<More>,
-    /// When the fake lister answers, on the page's clock.
-    pub due: Option<f64>,
+    /// The peek it lists ([`PeekTarget::serial`]).
+    ///
+    /// [`PeekTarget::serial`]: strata_components::folder_peek::PeekTarget::serial
+    pub serial: u64,
+}
+
+/// A listing the fake lister is working on: for the peek `serial`, of folder `name`, due on
+/// the page's clock.
+#[derive(Debug)]
+pub struct Job {
+    pub serial: u64,
+    pub name: String,
+    pub due: f64,
 }
 
 /// One column: Home.
@@ -242,6 +273,18 @@ pub struct Demo {
     pub heard: String,
     /// A peek a scene opens once its view is laid out.
     pub open_at: Option<(&'static str, Origin)>,
+    /// The fake lister's jobs, in the order asked.
+    pub jobs: Vec<Job>,
+    /// Results that came for a peek no longer open, and were dropped.
+    pub stale: usize,
+    /// What the host heard of the peek, in order.
+    pub events: Vec<String>,
+    /// A sideways scroll of the List to make once laid out.
+    pub scroll_x: Option<f32>,
+    /// A stand-in menu is open, its scrim over the window (Ctrl+M).
+    pub menu: bool,
+    /// Where the pane shows, in window points: the peek's bounds.
+    pub pane_rect: Option<Rect>,
 }
 
 impl Default for Demo {
@@ -292,6 +335,12 @@ impl Demo {
             pane: None,
             heard: String::new(),
             open_at: None,
+            jobs: Vec::new(),
+            stale: 0,
+            events: Vec::new(),
+            scroll_x: None,
+            menu: false,
+            pane_rect: None,
         }
     }
 
@@ -322,16 +371,24 @@ impl Demo {
                 } else {
                     LIST_DELAY
                 };
+                let serial = target.serial;
                 self.heard = format!("Peek {name}");
+                self.events.push(format!("open {name} #{serial}"));
+                self.jobs.push(Job {
+                    serial,
+                    name: name.clone(),
+                    due: self.clock + delay,
+                });
                 self.peeked = Peeked {
                     name,
-                    due: Some(self.clock + delay),
+                    serial,
                     ..Peeked::default()
                 };
                 tx.wake_after(Duration::from_secs_f64(delay));
             }
             Change::Closed => {
                 self.heard = "Peek closed".into();
+                self.events.push("closed".into());
                 self.peeked = Peeked::default();
             }
         }
@@ -339,12 +396,26 @@ impl Demo {
 
     fn heard(&mut self, intent: Intent) {
         if let Intent::BeginDrag { ids, .. } = intent {
-            self.heard = format!("Dragging {} items", ids.len());
             // The host's part of "starting a drag closes the peek".
-            if self.peek.close() {
+            let closed = self.peek.close();
+            if closed {
                 self.peeked = Peeked::default();
+                self.events.push("closed by the drag".into());
             }
+            self.heard = format!(
+                "Dragging {} items{}",
+                ids.len(),
+                if closed { ", peek closed" } else { "" }
+            );
         }
+    }
+
+    /// Opens or closes the stand-in menu: the host's part of "rows under an overlay don't
+    /// peek".
+    fn show_menu(&mut self, on: bool, tx: &mut Tx) {
+        self.menu = on;
+        let change = self.peek.set_covered(on);
+        self.relist(change, tx);
     }
 
     fn coll(&self) -> &CollectionState {
@@ -367,6 +438,8 @@ pub fn peek() -> FolderPeek<Gallery> {
         |g: &Gallery| g.look(),
     )
     .thumbnails(|g: &Gallery| &g.c22.store)
+    // The pane, which C4's sideways scroll is narrower than when its columns don't fit.
+    .bounds(|g: &Gallery| g.c22.pane_rect)
     .on_change(|g: &mut Gallery, change, tx| g.c22.relist(change, tx))
     .on_open(|g: &mut Gallery, target, _| {
         g.c22.heard = format!("Open {}", g.c22.name_of(target.folder));
@@ -587,6 +660,10 @@ fn columns(g: &mut Gallery, dark: bool) {
     start(g, dark).mode = Mode::Columns;
 }
 
+fn long(g: &mut Gallery, dark: bool) {
+    lengthen(start(g, dark), 400);
+}
+
 fn icons(g: &mut Gallery, dark: bool) {
     start(g, dark).mode = Mode::Icons;
 }
@@ -642,7 +719,33 @@ pub const REVIEW: &[Scene] = &[
     ("c22-narrow-dark", |g| narrow(g, true)),
     ("c22-columns-light", |g| columns(g, false)),
     ("c22-columns-dark", |g| columns(g, true)),
+    ("c22-long-light", |g| long(g, false)),
+    ("c22-long-dark", |g| long(g, true)),
 ];
+
+/// Something to drag from outside the collections (a sidebar row, a tab, another pane), for
+/// the host's part of "ending a drag cancels a pending peek".
+fn drag_source(g: &Gallery) -> El {
+    let kit = g.kit();
+    row()
+        .key("c22-drag-source")
+        .px(g.look().space.sm)
+        .radius(kit.radius.sm)
+        .border(1.0, kit.c.std_border)
+        .child(
+            text("Drag me")
+                .font(kit.ty.ui_compact)
+                .color(kit.c.text_muted),
+        )
+        .on_drag(|g: &mut Gallery, d: &mut rune::Drag, _| {
+            if d.phase == rune::Phase::Up {
+                g.c22.heard = "Dropped".into();
+                // The host's part of "ending a drag cancels a pending peek".
+                g.c22.list.hold_rest();
+                g.c22.icons.hold_rest();
+            }
+        })
+}
 
 fn label(key: &str, t: String, g: &Gallery) -> El {
     let kit = g.kit();
@@ -675,7 +778,8 @@ pub fn view(g: &Gallery, cx: &mut Cx<Gallery>) -> El {
             ),
             g,
         ))
-        .child(label("c22-heard", d.heard.clone(), g));
+        .child(label("c22-heard", d.heard.clone(), g))
+        .child(drag_source(g));
     let body = match d.mode {
         Mode::List => table().build(g, peek().rows(list_base()), &mut layer),
         Mode::Icons => icons_collection().build(g),
@@ -684,10 +788,40 @@ pub fn view(g: &Gallery, cx: &mut Cx<Gallery>) -> El {
     if d.mode != Mode::Columns {
         peek().card(g, &mut layer);
     }
+    if d.menu {
+        // A menu's outside-press scrim over the window, and the menu over the rows.
+        layer.push(
+            rune_kit::scrim("c22-scrim", |_: &mut Gallery| {})
+                .on_press_tx(|g: &mut Gallery, tx| g.c22.show_menu(false, tx)),
+        );
+        layer.push(
+            col()
+                .key("c22-menu")
+                .role("menu")
+                .label("Menu")
+                .pin(Some(20.0), Some(70.0), None, None)
+                .w(400.0)
+                .h(200.0)
+                .radius(kit.radius.md)
+                .fill(kit.c.surface_raised)
+                .border(1.0, kit.c.std_border)
+                .on_press(|_: &mut Gallery| {}),
+        );
+    }
     let pane = match d.pane {
-        Some(w) => col().w(w).h_full().min_h(0.0).child(body),
-        None => col().w_full().h_full().min_h(0.0).child(body),
-    };
+        Some(w) => col().w(w),
+        None => col().w_full(),
+    }
+    .h_full()
+    .min_h(0.0)
+    .on_layout_tx(|g: &mut Gallery, r, tx| {
+        let r = Rect::new(r[0], r[1], r[2], r[3]);
+        if g.c22.pane_rect == Some(r) {
+            tx.live_only();
+        }
+        g.c22.pane_rect = Some(r);
+    })
+    .child(body);
     let page = col().key("c22-page").w_full().h_full().child(header).child(
         col()
             .w_full()
@@ -708,7 +842,7 @@ fn rects(g: &Gallery, id: EntryId) -> Option<(&'static str, Rect, Rect)> {
         Mode::Icons => (ICONS, icons_collection()),
         Mode::Columns => return None,
     };
-    let viewport = d.coll().viewport();
+    let viewport = peek().viewport(g, d.coll().viewport());
     (viewport.w > 0.0).then(|| (scope, c.window_rect_of(g, index), viewport))
 }
 
@@ -720,7 +854,18 @@ pub fn on_key(g: &mut Gallery, key: &KeyEvent, tx: &mut Tx) -> bool {
             .map(|(_, m)| m)
     };
     if let Some(m) = mode(key) {
-        g.c22.mode = m;
+        let d = &mut g.c22;
+        d.mode = m;
+        // The host's part of "switching views closes the peek": a keyboard peek has no
+        // pointer leave to close it.
+        if d.peek.close() {
+            d.relist(Change::Closed, tx);
+        }
+        return true;
+    }
+    if key.is_command('m') {
+        let on = !g.c22.menu;
+        g.c22.show_menu(on, tx);
         return true;
     }
     if key.is_command('p') {
@@ -794,9 +939,26 @@ pub fn poll(g: &mut Gallery, t: f64, tx: &mut Tx) -> bool {
     }
     let look = g.look.clone();
     let d = &mut g.c22;
-    if d.peeked.due.is_some_and(|due| t >= due) {
-        let (rows, status, more) = listing(&d.peeked.name);
-        d.peeked.due = None;
+    if d.list.viewport().w > 0.0
+        && let Some(x) = d.scroll_x.take()
+    {
+        tx.scroll_to_x(format!("{LIST}-scroll"), x);
+    }
+    // Results come back in the order asked; one for a peek no longer open is dropped by its
+    // serial, as Strata's request ids drop a closed peek's batches.
+    let due: Vec<Job> = {
+        let (due, rest) = std::mem::take(&mut d.jobs)
+            .into_iter()
+            .partition(|j| t >= j.due);
+        d.jobs = rest;
+        due
+    };
+    for job in due {
+        if d.peek.target().map(|t| t.serial) != Some(job.serial) {
+            d.stale += 1;
+            continue;
+        }
+        let (rows, status, more) = listing(&job.name);
         d.peeked.rows = ListSource::new(rows);
         d.peeked.status = status;
         d.peeked.more = more;

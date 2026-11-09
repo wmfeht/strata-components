@@ -7,7 +7,7 @@
     {
       "t": 0.2,
       "type": "move",
-      "key": "row-2"
+      "key": "row-2/cell-name/icon"
     },
     {
       "t": 1.5,

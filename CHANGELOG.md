@@ -93,8 +93,8 @@ Nothing is released yet. The first release is planned for milestone M1 with the 
   - On X11, `clipboard::shutdown()` hands a copy that still holds the clipboard to a running
     clipboard manager, every type of it, waiting at most 2 s (`Content::keep_after_exit`);
     `Closed::hand_off` says how it went. On Wayland a copy goes with the app.
-  - Call `clipboard::shutdown()` (or `dnd::shutdown()`: either does both) where drag and drop's
-    is called.
+  - Call `clipboard::shutdown()` (or `dnd::shutdown()`: either does both) in `App::on_quit` and
+    in the last window's `on_close`, as drag and drop's.
 - `glib-bridge`: a GLib main loop for Rune apps. `GlibThread::start` runs a fresh `MainContext`
   on its own thread and wakes the app's `poll` as answers land in its state.
   - `Glib::spawn` runs a GIO future there, and its output lands in a `Task`.

@@ -1145,6 +1145,27 @@ fn x11_drag_and_drops_shutdown_hands_the_clipboard_over_too() {
     );
 }
 
+/// `Tx::quit` alone: Rune runs `App::on_quit` before any window closes, and the shutdown there
+/// hands the clipboard over as an explicit one does.
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn x11_on_quit_shuts_down_and_hands_the_clipboard_over() {
+    let s = Session::start();
+    let manager = s.peer(Display::X11);
+    manager.clipboard_manager(true);
+    let demo = Demo::start(&s, B::X).expect("X11");
+    let at = demo.app.line_count();
+    let copy = demo.copy_offers(Selection::Clipboard, &[Offer::text(UTF8, "kept")]);
+    demo.change(at, "holding", Some(copy));
+    let down = demo.quit("quit-only");
+    assert_eq!(
+        (&down["why"], &down["hand_off"]),
+        (&json!("on-quit"), &json!("Saved")),
+        "{down}"
+    );
+    manager.wait_event("manager-saved", |e| matches!(e, Event::ManagerSaved { .. }));
+}
+
 // ---- 12. Through Xwayland (XW) ----
 
 /// libwayland < 1.23 and no data control, simulated: the app's clipboard goes through

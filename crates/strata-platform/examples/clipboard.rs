@@ -14,7 +14,8 @@
 //! - `{"cmd":"read","selection":…,"mimes":[…],"max_bytes":n}`, `{"cmd":"read-files","selection":…}`;
 //! - `{"cmd":"rune-copy","text":"…"}`: Rune's own `Tx::copy`;
 //! - `{"cmd":"quit"}`: the clipboard's shutdown, then `Tx::quit`; `{"cmd":"quit-dnd"}`: drag
-//!   and drop's shutdown instead (with `--with-dnd`).
+//!   and drop's shutdown instead (with `--with-dnd`); `{"cmd":"quit-only"}`: `Tx::quit` alone,
+//!   so `App::on_quit` shuts down.
 //!
 //! Flags: `--title T`, `--with-dnd` (drag and drop attached too, sharing the substrate),
 //! and the test switches `--no-data-control` (the data device, as on mutter) and
@@ -240,6 +241,7 @@ mod demo {
                 shutdown(why);
                 tx.quit();
             }
+            "quit-only" => tx.quit(),
             other => log("bad-command", json!({ "cmd": other })),
         }
     }
@@ -312,6 +314,7 @@ mod demo {
                 #[cfg(feature = "dnd")]
                 _dnd: state_dnd,
             })
+            .on_quit(|_, _| shutdown("on-quit"))
             .on_close(on_close);
         let handle: AppHandle<State> = app.handle();
         let stdin_handle = handle.clone();

@@ -17,9 +17,11 @@
 //!
 //! Call [`shutdown`] on the UI thread before the event loop ends, as drag and drop's: it
 //! hands an X11 clipboard to a clipboard manager, then tears down the transfer substrate
-//! (shared with `dnd`) while winit's display is alive. Call it before `Tx::quit` or
-//! `AppHandle::quit`, **and** in the last window's `on_close`. Either module's shutdown does
-//! both modules' work.
+//! (shared with `dnd`) while winit's display is alive. Call it from `App::on_quit`, which
+//! Rune runs in every open window before any closes for `Tx::quit` and `AppHandle::quit`,
+//! **and** in the last window's `on_close`: when the last window closes, `on_quit` runs only
+//! in the windows still open, so not in that one. Calling it before `Tx::quit` as well does no
+//! harm; a second call finds nothing to do. Either module's shutdown does both modules' work.
 //!
 //! # What Rune lacks
 //!

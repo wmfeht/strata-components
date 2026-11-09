@@ -38,6 +38,7 @@
 //!     .labels(FilterLabels { field: "Filter list (Ctrl+F)".into(), placeholder: "Filter 12 items…".into() })
 //!     .results(|s: &App| Results { source: &s.shown, selection: &s.coll.selection })
 //!     .previews(|s: &App| s.a_selected_result_is_a_file())
+//!     .focus_return("pane")              // the results' focus stop
 //!     .on_intent(|s: &mut App, intent, tx| s.filtered(intent, tx));
 //! // The view: the bar right before the results' focus stop.
 //! // The results: Collection::marks sets `enter_target` where s.filter.outlined(..) == Some(id);
@@ -47,6 +48,7 @@
 //! //   then s.filter.take_reveal(..) into CollectionState::reveal.
 //! // FilterIntent::ShowListing { restore }: the whole listing, Selection::restore, then sync.
 //! // Each poll: s.filter.tick(). Escape from a result: s.filter.close(). Up from the first: focus_field().
+//! // The results dropped (a scope or limit changed): s.filter.restart().
 //! ```
 //!
 //! - **The Enter target** (Strata's `Tracker`): until the user picks a result after the query
@@ -62,9 +64,11 @@
 //!   result while Enter opens it and the field has the keyboard.
 //! - **Keeping the top result in view**: after each set of results, while the field has the
 //!   keyboard and the user hasn't scrolled them since the query changed.
-//! - **Keys in the field.** Enter opens the target (a held Enter once). Down picks the target, or
-//!   the top result, as [`filter::FilterIntent::FocusResults`], then sends the field a Tab so the
-//!   next focus stop, the results, takes the keyboard (probe P1: Rune has no `Tx::focus`, #173).
+//! - **Keys in the field.** Enter opens the target (a held Enter once). Down lands on the top
+//!   result while Enter opens it, else on the results' cursor (Strata's search results,
+//!   `inline_search.rs`; [`filter::FilterState::landing`]), as
+//!   [`filter::FilterIntent::FocusResults`], picks it, then sends the field a Tab so the next
+//!   focus stop, the results, takes the keyboard (probe P1: Rune has no `Tx::focus`, #173).
 //!   Space previews when something is selected and the host's `previews` accepts it; with only
 //!   the outline, or with Shift, it types. Escape closes the bar. A right-click, the Menu key or
 //!   Shift+F10 is [`filter::FilterIntent::FieldMenu`], never the folder menu. Rune hands Enter
@@ -72,7 +76,11 @@
 //! - **Escape and the selection.** When a query starts over results that replace the listing,
 //!   the bar saves the listing's selection (C1a's `Position`); closing the bar or clearing the
 //!   query gives it back in [`filter::FilterIntent::ShowListing`]. In place, the listing's own
-//!   selection stays.
+//!   selection stays. Escape removes the bar with the keyboard in it; it goes to the host's focus
+//!   stop ([`filter::FilterBar::focus_return`]).
+//! - **Restart**: after the host dropped the results (a scope or a search limit changed),
+//!   [`filter::FilterState::restart`] makes the next shown query new, so the pick goes even for
+//!   the same text (Strata's `EnterTarget::restart`).
 //! - **Focus.** The field keeps the keyboard through listing changes. `focus_field` gives it
 //!   back (probe P2: setting `TextEdit::focused` moves Rune's focus on the next frame).
 //!
@@ -106,10 +114,14 @@
 //!   check answering for older text (or after the prompt closed) changes nothing.
 //! - Escape closes it ([`prompt::PromptIntent::Dismissed`], with the text: `s` keeps non-empty
 //!   hits). The field losing the keyboard closes it too, a frame later (a clicked row, another
-//!   pane). Removing the bar gives the keyboard back to the host's focus stop (probe P3).
-//! - Candidates: each edit asks for a new generation; the previous list stays until the new one
-//!   lands, and a stale answer is dropped. A choice the user made survives later batches while
-//!   its candidate is listed; otherwise the first follows the ranking. An early Enter can wait
+//!   pane), unless the host holds it open ([`prompt::PromptState::hold_open`]: while the
+//!   shortcut reference has the keyboard, as Strata's `abandoned` does). Removing the bar gives
+//!   the keyboard back to the host's focus stop (probe P3).
+//! - Candidates: every open, close and edit starts a new generation; the previous list stays
+//!   until the new one lands, and a stale answer, or one for a prompt that lists none, is
+//!   dropped. A choice the user made survives later batches while its candidate is listed, until
+//!   the text changes (Tab's write included: Strata's `forget_candidate_step`); otherwise the
+//!   first follows the ranking. Shift+Tab completes nothing and moves focus back, as GTK's. An early Enter can wait
 //!   for the listing to finish ([`prompt::PromptState::wait_until_settled`], Strata's
 //!   `when_settled`). The list hangs above the field, 280 to 560 pt wide, with the keys' legend
 //!   under it; the pointer tints a row and a press submits it.
@@ -157,15 +169,15 @@
 //! | Bullet (opening words) | Checked by |
 //! | --- | --- |
 //! | Ctrl+F, or the pane's filter button, reveals the filter field… | script `ctrl-f-opens` (the page binds both) |
-//! | With Type to search on, typing a printable character… opens the filter with that character | script `type-to-search` (which keys, and the preference, are Strata's) |
+//! | With Type to search on, typing a printable character… opens the filter with that character | script `type-to-search`; test `a_burst_of_type_to_search_keys_all_reach_the_query` (which keys, and the preference, are Strata's) |
 //! | With Type to search on, `/`… opens an empty filter | script `slash-opens-empty` |
-//! | Escape in the filter field, or clearing the query, restores the normal listing… | scripts `escape-restores`, `clearing-restores`; unit `closing_or_clearing_gives_back_the_listing_and_its_selection` (hidden files are Strata's) |
+//! | Escape in the filter field, or clearing the query, restores the normal listing… | scripts `escape-restores`, `clearing-restores` (the listing's cursor row has the keyboard after); unit `closing_or_clearing_gives_back_the_listing_and_its_selection` (hidden files are Strata's) |
 //! | With a pinyin input method composing…, Escape cancels only the composition | test `escape_while_composing_keeps_the_filter_open` |
 //! | Escape on a focused result closes the filter… with the directory's own selection | script `escape-on-result` |
 //! | Escape on a focused row also closes a filter that narrows rows in place | script `escape-in-place` |
 //! | Press Ctrl+F while a large… folder is loading… | **partial**: script `listing-change-keeps-field` (a listing change stands in for a load ending) |
-//! | Down from the field focuses a result…; Up from the first result returns to the field | script `down-and-up` |
-//! | In the filter field or its results, Space toggles quick preview…; Shift+Space types a space | script `space-previews` (in the field; in the results it is Strata's key map) |
+//! | Down from the field focuses a result…; Up from the first result returns to the field | scripts `down-focuses-results`, `down-lands-on-cursor`, `down-and-up`; unit `down_lands_on_the_cursor_after_a_pick_and_on_the_top_result_before` |
+//! | In the filter field or its results, Space toggles quick preview…; Shift+Space types a space | scripts `space-previews`, `shift-space-types` (in the field; in the results it is Strata's key map); test `down_and_space_while_composing_stay_with_the_composition` |
 //! | When another program deletes the listing's cursor entry…, a focused filter field or result keeps focus | test `a_deleted_cursor_entry_leaves_the_field_and_the_prompt_focused` (the field) |
 //! | In Columns…, Ctrl+F returns focus to that column's open filter field with its query | **partial**: `FilterState::open` on an open bar refocuses it (unit `tick_reports_the_field_gaining_and_losing_the_keyboard`); the column is C2's |
 //! | In Icons and List, with no results, the status sits centered… | golden `c18-filter-empty` ([`filter::status`]) |
@@ -177,13 +189,13 @@
 //! | --- | --- |
 //! | With the field focused and a query with results, the top result has a 1 px accent outline | script `outline-follows-query`; golden `c18-filter-target` |
 //! | In search results the outline comes with no selection; the in-place filter keeps the listing's selection | goldens `c18-filter-target`, `c18-filter-in-place`; unit `a_query_edit_drops_the_pick_and_a_same_query_update_keeps_it` |
-//! | Moving focus from the field to a result or elsewhere removes the outline | script `outline-leaves-with-focus`; unit `enter_opens_the_top_result_outlined_while_the_field_has_the_keyboard` |
-//! | In Icons and List, Enter in the field with no pick opens the outlined top result | script `enter-opens-top`; unit, as above |
+//! | Moving focus from the field to a result or elsewhere removes the outline | scripts `outline-leaves-with-focus` (a click), `tab-out-removes-outline` (no pick); unit `enter_opens_the_top_result_outlined_while_the_field_has_the_keyboard` |
+//! | In Icons and List, Enter in the field with no pick opens the outlined top result | script `enter-opens-top`; test `a_held_enter_opens_once`; unit, as above |
 //! | A pick, such as Ctrl+click…, removes the outline; Enter then opens the pick | script `pick-then-enter`; unit `after_a_pick_enter_opens_the_first_selected_result_in_display_order` |
 //! | A pick is an arrow key, Down from the field, a click, a Ctrl+click, focus moving into the results… | scripts `pick-then-enter`, `down-and-up` (the host calls `pick` from C1e's `on_selection`) |
 //! | Deselecting every result after a pick returns the outline and Enter to the top result | script `deselect-returns-top`; unit `deselecting_every_result_after_a_pick_returns_the_top_result` |
 //! | In search results, editing the query text drops the pick and the results' selection | script `edit-drops-pick`; unit `a_query_edit_drops_the_pick_and_a_same_query_update_keeps_it` |
-//! | Editing the query and typing it back… still counts as a query edit | script `edit-typed-back`; unit, as above |
+//! | Editing the query and typing it back… still counts as a query edit | script `edit-typed-back` (both keys within the page's 40 ms debounce, Strata's `FILTER_DEBOUNCE_DELAY`: one query shows); units, as above and `a_restart_makes_the_same_query_new` |
 //! | In Trash, Recent, or a network share…, a query edit keeps the selection but drops the pick | script `in-place-edit-keeps-selection`; unit, as above |
 //! | A same-query update… keeps the pick, the selection, and its preview | script `same-query-keeps-pick`; unit, as above |
 //! | While the field has focus, the list keeps the top result scrolled into view as results arrive | test `the_top_result_follows_the_results_until_they_are_scrolled`; unit `the_top_result_follows_until_the_results_scroll_and_again_after_an_edit` |
@@ -217,13 +229,13 @@
 //! | search: `f` opens a `filter:` prompt…; Enter commits the filter… | script `filter-prompt` |
 //! | search: Pressing `f` again pre-fills… | script `filter-prompt-prefills`; unit `a_prefilled_prompt_keeps_its_text_unselected` |
 //! | search: Esc from a nonempty prompt keeps the hits…; Pressing `s` while hits are showing pre-fills… | scripts `search-prompt-escape`, `search-prompt-keeps-hits` |
-//! | places: `g Space` opens a footer `go ›` prompt…; Up and Down choose a candidate…; Tab writes the chosen folder… | script `go-prompt`; units `a_chosen_candidate_survives_later_batches_and_a_stale_answer_is_dropped`, `tab_writes_the_chosen_candidate_and_lists_again` |
+//! | places: `g Space` opens a footer `go ›` prompt…; Up and Down choose a candidate…; Tab writes the chosen folder… | script `go-prompt`; test `down_while_composing_chooses_no_candidate`; units `a_chosen_candidate_survives_later_batches_and_a_stale_answer_is_dropped`, `tab_writes_the_chosen_candidate_and_lists_again`, `an_edit_or_a_tab_forgets_the_choice`, `a_stale_batch_never_lands_in_a_later_prompt`, `shift_tab_completes_nothing` |
 //! | places: The entry is cleared on submit, Esc, focus loss, a replacing prompt, and mode exit, and it keeps no undo history | script `go-prompt-clears`; units `a_new_prompt_replaces_the_open_one_without_its_text`, `a_prompt_without_undo_swallows_the_undo_keys`, `losing_the_keyboard_dismisses_the_prompt` |
-//! | places: Enter on a typed path that exists acts on it at once; otherwise Enter waits… | test `an_early_enter_in_go_waits_for_the_picker_in_a_resting_window`; unit `a_submit_can_wait_for_the_listing_to_finish` (whether the path exists is Strata's) |
+//! | places: Enter on a typed path that exists acts on it at once; otherwise Enter waits… | test `an_early_enter_in_go_waits_for_the_picker_in_a_resting_window`; units `a_submit_can_wait_for_the_listing_to_finish`, `an_edit_drops_a_waiting_submit` (whether the path exists is Strata's) |
 //! | places: Esc cancels an armed chord, and any other unknown second key cancels it with `Unknown chord` | script `chord-unknown`; tests `the_unknown_chord_flash_ends_in_a_resting_window`, `a_second_flash_restarts_its_time` |
 //! | file-verbs: `r` and F2 open `rename ›`…; A file's stem… is selected | script `rename-prompt`; unit `rename_opens_with_the_range_the_host_names_selected` (the stem rule is the host's) |
 //! | file-verbs: Enter renames the item…; a taken name keeps the prompt open… | scripts `rename-prompt`, `rename-refused`; golden `c18-prompt-refused` |
-//! | file-verbs: Esc, a clicked row, another prompt, or leaving the mode discards… | script `prompt-discard`; unit `losing_the_keyboard_dismisses_the_prompt` |
+//! | file-verbs: Esc, a clicked row, another prompt, or leaving the mode discards… | script `prompt-discard`; units `losing_the_keyboard_dismisses_the_prompt`, `a_held_prompt_survives_losing_the_keyboard_until_released` (F1 keeps it: C19 holds it) |
 //! | `jump ›`, `recent ›`, `create ›`, `move to ›`, `copy to ›`, `extract to ›` | presets only (owner's ruling): the same mechanism as `go ›` and `rename ›` |
 //!
 //! `browser/view-modes/columns`: "Right-clicking… the filter field opens no folder menu"
@@ -244,14 +256,17 @@
 //! - **No slide-down**: the bar appears and goes at once, where Strata's revealer slides (owner's
 //!   ruling).
 //! - **Live regions beyond Strata**: the results' status line, the chord pill and the flash are
-//!   polite live regions (Strata's are plain labels). The status line and the pill are the
-//!   owner's ruling; the flash follows them (an owner item).
+//!   polite live regions (Strata's are plain labels; owner's and coordinator's rulings).
 //! - **Down from the field moves the keyboard with a Tab** sent to the field (P1), so the bar
 //!   must come right before the results' focus stop ([`filter::FilterBar::tab_to_results`] turns
 //!   it off).
 //! - **Losing the keyboard is noticed a frame late**, in `tick` (U-C6-3).
 //! - **The host reports picks** ([`filter::FilterState::pick`]): the bar can't see the results'
 //!   selection change or focus enter them.
+//! - **Enter after a pick opens the first selected result** (Strata's in-place filter,
+//!   `filter_activation_position`; owner's ruling), while Down lands on the cursor (Strata's
+//!   search results). Strata's search results' Enter opens their cursor too
+//!   (`inline_search.rs`): an owner item.
 //! - **Our own candidate list**, not rune-kit's `PopupList`, whose rows can't draw matched
 //!   ranges (U-C6-4), as C6's.
 //!

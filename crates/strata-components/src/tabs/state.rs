@@ -139,11 +139,6 @@ impl BrowserTabsState {
         self.open_drag
     }
 
-    /// The active tab the last tick saw.
-    pub(super) fn seen_active(&self) -> Option<TabId> {
-        self.active
-    }
-
     /// The tab a resting drag will select, if one is armed.
     pub fn spring(&self) -> Option<TabId> {
         self.spring.as_ref().map(|s| s.id)

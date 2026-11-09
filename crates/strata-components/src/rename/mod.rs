@@ -52,8 +52,11 @@
 //!   ([`Kept`]); a name holding a `/` is a [`RenameIntent::Move`]; anything else a
 //!   [`RenameIntent::Rename`]. Escape, [`RenameState::cancel`], the entry leaving the listing
 //!   or being renamed elsewhere, and its row scrolling out keep the old name. Ctrl, Alt and
-//!   Super with Enter pass on to the host. A held Enter or Escape ends one edit; a held Tab
-//!   walks on.
+//!   Super with Enter or Escape pass on to the host; Shift changes neither. A held Enter or
+//!   Escape ends one edit; a held Tab walks on.
+//! - **Page keys stay in the field.** Page Up and Page Down (with or without Shift) do nothing
+//!   in it, as Up, Down, Home and End stay its own: passed on, Rune would page the listing, the
+//!   row would leave the viewport and the edit would end, dropping the typed name.
 //! - **The blur.** Rune has no focus-change hook (upstream #106), so `tick` notices the field
 //!   lost the keyboard, as C6's entry does. Another window taking activation leaves the field
 //!   focused (C6 probe P2), so the edit stays open, as Strata's does. C24's autoscroll shield
@@ -128,8 +131,8 @@
 //!   press with any button anywhere outside the field (a capture-phase click); here only a
 //!   press that takes the keyboard does. At the pinned rev these leave the field focused
 //!   (`runtime/input/pointer.rs`, `pointer_down`; `gesture.rs`, `button_down`; `secondary.rs`):
-//!   - a primary press on an element with `preserve_focus_on_press`, or on an unfocusable
-//!     element inside one (C24's bar, toolbar buttons built that way);
+//!   - a primary press on an unfocusable element with `preserve_focus_on_press`, or inside
+//!     one (C24's bar, toolbar buttons built that way);
 //!   - a primary press on a link in text;
 //!   - a primary press on an element with `keeps_text_selection`, or inside one;
 //!   - a primary press on an unfocusable element inside another `textbox` (rune-kit
@@ -216,8 +219,9 @@
 //! listing or renamed elsewhere, the field menu and its hold with a real rune-kit menu (opened
 //! by a right-click and by the Menu key), the hold ending without `menu_closed` and when no
 //! menu takes the keyboard, a press in the box's margin, a middle press in the field and its
-//! margin, a press on the message, a `tick` with another collection's scope, #180, a
-//! composition ending in a blur, and paste.
+//! margin, a press on the message, page keys in the field, Shift+Escape, `menu_closed`'s
+//! refocus, a `tick` with another collection's scope, #180, a composition ending in a blur,
+//! and paste.
 //!
 //! # Rune
 //!

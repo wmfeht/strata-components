@@ -246,7 +246,7 @@ impl RenameState {
     }
 
     /// The field menu closed: the field asks for the keyboard back if the menu didn't
-    /// return it.
+    /// return it. A fallback: Rune's modal restore normally gives it back first.
     pub fn menu_closed(&mut self) -> Polled {
         if std::mem::take(&mut self.hold) == Hold::None || self.open.is_none() {
             return Polled::default();
@@ -258,10 +258,17 @@ impl RenameState {
         Polled::default()
     }
 
-    /// A key in the field, before its editor: Enter and Shift+Enter commit, Escape cancels,
-    /// Tab and Shift+Tab commit toward the next or previous entry. `None` passes the key on.
-    /// Keys an input method is composing with stay the field's (Rune already gives Enter and
-    /// Escape to the composition).
+    /// A key in the field, before its editor: Enter and Shift+Enter commit, Escape and
+    /// Shift+Escape cancel (Shift changes neither, as it changes neither in Strata's entry),
+    /// Tab and Shift+Tab commit toward the next or previous entry, and Page Up and Page Down
+    /// (with or without Shift) do nothing. `None` passes the key on. Keys an input method is
+    /// composing with stay the field's (Rune already gives Enter and Escape to the
+    /// composition).
+    ///
+    /// The page keys stay in the field, as Up, Down, Home and End already do (its editor
+    /// takes those): passed on, Rune would page the listing (`runtime/input/keys.rs`,
+    /// `page_scroll`), the row would leave the viewport and the edit would end, dropping the
+    /// typed name.
     pub(super) fn key(&mut self, ev: &KeyEvent, repeat: bool) -> Option<Polled> {
         if self.open.is_none() || self.edit.preedit.is_some() {
             return None;
@@ -269,8 +276,9 @@ impl RenameState {
         let m = ev.mods;
         let chorded = m.ctrl || m.alt || m.cmd || m.logo;
         let by = match ev.key {
+            Key::PageUp | Key::PageDown if !chorded => return Some(Polled::default()),
             Key::Enter if !chorded => By::Enter,
-            Key::Escape if !chorded && !m.shift => By::Escape,
+            Key::Escape if !chorded => By::Escape,
             Key::Tab if !chorded => {
                 if m.shift {
                     By::Previous

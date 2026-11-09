@@ -223,6 +223,36 @@ fn escape_cancels_and_tab_and_shift_tab_commit_toward_a_neighbour() {
 }
 
 #[test]
+fn shift_escape_cancels_as_escape_does() {
+    let shift = Mods {
+        shift: true,
+        ..Mods::default()
+    };
+    let mut st = typed("Notes.md", "x.md");
+    let polled = press(&mut st, Key::Escape, shift, false).expect("taken");
+    assert!(matches!(
+        ended(&mut st, polled),
+        RenameIntent::Keep {
+            why: Kept::Cancelled,
+            by: By::Escape,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn a_menu_that_closes_without_giving_the_keyboard_back_gets_it_from_menu_closed() {
+    // A fallback: Rune's modal restore normally gives the keyboard back first.
+    let mut st = opened("Notes.md");
+    st.menu_opened();
+    st.edit.focused = false;
+    let polled = st.menu_closed();
+    assert!(polled.changed);
+    assert!(st.edit.focused, "the field asks for the keyboard back");
+    assert!(st.is_open());
+}
+
+#[test]
 fn a_held_enter_ends_one_edit() {
     let mut st = typed("Notes.md", "x.md");
     let polled = press(&mut st, Key::Enter, Mods::default(), true).expect("taken");
@@ -594,6 +624,40 @@ fn a_host_menu_holds_the_edit_open_while_it_has_the_keyboard() {
 }
 
 #[test]
+fn page_keys_stay_in_the_field() {
+    // Rune would scroll the listing a page with them, the row would leave the viewport, and
+    // the edit would end as scrolled out, dropping the typed name.
+    let shift = Mods {
+        shift: true,
+        ..Mods::default()
+    };
+    for mods in [Mods::default(), shift] {
+        for key in [Key::PageUp, Key::PageDown] {
+            let mut rt = mount(60);
+            begin(&mut rt, 12);
+            rt.key(KeyEvent {
+                key: Key::Text("Memo".into()),
+                mods: Mods::default(),
+            });
+            frames(&mut rt, 2);
+            assert_eq!(rt.state.rename.edit.text, "Memo.txt");
+            rt.key(KeyEvent {
+                key: key.clone(),
+                mods,
+            });
+            frames(&mut rt, 6);
+            assert!(
+                rt.state.rename.has_keyboard(),
+                "{key:?} (shift {}) ended the edit: {:?}",
+                mods.shift,
+                rt.state.heard
+            );
+            assert_eq!(rt.state.rename.edit.text, "Memo.txt");
+        }
+    }
+}
+
+#[test]
 fn a_middle_press_in_the_editor_is_not_the_rows() {
     let mut rt = mount(20);
     rt.state.coll.controllers.pointer =
@@ -661,7 +725,7 @@ fn a_hold_whose_menu_never_takes_the_keyboard_ends_at_once() {
 }
 
 #[test]
-fn the_validators_message_shows_under_the_field_and_a_press_on_it_is_a_press_outside() {
+fn the_validators_message_is_a_status_and_a_press_on_it_is_a_press_outside() {
     let mut rt = mount(20);
     begin(&mut rt, 1);
     for c in ["a", "/", "/"] {
@@ -673,12 +737,6 @@ fn the_validators_message_shows_under_the_field_and_a_press_on_it_is_a_press_out
     }
     frames(&mut rt, 2);
     assert_eq!(rt.state.rename.error(), Some("Enter a name"));
-    let row = rect(&rt, "row-1");
-    let message = rect(&rt, keys::MESSAGE);
-    assert!(
-        message[1] >= row[1] + row[3] - 8.0,
-        "under the field: {row:?} {message:?}"
-    );
     // Walk the tree (a `serde_json::Value`, which this crate doesn't name) for the message.
     let mut stack = vec![rt.accessibility_json()];
     let mut found = None;

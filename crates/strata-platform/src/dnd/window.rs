@@ -188,6 +188,7 @@ impl<S: 'static> Dnd<S> {
                     Decision::Pass => pass(s, d, tx),
                     Decision::Own => {}
                     Decision::Cancel => hub::cancel_drag(),
+                    Decision::Released => hub::released(),
                     Decision::Start => {
                         let item = (source.item)(s, tx.mods());
                         let Some(item) = item.filter(|i| !i.is_empty()) else {
@@ -226,11 +227,16 @@ impl<S: 'static> Dnd<S> {
     /// window started: if so, the handler should ignore it. It also tracks the press, so
     /// call it on every phase.
     pub fn owns(&self, drag: &Drag) -> bool {
-        match self.0.guard.borrow_mut().owns(Step::of(drag)) {
+        let decision = self.0.guard.borrow_mut().owns(Step::of(drag));
+        match decision {
             Decision::Pass | Decision::Start => false,
             Decision::Own => true,
             Decision::Cancel => {
                 hub::cancel_drag();
+                true
+            }
+            Decision::Released => {
+                hub::released();
                 true
             }
         }
@@ -253,22 +259,44 @@ impl<S: 'static> Dnd<S> {
             self.0.ends.borrow_mut().insert(id, end);
         }
         self.0.out.set(Some((id, release)));
+        // On Wayland the Escape that ends Rune's capture waits for the compositor's proof
+        // that it took the pointer (`Routed::Holding`): see `session`.
         self.0.guard.borrow_mut().started(release);
-        if release == Release::Escape {
-            // Rune's capture of the press: see `session`. The cancelled Up this brings is
-            // the guard's to swallow.
-            tx.send_key(KeyEvent {
-                key: Key::Escape,
-                mods: Mods::default(),
-            });
-        }
         Ok(())
+    }
+
+    /// For the headless tests: the compositor's proof arrives, with no platform to ask.
+    #[cfg(test)]
+    pub(crate) fn holding_for_test(&self, tx: &mut Tx) {
+        if let Some((id, _)) = self.0.out.get() {
+            self.0.holding(id, tx, || true);
+        }
     }
 }
 
 impl<S: 'static> Core<S> {
     fn key(&self) -> String {
         self.key.borrow().clone().unwrap_or_default()
+    }
+
+    /// The compositor took the pointer for drag `id`: end Rune's capture of its press with an
+    /// Escape, if the guard still holds that press and `live` confirms the drag hasn't
+    /// dropped or ended (see `session`).
+    fn holding(&self, id: u64, tx: &mut Tx, live: impl FnOnce() -> bool) {
+        if self.out.get() != Some((id, Release::Escape)) {
+            return;
+        }
+        let may = self.guard.borrow().may_escape();
+        if !may || !live() {
+            return;
+        }
+        if self.guard.borrow_mut().take_escape() {
+            // The cancelled Up this brings is the guard's to swallow.
+            tx.send_key(KeyEvent {
+                key: Key::Escape,
+                mods: Mods::default(),
+            });
+        }
     }
 
     /// Handles what was routed to this window. True if app code ran.
@@ -281,6 +309,10 @@ impl<S: 'static> Core<S> {
             };
             changed |= match r {
                 Routed::In(ev) => self.on_in(ev, s, tx),
+                Routed::Holding { id } => {
+                    self.holding(id, tx, || hub::still_holding(id));
+                    false
+                }
                 Routed::Ended { id, outcome } => {
                     let f = self.ends.borrow_mut().remove(&id);
                     if self.out.get().is_some_and(|(o, _)| o == id) {

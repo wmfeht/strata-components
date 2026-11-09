@@ -9,15 +9,38 @@
 //!
 //! - **Wayland:** winit gets a pointer leave and never the release, so Rune stays pressing
 //!   and later moves reach `on_drag` with no button held (S2, Q3). Rune has no public way to
-//!   end the capture (draft U10, not filed). The workaround: right after `start_drag`, P1
-//!   sends Escape through `Tx::send_key`, which Rune handles as "Escape during a drag cancels
-//!   it" (`Drag::cancelled`'s documented cause): the element hears `Up` with `cancelled`,
-//!   and the capture ends. The guard swallows that `Up`. It is sent only while the guard
-//!   holds the press it saw go down; if something ended the capture in the same instant,
-//!   the Escape would reach the app's key handlers once.
+//!   end the capture (draft U10, not filed). The workaround: P1 sends Escape through
+//!   `Tx::send_key`, which Rune handles as "Escape during a drag cancels it"
+//!   (`Drag::cancelled`'s documented cause): the element hears `Up` with `cancelled`, the
+//!   capture ends, and the guard swallows that `Up`.
+//!
+//!   An Escape that finds no capture reaches the app's key handlers, so it is sent only when
+//!   the capture is known to be held:
+//!   - Not from the `Move` that crossed the threshold: a fast flick brings that move and the
+//!     release in one batch, and Rune ends the capture at the release's input, before any
+//!     handler runs (review round 1, B2).
+//!   - Only once the compositor proves it took the pointer: the drag's own
+//!     `wl_data_device.enter` on the app's window, which comes at the start of a drag the
+//!     compositor accepted. A compositor takes a drag only while the button is held
+//!     (wlroots checks the press serial), and then winit never hears the release.
+//!   - In that update, P1 first dispatches P0's queue and checks that the drag hasn't dropped
+//!     or ended: a focus change at the drop (sway's bounce) follows those in the protocol
+//!     stream. Nothing winit reads can run until the update returns, and Rune handles the
+//!     sent key before it does.
+//!   - Only for a press the guard saw go down, and once.
+//!
+//!   What remains, both an Escape reaching the app's keys once:
+//!   - Keyboard focus leaving the window for another reason (the user switching windows, a
+//!     window mapping) between the drag's start and that update: Rune ends the capture at
+//!     the focus loss, and if its cancelled `Up` hasn't reached the guard by the update, the
+//!     Escape finds no capture.
+//!   - A compositor that accepted `start_drag` after the button was released (wlroots
+//!     refuses one): winit would have had the release already, and the same holds if Rune
+//!     hasn't run the release's handler by the update. Other compositors are hand tests.
 //! - **X11:** the source is grab-less and winit keeps its implicit grab, so Rune hears every
-//!   move and the real release. The guard swallows them. A cancelled `Up` (the user's Escape,
-//!   or focus lost) cancels the drag.
+//!   move and the real release. The guard swallows them, and the real release also drops
+//!   the drag (a backstop for a release the XI2 events missed, B1). A cancelled `Up` (the
+//!   user's Escape, or focus lost) cancels the drag.
 
 use std::any::Any;
 use std::rc::Rc;
@@ -40,8 +63,16 @@ pub(crate) enum Release {
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum State {
     Idle,
-    Pressed { x: f32, y: f32 },
-    Started(Release),
+    Pressed {
+        x: f32,
+        y: f32,
+    },
+    /// A system drag runs from the press. `escape`: P1 may still end Rune's capture with an
+    /// Escape (Wayland, a press the guard saw go down, none sent yet).
+    Started {
+        release: Release,
+        escape: bool,
+    },
 }
 
 /// What a source's `on_drag` does with a phase.
@@ -55,6 +86,8 @@ pub(crate) enum Decision {
     Own,
     /// X11: the press was cancelled under a running drag (Escape, focus): cancel it.
     Cancel,
+    /// X11: the real release under a running drag: it drops, if the XI2 events missed it.
+    Released,
 }
 
 #[derive(Debug)]
@@ -104,7 +137,28 @@ impl Guard {
     /// The drag started from the press the guard holds (or, for an app's own `on_drag`
     /// calling `start_drag`, from whatever press is down).
     pub(crate) fn started(&mut self, release: Release) {
-        self.state = State::Started(release);
+        let pressed = matches!(self.state, State::Pressed { .. });
+        self.state = State::Started {
+            release,
+            escape: release == Release::Escape && pressed,
+        };
+    }
+
+    /// Whether [`Guard::take_escape`] would allow the Escape, without spending it.
+    pub(crate) fn may_escape(&self) -> bool {
+        matches!(self.state, State::Started { escape: true, .. })
+    }
+
+    /// Whether P1 may send its Escape now: a Wayland drag from a press the guard saw go
+    /// down, whose `Up` hasn't come, and no Escape sent yet. Taking it spends it.
+    pub(crate) fn take_escape(&mut self) -> bool {
+        match &mut self.state {
+            State::Started { escape, .. } if *escape => {
+                *escape = false;
+                true
+            }
+            _ => false,
+        }
     }
 
     /// For [`super::Dnd::owns`]: whether `d` belongs to the system drag.
@@ -115,14 +169,14 @@ impl Guard {
                 self.state = State::Pressed { x, y };
                 Decision::Pass
             }
-            (Phase::Move, State::Started(_)) => Decision::Own,
+            (Phase::Move, State::Started { .. }) => Decision::Own,
             (Phase::Move, _) => Decision::Pass,
-            (Phase::Up, State::Started(release)) => {
+            (Phase::Up, State::Started { release, .. }) => {
                 self.state = State::Idle;
-                if release == Release::RealUp && d.cancelled {
-                    Decision::Cancel
-                } else {
-                    Decision::Own
+                match (release, d.cancelled) {
+                    (Release::RealUp, true) => Decision::Cancel,
+                    (Release::RealUp, false) => Decision::Released,
+                    (Release::Escape, _) => Decision::Own,
                 }
             }
             (Phase::Up, _) => {

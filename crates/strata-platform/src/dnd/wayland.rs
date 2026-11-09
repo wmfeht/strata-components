@@ -83,6 +83,11 @@ pub(crate) struct OutState {
 }
 
 impl OutState {
+    /// The drag runs: neither dropped nor ended.
+    pub(crate) fn live(&self) -> bool {
+        !self.dropped && !self.ended
+    }
+
     /// The outcome, once the drag has one. A `cancelled` after `dnd_finished` (sway sends one,
     /// S2 Q3) is ignored.
     pub(crate) fn on(&mut self, ev: SrcEvent) -> Option<DragOutcome> {

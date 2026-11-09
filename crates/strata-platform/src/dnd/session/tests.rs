@@ -47,14 +47,17 @@ fn on_wayland_the_escapes_cancelled_up_is_swallowed() {
     assert_eq!(g.phase(step(Phase::Down, 40.0, false), 8.0), Decision::Pass);
 }
 
-/// X11: the real release is swallowed, while a cancelled Up (Escape, focus lost) cancels the
-/// drag.
+/// X11: the real release is swallowed and drops the drag, while a cancelled Up (Escape,
+/// focus lost) cancels it.
 #[test]
-fn on_x11_a_cancelled_up_cancels_the_drag_and_a_real_one_is_swallowed() {
+fn on_x11_a_cancelled_up_cancels_the_drag_and_a_real_one_drops_it() {
     let mut g = Guard::default();
     g.phase(step(Phase::Down, 0.0, false), 8.0);
     g.started(Release::RealUp);
-    assert_eq!(g.phase(step(Phase::Up, 30.0, false), 8.0), Decision::Own);
+    assert_eq!(
+        g.phase(step(Phase::Up, 30.0, false), 8.0),
+        Decision::Released
+    );
     g.phase(step(Phase::Down, 0.0, false), 8.0);
     g.started(Release::RealUp);
     assert_eq!(g.phase(step(Phase::Up, 30.0, true), 8.0), Decision::Cancel);
@@ -179,4 +182,26 @@ fn source_actions_unknown_yet_negotiate_as_copy() {
             ..
         }
     ));
+}
+
+/// Review round 1: an Escape only for a press the guard saw go down, and only once.
+#[test]
+fn the_escape_is_allowed_once_and_only_for_a_press_seen() {
+    let mut g = Guard::default();
+    g.started(Release::Escape);
+    assert!(!g.take_escape(), "no press seen: an app's own start_drag");
+    let mut g = Guard::default();
+    g.phase(step(Phase::Down, 0.0, false), 8.0);
+    g.started(Release::Escape);
+    assert!(g.take_escape());
+    assert!(!g.take_escape(), "once");
+    let mut g = Guard::default();
+    g.phase(step(Phase::Down, 0.0, false), 8.0);
+    g.started(Release::Escape);
+    assert_eq!(g.phase(step(Phase::Up, 30.0, false), 8.0), Decision::Own);
+    assert!(!g.take_escape(), "the Up has come: the capture is gone");
+    let mut g = Guard::default();
+    g.phase(step(Phase::Down, 0.0, false), 8.0);
+    g.started(Release::RealUp);
+    assert!(!g.take_escape(), "X11 sends none");
 }

@@ -74,6 +74,11 @@ pub(crate) enum Routed {
         id: u64,
         outcome: DragOutcome,
     },
+    /// The compositor took the pointer for drag `id` (Wayland): the drag, which lists its
+    /// token, entered one of the app's windows.
+    Holding {
+        id: u64,
+    },
 }
 
 /// The platform side of one drag over a window.
@@ -110,15 +115,53 @@ struct Out {
     mods: Mods,
     x11: bool,
     wl: wayland::OutState,
+    /// `Routed::Holding` went out.
+    holding: bool,
+}
+
+/// Every window's poster, by window key: anything any thread hears wakes them all, and the
+/// first to run routes it. A window attached again (Rune recreates its native side on each
+/// Wayland show) replaces its own poster.
+#[derive(Clone, Default)]
+pub(crate) struct Posters(Arc<Mutex<Vec<(String, Poster)>>>);
+
+impl Posters {
+    pub(crate) fn set(&self, key: &str, poster: Poster) {
+        let mut all = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        all.retain(|(k, _)| k != key);
+        all.push((key.to_owned(), poster));
+    }
+
+    fn all(&self) -> Vec<Poster> {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .map(|(_, p)| p.clone())
+            .collect()
+    }
+
+    fn first(&self) -> Option<Poster> {
+        self.all().into_iter().next()
+    }
+
+    fn wake_all(&self) {
+        for p in self.all() {
+            p(Job::Pump);
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner).len()
+    }
 }
 
 pub(crate) struct Hub {
     transfer: Transfer,
     sub: Subscription,
     wins: Vec<Win>,
-    /// Every window's poster: anything any thread hears wakes them all, and the first to
-    /// run routes it.
-    posters: Arc<Mutex<Vec<Poster>>>,
+    posters: Posters,
     /// The window a Wayland drag is over, and whether the drag is this process's own.
     wl_in: Option<(String, bool)>,
     out: Option<Out>,
@@ -150,16 +193,6 @@ fn with<R>(f: impl FnOnce(&mut Hub) -> R) -> Option<R> {
     HUB.with(|h| h.borrow_mut().as_mut().map(f))
 }
 
-fn wake_all(posters: &Arc<Mutex<Vec<Poster>>>) {
-    let all = posters
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .clone();
-    for p in all {
-        p(Job::Pump);
-    }
-}
-
 /// Attaches `window` (its core `core`, reached through `sink`), binding the substrate on
 /// the first call. On the UI thread, from `App::on_window`.
 pub(crate) fn attach(
@@ -175,20 +208,20 @@ pub(crate) fn attach(
         // Default wants: P0 binds once per process, so a clipboard (P2) attached later
         // still finds data control.
         let (t, _) = Transfer::attach(window, turn, Wants::default())?;
-        let posters: Arc<Mutex<Vec<Poster>>> = Arc::default();
+        let posters = Posters::default();
         let wake = posters.clone();
-        let sub = t.subscribe(move || wake_all(&wake));
+        let sub = t.subscribe(move || wake.wake_all());
         let x11 = match t.x11() {
             Some(x) => {
                 let wake = posters.clone();
-                let notify: Arc<dyn Fn() + Send + Sync> = Arc::new(move || wake_all(&wake));
+                let notify: Arc<dyn Fn() + Send + Sync> = Arc::new(move || wake.wake_all());
                 Some(x11::install(&t, x, notify)?)
             }
             None => None,
         };
         if let Some(conn) = t.shared_conn() {
             let wake = posters.clone();
-            wayland::set_notify(conn, Arc::new(move || wake_all(&wake)));
+            wayland::set_notify(conn, Arc::new(move || wake.wake_all()));
         }
         // P1's objects go before P0's teardown, on the UI thread.
         t.before_shutdown(Box::new(|_| teardown()));
@@ -223,9 +256,7 @@ pub(crate) fn attach(
             sink,
             core,
         });
-        let mut posters = hub.posters.lock().unwrap_or_else(PoisonError::into_inner);
-        posters.push(poster);
-        drop(posters);
+        hub.posters.set(&key, poster);
         if !fresh {
             // P0 tracks the windows a drag can enter.
             let _ = Transfer::attach(window, Arc::new(|_| {}), Wants::default());
@@ -340,6 +371,12 @@ fn route_substrate(hub: &mut Hub, to: &mut To<'_>) {
                 let local = local_of(hub, &mimes);
                 let mods = local_mods(hub, local);
                 hub.wl_in = Some((window.clone(), local));
+                // Our own drag entering our window: the compositor took the pointer.
+                if let Some(out) = hub.out.as_mut().filter(|o| local && !o.x11 && !o.holding) {
+                    out.holding = true;
+                    let (id, w) = (out.id, out.window.clone());
+                    to(hub, &w, Routed::Holding { id });
+                }
                 let port: Rc<dyn InPort> = Rc::new(wayland::WlIn::new(offer));
                 to(
                     hub,
@@ -384,6 +421,10 @@ fn route_substrate(hub: &mut Hub, to: &mut To<'_>) {
                 }
                 hub.wl_in = None;
                 if let Some(out) = hub.out.take() {
+                    // No Live entry stays behind; requests on a dead connection go nowhere.
+                    if let (false, Some(conn)) = (out.x11, hub.transfer.shared_conn()) {
+                        wayland::end(conn, out.id);
+                    }
                     to(
                         hub,
                         &out.window,
@@ -495,7 +536,9 @@ pub(crate) fn start_drag(key: &str, item: DragItem, mods: Mods) -> Result<(u64, 
     cancel_drag();
     let id = next_id();
     let actions = negotiate::source_actions(item.actions, mods);
-    let token = item.local.is_some().then(local::new_token);
+    // Every drag lists its token: it marks the drag as ours when it enters our windows, for
+    // its payload if it has one, and as the compositor's proof that it took the pointer.
+    let token = Some(local::new_token());
     let spec = item.spec(token.as_deref());
     let started = with(|hub| -> Result<(bool, Release), Error> {
         let window = hub
@@ -529,6 +572,7 @@ pub(crate) fn start_drag(key: &str, item: DragItem, mods: Mods) -> Result<(u64, 
             mods,
             x11,
             wl: wayland::OutState::default(),
+            holding: false,
         });
     });
     if let Some(icon) = item.icon.clone() {
@@ -536,12 +580,7 @@ pub(crate) fn start_drag(key: &str, item: DragItem, mods: Mods) -> Result<(u64, 
         // icon surface lives there, and a failure can be reported there.
         if let Some(posters) = with(|hub| hub.posters.clone()) {
             let done = Box::new(move |image| {
-                let first = posters
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .first()
-                    .cloned();
-                if let Some(p) = first {
+                if let Some(p) = posters.first() {
                     p(Job::Icon { id, image });
                 }
             });
@@ -568,6 +607,35 @@ pub(crate) fn icon_ready(id: u64, image: Option<DragImage>) {
             wayland::set_icon(conn, id, &image);
         }
     });
+}
+
+/// X11: the guard saw the real release of the drag's press. The actor drops (or cancels)
+/// the drag if its XI2 events missed that release: they are selected only once the drag
+/// starts, which a fast flick's release can precede (review round 1, B1).
+pub(crate) fn released() {
+    with(|hub| {
+        if let (Some(out), Some(x)) = (hub.out.as_ref().filter(|o| o.x11), hub.transfer.x11()) {
+            x11::released(x, out.id);
+        }
+    });
+}
+
+/// Whether Wayland drag `id` still runs after dispatching what P0 has read: not dropped,
+/// not ended. On the UI thread, in an update: nothing winit reads runs until it returns.
+pub(crate) fn still_holding(id: u64) -> bool {
+    let Some(t) = with(|hub| hub.transfer.clone()) else {
+        return false;
+    };
+    if t.dispatch().is_err() {
+        return false;
+    }
+    route();
+    with(|hub| {
+        hub.out
+            .as_ref()
+            .is_some_and(|o| o.id == id && !o.x11 && o.wl.live())
+    })
+    .unwrap_or(false)
 }
 
 /// Cancels the drag this process started, if any: its window hears `Cancelled`.
@@ -616,22 +684,5 @@ pub(crate) fn shutdown() -> Result<bool, Error> {
     Ok(Transfer::shutdown()?)
 }
 
-/// A start that reaches no platform, for the headless tests of the source's guard.
 #[cfg(test)]
-pub(crate) mod tests {
-    use std::cell::Cell;
-
-    use super::Release;
-
-    thread_local! {
-        pub(crate) static FAKE_START: Cell<Option<Release>> = const { Cell::new(None) };
-        static NEXT: Cell<u64> = const { Cell::new(0) };
-    }
-
-    pub(super) fn next_id() -> u64 {
-        NEXT.with(|n| {
-            n.set(n.get() + 1);
-            n.get()
-        })
-    }
-}
+pub(crate) mod tests;

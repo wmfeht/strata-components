@@ -38,10 +38,12 @@
 //!   P1 adds neither a queue nor a thread to it (the owner's ruling on S2 Q2).
 //! - **U10** (draft, not filed): no public way to end a pointer capture. After a Wayland
 //!   drag starts, Rune would stay pressing. **Workaround:** P1 sends Escape through
-//!   `Tx::send_key` right after `start_drag`, which Rune takes as "Escape during a drag
-//!   cancels it", and swallows the cancelled `Up` that follows (see `session`; the owner's
-//!   ruling on S2 Q3). It doesn't rely on a compositor's focus bounce at the drop. A test
-//!   guards it at the pinned Rune rev.
+//!   `Tx::send_key`, which Rune takes as "Escape during a drag cancels it", and swallows the
+//!   cancelled `Up` that follows (the owner's ruling on S2 Q3). It goes out only once the
+//!   compositor proves it took the pointer (the drag's own `wl_data_device.enter`) and the
+//!   drag hasn't dropped or ended, and only for a press P1 saw go down: an Escape that finds
+//!   no capture would reach the app's keys. `session` says exactly what remains. It doesn't
+//!   rely on a compositor's focus bounce at the drop. Tests guard it at the pinned Rune rev.
 //! - **U3** (draft, not filed): file-drop acceptance sees no app state and no drag identity.
 //! - **U-P1-1** (draft, not filed): an element has one handler of each kind, and a shim
 //!   can't read an element's key. So [`Dnd::drag_source`] takes the element's `on_drag` and

@@ -134,6 +134,11 @@ enum Cmd {
     Cancel {
         id: u64,
     },
+    /// The UI saw the real release of drag `id`'s press (its guard did): a backstop for a
+    /// release the XI2 events missed.
+    Released {
+        id: u64,
+    },
 }
 
 /// Posts commands to the actor, from any thread.
@@ -156,7 +161,6 @@ impl Handle {
     }
 }
 
-/// Installs XDND on the actor.
 /// Installs XDND on the actor. The hook keeps `t` to hand drop ports to the UI; the actor
 /// drops it when it stops.
 pub(crate) fn install(
@@ -196,6 +200,10 @@ pub(crate) fn start(x: &X11, id: u64, spec: SourceSpec, actions: Actions) -> Res
     } else {
         Err(Error::Platform("the X11 connection is gone".into()))
     }
+}
+
+pub(crate) fn released(x: &X11, id: u64) {
+    x.post_hook(Box::new(Cmd::Released { id }));
 }
 
 pub(crate) fn cancel(x: &X11, id: u64) {
@@ -242,6 +250,7 @@ x11rb::atom_manager! {
         XdndAware, XdndProxy, XdndTypeList, XdndActionList, XdndActionDescription,
         XdndSelection, XdndEnter, XdndPosition, XdndStatus, XdndLeave, XdndDrop, XdndFinished,
         XdndActionCopy, XdndActionMove, XdndActionLink, XdndActionAsk, XdndActionPrivate,
+        _NET_WM_WINDOW_TYPE, _NET_WM_WINDOW_TYPE_DND,
     }
 }
 
@@ -283,6 +292,9 @@ struct Outgoing {
     icon: Option<IconWin>,
     /// The pointer and modifiers last sent.
     last: Option<(i16, i16, u16)>,
+    /// The pointer's button mapping: raw events name physical buttons, and the drag's press
+    /// is logical button 1.
+    buttons: Vec<u8>,
 }
 
 struct IconWin {
@@ -553,7 +565,28 @@ impl Xdnd {
             AtomEnum::ATOM,
             &listed,
         );
+        // With ask listed, a target that asks shows each action's description, in the
+        // list's order, NUL-separated.
+        if actions.has(DragAction::Ask) {
+            let text = descriptions(actions);
+            let _ = cx.conn().change_property8(
+                PropMode::REPLACE,
+                win,
+                a.XdndActionDescription,
+                AtomEnum::STRING,
+                &text,
+            );
+        } else {
+            let _ = cx.conn().delete_property(win, a.XdndActionDescription);
+        }
         cx.own(a.XdndSelection, SourceId::next(), spec);
+        let buttons = cx
+            .conn()
+            .get_pointer_mapping()
+            .ok()
+            .and_then(|c| c.reply().ok())
+            .map(|r| r.map)
+            .unwrap_or_default();
         let mask = xinput::XIEventMask::RAW_MOTION
             | xinput::XIEventMask::RAW_BUTTON_RELEASE
             | xinput::XIEventMask::RAW_KEY_PRESS
@@ -576,8 +609,22 @@ impl Xdnd {
             deadline: None,
             icon: None,
             last: None,
+            buttons,
         });
         self.motion(cx, a, CURRENT_TIME, true);
+        // The XI2 events are selected only now, and a fast flick's release may already
+        // have happened (review round 1, B1): no raw release would ever come, and the drag
+        // would drop on the next click anywhere. The pointer's own state says.
+        let held = Self::pointer(cx).is_some_and(|(_, _, m)| m.contains(KeyButMask::BUTTON1));
+        if !held {
+            self.release(cx, a, CURRENT_TIME);
+        }
+    }
+
+    /// Whether a raw event's button (physical) is the logical primary button.
+    fn primary(&self, detail: u32) -> bool {
+        let map = self.outgoing.as_ref().map_or(&[][..], |o| &o.buttons[..]);
+        is_primary(map, detail)
     }
 
     /// The XDND-aware window under a root point, with where its messages go.
@@ -720,16 +767,17 @@ impl Xdnd {
     }
 
     fn icon(&mut self, cx: &mut HookCx<'_>, id: u64, image: &DragImage) {
+        let Some(a) = self.atoms else {
+            return;
+        };
         let Some(out) = self.outgoing.as_mut().filter(|o| o.id == id && !o.dropped) else {
             return;
         };
-        match icon_window(cx, image) {
+        match icon_window(cx, &a, image) {
             Ok(icon) => out.icon = Some(icon),
             Err(e) => hub_note(&format!("no X11 drag icon: {e}")),
         }
-        if let Some(a) = self.atoms {
-            self.motion(cx, &a, CURRENT_TIME, true);
-        }
+        self.motion(cx, &a, CURRENT_TIME, true);
     }
 }
 
@@ -741,7 +789,51 @@ fn hub_note(message: &str) {
 
 /// An override-redirect window with a 32-bit visual showing `image`, taking no input, so the
 /// walk to the target under the pointer passes through it.
-fn icon_window(cx: &mut HookCx<'_>, image: &DragImage) -> Result<IconWin, String> {
+/// The largest icon side, in pixels: a bigger picture is cropped to it.
+const ICON_MAX: u32 = 1024;
+
+/// Whether physical button `detail` (what XI2 raw events name) is logical button 1 under the
+/// pointer's button mapping `map` (`GetPointerMapping`: logical number by physical index).
+fn is_primary(map: &[u8], detail: u32) -> bool {
+    let logical = usize::try_from(detail)
+        .ok()
+        .and_then(|d| d.checked_sub(1))
+        .and_then(|i| map.get(i).copied())
+        .map_or(detail, u32::from);
+    logical == 1
+}
+
+/// `XdndActionDescription`: each listed action's name, in the list's order, NUL-separated.
+fn descriptions(actions: Actions) -> Vec<u8> {
+    actions
+        .iter()
+        .flat_map(|d| {
+            let name = match d {
+                DragAction::Copy => "Copy",
+                DragAction::Move => "Move",
+                DragAction::Link => "Link",
+                DragAction::Ask => "Ask",
+            };
+            name.bytes().chain([0])
+        })
+        .collect()
+}
+
+/// The icon window's size and its premultiplied BGRA pixels: cropped to [`ICON_MAX`] a side,
+/// since X window sizes are 16-bit and a wider picture would wrap.
+fn icon_pixels(image: &DragImage) -> (u16, u16, Vec<u8>) {
+    let (w, h) = (image.width.min(ICON_MAX), image.height.min(ICON_MAX));
+    let full = bgra_premultiplied(&image.rgba);
+    let src_row = image.width as usize * 4;
+    let pixels = full
+        .chunks(src_row)
+        .take(h as usize)
+        .flat_map(|r| r[..w as usize * 4].iter().copied())
+        .collect();
+    (w as u16, h as u16, pixels)
+}
+
+fn icon_window(cx: &mut HookCx<'_>, a: &Atoms, image: &DragImage) -> Result<IconWin, String> {
     let err = |e: &dyn std::fmt::Display| e.to_string();
     let conn = cx.conn();
     let screen = &conn.setup().roots[0];
@@ -753,7 +845,7 @@ fn icon_window(cx: &mut HookCx<'_>, image: &DragImage) -> Result<IconWin, String
         .find(|v| v.class == VisualClass::TRUE_COLOR)
         .map(|v| v.visual_id)
         .ok_or("no 32-bit visual")?;
-    let (w, h) = (image.width as u16, image.height as u16);
+    let (w, h, pixels) = icon_pixels(image);
     let cmap = conn.generate_id().map_err(|e| err(&e))?;
     conn.create_colormap(
         x11rb::protocol::xproto::ColormapAlloc::NONE,
@@ -791,11 +883,17 @@ fn icon_window(cx: &mut HookCx<'_>, image: &DragImage) -> Result<IconWin, String
         0,
         &[] as &[Rectangle],
     );
+    let _ = conn.change_property32(
+        PropMode::REPLACE,
+        win,
+        a._NET_WM_WINDOW_TYPE,
+        AtomEnum::ATOM,
+        &[a._NET_WM_WINDOW_TYPE_DND],
+    );
     let gc = conn.generate_id().map_err(|e| err(&e))?;
     conn.create_gc(gc, win, &CreateGCAux::new())
         .map_err(|e| err(&e))?;
     conn.map_window(win).map_err(|e| err(&e))?;
-    let pixels = bgra_premultiplied(&image.rgba);
     let row = usize::from(w) * 4;
     // Rows per request, under the server's request limit.
     let per = (conn.maximum_request_bytes().saturating_sub(64) / row.max(1)).max(1);
@@ -903,7 +1001,9 @@ impl Hook for Xdnd {
                 // A modifier pressed or let go: propose the action again.
                 self.motion(cx, &a, e.time, false);
             }
-            XEvent::XinputRawButtonRelease(e) if e.detail == 1 => self.release(cx, &a, e.time),
+            XEvent::XinputRawButtonRelease(e) if self.primary(e.detail) => {
+                self.release(cx, &a, e.time);
+            }
             _ => {}
         }
     }
@@ -955,6 +1055,16 @@ impl Hook for Xdnd {
                     self.end(cx, &a, None);
                 }
             }
+            Cmd::Released { id } => {
+                // Already dropped or ended when the raw release came first: nothing to do.
+                if self
+                    .outgoing
+                    .as_ref()
+                    .is_some_and(|o| o.id == id && !o.dropped)
+                {
+                    self.release(cx, &a, CURRENT_TIME);
+                }
+            }
         }
         cx.flush();
     }
@@ -990,3 +1100,6 @@ impl Hook for Xdnd {
         cx.flush();
     }
 }
+
+#[cfg(test)]
+mod tests;

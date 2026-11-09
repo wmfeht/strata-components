@@ -16,6 +16,7 @@
                               "actions": [
                                 "scroll-up",
                                 "scroll-down",
+                                "scroll-left",
                                 "set-scroll-offset"
                               ],
                               "children": [

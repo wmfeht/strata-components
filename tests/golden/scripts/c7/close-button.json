@@ -168,6 +168,13 @@
                                                   "actions": [
                                                     "scroll-into-view"
                                                   ],
+                                                  "key": "ground",
+                                                  "role": "group"
+                                                },
+                                                {
+                                                  "actions": [
+                                                    "scroll-into-view"
+                                                  ],
                                                   "children": [
                                                     {
                                                       "actions": [
@@ -195,7 +202,7 @@
                                       "position": 3,
                                       "role": "tab",
                                       "states": [
-                                        "unselected"
+                                        "selected"
                                       ]
                                     },
                                     {
@@ -222,13 +229,6 @@
                                                 "scroll-into-view"
                                               ],
                                               "children": [
-                                                {
-                                                  "actions": [
-                                                    "scroll-into-view"
-                                                  ],
-                                                  "key": "ground",
-                                                  "role": "group"
-                                                },
                                                 {
                                                   "actions": [
                                                     "scroll-into-view"
@@ -260,7 +260,7 @@
                                       "position": 4,
                                       "role": "tab",
                                       "states": [
-                                        "selected"
+                                        "unselected"
                                       ]
                                     }
                                   ],
@@ -306,12 +306,12 @@
                       ],
                       "children": [
                         {
-                          "name": "trash:///",
+                          "name": "/home/demo/Quarterly reports and invoices 2026",
                           "role": "label"
                         }
                       ],
-                      "key": "c7-pane-5",
-                      "name": "Trash view",
+                      "key": "c7-pane-4",
+                      "name": "Quarterly reports and invoices 2026 view",
                       "role": "group"
                     }
                   ],
@@ -322,12 +322,12 @@
                   "children": [
                     {
                       "key": "c7-log",
-                      "name": "Close share",
+                      "name": "Close Music",
                       "role": "label"
                     },
                     {
                       "key": "c7-title",
-                      "name": "Trash — Strata",
+                      "name": "Quarterly reports and invoices 2026 — Strata",
                       "role": "label"
                     }
                   ],
@@ -347,6 +347,6 @@
       "role": "group"
     }
   ],
-  "name": "Trash — Strata",
+  "name": "Quarterly reports and invoices 2026 — Strata",
   "role": "window"
 }

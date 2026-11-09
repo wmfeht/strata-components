@@ -123,6 +123,11 @@ pub struct Wants {
     /// strata-platform's own tests set it.
     #[doc(hidden)]
     pub as_if_libwayland_below_1_23: bool,
+    /// A test switch: behave as on a compositor with no data control (mutter): its globals
+    /// are left unbound on every connection, so a connection of our own has nothing to bind.
+    /// Only strata-platform's own tests set it.
+    #[doc(hidden)]
+    pub as_if_no_data_control: bool,
 }
 
 impl Default for Wants {
@@ -133,6 +138,7 @@ impl Default for Wants {
             prefer: Prefer::default(),
             x11_fallback: true,
             as_if_libwayland_below_1_23: false,
+            as_if_no_data_control: false,
         }
     }
 }
@@ -495,7 +501,9 @@ fn wayland_backend(
     );
     let mut unsupported = None;
     let shared = if wants.shared {
-        let control = on_shared.then_some(wants.prefer);
+        let control = on_shared
+            .then_some(wants.prefer)
+            .filter(|_| !wants.as_if_no_data_control);
         match wayland::Conn::shared(
             window,
             windows.clone(),
@@ -521,9 +529,11 @@ fn wayland_backend(
         DataControl::Off | DataControl::Shared => false,
     };
     let own = if want_own {
-        match wayland::Conn::own(subs.clone(), wants.prefer) {
+        match wayland::Conn::own(subs.clone(), wants.prefer, wants.as_if_no_data_control) {
             Ok(c) => Some(c),
-            Err(Error::Unsupported(u)) if shared.is_some() => {
+            // A compositor without data control (mutter). With winit's display out of reach
+            // too, the X11 fallback below may still serve.
+            Err(Error::Unsupported(u)) => {
                 unsupported.get_or_insert(u);
                 None
             }

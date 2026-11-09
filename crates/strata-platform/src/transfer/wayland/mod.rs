@@ -330,9 +330,16 @@ impl Conn {
     }
 
     /// Connects to the compositor on a connection of our own, for data control alone.
-    pub(crate) fn own(subs: Subscribers, prefer: Prefer) -> Result<Arc<Conn>, Error> {
+    /// `as_if_none`: a test switch that leaves the data-control globals unbound, as on a
+    /// compositor without them.
+    pub(crate) fn own(
+        subs: Subscribers,
+        prefer: Prefer,
+        as_if_none: bool,
+    ) -> Result<Arc<Conn>, Error> {
         let conn = Connection::connect_to_env().map_err(|e| Error::Connection(e.to_string()))?;
-        Conn::bind(Kind::Own, conn, Arc::default(), subs, Some(prefer), None)
+        let control = (!as_if_none).then_some(prefer);
+        Conn::bind(Kind::Own, conn, Arc::default(), subs, control, None)
     }
 
     fn bind(

@@ -13,7 +13,8 @@
 //! is read, then the drop is finished.
 //!
 //! Flags: `--title T`, `--own-data-control` (data control on a connection of its own),
-//! `--data-control ext|wlr` (which protocol first), `--no-data-control`, `--no-x11-fallback`
+//! `--data-control ext|wlr` (which protocol first), `--as-if-no-data-control` (a compositor
+//! without data control, as mutter: a test switch), `--no-x11-fallback`
 //! (no X11 selections through Xwayland when Wayland has no route), `--no-shared` (don't bind on winit's
 //! display), `--as-if-libwayland-1-22` (behave as on libwayland < 1.23, which has no route to
 //! winit's display: a test switch), `--answer-ask-with-move` (prefer ask on enter, answer the
@@ -445,8 +446,6 @@ mod probe {
             shared: !flag("--no-shared"),
             data_control: if flag("--own-data-control") {
                 DataControl::Own
-            } else if flag("--no-data-control") {
-                DataControl::Off
             } else {
                 DataControl::SharedElseOwn
             },
@@ -456,6 +455,7 @@ mod probe {
             },
             x11_fallback: !flag("--no-x11-fallback"),
             as_if_libwayland_below_1_23: flag("--as-if-libwayland-1-22"),
+            as_if_no_data_control: flag("--as-if-no-data-control"),
         };
         rune::tooling::set_app_id("strata-transfer-probe");
         let app =

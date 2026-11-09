@@ -516,7 +516,7 @@ fn without_any_wayland_route_a_wayland_window_takes_x11_selections_through_xwayl
     let probe = Probe::start_with(
         &s,
         Display::Wayland,
-        &["--as-if-libwayland-1-22", "--no-data-control"],
+        &["--as-if-libwayland-1-22", "--as-if-no-data-control"],
         &[Display::X11],
     );
     let a = &probe.attached;

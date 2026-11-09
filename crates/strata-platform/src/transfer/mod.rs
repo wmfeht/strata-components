@@ -116,7 +116,8 @@ pub struct Wants {
     pub data_control: DataControl,
     pub prefer: Prefer,
     /// Wayland: when no Wayland route is left, take X11 selections through Xwayland (where
-    /// `DISPLAY` names one).
+    /// `DISPLAY` names one). Off by default: only the clipboard has a use for them, so
+    /// drag and drop alone opens no X11 connection and stays unsupported there.
     pub x11_fallback: bool,
     /// A test switch: behave as on libwayland < 1.23, whose missing `wl_proxy_get_display`
     /// puts winit's display out of reach, so the fallback runs on any host. Only
@@ -136,7 +137,7 @@ impl Default for Wants {
             shared: true,
             data_control: DataControl::default(),
             prefer: Prefer::default(),
-            x11_fallback: true,
+            x11_fallback: false,
             as_if_libwayland_below_1_23: false,
             as_if_no_data_control: false,
         }
@@ -546,10 +547,13 @@ fn wayland_backend(
     if shared.is_none() && own.is_none() {
         let why = unsupported.unwrap_or(Unsupported::NothingWanted);
         let display = std::env::var_os("DISPLAY").is_some_and(|d| !d.is_empty());
-        if !(wants.x11_fallback && display) {
+        if !(wants.x11_fallback && display) || why == Unsupported::NothingWanted {
             return Err(Error::Unsupported(why));
         }
-        let x11 = x11::X11::start(subs.clone())?;
+        // No Xwayland to reach is the same answer as no fallback: no route here.
+        let Ok(x11) = x11::X11::start(subs.clone()) else {
+            return Err(Error::Unsupported(why));
+        };
         let status = Status {
             backend: "wayland",
             shared: false,

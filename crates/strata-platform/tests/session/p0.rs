@@ -516,7 +516,11 @@ fn without_any_wayland_route_a_wayland_window_takes_x11_selections_through_xwayl
     let probe = Probe::start_with(
         &s,
         Display::Wayland,
-        &["--as-if-libwayland-1-22", "--as-if-no-data-control"],
+        &[
+            "--as-if-libwayland-1-22",
+            "--as-if-no-data-control",
+            "--x11-fallback",
+        ],
         &[Display::X11],
     );
     let a = &probe.attached;
@@ -579,6 +583,36 @@ fn without_any_wayland_route_a_wayland_window_takes_x11_selections_through_xwayl
     let got = probe.read(Via::X11, Selection::Clipboard, "UTF8_STRING");
     assert_eq!(got["text"], "the Wayland peer's");
     probe.no_errors();
+}
+
+/// No Wayland route, and the X11 fallback finds no X server where `DISPLAY` points: the
+/// window has no route at all, which is Unsupported (not a connection error).
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn without_any_route_and_no_x_server_a_wayland_window_is_unsupported() {
+    let s = Session::start();
+    let mut cmd = s.command(example("transfer-probe"), Display::Wayland);
+    // A display number no server listens on, in the session's own runtime directory.
+    cmd.env("DISPLAY", ":250");
+    cmd.args([
+        "--title",
+        "p0 probe",
+        "--as-if-libwayland-1-22",
+        "--as-if-no-data-control",
+        "--x11-fallback",
+    ]);
+    let app = s.spawn("probe", cmd);
+    let v = app.wait_json("attach", |v| {
+        v["ev"] == "attached" || v["ev"] == "attach-error"
+    });
+    assert_eq!(v["ev"], "attach-error", "{v}");
+    assert!(
+        v["error"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("unsupported"),
+        "{v}"
+    );
 }
 
 // ---- Wayland: the peer offers ----

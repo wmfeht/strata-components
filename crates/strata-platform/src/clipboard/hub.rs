@@ -164,6 +164,8 @@ pub(super) fn attach(
         let wants = Wants {
             as_if_libwayland_below_1_23: test.as_if_libwayland_below_1_23,
             as_if_no_data_control: test.as_if_no_data_control,
+            // Where Wayland has no route, X11 selections through Xwayland.
+            x11_fallback: true,
             ..Wants::default()
         };
         // P0 binds once per process: when drag and drop bound it first, these wants don't

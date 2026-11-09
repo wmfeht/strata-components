@@ -243,3 +243,46 @@ fn short_korean_words_are_kept_whole_and_long_runs_stay_breakable() {
     assert_eq!(joined.replace('\u{2060}', ""), "다음 중 하나를");
     assert_eq!(keep_words_whole("Delete 3 items?"), "Delete 3 items?");
 }
+
+#[derive(Default)]
+struct Closable {
+    closable: bool,
+    dismissed: u32,
+}
+
+fn closable_view(s: &Closable, _cx: &mut Cx<Closable>) -> El {
+    let look = strata_kit::look::Look::fallback(false);
+    let mut layer = Vec::new();
+    super::StrataDialog::new("d", "Copying items", |s: &mut Closable| s.dismissed += 1)
+        .open(true)
+        .closable(s.closable)
+        .secondary("Cancel", |_: &mut Closable| {})
+        .build(&look, &mut layer);
+    rune_kit::root(col(), layer)
+}
+
+#[test]
+fn a_dialog_that_is_not_closable_has_no_close_button_and_escape_still_dismisses_it() {
+    for closable in [true, false] {
+        let state = Closable {
+            closable,
+            dismissed: 0,
+        };
+        let mut rt = Runtime::new(state, closable_view, (600.0, 400.0), Env::new(false, 1.0));
+        rt.frame(0.0);
+        rt.frame(0.3);
+        let keys: Vec<String> = rt.elements().into_iter().filter_map(|e| e.key).collect();
+        assert_eq!(
+            keys.iter().any(|k| k == "d-close"),
+            closable,
+            "closable({closable})"
+        );
+        assert!(keys.iter().any(|k| k == "d-secondary"));
+        rt.key(key(Key::Escape));
+        rt.frame(1.0 / 60.0);
+        assert_eq!(
+            rt.state.dismissed, 1,
+            "Escape dismisses, closable({closable})"
+        );
+    }
+}

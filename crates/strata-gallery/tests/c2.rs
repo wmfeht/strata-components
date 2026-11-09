@@ -1157,4 +1157,57 @@ mod c2 {
             strip_offset(&rt)
         );
     }
+
+    /// Column `depth`'s laid-out width and how much of it shows.
+    fn shown(rt: &Runtime<Gallery>, depth: usize) -> (f32, f32) {
+        let slot = rt
+            .state
+            .c2
+            .columns
+            .column(depth)
+            .map(|_| depth + 1)
+            .unwrap();
+        let i = info(rt, &format!("c2-slot-{slot}")).expect("slot");
+        (i.rect[2], i.visible[2])
+    }
+
+    #[test]
+    fn a_reveal_in_the_same_handler_as_a_narrower_strip_still_shows_the_column() {
+        // browser/view-modes/columns: A keyboard move reveals a column ... fully (the reveal is
+        // worked out again when the strip's width changes right after it).
+        let mut rt = scene("c2-overflow-light");
+        rt.update(|g, tx| {
+            let look = g.look.clone();
+            g.c2.columns.set_active(0, &look, tx);
+        });
+        settle(&mut rt, 60);
+        assert!(strip_offset(&rt) < 0.5);
+        rt.update(|g, tx| {
+            let look = g.look.clone();
+            g.c2.width = Some(700.0);
+            g.c2.columns.set_active(6, &look, tx);
+        });
+        settle(&mut rt, 60);
+        let (w, visible) = shown(&rt, 6);
+        assert!((w - visible).abs() < 0.5, "level-5 shows {visible} of {w}");
+    }
+
+    #[test]
+    fn a_drawer_opening_in_the_same_handler_as_a_close_keeps_the_active_column_whole() {
+        // browser/view-modes/columns: A keyboard move reveals a column ... fully; here the host
+        // closes the deepest column and opens an unreserved drawer in one handler.
+        let mut rt = scene("c2-overflow-light");
+        rt.update(|g, _| g.c2.drawer = Some(strata_components::preview_drawer::DrawerState::new()));
+        settle(&mut rt, 20);
+        rt.update(|g, tx| {
+            let look = g.look.clone();
+            g.c2.listings.0.truncate(6);
+            g.c2.columns.truncate(6, &look, tx);
+            g.c2.drawer.as_mut().unwrap().open(&look, tx);
+        });
+        settle(&mut rt, 90);
+        assert_eq!(rt.state.c2.columns.active(), 5);
+        let (w, visible) = shown(&rt, 5);
+        assert!((w - visible).abs() < 0.5, "level-4 shows {visible} of {w}");
+    }
 }

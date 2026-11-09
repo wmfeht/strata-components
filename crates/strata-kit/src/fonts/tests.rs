@@ -91,6 +91,9 @@ fn ramp_weights() -> Vec<f32> {
     .to_vec()
 }
 
+// The weight test, which measures through `rune::text`'s shared state, lives alone in
+// `tests/fonts_weight.rs`: see there.
+
 /// The face's family (name ID 1) and typographic family (16, when present) are the name
 /// [`FAMILIES`] gives Rune, and its `wght` axis spans every weight the ramps use.
 #[test]
@@ -111,7 +114,8 @@ fn the_bundled_face_is_named_as_rune_matches_it_and_spans_the_ramps_weights() {
 
 /// Text in both slots and by name shapes in the bundled face: monospace at JetBrains Mono's
 /// 600-unit advance (on 1000 units per em). A proportional fallback gives `i` and `M`
-/// different advances, and DejaVu Sans Mono's is 602.
+/// different advances, and DejaVu Sans Mono's is 602. It measures on its own text system, not
+/// through `rune::text`'s shared state, so parallel tests can't change what it measures.
 #[test]
 fn text_shapes_in_jetbrains_mono_not_a_fallback() {
     let mut text = TextSystem::new(FONTS, FAMILIES);
@@ -126,32 +130,4 @@ fn text_shapes_in_jetbrains_mono_not_a_fallback() {
             assert_eq!(w, 600.0, "{slot} {run}");
         }
     }
-}
-
-/// The face is variable: a heavier weight draws a wider stem, so medium and semibold text
-/// doesn't draw as regular.
-#[test]
-fn the_wght_axis_follows_the_weight() {
-    // `ink` and `advance` read the measure state, which is process-wide: another test's text
-    // system (icon_coverage's, say) can put it back on Inter, which is variable too. The guard
-    // makes this thread's state its own, and the text system built under it lands the bundled
-    // fonts there, so both are pinned whatever runs alongside.
-    let _families = rune::text::with_families(FAMILY, FAMILY);
-    let _text = TextSystem::new(FONTS, FAMILIES);
-    // JetBrains Mono's 600-unit advance: this path measures the bundled face.
-    let advance = rune::text::advance("iiiiiiiiii", TextStyle::new(100.0, 400.0));
-    assert!(
-        (advance - 600.0).abs() < 0.01,
-        "{advance} pt, not JetBrains Mono's"
-    );
-    let ink = |weight| {
-        rune::text::ink("l", TextStyle::new(100.0, weight))
-            .expect("ink")
-            .bounds[2]
-    };
-    let (regular, medium, semibold) = (ink(400.0), ink(500.0), ink(600.0));
-    assert!(
-        regular < medium && medium < semibold,
-        "{regular} {medium} {semibold}"
-    );
 }

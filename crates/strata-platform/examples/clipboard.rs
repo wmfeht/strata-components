@@ -5,7 +5,8 @@
 //!
 //! Commands:
 //! - `{"cmd":"copy","selection":"clipboard"|"primary","offers":[Offer],"keep_ms":n|null}`:
-//!   copies the offers, each with a lazy writer that logs `writer` when it runs;
+//!   copies the offers, each with a lazy writer that logs `writer` when it runs (those named in
+//!   `"hang":[…]` then never return);
 //!   `keep_ms` is how long the exit waits for a clipboard manager (`null`: don't hand over;
 //!   absent: the default);
 //! - `{"cmd":"arm","offers":[Offer]}`: what Ctrl+C in the window copies;
@@ -104,10 +105,21 @@ mod demo {
     }
 
     fn content(offers: Vec<Offer>) -> Content {
+        content_with(offers, &[])
+    }
+
+    /// The offers with lazy writers that log `writer`; those of `hang` never return.
+    fn content_with(offers: Vec<Offer>, hang: &[String]) -> Content {
         offers.into_iter().fold(Content::new(), |c, offer| {
             let mime = offer.mime.clone();
+            let hangs = hang.contains(&mime);
             c.lazy(offer.mime, move || {
                 log("writer", json!({ "mime": mime }));
+                if hangs {
+                    loop {
+                        std::thread::park();
+                    }
+                }
                 offer.data.bytes().unwrap_or_default()
             })
         })
@@ -155,7 +167,8 @@ mod demo {
             "copy" => {
                 let offers: Vec<Offer> =
                     serde_json::from_value(field("offers")).unwrap_or_default();
-                let mut c = content(offers);
+                let hang: Vec<String> = serde_json::from_value(field("hang")).unwrap_or_default();
+                let mut c = content_with(offers, &hang);
                 if let Some(keep) = cmd.get("keep_ms") {
                     c = c.keep_after_exit(keep.as_u64().map(Duration::from_millis));
                 }

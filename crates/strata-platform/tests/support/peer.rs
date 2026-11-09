@@ -8,8 +8,8 @@ use std::time::{Duration, Instant};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use strata_test_peer::protocol::{
-    Action, ActivationToken, Button, Command, Event, Exported, Mapped, Message, Offer, Received,
-    Request, Selection, Targets, TypedWindow, Via,
+    Action, ActivationToken, Button, Command, Event, Exported, Mapped, Message, MultipleRead,
+    Offer, Received, Request, Selection, Targets, TypedWindow, Via,
 };
 
 use super::{Display, Proc, Session};
@@ -308,6 +308,22 @@ impl Peer {
             via,
             mime: mime.to_owned(),
         })
+    }
+
+    /// X11: reads `mimes` in one `MULTIPLE` conversion, repeats included; None where refused.
+    #[cfg_attr(
+        not(feature = "clipboard"),
+        expect(
+            dead_code,
+            reason = "only P2's session tests, behind clipboard, use it"
+        )
+    )]
+    pub fn read_multiple(&self, selection: Selection, mimes: &[&str]) -> Vec<Option<Received>> {
+        self.request_as::<MultipleRead>(Command::SelectionReadMultiple {
+            selection,
+            mimes: mimes.iter().map(|m| (*m).to_owned()).collect(),
+        })
+        .results
     }
 
     /// X11: become the clipboard manager; with `answer: false`, one that never answers.

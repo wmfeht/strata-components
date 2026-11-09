@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 use strata_platform::transfer::mime;
-use strata_test_peer::protocol::{Event, Offer, Payload, Selection, Via, fnv1a64};
+use strata_test_peer::protocol::{Command, Event, Offer, Payload, Selection, Via, fnv1a64};
 
 use crate::support::{Display, Peer, Proc, Session, Window, example, timeout};
 
@@ -1101,6 +1101,86 @@ fn x11_a_silent_manager_holds_the_exit_only_as_long_as_the_copy_asked() {
     assert_eq!(down["hand_off"], "TimedOut", "{down}");
     let ms = down["ms"].as_f64().expect("ms");
     assert!((600.0..1600.0).contains(&ms), "the wait took {ms} ms");
+}
+
+fn threads_named(pid: u32, name: &str) -> usize {
+    std::fs::read_dir(format!("/proc/{pid}/task"))
+        .map(|tasks| {
+            tasks
+                .flatten()
+                .filter(|t| {
+                    std::fs::read_to_string(t.path().join("comm"))
+                        .is_ok_and(|c| c.trim_end() == name)
+                })
+                .count()
+        })
+        .unwrap_or(0)
+}
+
+/// A `MULTIPLE` request naming one lazy type 50 times, whose writer never returns, beside
+/// text: the writer runs on one worker, not one per pair, and the request is answered by its
+/// deadline, the stuck type refused and the text given.
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn x11_multiple_runs_each_writer_once_and_answers_by_its_deadline() {
+    let s = Session::start();
+    let demo = Demo::start(&s, B::X).expect("X11");
+    let peer = s.peer(Display::X11);
+    let stuck = "application/x-p2-stuck";
+    let at = demo.app.line_count();
+    let copy = demo.copy(json!({
+        "cmd": "copy", "selection": Selection::Clipboard, "hang": [stuck],
+        "offers": [Offer::text(stuck, "never"), Offer::text(UTF8, "given")],
+    }));
+    demo.change(at, "holding", Some(copy));
+    let mut mimes = vec![stuck; 50];
+    mimes.push(UTF8);
+    let started = Instant::now();
+    let results = peer.read_multiple(Selection::Clipboard, &mimes);
+    let took = started.elapsed();
+    assert!(
+        results[..50].iter().all(Option::is_none),
+        "the stuck type is refused"
+    );
+    assert_eq!(
+        results[50].as_ref().and_then(|r| r.text.as_deref()),
+        Some("given")
+    );
+    assert!(
+        took >= Duration::from_secs(4),
+        "answered before the deadline: {took:?}"
+    );
+    assert_eq!(demo.writer_runs(stuck), 1, "one run for 50 pairs");
+    assert!(
+        threads_named(demo.app.pid(), "transfer-write") <= 1,
+        "a worker per pair: {}",
+        threads_named(demo.app.pid(), "transfer-write")
+    );
+}
+
+/// A `MULTIPLE` request may name 1024 pairs; one with more is refused whole, as a request can
+/// carry 32k and each target costs the owner a round trip.
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn x11_multiple_with_more_than_1024_pairs_is_refused() {
+    let s = Session::start();
+    let demo = Demo::start(&s, B::X).expect("X11");
+    let peer = s.peer(Display::X11);
+    let at = demo.app.line_count();
+    let copy = demo.copy_offers(Selection::Clipboard, &[Offer::text(UTF8, "t")]);
+    demo.change(at, "holding", Some(copy));
+    let at_most = peer.read_multiple(Selection::Clipboard, &[UTF8; 1024]);
+    assert!(
+        at_most.iter().all(Option::is_some),
+        "1024 pairs are answered"
+    );
+    let over = peer.try_request(Command::SelectionReadMultiple {
+        selection: Selection::Clipboard,
+        mimes: vec![UTF8.to_owned(); 1025],
+    });
+    let refused = over.as_ref().err().is_some_and(|e| e.contains("refused"));
+    assert!(refused, "1025 pairs are refused whole: {over:?}");
+    demo.no_errors();
 }
 
 // ---- 10. Read limits and reads of our own copy ----

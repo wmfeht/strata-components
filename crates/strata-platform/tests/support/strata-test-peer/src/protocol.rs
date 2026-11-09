@@ -85,6 +85,13 @@ pub enum Command {
         via: Via,
         mime: String,
     },
+    /// X11 only: reads `mimes` in one `MULTIPLE` conversion, each pair into a property of its
+    /// own, repeats included ([`MultipleRead`]). Small data only: a pair answered by INCR
+    /// counts as refused.
+    SelectionReadMultiple {
+        selection: Selection,
+        mimes: Vec<String>,
+    },
     /// Starts a drag from the peer's own window. Needs a press on it that is still held
     /// ([`Event::PointerButton`]): the session's input peer presses, then drags. On X11 it
     /// proposes the first of `actions` and lists them all in `XdndActionList`.
@@ -255,6 +262,13 @@ pub const INLINE_TEXT: usize = 64 * 1024;
 pub struct Mapped {
     /// The X window, on X11.
     pub xid: Option<u32>,
+}
+
+/// The reply to [`Command::SelectionReadMultiple`]: each pair's data, in the order asked, or
+/// None where the owner refused it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MultipleRead {
+    pub results: Vec<Option<Received>>,
 }
 
 /// The reply to [`Command::SelectionTargets`].

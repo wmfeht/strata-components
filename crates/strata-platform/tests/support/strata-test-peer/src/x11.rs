@@ -21,8 +21,8 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::time::{Duration, Instant};
 
 use strata_test_peer::protocol::{
-    Action, Backend, Command, Event, Exported, Mapped, Offer, Payload, Request, Selection, Targets,
-    TypedWindow, Via,
+    Action, Backend, Command, Event, Exported, Mapped, MultipleRead, Offer, Payload, Request,
+    Selection, Targets, TypedWindow, Via,
 };
 use x11rb::connection::Connection as _;
 use x11rb::protocol::Event as XEvent;
@@ -97,6 +97,8 @@ enum Conversion {
     Multiple,
     /// As clipboard manager: pair `n` of that conversion, which came by INCR.
     Part(usize),
+    /// A test's `MULTIPLE` read: the request id and each pair's property.
+    ReadMultiple(u64, Vec<Atom>),
 }
 
 /// A hand-over in progress: the `SAVE_TARGETS` request to answer, and each type's data as it
@@ -460,6 +462,9 @@ impl X {
                 let target = self.atom(&mime)?;
                 self.convert(self.selection_atom(selection), target, Conversion::Read(id))
             }),
+            Command::SelectionReadMultiple { selection, mimes } => {
+                self.read_multiple(id, selection, &mimes)
+            }
             Command::DragStart { offers, actions } => self.drag_start(id, offers, actions),
             Command::DropAccept {
                 mimes,
@@ -1133,6 +1138,10 @@ impl X {
             Ok(r) => r,
             Err(e) => return self.finish(why, Err(e)),
         };
+        if let Conversion::ReadMultiple(id, props) = why {
+            let pairs: Vec<u32> = reply.value32().map(Iterator::collect).unwrap_or_default();
+            return self.multiple_read_landed(id, &props, &pairs);
+        }
         if matches!(why, Conversion::Multiple) {
             let pairs: Vec<u32> = reply.value32().map(Iterator::collect).unwrap_or_default();
             return self.multiple_landed(&pairs);
@@ -1161,6 +1170,9 @@ impl X {
 
     fn finish(&mut self, why: Conversion, data: Result<Vec<u8>, String>) {
         match why {
+            Conversion::ReadMultiple(id, _) => {
+                out::reply(id, data.map(|_| serde_json::Value::Null))
+            }
             Conversion::Multiple => {
                 // Refused as a whole: every part failed.
                 if let Some(saving) = self.saving.as_mut() {
@@ -1243,6 +1255,69 @@ impl X {
                 }
             }
         }
+    }
+
+    // ---- a test's MULTIPLE read ----
+
+    fn read_multiple(
+        &mut self,
+        id: u64,
+        selection: Selection,
+        mimes: &[String],
+    ) -> Result<(), String> {
+        let mut pairs = Vec::with_capacity(mimes.len() * 2);
+        let mut props = Vec::with_capacity(mimes.len());
+        for mime in mimes {
+            self.next_property += 1;
+            let property = self.atom(&format!("STRATA_PEER_{}", self.next_property))?;
+            pairs.extend([self.atom(mime)?, property]);
+            props.push(property);
+        }
+        self.next_property += 1;
+        let multi = self.atom(&format!("STRATA_PEER_{}", self.next_property))?;
+        self.conn
+            .change_property32(
+                PropMode::REPLACE,
+                self.win,
+                multi,
+                self.atoms.ATOM_PAIR,
+                &pairs,
+            )
+            .map_err(err)?;
+        let sel = self.selection_atom(selection);
+        let time = self.server_time()?;
+        self.pending.insert(
+            multi,
+            (
+                sel,
+                self.atoms.MULTIPLE,
+                Conversion::ReadMultiple(id, props),
+            ),
+        );
+        self.conn
+            .convert_selection(self.win, sel, self.atoms.MULTIPLE, multi, time)
+            .map_err(err)?;
+        Ok(())
+    }
+
+    fn multiple_read_landed(&mut self, id: u64, props: &[Atom], pairs: &[u32]) {
+        let answered: Vec<Atom> = pairs.as_chunks::<2>().0.iter().map(|[_, p]| *p).collect();
+        let mut results = Vec::with_capacity(props.len());
+        for (i, &property) in props.iter().enumerate() {
+            let refused = answered.get(i).is_none_or(|p| *p == x11rb::NONE);
+            let data = (!refused)
+                .then(|| {
+                    self.conn
+                        .get_property(true, self.win, property, AtomEnum::ANY, 0, u32::MAX / 4)
+                        .ok()
+                        .and_then(|c| c.reply().ok())
+                })
+                .flatten()
+                .filter(|r| r.type_ != self.atoms.INCR)
+                .map(|r| out::received(&r.value));
+            results.push(data);
+        }
+        out::value(id, MultipleRead { results });
     }
 
     // ---- clipboard manager ----

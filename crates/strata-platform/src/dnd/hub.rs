@@ -195,19 +195,33 @@ fn with<R>(f: impl FnOnce(&mut Hub) -> R) -> Option<R> {
 
 /// Attaches `window` (its core `core`, reached through `sink`), binding the substrate on
 /// the first call. On the UI thread, from `App::on_window`.
+/// Test switches for strata-platform's own tests: what the first attach behaves as if it found.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct TestRoute {
+    pub(crate) as_if_libwayland_below_1_23: bool,
+    pub(crate) as_if_no_data_control: bool,
+}
+
 pub(crate) fn attach(
     window: &WindowHandle,
     sink: Rc<dyn Sink>,
     core: Rc<dyn Any>,
     poster: Poster,
+    test: TestRoute,
 ) -> Result<Status, Error> {
     let fresh = HUB.with(|h| h.borrow().is_none());
     if fresh {
         let turn_poster = poster.clone();
         let turn: Turn = Arc::new(move |f| turn_poster(Job::Run(f)));
         // Default wants: P0 binds once per process, so a clipboard (P2) attached later
-        // still finds data control.
-        let (t, _) = Transfer::attach(window, turn, Wants::default())?;
+        // still finds data control. No X11 fallback: drag and drop has no use for X11
+        // selections through Xwayland, and stays unsupported where Wayland has no route.
+        let wants = Wants {
+            as_if_libwayland_below_1_23: test.as_if_libwayland_below_1_23,
+            as_if_no_data_control: test.as_if_no_data_control,
+            ..Wants::default()
+        };
+        let (t, _) = Transfer::attach(window, turn, wants)?;
         let posters = Posters::default();
         let wake = posters.clone();
         let sub = t.subscribe(move || wake.wake_all());

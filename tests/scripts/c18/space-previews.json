@@ -20,21 +20,15 @@
       "t": 0.5
     },
     {
-      "type": "key",
-      "name": " ",
-      "shift": true,
-      "t": 0.7
-    },
-    {
       "type": "mark",
       "name": "end",
-      "t": 1.0
+      "t": 0.8
     }
   ],
   "expect": [
     {
       "key": "c18-filter-field",
-      "value": "rep ",
+      "value": "rep",
       "focused": true
     },
     {

@@ -39,6 +39,10 @@
     },
     {
       "key": "row-4"
+    },
+    {
+      "key": "c18-pane",
+      "focused": true
     }
   ]
 }

@@ -26,39 +26,6 @@
                   "role": "group"
                 },
                 {
-                  "children": [
-                    {
-                      "actions": [
-                        "context-menu"
-                      ],
-                      "children": [
-                        {
-                          "actions": [
-                            "click",
-                            "focus",
-                            "context-menu",
-                            "set-value",
-                            "replace-selected-text",
-                            "set-text-selection"
-                          ],
-                          "key": "c18-filter-field",
-                          "name": "Filter list (Ctrl+F)",
-                          "placeholder": "Filter 12 items…",
-                          "role": "text-input",
-                          "states": [
-                            "focused"
-                          ],
-                          "value": ""
-                        }
-                      ],
-                      "key": "c18-filter-box",
-                      "role": "group"
-                    }
-                  ],
-                  "key": "c18-filter",
-                  "role": "group"
-                },
-                {
                   "actions": [
                     "focus"
                   ],
@@ -220,7 +187,10 @@
                   ],
                   "key": "c18-pane",
                   "name": "Documents pane",
-                  "role": "group"
+                  "role": "group",
+                  "states": [
+                    "focused"
+                  ]
                 },
                 {
                   "key": "c18-footer",
@@ -233,7 +203,7 @@
                 },
                 {
                   "key": "c18-log",
-                  "name": "—",
+                  "name": "Filter closed",
                   "role": "label"
                 }
               ],

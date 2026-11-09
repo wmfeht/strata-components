@@ -48,7 +48,7 @@
                           "states": [
                             "focused"
                           ],
-                          "value": "rep "
+                          "value": "rep"
                         }
                       ],
                       "key": "c18-filter-box",
@@ -106,7 +106,10 @@
                                   "key": "row-11",
                                   "name": "report.pdf",
                                   "position": 3,
-                                  "role": "list-box-option"
+                                  "role": "list-box-option",
+                                  "states": [
+                                    "selected"
+                                  ]
                                 }
                               ],
                               "key": "rows",
@@ -144,7 +147,7 @@
                 },
                 {
                   "key": "c18-outlined",
-                  "name": "Outlined: reports",
+                  "name": "Outlined: none",
                   "role": "label"
                 },
                 {

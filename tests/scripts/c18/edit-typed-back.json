@@ -13,12 +13,12 @@
     {
       "type": "key",
       "name": "Backspace",
-      "t": 0.41
+      "t": 0.21
     },
     {
       "type": "mark",
       "name": "end",
-      "t": 0.71
+      "t": 0.51
     }
   ],
   "expect": [
@@ -29,6 +29,10 @@
     {
       "key": "c18-filter-field",
       "value": "rep"
+    },
+    {
+      "key": "c18-log",
+      "name": "Query “rep”, 1 shown"
     }
   ]
 }

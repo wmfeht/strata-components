@@ -96,6 +96,10 @@ pub struct Demo {
     pub next_id: u64,
     pub now: f64,
     pub log: String,
+    /// A query waiting out the debounce: when it applies, and its text.
+    pub pending_query: Option<(f64, String)>,
+    /// Queries shown since the scene opened.
+    pub queries: u32,
 }
 
 impl Default for Demo {
@@ -125,6 +129,8 @@ impl Default for Demo {
             next_id: 100,
             now: 0.0,
             log: String::new(),
+            pending_query: None,
+            queries: 0,
         }
     }
 }
@@ -165,6 +171,9 @@ const FOLDERS: &[&str] = &[
     "Videos",
 ];
 
+/// How long an edit's query waits for the next edit (Strata's `FILTER_DEBOUNCE_DELAY`).
+const QUERY_DEBOUNCE: f64 = 0.04;
+
 /// How long the fake folder picker takes to answer.
 const PICKER_DELAY: f64 = 0.3;
 
@@ -203,6 +212,7 @@ fn bar(g: &Gallery) -> FilterBar<Gallery> {
             placeholder: format!("Filter {n} items\u{2026}"),
         })
         .results(results)
+        .focus_return(PANE)
         .previews(|g: &Gallery| {
             let d = &g.c18;
             d.coll
@@ -383,14 +393,13 @@ impl Demo {
     /// The filter bar's intents: the page filters, opens and previews.
     fn filtered(&mut self, intent: FilterIntent, tx: &mut Tx) {
         match intent {
+            // Strata settles a query 40 ms after the last edit (`FILTER_DEBOUNCE_DELAY`).
             FilterIntent::Query { text } => {
-                self.show(|e| matches(&e.name, &text));
-                if self.filter.shown(&text) {
-                    let _ = self.coll.selection.clear();
-                }
-                self.reveal_top(tx);
+                self.pending_query = Some((self.now + QUERY_DEBOUNCE, text));
+                tx.wake_after(std::time::Duration::from_secs_f64(QUERY_DEBOUNCE));
             }
             FilterIntent::ShowListing { restore } => {
+                self.pending_query = None;
                 self.listing.replace(self.disk.clone());
                 self.version += 1;
                 if let Some(p) = restore {
@@ -401,7 +410,10 @@ impl Demo {
                     self.coll.reveal(SCOPE, &self.listing, i, tx);
                 }
             }
-            FilterIntent::Closed => self.log = "Filter closed".into(),
+            FilterIntent::Closed => {
+                self.pending_query = None;
+                self.log = "Filter closed".into();
+            }
             FilterIntent::Open { id } => self.log = format!("Opened {}", self.name_of(id)),
             FilterIntent::FocusResults { id } => {
                 if let Some(i) = self.listing.index_of(id) {
@@ -409,12 +421,25 @@ impl Demo {
                     self.coll.keyboard_moved();
                     self.coll.reveal(SCOPE, &self.listing, i, tx);
                 }
+                self.log = format!("Down to {}", self.name_of(id));
             }
             FilterIntent::Preview => self.log = "Quick preview".into(),
             // C21's FieldMenu answers this in Strata; it isn't merged yet.
             FilterIntent::FieldMenu { .. } => self.log = "Field menu".into(),
             _ => {}
         }
+    }
+
+    /// A settled query: the results show, and the bar hears which query they are for.
+    fn apply_query(&mut self, text: &str, tx: &mut Tx) {
+        self.show(|e| matches(&e.name, text));
+        if self.filter.shown(text) {
+            let _ = self.coll.selection.clear();
+        }
+        self.reveal_top(tx);
+        self.queries += 1;
+        let n = self.queries;
+        self.log = format!("Query “{text}”, {n} shown");
     }
 
     fn reveal_top(&mut self, tx: &mut Tx) {
@@ -1233,6 +1258,15 @@ pub fn poll(g: &mut Gallery, t: f64, tx: &mut Tx) -> bool {
     g.c18.route_prompt(polled, tx);
     changed |= g.c18.flash.tick(t, tx);
     let d = &mut g.c18;
+    if let Some((at, text)) = d.pending_query.clone() {
+        if at <= t + 1e-6 {
+            d.pending_query = None;
+            d.apply_query(&text, tx);
+            changed = true;
+        } else {
+            tx.wake_after(std::time::Duration::from_secs_f64(at - t));
+        }
+    }
     let (due, later): (Vec<_>, Vec<_>) = d.worker.drain(..).partition(|(at, _)| *at <= t);
     d.worker = later;
     for (_, answer) in due {

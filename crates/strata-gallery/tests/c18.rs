@@ -260,4 +260,74 @@ mod c18 {
         assert!(rt.state.c18.log.starts_with("Deleted"));
         assert!(rt.state.c18.prompt.focused());
     }
+
+    // browser/search/filter: "With **Type to search** on, typing a printable character in a
+    // file view opens the filter with that character as the query." Keys typed in one frame,
+    // before the field takes the keyboard, all reach the query.
+    #[test]
+    fn a_burst_of_type_to_search_keys_all_reach_the_query() {
+        let mut rt = mount("c18-listing-light");
+        for c in ["r", "e", "p"] {
+            rt.key(KeyEvent {
+                key: Key::Text(c.into()),
+                mods: Mods::default(),
+            });
+        }
+        run(&mut rt, 0.3);
+        assert_eq!(rt.state.c18.filter.text(), "rep");
+        assert_eq!(rt.state.c18.log, "Query “rep”, 1 shown");
+    }
+
+    // A held Enter in the field opens its target once.
+    #[test]
+    fn a_held_enter_opens_once() {
+        let mut rt = mount("c18-filter-target-light");
+        let enter = KeyEvent {
+            key: Key::Enter,
+            mods: Mods::default(),
+        };
+        rt.key(enter.clone());
+        rt.frame(FRAME);
+        assert_eq!(rt.state.c18.log, "Opened reports");
+        rt.state.c18.log.clear();
+        for _ in 0..3 {
+            rt.repeat_key(enter.clone());
+            rt.frame(FRAME);
+        }
+        assert_eq!(rt.state.c18.log, "", "the repeats open nothing");
+    }
+
+    // While an input method composes, Down and Space in the filter field are the
+    // composition's: Down neither moves to the results nor picks, Space previews nothing.
+    #[test]
+    fn down_and_space_while_composing_stay_with_the_composition() {
+        let mut rt = mount("c18-filter-picked-light");
+        rt.ime(Ime::Preedit("か".into(), Some((3, 3))));
+        rt.frame(FRAME);
+        key(&mut rt, Key::Down, Mods::default());
+        key(&mut rt, Key::Text(" ".into()), Mods::default());
+        run(&mut rt, 0.2);
+        assert!(
+            !rt.state.c18.log.starts_with("Down to"),
+            "{}",
+            rt.state.c18.log
+        );
+        assert_ne!(rt.state.c18.log, "Quick preview");
+        assert!(rt.state.c18.filter.field_focused());
+    }
+
+    // The same in a prompt: Down chooses no candidate.
+    #[test]
+    fn down_while_composing_chooses_no_candidate() {
+        let mut rt = mount("c18-prompt-go-light");
+        run(&mut rt, 0.5);
+        assert_eq!(rt.state.c18.prompt.chosen_index(), Some(0));
+        rt.ime(Ime::Preedit("か".into(), Some((3, 3))));
+        rt.frame(FRAME);
+        key(&mut rt, Key::Down, Mods::default());
+        run(&mut rt, 0.2);
+        assert_eq!(rt.state.c18.prompt.chosen_index(), Some(0));
+        assert!(!rt.state.c18.prompt.stepped());
+        assert!(rt.state.c18.prompt.is_open());
+    }
 }

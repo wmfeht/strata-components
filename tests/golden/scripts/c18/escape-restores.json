@@ -187,7 +187,10 @@
                   ],
                   "key": "c18-pane",
                   "name": "Documents pane",
-                  "role": "group"
+                  "role": "group",
+                  "states": [
+                    "focused"
+                  ]
                 },
                 {
                   "key": "c18-footer",

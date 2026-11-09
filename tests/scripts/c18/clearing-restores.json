@@ -31,16 +31,20 @@
       "t": 0.78
     },
     {
+      "type": "key",
+      "name": "Escape",
+      "t": 1.08
+    },
+    {
       "type": "mark",
       "name": "end",
-      "t": 1.08
+      "t": 1.38
     }
   ],
   "expect": [
     {
       "key": "c18-filter-field",
-      "value": "",
-      "focused": true
+      "absent": true
     },
     {
       "key": "row-5",
@@ -50,6 +54,10 @@
     },
     {
       "key": "row-4"
+    },
+    {
+      "key": "c18-pane",
+      "focused": true
     }
   ]
 }

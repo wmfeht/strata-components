@@ -62,6 +62,7 @@
                   "actions": [
                     "focus"
                   ],
+                  "activeDescendant": "row-11",
                   "children": [
                     {
                       "actions": [
@@ -148,7 +149,7 @@
                 },
                 {
                   "key": "c18-log",
-                  "name": "—",
+                  "name": "Query “rep”, 1 shown",
                   "role": "label"
                 }
               ],

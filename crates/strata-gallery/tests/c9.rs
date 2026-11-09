@@ -436,6 +436,26 @@ mod c9 {
         assert_eq!(value(&rt), "308", "Up widens a step");
     }
 
+    /// `browser/view-modes/columns`: Hovering the edge of the column that meets the preview
+    /// also lights the preview divider line (the drawer's half: the host lights it).
+    #[test]
+    fn the_host_lights_the_divider_line() {
+        let mut rt = scene("c9-columns-open-light");
+        let lit = |rt: &Runtime<Gallery>| info(rt, "preview-divider-lit").map(|e| e.opacity);
+        assert_eq!(lit(&rt), Some(0.0));
+        rt.update(|g, _| g.c9.drawer.light_line(true));
+        settle(&mut rt, 30);
+        assert_eq!(lit(&rt), Some(1.0), "lit with no hover");
+        assert_eq!(
+            info(&rt, "preview-divider-strip").map(|e| e.opacity),
+            Some(0.0),
+            "the grip keeps its own hover"
+        );
+        rt.update(|g, _| g.c9.drawer.light_line(false));
+        settle(&mut rt, 30);
+        assert_eq!(lit(&rt), Some(0.0));
+    }
+
     /// `preview/preview-panel/layout`: Hovering the grip or divider line lights the line and
     /// tints the grip; after 400 ms, "Preview panel minimum width" appears. And: Crossing
     /// between the divider line and the grip keeps the caption; pressing hides it in favor of

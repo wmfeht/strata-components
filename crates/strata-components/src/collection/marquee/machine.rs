@@ -150,6 +150,9 @@ struct Band {
     frames: u32,
     /// When the last tick ran.
     ticked_at: Option<f64>,
+    /// A key took the view ([`MarqueeMachine::yield_scroll`]): no edge scroll until the
+    /// pointer next moves.
+    held: bool,
 }
 
 impl Band {
@@ -248,6 +251,7 @@ impl MarqueeMachine {
             coasting: 0,
             frames: 0,
             ticked_at: None,
+            held: false,
         });
         s.emit(Outcome::Repaint);
         self.step(s, Step::Move);
@@ -260,6 +264,7 @@ impl MarqueeMachine {
             return false;
         };
         band.pointer = Point::new(at.x - visible.x, at.y - visible.y);
+        band.held = false;
         self.step(s, Step::Move)
     }
 
@@ -312,6 +317,21 @@ impl MarqueeMachine {
         self.band = None;
     }
 
+    /// A key moved the cursor and the view is revealing it: stops the edge scroll with no
+    /// scroll request of its own (a stop on a later tick would undo the reveal), and scrolls
+    /// no more until the pointer next moves. True when the edge scroll was moving the view, so
+    /// the caller stops it dead before the reveal.
+    pub fn yield_scroll(&mut self) -> bool {
+        let Some(band) = self.band.as_mut() else {
+            return false;
+        };
+        let moving = band.speed != 0.0 || band.coasting > 0;
+        band.speed = 0.0;
+        band.coasting = 0;
+        band.held = true;
+        moving
+    }
+
     fn step(&mut self, s: &mut dyn Surface, step: Step) -> bool {
         let settings = s.settings();
         let visible = s.visible();
@@ -340,7 +360,11 @@ impl MarqueeMachine {
         }
 
         let was = band.speed;
-        let speed = scroll_speed(band, &*s, &settings);
+        let speed = if band.held {
+            0.0
+        } else {
+            scroll_speed(band, &*s, &settings)
+        };
         if step == Step::Tick {
             if speed != 0.0 {
                 let dt = band

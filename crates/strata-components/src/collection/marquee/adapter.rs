@@ -122,6 +122,10 @@ impl MarqueeController for Marquee {
     fn reset(&mut self) {
         self.machine.reset();
     }
+
+    fn yield_scroll(&mut self) -> bool {
+        self.machine.yield_scroll()
+    }
 }
 
 /// C1e's context as the machine's surface.

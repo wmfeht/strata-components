@@ -51,6 +51,7 @@ use crate::tokens::Token;
 use crate::look::Look;
 
 pub mod collection;
+pub mod columns;
 pub mod icons;
 pub mod list;
 pub mod scroll;
@@ -66,6 +67,8 @@ mod tests;
 pub struct Slots {
     /// The collection element (C1e), which C2, C3 and C4 build on.
     pub collection: collection::Collection,
+    /// ColumnsView (C2).
+    pub columns: columns::Columns,
     /// IconsGrid (C3).
     pub icons: icons::Icons,
     /// ListTable (C4).
@@ -82,6 +85,7 @@ pub struct Slots {
 /// slot token's name is `<id>.<part>.<property>`.
 pub const TOKENS: &[(&str, &[Token])] = &[
     ("collection", collection::TOKENS),
+    ("columns", columns::TOKENS),
     ("icons", icons::TOKENS),
     ("list", list::TOKENS),
     ("scroll", scroll::TOKENS),

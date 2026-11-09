@@ -138,14 +138,33 @@ fn after<S: 'static>(
     moved: bool,
     effects: Vec<Effect>,
 ) {
+    // A key that moves the cursor takes the view from a band's edge scroll, whose next tick
+    // would otherwise glide on, or stop dead where it was, over the key's reveal (C1d's S-B).
+    // A glide in flight would keep its speed through a reveal request, and an instant stop
+    // would land after it (Rune applies offsets after reveals), so the reveal is one instant
+    // scroll then.
+    let instant = from == Source::Key && moved && {
+        let st = (cfg.get_mut)(s).1;
+        st.controllers
+            .marquee
+            .as_mut()
+            .is_some_and(|m| m.yield_scroll())
+    };
+    let reveal = |s: &mut S, index: usize, tx: &mut Tx| {
+        let (src, st) = (cfg.get_mut)(s);
+        if instant {
+            st.reveal_instant(&cfg.key, src, index, tx);
+        } else {
+            st.reveal(&cfg.key, src, index, tx);
+        }
+    };
     let mut intents = Vec::new();
     let mut revealed = false;
     let mut mode_set = false;
     for effect in effects {
         match effect {
             Effect::Reveal(index) => {
-                let (src, st) = (cfg.get_mut)(s);
-                st.reveal(&cfg.key, src, index, tx);
+                reveal(s, index, tx);
                 revealed = true;
             }
             Effect::BeginMarquee { at, mods } => {
@@ -187,9 +206,12 @@ fn after<S: 'static>(
     // A key or a tick that moves the cursor keeps it in view; a pointer moves it only to what
     // it shows.
     if moved && !matches!(from, Source::Pointer(_)) && !revealed {
-        let (src, st) = (cfg.get_mut)(s);
-        if let Some(index) = st.selection.cursor_index(src) {
-            st.reveal(&cfg.key, src, index, tx);
+        let index = {
+            let (src, st) = (cfg.get)(s);
+            st.selection.cursor_index(src)
+        };
+        if let Some(index) = index {
+            reveal(s, index, tx);
         }
     }
     // The status line reads a band's count once its gesture ends, not at every step.
@@ -377,7 +399,36 @@ pub(super) fn on_drag<S: 'static>(cfg: &Rc<Config<S>>, s: &mut S, d: &mut Drag, 
     {
         f(s, &input, tx);
     }
-    let shows = route_pointer(cfg, s, tx, &input);
+    // A press on the header held back (`Collection::header_defers_press`): it reaches the
+    // controllers once it travels past the threshold, with the move that took it there; a
+    // release before then is a click on the header, which the collection doesn't take.
+    let mut released = false;
+    if let Some(threshold) = cfg.header_defer {
+        let st = (cfg.get_mut)(s).1;
+        match phase {
+            PointerPhase::Down if on_header => {
+                st.deferred = Some(input);
+                tx.live_only();
+                return;
+            }
+            PointerPhase::Down => st.deferred = None,
+            PointerPhase::Move if st.deferred.is_some() => {
+                let past = input.travel.x.abs() > threshold || input.travel.y.abs() > threshold;
+                if !past || input.cancelled {
+                    tx.live_only();
+                    return;
+                }
+                let down = st.deferred.take().expect("checked");
+                released = route_pointer(cfg, s, tx, &down);
+            }
+            PointerPhase::Up if st.deferred.take().is_some() => {
+                tx.live_only();
+                return;
+            }
+            _ => {}
+        }
+    }
+    let shows = route_pointer(cfg, s, tx, &input) || released;
     // A move that changed nothing the view reads commits nothing, an open band's included: a
     // marquee that redraws says so with `Ctx::repaint`.
     if phase == PointerPhase::Move && !shows && hover_was_live {

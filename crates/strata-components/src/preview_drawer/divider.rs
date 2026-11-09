@@ -70,7 +70,8 @@ pub(super) fn divider<S: 'static>(
                 .w_full()
                 .h_full()
                 .fill(k.c.border_focus)
-                .group_opacity(0.0, 1.0),
+                // Lit by its own hover, or by the host's (a column's edge beside it, C2).
+                .group_opacity(if st.lit { 1.0 } else { 0.0 }, 1.0),
         );
     let grip = el()
         .key("preview-divider-strip")

@@ -61,6 +61,11 @@
 //!   the same whether or not the collection has focus (Strata dims it when unfocused), and the
 //!   cursor outline follows keyboard mode (the last input that moved the cursor was a key)
 //!   instead of keyboard focus.
+//! - **Collections keyed by their host are no focus stops** ([`Collection::keys_by_host`],
+//!   C2). Their container isn't focusable, has no key handler and names no active descendant;
+//!   a press in one focuses the nearest ancestor with a key handler, which routes keys to the
+//!   collection it picks ([`Collection::key`]) and names that collection's cursor row
+//!   ([`Collection::cursor_path`]). Columns is one Tab stop this way, as in Strata.
 //! - **Selection fill.** Selected rows use rune-kit's table selection colour
 //!   (`TableStyle::from_kit(kit).selected`), hover Kit's `c.hover`, the cursor outline
 //!   `c.border_focus` and a drop target or Enter target `c.text_accent`.
@@ -82,6 +87,12 @@
 //!   descendant (C1c).
 //! - **No cursor reveal on a pointer press.** A key or a tick that moves the cursor scrolls it
 //!   into view; a press moves it only onto what the viewport already shows.
+//! - **Reveals can be kept to the collection's own viewport**
+//!   ([`CollectionState::set_own_viewport_reveals`], C2). A reveal request scrolls a sideways
+//!   viewport around the collection too, at once (Rune draft U-C2-4), so a collection inside a
+//!   strip that glides to it on its own (C2's columns) reveals by an instant offset on its own
+//!   viewport instead, worked out from the geometry. Off by default: other hosts' reveals are
+//!   Rune's, as before.
 //! - **Sticky group headers are an overlay** ([`CollectionState::set_groups`], C1f). Rune
 //!   sticks an element only inside its own virtual row, which would put a whole group (up to
 //!   every entry) in one row, so each group's header is a virtual line of its own and the
@@ -179,7 +190,7 @@ use std::borrow::Cow;
 use std::ops::Range;
 use std::rc::Rc;
 
-use rune::{El, GrowthSpec, Live, PointerButton, ScrollPos, ScrollSpec, Tx, col, text};
+use rune::{El, GrowthSpec, KeyEvent, Live, PointerButton, ScrollPos, ScrollSpec, Tx, col, text};
 use strata_kit::look::Look;
 
 pub use a11y::{Announcement, Roles, default_announcement};
@@ -220,6 +231,7 @@ type AnnounceFn<S> = Rc<dyn Fn(&S, &Announcement) -> String>;
 type GroupStyleFn = Rc<dyn Fn(&Look) -> GroupStyle>;
 type PressFn<S> = Rc<dyn Fn(&mut S, &PointerInput, &mut Tx)>;
 type ScrollFn = Rc<dyn Fn(ScrollPos)>;
+pub(crate) type DragOverFn<S> = Rc<dyn Fn(&mut S, Option<Point>, &mut Tx) -> bool>;
 
 /// What [`Collection`] was built with, shared by its rows and handlers.
 pub(crate) struct Config<S> {
@@ -256,6 +268,9 @@ pub(crate) struct Config<S> {
     on_visible: Option<VisibleFn<S>>,
     announce: Option<AnnounceFn<S>>,
     on_scroll: Option<ScrollFn>,
+    keys_by_host: bool,
+    on_drag_over: Option<DragOverFn<S>>,
+    header_defer: Option<f32>,
 }
 
 impl<S> Config<S> {
@@ -332,6 +347,9 @@ impl<S: 'static> Collection<S> {
                 on_visible: None,
                 announce: None,
                 on_scroll: None,
+                keys_by_host: false,
+                on_drag_over: None,
+                header_defer: None,
             },
         }
     }
@@ -467,6 +485,17 @@ impl<S: 'static> Collection<S> {
         self
     }
 
+    /// A primary press on the header part's blank space reaches the controllers only once it
+    /// travels more than `threshold` points (along either axis; pass the pointer controller's
+    /// drag threshold): a drag from there then bands as [`Collection::header`] says, and a
+    /// click there changes nothing in the collection. [`Collection::on_press`] still hears the
+    /// press. Columns (C2): a click on a column's title focuses it and keeps its selection,
+    /// while a drag from its header's blank space starts a band, as in Strata.
+    pub fn header_defers_press(mut self, threshold: f32) -> Self {
+        self.cfg.header_defer = Some(threshold);
+        self
+    }
+
     /// A part drawn over the viewport, pinned to it below any header, in its coordinates
     /// (C1d's band). It takes no input: presses go through it to the rows.
     pub fn overlay(mut self, f: impl Fn(&S) -> Option<El> + 'static) -> Self {
@@ -494,6 +523,34 @@ impl<S: 'static> Collection<S> {
     /// through live values. It reads no state.
     pub fn on_scroll(mut self, f: impl Fn(ScrollPos) + 'static) -> Self {
         self.cfg.on_scroll = Some(Rc::new(f));
+        self
+    }
+
+    /// Keys reach this collection from the host, not from Rune's focus: the collection is no
+    /// focus stop (its container isn't focusable and has no key handler), and names no active
+    /// descendant. An ancestor that is the focus stop routes each key to it with
+    /// [`Collection::key`] and names the cursor's row as its own active descendant
+    /// ([`Collection::cursor_path`]). A press in it focuses that ancestor, the nearest one with
+    /// a key handler. Columns (C2) builds every column this way, so the whole strip is one Tab
+    /// stop, as in Strata, and the strip sends each key to the column that holds the cursor:
+    /// Rune can't move focus between elements from code at the pinned rev.
+    pub fn keys_by_host(mut self) -> Self {
+        self.cfg.keys_by_host = true;
+        self
+    }
+
+    /// Hears where a drag the collection's drop zones accept is, in window points, while it is
+    /// over them (`Some`, on reaching a zone and on every move), and when it leaves them or a
+    /// zone refuses it (`None`). Set, it replaces the element's own edge scroll during a drag
+    /// (a row's height a move near the viewport's top or bottom): the host scrolls instead.
+    /// Columns (C2) follows the drag across its whole strip with it, since Rune tells only the
+    /// innermost zone under a drag that it moved (Rune draft U-C2-1). Return true when it
+    /// changed what the view reads. Needs [`Collection::on_drop`], which makes the zones.
+    pub fn on_drag_over(
+        mut self,
+        f: impl Fn(&mut S, Option<Point>, &mut Tx) -> bool + 'static,
+    ) -> Self {
+        self.cfg.on_drag_over = Some(Rc::new(f));
         self
     }
 
@@ -551,6 +608,32 @@ impl<S: 'static> Collection<S> {
     pub fn tick(self, s: &mut S, tx: &mut Tx) -> bool {
         let cfg = Rc::new(self.cfg);
         route::tick(&cfg, s, tx)
+    }
+
+    /// Handles a key as the collection's own key handler would: the keyboard controller hears
+    /// it, through the same routing a focused collection's keys take. For a collection built
+    /// with [`Collection::keys_by_host`], from the focus stop's `on_key`, with the key's own
+    /// transaction (so layout-aware chords still match). True when a controller took the key;
+    /// the caller then says so to Rune.
+    pub fn key(self, s: &mut S, event: &KeyEvent, tx: &mut Tx) -> bool {
+        let cfg = Rc::new(self.cfg);
+        route::on_key(&cfg, s, event, tx)
+    }
+
+    /// The key path of the cursor's row (or cell), under this collection's key, as its
+    /// container names it its active descendant: for the focus stop of a collection built with
+    /// [`Collection::keys_by_host`]. `None` with no cursor. The path starts at the collection's
+    /// key, so the focus stop names it from above (a key path's leading keys are the nearest
+    /// keyed ancestors of the rest).
+    pub fn cursor_path(&self, s: &S) -> Option<String> {
+        let (src, st) = (self.cfg.get)(s);
+        let index = st.selection.cursor_index(src)?;
+        Some(keys::entry_path(
+            &self.cfg.key,
+            src,
+            index,
+            st.per_line.get().max(1),
+        ))
     }
 
     /// Works the entries per line out again from the lines' rule as it stands now: call it
@@ -702,7 +785,6 @@ impl<S: 'static> Collection<S> {
         let mut root = col()
             .key(cfg.key.to_string())
             .role(cfg.roles.container)
-            .focusable(true)
             .w_full()
             .h_full()
             .min_h(0.0)
@@ -712,14 +794,20 @@ impl<S: 'static> Collection<S> {
             .on_secondary_press_local(move |s: &mut S, e, tx| {
                 route::on_secondary(&secondary_cfg, s, e, tx)
             })
-            .on_key(move |s: &mut S, e, tx| route::on_key(&key_cfg, s, e, tx))
             .on_pointer_move_local(move |s: &mut S, _, tx| {
                 route::on_pointer_move(&move_cfg, s, tx)
             });
+        if !cfg.keys_by_host {
+            root = root
+                .focusable(true)
+                .on_key(move |s: &mut S, e, tx| route::on_key(&key_cfg, s, e, tx));
+        }
         if let Some(name) = &cfg.name {
             root = root.label(name.clone());
         }
-        if let Some(index) = st.selection.cursor_index(src) {
+        if !cfg.keys_by_host
+            && let Some(index) = st.selection.cursor_index(src)
+        {
             // A path under this collection, so a second collection showing the same folder
             // (another pane) can't answer for it.
             root = root.active_descendant(keys::entry_path(&cfg.key, src, index, per));
@@ -843,14 +931,14 @@ fn pinned(part: El) -> El {
 /// The background's drop zone: drops go to the folder shown.
 fn background_zone<S: 'static>(cfg: &Rc<Config<S>>, on_drop: row::DropFn<S>) -> DropZone<S> {
     let get_mut = cfg.get_mut.clone();
-    let hover_mut = cfg.get_mut.clone();
+    let hover_cfg = cfg.clone();
     let edge = cfg.clone();
     DropZone::new(move |s: &mut S, dropped, tx| {
         (get_mut)(s).1.drop = None;
         on_drop(s, None, dropped, tx);
     })
-    .on_hover(move |s: &mut S, hover, _offer, _tx| {
-        let st = (hover_mut)(s).1;
+    .on_hover(move |s: &mut S, hover, _offer, tx| {
+        let st = (hover_cfg.get_mut)(s).1;
         match hover {
             DropHover::Accepting | DropHover::Rejecting => {
                 if st.drop.is_none() {
@@ -863,6 +951,32 @@ fn background_zone<S: 'static>(cfg: &Rc<Config<S>>, on_drop: row::DropFn<S>) -> 
                 }
             }
         }
+        drag_over_hover(&hover_cfg, s, hover, tx);
     })
-    .on_move(move |s: &mut S, point, tx| route::drop_edge_scroll(&edge, s, point, false, tx))
+    .on_move(move |s: &mut S, point, tx| match &edge.on_drag_over {
+        Some(f) => {
+            if !f(s, Some(Point::new(point.window_x, point.window_y)), tx) {
+                tx.live_only();
+            }
+        }
+        None => route::drop_edge_scroll(&edge, s, point, false, tx),
+    })
+}
+
+/// Tells the host's drag-over hook about a hover: where an accepted drag reached a zone, or
+/// that it left one or was refused.
+pub(super) fn drag_over_hover<S: 'static>(
+    cfg: &Config<S>,
+    s: &mut S,
+    hover: DropHover,
+    tx: &mut Tx,
+) {
+    let Some(f) = &cfg.on_drag_over else {
+        return;
+    };
+    let at = match hover {
+        DropHover::Accepting => tx.drop_point().map(|p| Point::new(p.window_x, p.window_y)),
+        DropHover::Rejecting | DropHover::Left => None,
+    };
+    f(s, at, tx);
 }

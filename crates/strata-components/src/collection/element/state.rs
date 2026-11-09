@@ -76,6 +76,12 @@ pub struct CollectionState {
     /// press on its blank space is on empty space, at the viewport's top. A cell, so a build
     /// with no header clears it.
     pub(super) header: Cell<Rect>,
+    /// A press on the header's blank space held back until it travels past the threshold
+    /// (`Collection::header_defers_press`).
+    pub(super) deferred: Option<super::seam::PointerInput>,
+    /// Reveals move only this collection's viewport
+    /// ([`CollectionState::set_own_viewport_reveals`]).
+    pub(super) own_viewport_reveals: bool,
 }
 
 impl Default for CollectionState {
@@ -105,6 +111,8 @@ impl Default for CollectionState {
             stuck_offset: Live::new([0.0, 0.0]),
             top_line: Cell::new(None),
             header: Cell::new(Rect::default()),
+            own_viewport_reveals: false,
+            deferred: None,
         }
     }
 }
@@ -366,6 +374,16 @@ impl CollectionState {
         true
     }
 
+    /// Keeps every reveal of an entry (a key, a placed cursor, a reflow, a restore) to this
+    /// collection's own viewport, as one instant scroll worked out from the geometry (where
+    /// [`CollectionState::reveal`] would land), rather than a reveal request: Rune applies a
+    /// reveal request to the nearest sideways viewport around the collection too, at once
+    /// (Rune draft U-C2-4). For a collection inside a sideways strip that scrolls itself to
+    /// it, on a glide of its own (C2's columns). Off by default.
+    pub fn set_own_viewport_reveals(&mut self, on: bool) {
+        self.own_viewport_reveals = on;
+    }
+
     /// Scrolls the entry at `index` into view, mounted or not, just far enough. In a grouped
     /// collection it lands clear of the stuck header: going up, the line above it (another
     /// entry, or its group's header) shows under the stuck header.
@@ -373,9 +391,12 @@ impl CollectionState {
         if index >= source.len() {
             return;
         }
-        if self.viewport.w <= 0.0 {
+        if self.viewport.w <= 0.0 || (self.own_viewport_reveals && self.row_height <= 0.0) {
             self.reveal_after_layout.set(Some(source.id_at(index)));
             return;
+        }
+        if self.own_viewport_reveals {
+            return self.reveal_by_offset(scope, source, index, tx);
         }
         let map = self.line_map(source.len());
         // Rune runs a transaction's reveals in order, each from where the one before left the
@@ -385,6 +406,44 @@ impl CollectionState {
             tx.scroll_into_view_in(scope.to_owned(), above);
         }
         tx.scroll_into_view_in(scope.to_owned(), map.line_key(source, map.line_of(index)));
+    }
+
+    /// [`CollectionState::reveal`] as one instant scroll worked out from the geometry, to the
+    /// same place (going up, the line above at the top, under any stuck header; going down,
+    /// the entry at the bottom; nowhere when it shows): for a view a glide is moving, which a
+    /// reveal request would keep moving (C1d's S-B, a key during a band's edge scroll).
+    pub(super) fn reveal_instant(
+        &self,
+        scope: &str,
+        source: &dyn EntrySource,
+        index: usize,
+        tx: &mut Tx,
+    ) {
+        if index >= source.len() || self.row_height <= 0.0 || self.viewport.w <= 0.0 {
+            return self.reveal(scope, source, index, tx);
+        }
+        self.reveal_by_offset(scope, source, index, tx);
+    }
+
+    /// The scroll of [`CollectionState::reveal_instant`], on a laid-out viewport: an offset
+    /// request on this collection's viewport alone (Rune leaves a viewport's other axis and
+    /// the viewports around it where they are).
+    fn reveal_by_offset(&self, scope: &str, source: &dyn EntrySource, index: usize, tx: &mut Tx) {
+        let h = self.row_height;
+        let map = self.line_map(source.len());
+        let line = map.line_of(index);
+        let top = line as f32 * h;
+        let offset = self.scroll.get();
+        let covered = if map.groups().is_some() { h } else { 0.0 };
+        let above = if line > 0 { h } else { 0.0 };
+        let target = if top < offset + covered {
+            (top - above - covered).max(0.0)
+        } else if top + h > offset + self.viewport.h {
+            top + h - self.viewport.h
+        } else {
+            offset
+        };
+        tx.scroll_to_instant(viewport_path(scope), 0.0, target);
     }
 
     // Position restore.
@@ -430,6 +489,7 @@ impl CollectionState {
         // The folder left takes its gestures and keyboard mode with it.
         self.controllers.reset();
         self.gesture = None;
+        self.deferred = None;
         self.keyboard = false;
         self.hover_live = true;
         let changed = match position {

@@ -56,6 +56,10 @@ struct Host {
     dropped: Vec<Option<EntryId>>,
     /// What `on_press` and a recording controller heard, in order.
     order: Rc<RefCell<Vec<String>>>,
+    /// Hears drags over the drop zones through `on_drag_over`, when set.
+    over: Option<Rc<RefCell<Vec<Option<Point>>>>>,
+    /// Holds a header press back until it passes the drag threshold.
+    defer: bool,
 }
 
 impl Host {
@@ -81,6 +85,8 @@ impl Host {
             drops: false,
             dropped: Vec::new(),
             order: Rc::default(),
+            over: None,
+            defer: false,
         }
     }
 }
@@ -203,6 +209,18 @@ fn collection(s: &Host) -> Collection<Host> {
     }
     if s.drops {
         c = c.on_drop(|s: &mut Host, target, _, _| s.dropped.push(target));
+    }
+    if s.defer {
+        c = c.header_defers_press(
+            crate::collection::pointer::PointerSettings::default().drag_threshold,
+        );
+    }
+    if let Some(log) = &s.over {
+        let log = log.clone();
+        c = c.on_drag_over(move |_: &mut Host, at, _| {
+            log.borrow_mut().push(at);
+            false
+        });
     }
     c.settings(7u32)
 }
@@ -2694,4 +2712,319 @@ fn a_press_while_the_stuck_header_hides_is_on_the_row_drawn_there() {
     let vp = rt.state.coll.viewport();
     click_at(&mut rt, vp.x + 40.0, vp.y + h / 2.0);
     assert_eq!(rt.state.coll.selection.cursor(), Some(id(503)));
+}
+
+// Keys from the host (C2's request E1).
+
+/// Two collections keyed by their host under one focus stop that routes keys to the active one.
+struct Strip {
+    src: FastSource,
+    colls: Vec<CollectionState>,
+    look: Look,
+    active: usize,
+}
+
+fn strip_pane(i: usize) -> Collection<Strip> {
+    Collection::new(
+        ["a", "b"][i],
+        move |s: &Strip| (&s.src, &s.colls[i]),
+        move |s: &mut Strip| (&s.src, &mut s.colls[i]),
+        |s: &Strip| &s.look,
+        |_: &Strip| 1,
+    )
+    .keys_by_host()
+}
+
+fn strip_view(s: &Strip, _: &mut Cx<Strip>) -> El {
+    let mut strip = rune::row()
+        .key("strip")
+        .role("group")
+        .focusable(true)
+        .size(W, H)
+        .on_key(|s: &mut Strip, e, tx| strip_pane(s.active).key(s, e, tx))
+        .child(col().w(W / 2.0).h_full().child(strip_pane(0).build(s)))
+        .child(col().w(W / 2.0).h_full().child(strip_pane(1).build(s)));
+    if let Some(path) = strip_pane(s.active).cursor_path(s) {
+        strip = strip.active_descendant(path);
+    }
+    strip
+}
+
+fn strip(n: usize) -> Runtime<Strip> {
+    let mut colls = vec![CollectionState::new(), CollectionState::new()];
+    for c in &mut colls {
+        c.controllers.keyboard = Some(Box::new(Keys));
+    }
+    let state = Strip {
+        src: FastSource::new(n),
+        colls,
+        look: Look::fallback(false),
+        active: 1,
+    };
+    let mut rt = Runtime::new(state, strip_view, (W, H), Env::new(false, 1.0));
+    rt.frame(0.0);
+    for _ in 0..10 {
+        rt.frame(1.0 / 60.0);
+    }
+    rt
+}
+
+/// E1: collections keyed by their host are no focus stops: a press in one focuses the host's
+/// stop, which hands the key to the collection it picks; the stop names the cursor's row.
+#[test]
+fn a_collection_keyed_by_its_host_takes_keys_through_the_host() {
+    let mut rt = strip(20);
+    let lists: Vec<_> = rt
+        .elements()
+        .into_iter()
+        .filter(|e| e.role == "listbox")
+        .collect();
+    assert_eq!(lists.len(), 2);
+    assert!(
+        lists.iter().all(|e| !e.focusable),
+        "the collections aren't focus stops"
+    );
+    let [x, y, w, h] = element_in(&rt, "a", "row-3").unwrap().visible;
+    rt.pointer_down(x + w / 2.0, y + h / 2.0);
+    rt.pointer_up(x + w / 2.0, y + h / 2.0);
+    rt.frame(1.0 / 60.0);
+    let focused: Vec<_> = rt
+        .elements()
+        .into_iter()
+        .filter(|e| e.focused)
+        .filter_map(|e| e.key)
+        .collect();
+    assert_eq!(focused, ["strip"], "a press focuses the host's stop");
+    assert_eq!(rt.state.colls[0].selection.cursor(), Some(id(3)));
+    // The host routes End to b, not to a, which the press was in.
+    rt.key(KeyEvent {
+        key: Key::End,
+        mods: Mods::default(),
+    });
+    rt.frame(1.0 / 60.0);
+    assert_eq!(rt.state.colls[1].selection.cursor(), Some(id(19)));
+    assert_eq!(rt.state.colls[0].selection.cursor(), Some(id(3)));
+    let strip = a11y_node(&rt, "strip").unwrap();
+    assert!(strip.contains(r#""activeDescendant":"row-19""#), "{strip}");
+    for scope in ["a", "b"] {
+        let node = a11y_node(&rt, scope).unwrap();
+        assert!(!node.contains("activeDescendant"), "{scope}: {node}");
+    }
+    // A key no controller takes isn't taken.
+    let taken = rt.update_if(|s, tx| {
+        strip_pane(1).key(
+            s,
+            &KeyEvent {
+                key: Key::Home,
+                mods: Mods::default(),
+            },
+            tx,
+        )
+    });
+    assert!(!taken);
+}
+
+// The drag-over hook (C2's request E2).
+
+/// Drags `at` a point on a folder row and then near the viewport's bottom edge, for 20 frames;
+/// the scroll offset after.
+fn drag_near_the_bottom(rt: &mut Runtime<Host>) -> f32 {
+    let [x, y, w, h] = element(rt, "row-0").unwrap().visible;
+    rt.drag_files(vec!["/tmp/a.txt".into()], Some((x + w / 2.0, y + h / 2.0)));
+    rt.frame(1.0 / 60.0);
+    for i in 0..20 {
+        rt.drag_files_to(Some((x + w / 2.0, H - 4.0 - (i % 2) as f32)));
+        rt.frame(1.0 / 60.0);
+    }
+    settle(rt);
+    let offset = rt.state.coll.scroll_offset();
+    rt.drag_files_leave();
+    rt.frame(1.0 / 60.0);
+    offset
+}
+
+/// E2: with `on_drag_over` the host hears an accepted drag over the rows and the background,
+/// with its window point, and its leaving; the element's own edge scroll then stays still.
+#[test]
+fn the_drag_over_hook_hears_the_drag_and_replaces_the_edge_scroll() {
+    let mut host = Host::new(2_000);
+    host.drops = true;
+    let mut rt = runtime(host);
+    assert!(
+        drag_near_the_bottom(&mut rt) > 0.0,
+        "without the hook, the element's edge scroll moves"
+    );
+
+    let mut host = Host::new(2_000);
+    host.drops = true;
+    let log = Rc::new(RefCell::new(Vec::new()));
+    host.over = Some(log.clone());
+    let mut rt = runtime(host);
+    let [x, y, w, h] = element(&rt, "row-0").unwrap().visible;
+    assert_eq!(
+        drag_near_the_bottom(&mut rt),
+        0.0,
+        "the hook scrolls instead"
+    );
+    let log = log.borrow();
+    assert_eq!(
+        log.first().copied().flatten(),
+        Some(Point::new(x + w / 2.0, y + h / 2.0)),
+        "the hover on the folder row says where"
+    );
+    assert!(
+        log.iter()
+            .flatten()
+            .any(|p| p.y >= H - 5.0 && p.y <= H - 3.0),
+        "moves over the background say where: {log:?}"
+    );
+    assert_eq!(log.last(), Some(&None), "leaving says so");
+    assert_eq!(rt.state.coll.drop_over(), None);
+}
+
+// The held-back header press (C2's request E3).
+
+/// E3: with `header_defers_press`, a click on the header's blank space leaves the selection
+/// alone (the host still hears the press), and a drag from there bands as without it.
+#[test]
+fn a_held_back_header_press_keeps_the_selection_on_a_click_and_bands_on_a_drag() {
+    let mut host = Host::new(20);
+    host.parts = true;
+    host.defer = true;
+    host.coll.controllers.pointer =
+        Some(Box::new(crate::collection::pointer::PointerIntent::new()));
+    host.coll.controllers.marquee = Some(Box::new(crate::collection::marquee::Marquee::new()));
+    let mut rt = runtime(host);
+    click(&mut rt, "row-5");
+    let [hx, hy, hw, hh] = element(&rt, "head").unwrap().visible;
+    let x = hx + hw - 40.0;
+    rt.state.order.borrow_mut().clear();
+    // A click, and a press that moves less than the threshold.
+    click_at(&mut rt, x, hy + hh / 2.0);
+    rt.pointer_down(x, hy + hh / 2.0);
+    rt.frame(1.0 / 60.0);
+    rt.pointer_move(x + 2.0, hy + hh / 2.0 + 2.0);
+    rt.frame(1.0 / 60.0);
+    rt.pointer_up(x + 2.0, hy + hh / 2.0 + 2.0);
+    rt.frame(1.0 / 60.0);
+    {
+        let s = &rt.state;
+        assert_eq!(
+            s.coll.selection.selected_ids(&s.src),
+            [id(5)],
+            "clicks keep it"
+        );
+        assert_eq!(s.order.borrow().len(), 2, "the host heard both presses");
+    }
+    // A drag from the same place bands from the viewport's top.
+    let row_h = rt.state.look.row.list;
+    rt.pointer_down(x, hy + hh / 2.0);
+    rt.frame(1.0 / 60.0);
+    for k in 1..=5 {
+        rt.pointer_move(x - 5.0 * k as f32, hy + hh + row_h * 0.5 * k as f32);
+        rt.frame(1.0 / 60.0);
+    }
+    rt.pointer_up(x - 25.0, hy + hh + row_h * 2.5);
+    settle(&mut rt);
+    let s = &rt.state;
+    assert_eq!(s.coll.selection.selected_ids(&s.src), [id(0), id(1), id(2)]);
+}
+
+// A key during a band's edge scroll (C1d's open item S-B; C2's E6).
+
+fn tick_poll(s: &mut Host, _: f64, tx: &mut rune::Tx) -> bool {
+    let c = collection(s);
+    c.tick(s, tx)
+}
+
+/// E6 (S-B): a key that moves the cursor while a band auto-scrolls at the viewport's edge keeps
+/// its reveal: the band's glide stops, and the stop doesn't jump the view back to where it was.
+#[test]
+fn a_key_that_moves_the_cursor_during_a_bands_edge_scroll_keeps_its_reveal() {
+    let mut host = Host::new(2_000);
+    host.coll.controllers.pointer =
+        Some(Box::new(crate::collection::pointer::PointerIntent::new()));
+    host.coll.controllers.marquee = Some(Box::new(crate::collection::marquee::Marquee::new()));
+    host.coll.controllers.keyboard = Some(Box::new(crate::collection::keyboard::Keyboard::new(
+        crate::collection::keyboard::KeyHandle::default(),
+    )));
+    let mut rt = runtime(host);
+    rt.poll = Some(tick_poll);
+    let [_, y, _, h] = element(&rt, "row-3").unwrap().visible;
+    // Blank space beside row 3: a drag from there bands.
+    let x = W - 20.0;
+    rt.pointer_down(x, y + h / 2.0);
+    rt.frame(1.0 / 60.0);
+    for k in 1..=4 {
+        rt.pointer_move(x, y + (H - 2.0 - y) * k as f32 / 4.0);
+        rt.frame(1.0 / 60.0);
+    }
+    for _ in 0..40 {
+        rt.frame(1.0 / 60.0);
+    }
+    let row_h = rt.state.look.row.list;
+    assert!(
+        rt.state.coll.scroll_offset() > 20.0 * row_h,
+        "the band's edge scroll ran: {}",
+        rt.state.coll.scroll_offset()
+    );
+    let cursor = rt.state.coll.selection.cursor_index(&rt.state.src).unwrap();
+    rt.key(KeyEvent {
+        key: Key::Down,
+        mods: Mods::default(),
+    });
+    for _ in 0..60 {
+        rt.frame(1.0 / 60.0);
+    }
+    let s = &rt.state;
+    let moved = s.coll.selection.cursor_index(&s.src).unwrap();
+    assert_eq!(moved, cursor + 1);
+    let top = moved as f32 * row_h;
+    let offset = s.coll.scroll_offset();
+    assert!(
+        top >= offset && top + row_h <= offset + H,
+        "the cursor's row ({top}) shows in the view at {offset}"
+    );
+    rt.pointer_up(x, H - 2.0);
+    rt.frame(1.0 / 60.0);
+}
+
+// A collection inside a sideways strip (C2's E7).
+
+/// The collection 400 points into a 500-point sideways strip, so it starts clipped.
+fn view_in_strip(s: &Host, _: &mut Cx<Host>) -> El {
+    col().size(W, H).child(
+        col().key("strip").w_full().h_full().scroll_x().child(
+            rune::row()
+                .h_full()
+                .child(col().key("spacer").w(400.0).h_full())
+                .child(col().w(300.0).h_full().child(collection(s).build(s))),
+        ),
+    )
+}
+
+/// Reveals entry 50 and reports where the strip's spacer and the row then stand.
+fn reveal_in_strip(own: bool) -> (f32, bool) {
+    let mut host = Host::new(200);
+    host.coll.set_own_viewport_reveals(own);
+    let mut rt = Runtime::new(host, view_in_strip, (W, H), Env::new(false, 1.0));
+    rt.frame(0.0);
+    settle(&mut rt);
+    assert_eq!(element(&rt, "spacer").expect("spacer").rect[0], 0.0);
+    rt.update(|s, tx| s.coll.reveal(SCOPE, &s.src, 50, tx));
+    rt.frame(1.0 / 60.0);
+    let spacer = element(&rt, "spacer").expect("spacer").rect[0];
+    let row = element(&rt, "row-50").is_some_and(|r| r.visible[3] >= r.rect[3] - 0.5);
+    (spacer, row)
+}
+
+#[test]
+fn own_viewport_reveals_leave_a_sideways_strip_around_the_collection_where_it_is() {
+    let (spacer, shown) = reveal_in_strip(true);
+    assert_eq!(spacer, 0.0, "the strip stays");
+    assert!(shown, "the row shows in the listing, its full height");
+    // Without them, Rune's reveal request also scrolls the strip, at once (Rune draft U-C2-4).
+    let (spacer, shown) = reveal_in_strip(false);
+    assert!(spacer < -100.0, "the strip jumped: {spacer}");
+    assert!(shown);
 }

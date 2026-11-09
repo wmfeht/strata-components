@@ -2140,3 +2140,15 @@ fn a_build_past_the_ceiling_evicts_the_old_document_in_n_log_n() {
         "the misses looked at {looked} entries (bound {bound})"
     );
 }
+
+#[test]
+fn each_pool_hashes_with_its_own_key() {
+    // SF1: a fixed hash key let a crafted document collide its blocks in every pool.
+    let pump = Pump::new(light());
+    let (a, b) = (pump.blocks(), pump.blocks());
+    assert_ne!(
+        a.key_for("rust", "fn main() {}"),
+        b.key_for("rust", "fn main() {}"),
+        "two pools keyed a block alike"
+    );
+}

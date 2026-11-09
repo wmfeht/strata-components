@@ -195,6 +195,12 @@ impl CodeBlocks {
         self.state.borrow().visits
     }
 
+    /// The key this pool gives a block.
+    #[cfg(test)]
+    pub(crate) fn key_for(&self, lang: &str, code: &str) -> u64 {
+        self.state.borrow().key(lang, code)
+    }
+
     /// The running total of the current build's bytes, and the same counted afresh.
     #[cfg(test)]
     pub(crate) fn current_check(&self) -> (usize, usize) {

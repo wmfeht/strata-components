@@ -290,6 +290,114 @@ mod c7 {
         assert_eq!(rt.state.c7.title, "Folder 10 — Strata");
     }
 
+    /// Sends `deltas` over the tab under the viewport's middle, a frame after each, phased as a
+    /// trackpad's gesture (`Began`, then `Moved`, then `Ended`) or unphased as a wheel's, and
+    /// returns how far tab 1 moved on each frame after the first.
+    fn gesture(rt: &mut Runtime<Gallery>, deltas: &[(f32, f32)], phased: bool) -> Vec<f32> {
+        use rune::GesturePhase;
+        let viewport = rect(rt, "c7-scroll");
+        let mid = viewport[0] + viewport[2] / 2.0;
+        let under = (1..=30)
+            .map(|id| rect(rt, &tab(id)))
+            .find(|r| (r[0]..r[0] + r[2]).contains(&mid))
+            .expect("a tab under the middle");
+        let at = (under[0] + under[2] / 2.0, under[1] + under[3] / 2.0);
+        rt.pointer_move(at.0, at.1);
+        let mut xs = Vec::new();
+        for (i, &(dx, dy)) in deltas.iter().enumerate() {
+            let mut ev = rune::WheelEvent::new(dx, dy).at(at.0, at.1).precise(true);
+            if phased {
+                let phase = if i == 0 {
+                    GesturePhase::Began
+                } else {
+                    GesturePhase::Moved
+                };
+                ev = ev.phase(phase);
+            }
+            rt.wheel_event(ev);
+            rt.frame(FRAME);
+            xs.push(rect(rt, &tab(1))[0]);
+        }
+        if phased {
+            let end = rune::WheelEvent::new(0.0, 0.0)
+                .at(at.0, at.1)
+                .phase(GesturePhase::Ended);
+            rt.wheel_event(end);
+        }
+        run(rt, 0.3);
+        xs.windows(2).map(|w| w[1] - w[0]).collect()
+    }
+
+    // A sideways gesture whose first delta lands in the frame a reveal's jump goes out: the
+    // tab's handler takes it, so Rune hands it the whole gesture, and it scrolls every delta
+    // after (review 3: the rest was dropped). Phased and unphased.
+    #[test]
+    fn a_sideways_gesture_through_the_reveal_frame_scrolls_to_its_end() {
+        let mods = Mods {
+            ctrl: true,
+            shift: true,
+            ..Mods::default()
+        };
+        for phased in [true, false] {
+            let mut rt = mount("c7-overflow-light");
+            rt.key(KeyEvent {
+                key: Key::Command('0'),
+                mods,
+            });
+            rt.frame(FRAME);
+            rt.frame(FRAME);
+            let moved = gesture(&mut rt, &[(-20.0, 0.0); 10], phased);
+            assert!(
+                moved.iter().all(|d| (d + 20.0).abs() < 2.0),
+                "phased {phased}: {moved:?}"
+            );
+        }
+    }
+
+    // A gesture that starts mostly vertical (the tab's handler takes it) and turns sideways
+    // keeps scrolling: its sideways deltas reach no one else. Phased and unphased.
+    #[test]
+    fn a_gesture_that_turns_sideways_keeps_scrolling() {
+        for phased in [true, false] {
+            let mut rt = mount("c7-overflow-light");
+            let mut deltas = vec![(0.0, -20.0)];
+            deltas.extend([(-20.0, 0.0); 8]);
+            let moved = gesture(&mut rt, &deltas, phased);
+            assert!(
+                moved.iter().all(|d| (d + 20.0).abs() < 2.0),
+                "phased {phased}: {moved:?}"
+            );
+        }
+    }
+
+    // Wheel deltas that reach a tab within one frame each scroll: the markers report the offset
+    // once a frame, so the wheel's jumps add up from where the last one left the viewport.
+    #[test]
+    fn wheel_deltas_within_one_frame_add_up() {
+        let mut rt = mount("c7-overflow-light");
+        let at = centre(&rt, &tab(20));
+        rt.pointer_move(at.0, at.1);
+        let before = rect(&rt, &tab(1))[0];
+        for _ in 0..3 {
+            rt.wheel_event(rune::WheelEvent::new(0.0, 40.0).at(at.0, at.1));
+        }
+        run(&mut rt, 0.2);
+        let after = rect(&rt, &tab(1))[0];
+        assert!((after - before - 120.0).abs() < 2.0, "{before} -> {after}");
+    }
+
+    // The active tab renamed by a host's key handler (its folder navigated) retitles the window
+    // in a still window too: the change lands after that frame's poll (review 3).
+    #[test]
+    fn renaming_the_active_tab_retitles_a_still_window() {
+        let mut rt = mount_with("c7-several-light", |g| g.look.animations = false);
+        assert_eq!(rt.state.c7.title, "Music — Strata");
+        // F8: the page's stand-in for the active tab's folder changing.
+        key(&mut rt, Key::Function(8), Mods::default());
+        wake_until(&mut rt, 2.0, |_| false);
+        assert_eq!(rt.state.c7.title, "Music/Albums — Strata");
+    }
+
     // The user's wheel, vertical or sideways, right after a selection wins over its reveal
     // still to land (review 2: the reveal's jump undid it).
     #[test]
@@ -454,6 +562,9 @@ mod c7 {
         rune_binder: bool,
         /// Whether the host's own drags open tabs (it sets `opens_tabs`).
         opens: bool,
+        /// Whether every drag opens tabs, so one under Rune's binder (from another process,
+        /// as Rune sees it) does.
+        opens_any: bool,
         /// The clock at the last poll.
         now: f64,
     }
@@ -474,6 +585,7 @@ mod c7 {
             heard: Vec::new(),
             rune_binder: false,
             opens: true,
+            opens_any: false,
             now: 0.0,
         }
     }
@@ -501,8 +613,9 @@ mod c7 {
         .content_types(&["text/plain"])
         .on_intent(|h: &mut Host, intent, _| h.heard.push(intent));
         // The host's own drags (from this process) open tabs here.
+        let any = h.opens_any;
         let strip = if h.opens {
-            strip.opens_tabs(|_, offer| offer.local)
+            strip.opens_tabs(move |_, offer| any || offer.local)
         } else {
             strip
         };
@@ -681,35 +794,36 @@ mod c7 {
     // happened to come).
     #[test]
     fn a_kept_slot_expires_from_wake_to_wake() {
-        let mut rt = mount_host(host(5));
+        // Rune's binder, so the leave and the drop arrive as input inside frames, as a real
+        // binder's do, after that frame's poll. Three tabs keep their widest width with the gap
+        // open or shut, so closing it moves nothing that would bring a frame of its own (the
+        // active tab's marker reports its moves): only the leave's wakes expire the slot.
+        let mut h = host(3);
+        h.rune_binder = true;
+        h.opens_any = true;
+        let mut rt = mount_host(h);
         let t2 = rect(&rt, "t-tabs-2");
         let gap = (t2[0] + t2[2] + 2.0, t2[1] + t2[3] / 2.0);
-        let strip = zone_at(gap.0, gap.1);
-        rt.update(|h, tx| {
-            strip.hover(h, DropHover::Accepting, &local_folders(), tx);
-            strip.moved(h, point(gap.0, gap.1), tx);
-        });
+        let folder = || vec![std::path::PathBuf::from("/srv/a/")];
+        rt.drag_files(folder(), Some(gap));
         run(&mut rt, 0.5);
-        rt.update(|h, tx| strip.hover(h, DropHover::Left, &local_folders(), tx));
-        // The frame the leave asks for, then only wakes: no frames for motion.
-        rt.frame(FRAME);
+        assert_eq!(rt.state.tabs_state.drag.incoming_slot(), Some(2));
+        rt.drag_files_leave();
+        // As a still window draws: a frame only for queued input or at a wake, none for motion
+        // and none of the test's own (review 3: one stepped here hid the leave's wake).
         for _ in 0..20 {
-            let Some(deadline) = rt.wake_deadline() else {
+            if rt.has_pending_input() {
+                rt.frame(FRAME);
+            } else if let Some(deadline) = rt.wake_deadline() {
+                rt.frame((deadline - rt.state.now).max(0.001));
+            } else {
                 break;
-            };
-            rt.frame((deadline - rt.state.now).max(0.001));
+            }
         }
-        let dropped = Dropped::new(
-            local_folders(),
-            DropData::files(&["/srv/a/".into()]),
-            Mods::default(),
-        );
-        rt.update(|h, tx| strip.deliver(h, dropped, tx));
-        assert_eq!(
-            opened(&rt.state),
-            [5],
-            "a later hoverless drop opens at the end"
-        );
+        // A later drop with no hover of its own opens at the end, not in the old gap.
+        rt.drop_files(folder(), Some(gap));
+        rt.frame(FRAME);
+        assert_eq!(opened(&rt.state), [3], "the kept slot expired");
     }
 
     // browser/tabs: "After an Escape-cancelled drag, the strip shows no insertion line": the

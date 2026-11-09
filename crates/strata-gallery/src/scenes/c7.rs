@@ -8,8 +8,9 @@
 //! which the page also sets with `Tx::set_title`).
 //!
 //! - **Keys** stand in for Strata's key map: Ctrl+T, Ctrl+W, Ctrl+Shift+T, Ctrl+Tab and
-//!   Ctrl+Shift+Tab, Ctrl+Page Up and Down, Ctrl+Shift+Page Up and Down, Ctrl+Shift+1…0, and F9
-//!   in place of holding Ctrl+Shift for the badges.
+//!   Ctrl+Shift+Tab, Ctrl+Page Up and Down, Ctrl+Shift+Page Up and Down, Ctrl+Shift+1…0, F9
+//!   in place of holding Ctrl+Shift for the badges, and F8 for the active tab's folder changing
+//!   (it takes a child's name).
 //! - **Drops** run Strata's rules on fake data: every folder is on one volume, so a plain drop
 //!   moves and Ctrl copies. Rune's binder brings every drag from outside the process, so the
 //!   page needs a stand-in for one of Strata's own folder-only drags, which open tabs (X2's
@@ -496,6 +497,16 @@ pub fn on_key(g: &mut Gallery, key: &KeyEvent, tx: &mut Tx) -> bool {
             }
         }
         Key::Function(9) => d.badges = !d.badges,
+        // The active tab's folder changes (a navigation): it takes the child's name.
+        Key::Function(8) => {
+            if let Some(t) = d
+                .active
+                .and_then(|id| d.tabs.iter_mut().find(|t| t.id == id))
+            {
+                t.name = format!("{}/Albums", t.name);
+                t.path = format!("{}/Albums", t.path);
+            }
+        }
         _ => return false,
     }
     true

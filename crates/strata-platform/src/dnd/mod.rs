@@ -21,10 +21,9 @@
 //! Call [`shutdown`] on the UI thread before the event loop ends: it ends a running drag and
 //! tears down P0's substrate while winit's display is alive (see `transfer`). Call it before
 //! `Tx::quit` or `AppHandle::quit`, **and** in the last window's `on_close`. Rune's
-//! `App::on_quit` (not in the pinned Rune `78d22ed`; once the pin moves to a Rune that has
-//! it) runs before teardown on `Tx::quit` and `AppHandle::quit`, so call it there too, but it
-//! runs in no window when the last window closes, and Linux has no system quit to hook: the
-//! last window's `on_close` stays needed.
+//! `App::on_quit` runs before teardown on `Tx::quit` and `AppHandle::quit`, so call it there
+//! too, but it runs in no window when the last window closes, and Linux has no system quit to
+//! hook: the last window's `on_close` stays needed.
 //!
 //! # What Rune lacks
 //!

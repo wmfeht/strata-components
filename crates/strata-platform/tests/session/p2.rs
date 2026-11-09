@@ -809,7 +809,9 @@ fn wayland_data_control_a_clear_racing_another_apps_copy_leaves_that_copy() {
         Via::DataControl,
         &[Offer::text(UTF8, "the peer's")],
     );
-    demo.wait(at, "the late clear", |v| v["ev"] == "cleared");
+    let cleared = demo.wait(at, "the late clear", |v| v["ev"] == "cleared");
+    // The app still thought it held the copy, so its clear went out.
+    assert_eq!(cleared["ok"], true, "{cleared}");
     peer.sync();
     assert_eq!(
         peer.read(Selection::Clipboard, Via::DataControl, UTF8)

@@ -73,7 +73,8 @@ impl<S: 'static> ProgressDialog<S> {
     }
 
     /// Hears Cancel ([`DockIntent::Cancel`]). C15's handlers carry no `Tx`, so this one has
-    /// none either.
+    /// none either; the dialog's wake beacon brings the tick the cancel needs
+    /// ([`Dock::cancel_untimed`]).
     pub fn on_intent(mut self, f: impl Fn(&mut S, DockIntent) + 'static) -> Self {
         self.on_intent = Rc::new(f);
         self
@@ -190,6 +191,10 @@ impl<S: 'static> ProgressDialog<S> {
                             .a11y_hidden(),
                     ),
             );
+        }
+
+        if let Some(generation) = dock.wants_wake() {
+            body = body.child(super::view::wake_beacon::<S>(key, generation));
         }
 
         let id = self.id;

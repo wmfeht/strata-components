@@ -329,6 +329,80 @@ mod c16 {
         );
     }
 
+    /// A blocking move whose subtitle already reads the cancel's words and whose worker has
+    /// gone quiet, in a resting window: a cancel then moves no layout and starts no motion of
+    /// its own (review 2, SF1's repro).
+    fn quiet_dialog_move(change: impl FnOnce(&mut Gallery)) -> Runtime<Gallery> {
+        use strata_components::progress_dock::{OpSpec, Placement, Progress, Sample, Transfer};
+        use strata_kit::icons::IconName;
+        let mut rt = mount_with("c16-idle-light", change);
+        rt.update(|g, tx| {
+            let mut spec = OpSpec::new(IconName::Folder, "Moving items", "Raw footage");
+            spec.transfer = true;
+            spec.placement = Placement::Dialog;
+            spec.subtitle = Some(g.c16.dock.words().waiting_for_write.clone());
+            g.c16.dock.start(77, spec, tx);
+            g.c16.dialog = Some(77);
+        });
+        run(&mut rt, 0.1);
+        rt.update(|g, tx| {
+            let now = g.c16.now;
+            let sample = Sample::new(Progress::Transfer(Transfer {
+                completed_items: 0,
+                total_items: 1,
+                completed_files: 3,
+                total_files: Some(30),
+                bytes: 10_000_000,
+                total_bytes: Some(120_000_000),
+            }))
+            .busy("Writing to device…")
+            .current("clip.mov");
+            g.c16.dock.progress(77, sample, now, tx);
+        });
+        run(&mut rt, 0.5);
+        wake_until(&mut rt, 30.0, |_| false);
+        rt
+    }
+
+    // operations/progress: "If the transfer has not stopped 8 seconds after Cancel, the title
+    // becomes 'Device not responding'": a cancel from the dialog (Escape, or Return on the
+    // focused Cancel) that moves no layout still stalls on time, stepping only wakes and
+    // input, with animations on and off and with the host's clock frozen (time_scale 0). C15's
+    // handlers carry no Tx; the dock's wake beacon asks for the poll that stamps the cancel.
+    #[test]
+    fn a_cancel_that_moves_no_layout_still_stalls_on_time() {
+        type Case = (&'static str, fn(&mut Gallery));
+        let cases: [Case; 3] = [
+            ("animations on", |_| {}),
+            ("animations off", still),
+            ("time scale 0", |g| g.c16.time_scale = Some(0.0)),
+        ];
+        for (case, change) in cases {
+            for key in [Key::Escape, Key::Enter] {
+                let mut rt = quiet_dialog_move(change);
+                assert_eq!(card(&rt.state, 77).as_deref(), Some("Moving items"));
+                let start = rt.state.c16.now;
+                rt.key(KeyEvent {
+                    key: key.clone(),
+                    mods: Mods::default(),
+                });
+                let end = wake_until(&mut rt, 20.0, |g| {
+                    card(g, 77).as_deref() == Some("Device not responding")
+                });
+                assert_eq!(
+                    card(&rt.state, 77).as_deref(),
+                    Some("Device not responding"),
+                    "{case}, {key:?}"
+                );
+                assert!(
+                    (end - start - 8.0).abs() < 0.1,
+                    "{case}, {key:?}: stalled {:.3} s after the cancel",
+                    end - start
+                );
+            }
+        }
+    }
+
     // operations/progress/dock: "When a notice expires and the dock holds no other row, the
     // dock closes."
     #[test]

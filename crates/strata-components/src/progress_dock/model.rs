@@ -377,6 +377,10 @@ pub struct Dock {
     words: Words,
     /// The animations setting is off (so the default, false, has them on).
     still: bool,
+    /// A cancel from a handler without a `Tx` ([`Dock::cancel_untimed`]) waits for the tick
+    /// that stamps it: the views mount a wake beacon with this generation until then.
+    beacon: Option<u64>,
+    beacons: u64,
     /// When the views last read what the ops show.
     last_flush: Option<f64>,
     /// Something changed since that the views haven't read.
@@ -647,12 +651,24 @@ impl Dock {
         true
     }
 
-    /// [`Dock::cancel`] from a handler without a `Tx` (C15's buttons and Escape). The stall's
-    /// clock starts at the next tick: at the pin Rune runs a frame, and so a poll, right after
-    /// the commit the cancel makes (`tests/c16.rs` steps it from wake to wake, Escape with
-    /// animations off included).
+    /// [`Dock::cancel`] from a handler without a `Tx` (C15's buttons and Escape). Rune runs no
+    /// poll on its own after the commit the cancel makes, so nothing would bring the tick that
+    /// starts the stall's clock: until that tick the views mount a wake beacon
+    /// ([`Dock::wants_wake`]), a zero-size element whose `on_layout_tx` (the one place a view
+    /// gets a `Tx`) asks for a wake when the commit lays it out.
     pub fn cancel_untimed(&mut self, id: OpId) -> bool {
-        self.cancel(id, &mut Tx::default())
+        let started = self.cancel(id, &mut Tx::default());
+        if started {
+            self.beacons += 1;
+            self.beacon = Some(self.beacons);
+        }
+        started
+    }
+
+    /// The wake beacon's generation while one is due ([`Dock::cancel_untimed`]); a new
+    /// generation mounts a new beacon, whose first layout asks for the wake.
+    pub fn wants_wake(&self) -> Option<u64> {
+        self.beacon
     }
 
     /// The user dismissed finished card `id`. True when it was finished (and is now gone).
@@ -728,7 +744,7 @@ impl Dock {
     pub fn tick(&mut self, now: f64, tx: &mut Tx) -> bool {
         let words = self.words.clone();
         let animations = !self.still;
-        let mut changed = false;
+        let mut changed = self.beacon.take().is_some();
         let mut wake: Option<f64> = None;
         let mut want = |w: f64| wake = Some(wake.map_or(w, |v: f64| v.min(w)));
         let mut gone = Vec::new();

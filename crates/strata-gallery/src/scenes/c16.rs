@@ -79,6 +79,8 @@ pub struct Demo {
     /// Presses on the probe button.
     pub probes: u32,
     pub now: f64,
+    /// The window's animation clock scale (`Cx::time_scale`): a host that froze its motion.
+    pub time_scale: Option<f32>,
 }
 
 fn demo(g: &mut Gallery) -> &mut Demo {
@@ -555,7 +557,10 @@ pub const REVIEW: &[Scene] = &[
     ),
 ];
 
-pub fn view(g: &Gallery, _cx: &mut Cx<Gallery>) -> El {
+pub fn view(g: &Gallery, cx: &mut Cx<Gallery>) -> El {
+    if let Some(k) = g.c16.time_scale {
+        cx.time_scale(k);
+    }
     let look = g.look();
     let mut layer = Vec::new();
     let jobs = Jobs::new(

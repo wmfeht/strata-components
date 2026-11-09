@@ -428,7 +428,12 @@ fn an_untimed_cancel_stalls_eight_seconds_after_the_next_tick() {
     dock.tick(0.0, &mut tx);
     assert!(dock.cancel_untimed(1));
     assert!(!dock.cancel_untimed(1), "once");
+    assert!(
+        dock.wants_wake().is_some(),
+        "the views mount a beacon until the next tick"
+    );
     let end = wake_to_wake(&mut dock, 1.0, 20.0);
+    assert!(dock.wants_wake().is_none());
     assert_eq!(dock.op(1).unwrap().title(), "Device not responding");
     assert!((end - 9.0).abs() < 1e-6, "{end}");
 }

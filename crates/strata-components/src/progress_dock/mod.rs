@@ -151,10 +151,13 @@
 //! reveal, the stall, the countdowns and fade, the notices, held commits and the jobs list's
 //! seconds. A call from a handler stamps its time at the next tick and asks for a wake; each
 //! tick asks for the next one due, so a resting window polls only then. C15's buttons and
-//! Escape carry no `Tx`, so a cancel from the dialog ([`Dock::cancel_untimed`]) asks for no
-//! wake: its stall starts at the poll Rune runs right after the commit the cancel makes.
-//! `tests/c16.rs` steps each timer from wake to wake, with no frames between, with
-//! animations on and off.
+//! Escape carry no `Tx`, and Rune runs no poll on its own after the commit such a handler
+//! makes: a cancel from the dialog ([`Dock::cancel_untimed`]) would wait for whatever moved
+//! next. So until the next tick the dialog mounts a zero-size wake beacon whose
+//! `on_layout_tx` asks for the wake when that commit lays it out; layout runs whatever the
+//! window's motion does, so the stall starts on time with animations off and under
+//! `Cx::time_scale(0)` too. `tests/c16.rs` steps each timer from wake to wake, with no
+//! frames between, with animations on and off.
 //!
 //! # What assistive technology hears
 //!

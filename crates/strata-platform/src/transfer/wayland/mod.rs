@@ -105,6 +105,7 @@ impl SourceProxy {
 }
 
 struct Source {
+    selection: Selection,
     spec: SourceSpec,
     proxy: SourceProxy,
 }
@@ -601,10 +602,51 @@ impl Conn {
             }
             Route::X11 => return Err(Error::NoRoute("X11")),
         };
-        state.sources.insert(id.get(), Source { spec, proxy });
+        state.sources.insert(
+            id.get(),
+            Source {
+                selection,
+                spec,
+                proxy,
+            },
+        );
         drop(state);
         self.home.flush();
         Ok(id)
+    }
+
+    /// Gives up `source`'s selection, if it still holds it: the selection is set to none and
+    /// the source destroyed (which also clears it, where the compositor ignores the first).
+    /// Subscribers hear [`Event::SourceCancelled`] at once. False if `source` no longer held
+    /// anything. A data-device clear uses the newest input serial, as a write does.
+    pub(crate) fn clear_selection(&self, source: SourceId) -> Result<bool, Error> {
+        if !self.home.here() {
+            return Err(Error::Refused(ON_UI));
+        }
+        if self.failed.load(Ordering::Acquire) {
+            return Ok(false);
+        }
+        let mut state = lock(&self.state);
+        let Some(held) = state.sources.remove(&source.get()) else {
+            return Ok(false);
+        };
+        match &held.proxy {
+            SourceProxy::Device(_) => {
+                if let (Some(device), Some(serial)) = (&state.device, state.latest_serial) {
+                    device.set_selection(None, serial);
+                }
+            }
+            SourceProxy::Control(_) => {
+                if let Some(control) = &state.control {
+                    control.clear(held.selection);
+                }
+            }
+        }
+        held.proxy.destroy();
+        drop(state);
+        self.home.flush();
+        self.subs.emit(vec![Event::SourceCancelled { source }]);
+        Ok(true)
     }
 
     /// Stops the reader, then destroys every object, on the UI thread for a shared

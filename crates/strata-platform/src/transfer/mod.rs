@@ -150,7 +150,7 @@ enum Backend {
 }
 
 /// Runs at [`Transfer::shutdown`], on the UI thread, before anything is torn down.
-#[cfg(feature = "dnd")]
+#[cfg(any(feature = "dnd", feature = "clipboard"))]
 pub(crate) type BeforeShutdown = Box<dyn FnOnce(&Transfer) + Send>;
 
 struct Hub {
@@ -160,9 +160,10 @@ struct Hub {
     windows: Arc<Mutex<Vec<WindowHandle>>>,
     subs: Subscribers,
     backend: Backend,
-    /// What modules built on the substrate (P1) must tear down first: their own objects on
-    /// winit's display, and properties they set on the app's windows.
-    #[cfg(feature = "dnd")]
+    /// What modules built on the substrate (P1, P2) must do first: tear down their own objects
+    /// on winit's display, undo properties they set on the app's windows, hand a selection to
+    /// a clipboard manager.
+    #[cfg(any(feature = "dnd", feature = "clipboard"))]
     before_shutdown: Mutex<Vec<BeforeShutdown>>,
 }
 
@@ -223,7 +224,7 @@ impl Transfer {
             windows,
             subs,
             backend,
-            #[cfg(feature = "dnd")]
+            #[cfg(any(feature = "dnd", feature = "clipboard"))]
             before_shutdown: Mutex::new(Vec::new()),
         });
         *hub = Some(h.clone());
@@ -354,6 +355,23 @@ impl Transfer {
         }
     }
 
+    /// Gives up the selection `source` holds, if it still holds it: nobody holds that
+    /// selection after. Subscribers hear [`Event::SourceCancelled`] for it. False if it held
+    /// nothing. On winit's display, call it on the UI thread.
+    pub fn clear_selection(&self, source: SourceId) -> Result<bool, Error> {
+        match &self.0.backend {
+            Backend::X11(x) => x.clear_selection(source),
+            Backend::Wayland { shared, own } => {
+                for c in [shared, own].into_iter().flatten() {
+                    if c.owns(source) {
+                        return c.clear_selection(source);
+                    }
+                }
+                Ok(false)
+            }
+        }
+    }
+
     /// Stops and destroys the process's substrate: on the UI thread, before the event loop
     /// ends (see the module docs). True if one was bound. Handles kept elsewhere stay valid
     /// to drop, and their calls fail or do nothing. Refused off the UI thread (the one that
@@ -373,7 +391,7 @@ impl Transfer {
             return Ok(false);
         };
         drop(slot);
-        #[cfg(feature = "dnd")]
+        #[cfg(any(feature = "dnd", feature = "clipboard"))]
         {
             let hooks = std::mem::take(&mut *lock(&hub.before_shutdown));
             let t = Transfer(hub.clone());
@@ -393,8 +411,7 @@ impl Transfer {
     }
 }
 
-/// What P1 (`dnd`) builds on: the connection on winit's display, the X11 actor, the app's
-/// windows, and a hook before the teardown.
+/// What P1 (`dnd`) builds on: the connection on winit's display and the X11 actor.
 #[cfg(feature = "dnd")]
 impl Transfer {
     /// The Wayland connection on winit's display, if bound.
@@ -409,7 +426,11 @@ impl Transfer {
             Backend::Wayland { .. } => None,
         }
     }
+}
 
+/// What P1 (`dnd`) and P2 (`clipboard`) build on: a hook before the teardown.
+#[cfg(any(feature = "dnd", feature = "clipboard"))]
+impl Transfer {
     /// Runs `f` at [`Transfer::shutdown`], on the UI thread, before the substrate tears down.
     pub(crate) fn before_shutdown(&self, f: BeforeShutdown) {
         lock(&self.0.before_shutdown).push(f);

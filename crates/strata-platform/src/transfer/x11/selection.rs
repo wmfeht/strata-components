@@ -191,6 +191,7 @@ impl Actor {
                     then: Then::User(done),
                 });
             }
+            Cmd::Disown { id } => self.disown(id),
             Cmd::Ready { request, bytes } => self.answer(request, bytes),
             Cmd::KillSelf => {
                 // KillClient on a resource of ours closes our own connection.
@@ -287,6 +288,24 @@ impl Actor {
             self.events.push(Event::SourceCancelled { source: old.id });
         }
         lock(&self.shared).owned.insert(o.id.get());
+    }
+
+    /// Gives up whichever selection source `id` holds, with the time it was taken (ICCCM:
+    /// never `CurrentTime`).
+    fn disown(&mut self, id: SourceId) {
+        let Some(sel) = self
+            .owned
+            .iter()
+            .find(|(_, o)| o.id == id)
+            .map(|(sel, _)| *sel)
+        else {
+            return;
+        };
+        if let Some(owned) = self.owned.remove(&sel) {
+            let _ = self.conn.set_selection_owner(NONE, sel, owned.time);
+            lock(&self.shared).owned.remove(&id.get());
+            self.events.push(Event::SourceCancelled { source: id });
+        }
     }
 
     fn cleared(&mut self, c: SelectionClearEvent) {

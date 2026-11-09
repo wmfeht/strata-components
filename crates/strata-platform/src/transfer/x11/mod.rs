@@ -68,6 +68,10 @@ enum Cmd {
         limits: ReadLimits,
         done: Reply,
     },
+    /// Give up the selection source `id` holds, if it still holds one.
+    Disown {
+        id: SourceId,
+    },
     /// A lazy writer finished on a worker: answer the request that asked for it.
     Ready {
         request: selection::Request,
@@ -254,6 +258,18 @@ impl X11 {
         };
         self.mailbox.post(own).map_err(|_| Error::Shutdown)?;
         Ok(id)
+    }
+
+    /// Gives up the selection `source` holds, if it still holds it. True if it held one when
+    /// asked; the actor then gives it up and [`Event::SourceCancelled`] follows.
+    pub(crate) fn clear_selection(&self, source: SourceId) -> Result<bool, Error> {
+        if !self.owns(source) {
+            return Ok(false);
+        }
+        self.mailbox
+            .post(Cmd::Disown { id: source })
+            .map_err(|_| Error::Shutdown)?;
+        Ok(true)
     }
 
     /// Installs `hook` on the actor thread, replacing any earlier one. False if the actor is

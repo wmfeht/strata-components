@@ -116,6 +116,19 @@ impl Control {
         }
     }
 
+    /// Sets `selection` to none.
+    pub(super) fn clear(&self, selection: Selection) {
+        match (self, selection) {
+            (Control::Ext(_, d), Selection::Clipboard) => d.set_selection(None),
+            (Control::Ext(_, d), Selection::Primary) => d.set_primary_selection(None),
+            (Control::Wlr(_, d), Selection::Clipboard) => d.set_selection(None),
+            (Control::Wlr(_, d), Selection::Primary) if d.version() >= 2 => {
+                d.set_primary_selection(None);
+            }
+            (Control::Wlr(..), Selection::Primary) => {}
+        }
+    }
+
     /// A test switch: commits a protocol error (`invalid_offer`, an offer after
     /// `set_selection`), which ends the connection.
     pub(super) fn provoke_protocol_error(&self, qh: &QueueHandle<State>) {

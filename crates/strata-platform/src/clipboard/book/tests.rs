@@ -105,7 +105,7 @@ fn the_echo_goes_to_the_newest_copy_offering_exactly_those_types() {
 }
 
 #[test]
-fn a_data_device_write_cancelled_before_its_echo_was_refused() {
+fn a_write_the_platform_judged_dropped_is_refused_and_any_other_pending_cancel_taken() {
     let mut b = Book::default();
     b.copied(C, CopyId(1), m(&["a"]));
     assert_eq!(
@@ -125,7 +125,7 @@ fn a_data_device_write_cancelled_before_its_echo_was_refused() {
             copy: CopyId(1),
             why: Lost::Taken
         }],
-        "elsewhere a cancel before the echo is another client taking it"
+        "a pending copy cancelled without being judged dropped was taken"
     );
 }
 

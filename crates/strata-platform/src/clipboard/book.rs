@@ -102,9 +102,9 @@ impl Book {
         changes
     }
 
-    /// The platform says `copy` no longer holds its selection. `data_device`: it went through
-    /// `wl_data_device`, where a write cancelled before its echo was dropped.
-    pub(super) fn cancelled(&mut self, copy: CopyId, data_device: bool) -> Vec<Change> {
+    /// The platform says `copy` no longer holds its selection. `refused`: the platform judged
+    /// its write dropped (a data-device write with no echo).
+    pub(super) fn cancelled(&mut self, copy: CopyId, refused: bool) -> Vec<Change> {
         let Some(e) = self.copies.get(&copy) else {
             return Vec::new();
         };
@@ -119,7 +119,7 @@ impl Book {
             Lost::Cleared
         } else if newer {
             Lost::Replaced
-        } else if e.state == CopyState::Pending && data_device {
+        } else if refused {
             Lost::Refused
         } else {
             Lost::Taken

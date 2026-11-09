@@ -266,8 +266,8 @@ pub(super) fn pump() {
                 transfer::Event::SourceCancelled { source } => {
                     let copy = CopyId(source.get());
                     hub.specs.remove(&copy);
-                    let data_device = hub.route == Route::DataDevice;
-                    changes.extend(hub.book.cancelled(copy, data_device));
+                    let refused = hub.transfer.write_was_dropped(source);
+                    changes.extend(hub.book.cancelled(copy, refused));
                 }
                 transfer::Event::Failed { message } => {
                     diagnostics.push(format!("the platform connection failed: {message}"));

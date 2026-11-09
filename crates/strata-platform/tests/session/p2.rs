@@ -895,6 +895,46 @@ fn wayland_data_device_a_stale_write_is_refused_and_ctrl_c_holds() {
     demo.no_errors();
 }
 
+/// A copy made while the app has no keyboard focus gets no echo and stays pending (wlroots).
+/// When another app then takes the clipboard, the copy was taken, not refused: only a write
+/// P0 judged dropped is refused.
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn wayland_data_device_an_unfocused_copy_another_app_takes_is_lost_as_taken() {
+    let s = Session::start();
+    let Some(mut demo) = Demo::start(&s, B::D) else {
+        return;
+    };
+    let (peer, peer_window) = peer_beside(&s, Display::Wayland, &mut demo);
+    demo.click(&s);
+    s.focus(&peer_window);
+    peer.wait_event("focus", |e| matches!(e, Event::Focus { focused: true }));
+    let at = demo.app.line_count();
+    let copy = demo.copy_offers(Selection::Clipboard, &[Offer::text(UTF8, "unfocused")]);
+    // Its write took: the peer reads it.
+    wait_targets(
+        &peer,
+        Selection::Clipboard,
+        Via::DataControl,
+        Some(&[UTF8.to_owned()]),
+    );
+    assert_eq!(
+        peer.read(Selection::Clipboard, Via::DataControl, UTF8)
+            .text
+            .as_deref(),
+        Some("unfocused")
+    );
+    assert_eq!(demo.state(copy), "Some(Pending)", "no echo without focus");
+    peer.set_selection(
+        Selection::Clipboard,
+        Via::DataDevice,
+        &[Offer::text(UTF8, "the peer's")],
+    );
+    let lost = demo.change(at, "lost", Some(copy));
+    assert_eq!(lost["why"], "taken", "{lost}");
+    demo.no_errors();
+}
+
 // ---- 8. The primary selection ----
 
 fn primary_round_trip(b: B) {

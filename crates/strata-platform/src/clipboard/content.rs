@@ -36,6 +36,8 @@ pub const KEEP_AFTER_EXIT: Duration = Duration::from_secs(2);
 pub struct Content {
     spec: SourceSpec,
     keep: Option<Duration>,
+    /// The first X11 meta target asked for, which no copy can offer.
+    reserved: Option<String>,
 }
 
 impl Default for Content {
@@ -49,22 +51,35 @@ impl Content {
         Content {
             spec: SourceSpec::new(),
             keep: Some(KEEP_AFTER_EXIT),
+            reserved: None,
         }
     }
 
-    /// Adds `mime` with bytes at hand.
-    pub fn with(mut self, mime: impl Into<String>, bytes: impl Into<Vec<u8>>) -> Self {
-        self.spec = self.spec.with(mime, Writer::bytes(bytes.into()));
-        self
+    /// Adds `mime` with bytes at hand. An X11 target that names a request, not a data type
+    /// (`TARGETS`, `SAVE_TARGETS`, `DELETE`…), can't be offered: [`Clipboard::copy`] of such a
+    /// content is refused.
+    ///
+    /// [`Clipboard::copy`]: super::Clipboard::copy
+    pub fn with(self, mime: impl Into<String>, bytes: impl Into<Vec<u8>>) -> Self {
+        let bytes = bytes.into();
+        self.add(mime.into(), Writer::bytes(bytes))
     }
 
     /// Adds `mime`, made by `make` when first asked for (see the type's docs).
     pub fn lazy(
-        mut self,
+        self,
         mime: impl Into<String>,
         make: impl FnOnce() -> Vec<u8> + Send + 'static,
     ) -> Self {
-        self.spec = self.spec.with(mime, Writer::lazy(make));
+        self.add(mime.into(), Writer::lazy(make))
+    }
+
+    fn add(mut self, mime: String, writer: Writer) -> Self {
+        if mime::is_x11_meta(&mime) {
+            self.reserved.get_or_insert(mime);
+        } else {
+            self.spec = self.spec.with(mime, writer);
+        }
         self
     }
 
@@ -116,6 +131,11 @@ impl Content {
 
     pub(super) fn into_parts(self) -> (SourceSpec, Option<Duration>) {
         (self.spec, self.keep)
+    }
+
+    /// The first X11 meta target asked for, if any.
+    pub(super) fn reserved(&self) -> Option<&str> {
+        self.reserved.as_deref()
     }
 }
 

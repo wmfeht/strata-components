@@ -210,10 +210,16 @@ impl<S: 'static> Clipboard<S> {
     }
 
     /// Puts `content` on `selection`, replacing whatever was there (this process's earlier
-    /// copy is then [`Lost::Replaced`](super::Lost::Replaced)). On the UI thread. Call it
+    /// copy is then [`Lost::Replaced`](super::Lost::Replaced)). Refused for a content that
+    /// asked to offer an X11 meta target ([`Content::with`]). On the UI thread. Call it
     /// from the key or click handler that asked for the copy: on the data-device route the
     /// write takes that event's serial.
     pub fn copy(&self, selection: Selection, content: Content) -> Result<CopyId, Error> {
+        if content.reserved().is_some() {
+            return Err(Error::Refused(
+                "an X11 target naming a request (TARGETS, SAVE_TARGETS…) is no type to offer",
+            ));
+        }
         let (spec, keep) = content.into_parts();
         hub::copy(selection, spec, keep)
     }

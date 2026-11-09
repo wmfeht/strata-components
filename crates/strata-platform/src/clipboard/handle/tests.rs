@@ -4,6 +4,7 @@ use std::rc::Rc;
 use rune::Tx;
 
 use super::{Clipboard, Pending, run};
+use crate::clipboard::Content;
 use crate::clipboard::api::{Change, CopyId, Data, Error, Limits, Lost, ReadError, Selection};
 use crate::clipboard::hub::{Job, Out, Sink};
 
@@ -119,4 +120,22 @@ fn a_dropped_handle_hears_nothing() {
     drop(clip);
     let mut s = S::default();
     assert!(!run::<S>(id, Job::Pump, &mut s, &mut Tx::default()));
+}
+
+#[test]
+fn a_copy_offering_a_target_that_names_a_request_is_refused() {
+    let clip = Clipboard::<S>::new();
+    for name in ["SAVE_TARGETS", "TARGETS", "DELETE"] {
+        let c = Content::new().text("a").with(name, "x");
+        assert!(c.mimes().all(|m| m != name), "{name} isn't offered");
+        assert!(
+            matches!(clip.copy(Selection::Clipboard, c), Err(Error::Refused(_))),
+            "{name}"
+        );
+    }
+    assert_eq!(
+        clip.copy(Selection::Clipboard, Content::new().with("PIXMAP", "x")),
+        Err(Error::NotAttached),
+        "PIXMAP is data"
+    );
 }

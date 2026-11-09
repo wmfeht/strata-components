@@ -497,6 +497,29 @@ fn x11_peer_offers_five_types_the_app_reads() {
     peer_offers_five_types(B::X);
 }
 
+/// X11 owners list targets that are no data type (GTK lists `SAVE_TARGETS`): they are left
+/// out of what the app hears is offered.
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn x11_targets_that_are_no_data_type_are_left_out_of_offers() {
+    let s = Session::start();
+    let demo = Demo::start(&s, B::X).expect("X11");
+    let peer = s.peer(Display::X11);
+    let meta = [
+        "SAVE_TARGETS",
+        "DELETE",
+        "INSERT_SELECTION",
+        "INSERT_PROPERTY",
+    ];
+    let mut offers: Vec<Offer> = meta.iter().map(|m| Offer::text(m, "")).collect();
+    offers.push(Offer::text(UTF8, "data"));
+    let at = demo.app.line_count();
+    peer.set_selection(Selection::Clipboard, Via::X11, &offers);
+    let heard = demo.change(at, "offered", None);
+    assert_eq!(heard["mimes"], json!([UTF8]), "{heard}");
+    demo.no_errors();
+}
+
 // ---- 3. A large image both ways (INCR on X11) ----
 
 fn large_image_both_ways(b: B) {

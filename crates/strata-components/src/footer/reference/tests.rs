@@ -444,7 +444,10 @@ fn the_panel_takes_keys_with_focus_elsewhere_in_it() {
     ] {
         assert!(route.panel_key(&mut s, &ev, &mut tx), "{ev:?} is taken");
     }
-    assert!(!route.panel_key(&mut s, &key(Key::Tab, shift()), &mut tx), "Tab is Rune's");
+    assert!(
+        !route.panel_key(&mut s, &key(Key::Tab, shift()), &mut tx),
+        "Tab is Rune's"
+    );
     assert!(s.is_open());
     assert!(route.panel_key(&mut s, &key(Key::Escape, ctrl()), &mut tx));
     assert!(!s.is_open(), "Escape with a modifier closes");

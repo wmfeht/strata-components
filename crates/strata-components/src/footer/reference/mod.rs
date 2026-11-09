@@ -2,7 +2,6 @@
 //! active key map, with a search and category filters. See the [footer module](super) docs.
 
 mod data;
-mod keycap;
 mod keymap;
 mod keys;
 mod search;

@@ -8,11 +8,11 @@ use rune::{
 };
 use strata_kit::look::Look;
 
-use super::keycap::keycap;
 use super::keys::Route;
 use super::search::{Index, Line, Lines, fold_query};
 use super::{RESULTS_HEIGHT, SIDEBAR_WIDTH, ShortcutReference};
 use crate::contract::MatchedText;
+use crate::filter_bar::keycap;
 
 /// Strata's reference look (`src/style.css`): a chosen category on the accent at 16 % with a
 /// 3 px accent bar at its left, a hovered one at 10 %; compact pills with a border at 40 % of the

@@ -39,10 +39,13 @@
 //!     .jobs(s.jobs_element())               // C16
 //!     .prompt(prompt.build(s, &s.look, cx, &mut layer))          // C18's FooterPrompt
 //!     .build(s, &s.look);
-//! // The window's on_key: keys.toggles(ev, tx) toggles s.reference (F1 anywhere; `~` in 10xer
-//! // only arrives with no text field focused, as a field types it).
-//! // Each poll: s.prompt.hold_open(s.reference.is_open()) keeps a footer prompt open while the
-//! // reference has the keyboard (C18); closing the reference gives the keyboard back to it.
+//! // The window's on_key: first stand down while a C21 FieldMenu is open (C18's host rule:
+//! // take every key, do nothing); then keys.toggles(ev, tx) toggles s.reference (F1 anywhere;
+//! // `~` in 10xer only arrives with no text field focused, as a field types it).
+//! // Each poll, before s.prompt.tick(): s.prompt.hold_open(s.reference.is_open() ||
+//! // s.fields.is_open()) keeps a footer prompt open while the reference (or the prompt's field
+//! // menu) has the keyboard; closing the reference gives the keyboard back to it.
+//! // The gallery's page (`scenes/c19`) does all of this with C18's prompt, chord and flash.
 //! ```
 //!
 //! # The footer
@@ -127,8 +130,8 @@
 //! | F1 opens the "Keyboard shortcuts" panel…; F1 again closes it | scripts `f1-opens`, `f1-toggles`; goldens `c19-reference` |
 //! | F1 with Ctrl, Alt, Super, or Shift held does not toggle | script `f1-modifiers`; unit `toggle_chords_match_exactly_and_tilde_only_where_typed` |
 //! | In 10xer mode, `~` also toggles…; in the default map `~` does not | scripts `tilde-tenxer`, `tilde-altgr` (no Shift: AltGr), `tilde-default`; unit `a_tilde_typed_without_shift_toggles_in_tenxer` (which keys toggle is the host's: [`ReferenceKeys::tenxer`]) |
-//! | In 10xer mode, `~` in a focused footer prompt or text field… types | script `tilde-in-field` |
-//! | F1 still opens the reference from a footer prompt or text field | scripts `f1-from-field`, `f1-from-prompt` (C18's prompt is a stand-in until C18 merges) |
+//! | In 10xer mode, `~` in a focused footer prompt or text field… types | scripts `tilde-in-field`, `tilde-in-prompt` (C18's prompt; `~` with and without Shift) |
+//! | F1 still opens the reference from a footer prompt or text field | scripts `f1-from-field`, `f1-from-prompt` (C18's prompt, held open while the reference has the keyboard, keeps its text and gets the keyboard back) |
 //! | In 10xer mode, `~` typed in the open reference's search closes | scripts `tilde-in-search`, `tilde-altgr-closes` |
 //! | In 10xer mode with Russian active and a text field focused, Shift and the ё key type Ё | scripts `yo-closes-nothing`, `yo-russian` (probe P5: a script's `code` event) |
 //! | In 10xer mode, Russian ё reads as `~` only through the layout fallback… | script `yo-russian` |
@@ -195,7 +198,7 @@
 //! | The `10X` pill's accessible name is… | script `tenxer-pill`; a11y goldens |
 //! | F1, or `~` outside text fields, toggles the shortcut reference, which lists only the commands of the active map and switches live | scripts `tilde-tenxer`, `live-mode` |
 //! | `v` starts a range…; the footer shows `VISUAL` or `UNSET` while it is active | **partial**: script `range-mark` (the mark); ranges are C1c's |
-//! | Arming a chord… shows its pill… beside the `10X` pill | golden `c19-footer-tenxer` (the slot; the pill is C18's, a stand-in until C18 merges) |
+//! | Arming a chord… shows its pill… beside the `10X` pill | scripts `chord-pill`, `chord-completes`; golden `c19-footer-tenxer` (C18's pill and panel in the footer's chord slot) |
 //! | search: While an `f` filter is active, the footer shows `filter: …` and the displayed result count, including zero | scripts `filter-mark`, `filter-mark-zero` |
 //! | search: The footer shows `search: …`, the hit count including zero, and the hit under the cursor… | script `search-mark` |
 //! | search: With some hits filled, `j`, `k`, `G`, `g g`, and Space move the footer path… | **partial**: script `hit-follows` (the path follows what the host passes) |
@@ -211,8 +214,7 @@
 //!
 //! - **Keycaps, one per chord step** (`Ctrl+Shift+T`; `g` then `h`), with "/" between
 //!   alternatives, where Strata draws one text box per row (owner's ruling; the plan asks for
-//!   chips). The chip is C18's look; a temporary copy lives in `reference/keycap.rs` until C18
-//!   merges.
+//!   chips). The chip is C18's ([`keycap`](crate::filter_bar::keycap)).
 //! - **Matched text in the search.** Strata only filters; the WP asks for W1's matched text, so
 //!   the match is drawn in the action and the context (never on keycaps: Strata has no such
 //!   highlight).
@@ -234,9 +236,6 @@
 //! # Follow-ups
 //!
 //! - A W2 `footer.*` slot for the Strata alphas held as constants here (`style.css`).
-//! - On C18's merge: draw `filter_bar::keycap`, delete `reference/keycap.rs`, and fill the
-//!   gallery's prompt and chord slots with C18's elements (hold the prompt open with
-//!   `hold_open`).
 //!
 //! # Rune drafts (not filed)
 //!

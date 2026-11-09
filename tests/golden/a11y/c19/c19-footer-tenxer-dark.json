@@ -282,7 +282,7 @@
                       ]
                     },
                     {
-                      "key": "c19-chord",
+                      "key": "c19-chord-pill",
                       "name": "g-",
                       "role": "status",
                       "states": [
@@ -305,6 +305,32 @@
               ],
               "key": "c19",
               "role": "group"
+            },
+            {
+              "children": [
+                {
+                  "key": "c19-chord-option-0",
+                  "name": "g: First item",
+                  "position": 1,
+                  "role": "list-item"
+                },
+                {
+                  "key": "c19-chord-option-1",
+                  "name": "h: Home folder",
+                  "position": 2,
+                  "role": "list-item"
+                },
+                {
+                  "key": "c19-chord-option-2",
+                  "name": "d: Downloads",
+                  "position": 3,
+                  "role": "list-item"
+                }
+              ],
+              "key": "c19-chord-panel",
+              "name": "Keys after g",
+              "role": "list",
+              "setSize": 3
             }
           ],
           "key": "kit-root",

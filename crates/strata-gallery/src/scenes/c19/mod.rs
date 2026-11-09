@@ -8,19 +8,25 @@
 //! reference over it. The page's key hook stands in for Strata's dispatch: F1 (and `~` in 10xer
 //! mode) toggles the reference, Ctrl+1–3 switch the view, Ctrl+Shift+M the mode, and Delete,
 //! Ctrl+V and Ctrl+, write what they would do to the log, so scripts see that nothing ran under
-//! the reference. C18's prompt, flash and chord pill are stand-ins until C18 merges, and C16's
-//! jobs element is one until C16 lands.
+//! the reference. The footer prompt (`r`, or the Footer prompt button: a `rename ›` prompt), the
+//! `g` chord's pill and panel and the flash are C18's; the prompt's field menu is C21's, and the
+//! page's key hook stands down while it is open (C18's host rule). C16's jobs element is a
+//! stand-in until C16 lands.
 
 mod fixture;
 
-use rune::{Cx, El, Key, KeyEvent, TextEdit, Tx, col, row, text, text_input};
+use rune::{Chord, Cx, El, Key, KeyEvent, TextEdit, Tx, col, row, text, text_input};
 use rune_kit::{Button, ButtonVariant, ControlSize};
 use strata_components::collection::keyboard::RangeKind;
+use strata_components::context_menu::{FieldMenu, FieldMenuState};
+use strata_components::filter_bar::chord::{self, ChordMap, ChordOption, ChordOutcome, ChordState};
+use strata_components::filter_bar::prompt::{FooterPrompt, PromptIntent, PromptSpec, PromptState};
+use strata_components::filter_bar::{Flash, flash};
 use strata_components::footer::reference::{
     ReferenceKeys, ReferenceLabels, ReferenceState, ShortcutData, ShortcutReference, chord_label,
 };
 use strata_components::footer::{
-    Count, CountWords, FilterCounts, FilterMark, Footer, Listing, Selected, SelectionDetails, pill,
+    Count, CountWords, FilterCounts, FilterMark, Footer, Listing, Selected, SelectionDetails,
     reference, summary,
 };
 use strata_kit::look::Look;
@@ -66,9 +72,11 @@ pub struct Demo {
     pub filter: Option<Filter>,
     pub hit: usize,
     pub range: Option<RangeKind>,
-    /// A footer prompt stand-in (C18's).
-    pub prompt: Option<TextEdit>,
-    pub chord: bool,
+    /// C18's footer prompt, its `g` chord and its flash, and C21's menu over the prompt's field.
+    pub prompt: PromptState<Kind>,
+    pub chord: ChordState<Act>,
+    pub flash: Flash,
+    pub fields: FieldMenuState<Field>,
     pub jobs: bool,
     pub location: TextEdit,
     pub log: String,
@@ -96,8 +104,10 @@ impl Default for Demo {
             filter: None,
             hit: 0,
             range: None,
-            prompt: None,
-            chord: false,
+            prompt: PromptState::new(),
+            chord: ChordState::new(),
+            flash: Flash::new(),
+            fields: FieldMenuState::new(),
             jobs: false,
             location: TextEdit::default(),
             log: String::new(),
@@ -201,7 +211,111 @@ impl Demo {
     fn log(&mut self, words: &str) {
         self.log = words.to_owned();
     }
+
+    /// Opens the `rename ›` prompt on `name`, its stem selected.
+    fn open_rename(&mut self, name: &str) -> strata_components::filter_bar::prompt::Polled<Kind> {
+        let stem = name.rfind('.').filter(|&i| i > 0).unwrap_or(name.len());
+        self.chord.clear();
+        self.prompt
+            .open(Kind::Rename, PromptSpec::rename(), name, Some(0..stem))
+    }
+
+    /// What the prompt asks of the page.
+    fn prompted(&mut self, intent: PromptIntent<Kind>) {
+        match intent {
+            PromptIntent::Submit { text, .. } => {
+                self.log(&format!("Renamed to {text}"));
+                let _ = self.prompt.close();
+            }
+            PromptIntent::Dismissed { .. } => self.log("Prompt dismissed"),
+            _ => {}
+        }
+    }
 }
+
+/// The page's prompt kinds: only `rename ›`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    Rename,
+}
+
+/// What the `g` chord's second keys do.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Act {
+    First,
+    Home,
+    Downloads,
+}
+
+/// The fields C21's text menu opens over: the prompt's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Field {
+    Prompt,
+}
+
+/// The `g` chord (a short copy of Strata's).
+fn go_chord() -> ChordMap<Act> {
+    let line = |cap: &str, label: &str, chord: &str, act| {
+        ChordOption::new(
+            cap,
+            label,
+            vec![(Chord::parse(chord).expect("a chord"), act)],
+        )
+    };
+    ChordMap {
+        mark: "g-".to_owned(),
+        name: "Keys after g".to_owned(),
+        options: vec![
+            line("g", "First item", "g", Act::First),
+            line("h", "Home folder", "h", Act::Home),
+            line("d", "Downloads", "d", Act::Downloads),
+        ],
+    }
+}
+
+fn prompt() -> FooterPrompt<Gallery, Kind> {
+    FooterPrompt::new(
+        PROMPT,
+        |g: &Gallery| &g.c19.prompt,
+        |g: &mut Gallery| &mut g.c19.prompt,
+    )
+    .focus_return("c19-list")
+    .on_intent(|g: &mut Gallery, intent, tx| match intent {
+        // C21's menu takes the keyboard: hold the prompt open until it gives it back.
+        PromptIntent::FieldMenu { at } => {
+            g.c19.prompt.hold_open(true);
+            field_menu().open(g, Field::Prompt, at, tx);
+            if !g.c19.fields.is_open() {
+                g.c19.prompt.hold_open(false);
+            }
+        }
+        intent => g.c19.prompted(intent),
+    })
+}
+
+fn field_menu() -> FieldMenu<Gallery, Field> {
+    FieldMenu::new(
+        "c19-field-menu",
+        |g: &Gallery| &g.c19.fields,
+        |g: &mut Gallery| &mut g.c19.fields,
+        |g: &mut Gallery, _| g.c19.prompt.is_open().then_some(&mut g.c19.prompt.edit),
+        |g: &Gallery, _| g.c19.prompt.is_open().then_some(&g.c19.prompt.edit),
+    )
+    .on_change(|g: &mut Gallery, _, tx| {
+        let polled = g.c19.prompt.text_edited();
+        prompt().route(g, polled, tx);
+    })
+    .on_close(|g: &mut Gallery, _| {
+        let open = g.c19.reference.is_open();
+        g.c19.prompt.hold_open(open);
+    })
+}
+
+/// The prompt's key prefix: its field is `c19-prompt-field`.
+pub const PROMPT: &str = "c19-prompt";
+
+/// The chord's key prefix: `c19-chord-pill`, `c19-chord-panel`.
+pub const CHORD: &str = "c19-chord";
 
 macro_rules! twin {
     ($light:literal, $dark:literal, $f:expr) => {
@@ -244,7 +358,7 @@ const GOLDEN: [[Scene; 2]; 10] = [
             displayed: true,
         });
         d.range = Some(RangeKind::Select);
-        d.chord = true;
+        d.chord.arm(go_chord());
     }),
     twin!("c19-footer-search-light", "c19-footer-search-dark", |d| {
         d.scope.tenxer = true;
@@ -257,7 +371,7 @@ const GOLDEN: [[Scene; 2]; 10] = [
     }),
     twin!("c19-footer-prompt-light", "c19-footer-prompt-dark", |d| {
         d.scope.tenxer = true;
-        d.prompt = Some(TextEdit::new("minutes.txt"));
+        let _ = d.open_rename("minutes.txt");
     }),
     twin!("c19-reference-light", "c19-reference-dark", |d| {
         d.scope.arrows = true;
@@ -391,7 +505,8 @@ pub fn view(g: &Gallery, cx: &mut Cx<Gallery>) -> El {
         panel = panel.compact_below(w);
     }
     panel.build(g, look, &mut layer);
-    let footer = footer(g, look);
+    let footer = footer(g, look, cx, &mut layer);
+    let menu = field_menu().build(g, look, &mut layer);
     rune_kit::root(
         col()
             .key("c19")
@@ -413,7 +528,8 @@ pub fn view(g: &Gallery, cx: &mut Cx<Gallery>) -> El {
                 .px(look.space.lg)
                 .py(look.space.xs),
             )
-            .children(footer),
+            .children(footer)
+            .child(menu),
         layer,
     )
 }
@@ -485,10 +601,7 @@ fn controls(look: &Look) -> El {
             d.no_listing = !d.no_listing
         }),
         ("c19-prompt", "Footer prompt", |d| {
-            d.prompt = match d.prompt {
-                Some(_) => None,
-                None => Some(TextEdit::default()),
-            }
+            let _ = d.open_rename("notes.txt");
         }),
     ];
     row()
@@ -579,52 +692,19 @@ fn listing(g: &Gallery, look: &Look) -> El {
         }))
 }
 
-/// The footer, with C18's and C16's stand-ins.
-fn footer(g: &Gallery, look: &Look) -> Option<El> {
+/// The footer, with C18's prompt, flash and chord pill (its panel goes onto `layer`), and C16's
+/// stand-in.
+fn footer(g: &Gallery, look: &Look, cx: &mut Cx<Gallery>, layer: &mut Vec<El>) -> Option<El> {
     let d = &g.c19;
     let k = &look.kit;
-    let prompt = d.prompt.as_ref().map(|edit| {
-        row()
-            .key("c19-prompt-bar")
-            .grow(1.0)
-            .gap(look.space.sm)
-            .items_center()
-            .child(
-                text("rename \u{203a}")
-                    .font(k.ty.small_medium)
-                    .color(k.c.text_accent)
-                    .a11y_hidden(),
-            )
-            .child(
-                row()
-                    .h(look.frame.control)
-                    .grow(1.0)
-                    .px(look.space.sm)
-                    .items_center()
-                    .radius(k.radius.md)
-                    .fill(k.c.bg_base)
-                    .border(1.0, k.c.border_base)
-                    .child(
-                        text_input(edit, k.ty.small)
-                            .single_line()
-                            .key("c19-prompt-field")
-                            .label("Rename the focused item")
-                            .color(k.c.text_base)
-                            .grow(1.0)
-                            .on_edit(|g: &mut Gallery| {
-                                g.c19.prompt.get_or_insert_with(TextEdit::default)
-                            }),
-                    ),
-            )
-    });
+    let prompt = prompt().build(g, look, cx, layer);
+    layer.extend(chord::panel(look, CHORD, &d.chord));
     let hit = d
         .filter
         .as_ref()
         .filter(|f| f.search && f.displayed)
         .map(|_| fixture::HITS[d.hit].to_owned());
-    let chord = d
-        .chord
-        .then(|| pill(look, "g-").key("c19-chord").role("status").label("g-"));
+    let chord = chord::pill(look, CHORD, &d.chord);
     let jobs = d.jobs.then(|| {
         Button::new("1 job")
             .variant(ButtonVariant::Ghost)
@@ -644,6 +724,7 @@ fn footer(g: &Gallery, look: &Look) -> Option<El> {
         .mark(if d.scope.tenxer { d.mark() } else { None })
         .current_hit(if d.scope.tenxer { hit } else { None })
         .range(d.range)
+        .flash(flash(look, "c19-flash", &d.flash))
         .chord(chord)
         .jobs(jobs)
         .prompt(prompt)
@@ -657,6 +738,11 @@ fn ctrl(ev: &KeyEvent, c: char) -> bool {
 /// The page's dispatch, standing in for Strata's: keys no focused element took.
 pub fn on_key(g: &mut Gallery, ev: &KeyEvent, tx: &mut Tx) -> bool {
     let d = &mut g.c19;
+    // C21's field menu passes on the keys it doesn't use: while it is open they are the menu's,
+    // not the page's (C18's host rule).
+    if d.fields.is_open() {
+        return true;
+    }
     // The reference takes every key it doesn't use: one that gets here is a leak. Logged, so a
     // script that closes the reference after sees it, and taken.
     if d.reference.is_open() {
@@ -665,14 +751,40 @@ pub fn on_key(g: &mut Gallery, ev: &KeyEvent, tx: &mut Tx) -> bool {
         d.leaks.push(leak);
         return true;
     }
+    // An armed chord hears the next key first.
+    if let Some(outcome) = d.chord.key(ev, tx) {
+        match outcome {
+            ChordOutcome::Pass => return false,
+            ChordOutcome::Cancelled => {}
+            ChordOutcome::Completed(act) => d.log(&format!("{act:?}")),
+            ChordOutcome::Unknown => d.flash.show("Unknown chord", tx),
+        }
+        return true;
+    }
     if d.keys().toggles(ev, tx) {
         d.reference.toggle();
         return true;
     }
-    if ctrl(ev, 'm') && ev.mods.shift {
-        d.scope.tenxer = !d.scope.tenxer;
-        d.refresh();
+    // The prompt's field passes on what it doesn't use: no browsing command runs from it, and
+    // Rune's own fallbacks (Shift+F10 and the Menu key open the field's menu) still do.
+    if d.prompt.focused() {
+        return ctrl(ev, 'm') && ev.mods.shift && toggle_mode(d);
+    }
+    let typed = |c: &str| {
+        matches!(&ev.key, Key::Text(t) if t == c)
+            && !(ev.mods.cmd || ev.mods.ctrl || ev.mods.alt || ev.mods.logo)
+    };
+    if d.scope.tenxer && typed("g") {
+        d.chord.arm(go_chord());
         return true;
+    }
+    if d.scope.tenxer && typed("r") {
+        let polled = d.open_rename("notes.txt");
+        prompt().route(g, polled, tx);
+        return true;
+    }
+    if ctrl(ev, 'm') && ev.mods.shift {
+        return toggle_mode(d);
     }
     for (c, view) in [('1', View::Columns), ('2', View::Icons), ('3', View::List)] {
         if ctrl(ev, c) && !ev.mods.shift {
@@ -698,15 +810,31 @@ pub fn on_key(g: &mut Gallery, ev: &KeyEvent, tx: &mut Tx) -> bool {
         d.filter = None;
         return true;
     }
-    if ev.key == Key::Escape && d.prompt.is_some() {
-        d.prompt = None;
-        return true;
-    }
     false
+}
+
+fn toggle_mode(d: &mut Demo) -> bool {
+    // Leaving 10xer mode closes its prompt and chord (`integration/10xer-mode`).
+    d.scope.tenxer = !d.scope.tenxer;
+    if !d.scope.tenxer {
+        d.chord.clear();
+        let _ = d.prompt.close();
+    }
+    d.refresh();
+    true
 }
 
 /// Applies the scheduled changes as the virtual clock reaches them.
 pub fn poll(g: &mut Gallery, t: f64, tx: &mut Tx) -> bool {
+    // The prompt stays open while the reference or the field menu has the keyboard (F1 from
+    // the prompt, as Strata's `abandoned` does); it closes on a blur otherwise.
+    let held = g.c19.reference.is_open() || g.c19.fields.is_open();
+    g.c19.prompt.hold_open(held);
+    let polled = g.c19.prompt.tick();
+    let mut changed = polled.changed;
+    prompt().route(g, polled, tx);
+    changed |= g.c19.flash.tick(t, tx);
+    changed |= field_menu().check(g);
     let d = &mut g.c19;
     // Wake at the next change, so it lands in a resting window too.
     if let Some(next) = d.schedule.iter().map(|(at, _)| *at).reduce(f64::min)
@@ -721,7 +849,7 @@ pub fn poll(g: &mut Gallery, t: f64, tx: &mut Tx) -> bool {
         .map(|(_, c)| *c)
         .collect();
     if due.is_empty() {
-        return false;
+        return changed;
     }
     d.schedule.retain(|(at, _)| *at > t);
     for change in due {

@@ -249,19 +249,32 @@
                       "children": [
                         {
                           "actions": [
-                            "click",
-                            "focus",
-                            "set-value",
-                            "replace-selected-text",
-                            "set-text-selection"
+                            "context-menu"
                           ],
-                          "key": "c19-prompt-field",
-                          "name": "Rename the focused item",
-                          "role": "text-input",
-                          "value": "minutes.txt"
+                          "children": [
+                            {
+                              "actions": [
+                                "click",
+                                "focus",
+                                "context-menu",
+                                "set-value",
+                                "replace-selected-text",
+                                "set-text-selection"
+                              ],
+                              "key": "c19-prompt-field",
+                              "name": "Rename the focused item",
+                              "role": "text-input",
+                              "states": [
+                                "focused"
+                              ],
+                              "value": "minutes.txt"
+                            }
+                          ],
+                          "key": "c19-prompt-box",
+                          "role": "group"
                         }
                       ],
-                      "key": "c19-prompt-bar",
+                      "key": "c19-prompt",
                       "role": "group"
                     }
                   ],

@@ -462,6 +462,7 @@ pub fn columns_view() -> ColumnsView<Gallery> {
                     g.c2.intent = format!("Refreshed column {}", cx.depth);
                 })
                 .build(kit)
+                .focusable(false)
                 .key(format!("c2-refresh-{}", cx.depth)),
         )
     })

@@ -306,6 +306,9 @@ pub(super) fn header<S: 'static>(sh: &Rc<Shared<S>>, s: &S, depth: usize, serial
                         }
                     })
                     .build(k)
+                    // Not a focus stop: a press on it focuses the strip, which keeps the
+                    // keyboard when the button goes with its column.
+                    .focusable(false)
                     .key(keys::close(&key)),
             );
             any = true;

@@ -1062,4 +1062,31 @@ mod c2 {
         assert_eq!(rt.state.c2.intent, "Dropped 1 into level-2");
         assert_eq!(strip_offset(&rt), start);
     }
+
+    fn focused(rt: &Runtime<Gallery>) -> Vec<String> {
+        rt.elements()
+            .into_iter()
+            .filter(|e| e.focused)
+            .filter_map(|e| e.key)
+            .collect()
+    }
+
+    #[test]
+    fn after_the_close_button_the_keys_still_reach_the_strip() {
+        // browser/view-modes/columns: Each column after the first has a "Close this pane" X
+        // button that closes it (and the keyboard goes on working: the strip keeps focus). And
+        // bullet 58's half the view holds: the view moves no focus, so the strip keeps it.
+        let mut rt = scene("c2-three-columns-light");
+        tap(&mut rt, &keys::title("c2-col-2"));
+        tap(&mut rt, &keys::close("c2-col-2"));
+        assert_eq!(path(&rt), "Home");
+        assert_eq!(focused(&rt), ["c2"], "the strip keeps focus");
+        let before = cursor(&rt, 0);
+        key(&mut rt, Key::Down);
+        assert_ne!(cursor(&rt, 0), before, "Down moves Home's cursor");
+        // A host's header action (the page's Refresh) leaves the keys with the strip too.
+        tap(&mut rt, "c2-refresh-0");
+        assert_eq!(rt.state.c2.intent, "Refreshed column 0");
+        assert_eq!(focused(&rt), ["c2"]);
+    }
 }

@@ -205,7 +205,10 @@ impl<S: 'static> ColumnsView<S> {
 
     /// A column header's actions (Refresh, Sort by, the filter field, Empty Trash): the host's,
     /// placed after the title. The view adds the close button to the targeted column after the
-    /// first. A secondary press on these is theirs, not the folder menu's.
+    /// first. A secondary press on these is theirs, not the folder menu's. Build them
+    /// `.focusable(false)`, as the close button is: the strip is the view's one focus stop, and a
+    /// press on a focusable button would take the keyboard from it (Strata's header buttons
+    /// don't take focus on a click).
     pub fn header_actions(self, f: impl Fn(&S, HeaderCx) -> Option<El> + 'static) -> Self {
         self.with(|sh| sh.actions = Some(Rc::new(f)))
     }

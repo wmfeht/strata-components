@@ -520,10 +520,10 @@ fn copy_code_copies_the_block_then_turns_back_after_two_seconds() {
         Some("let a = 1;\nlet b = 2;")
     );
     assert_eq!(label(&rt).as_deref(), Some("Code copied"));
-    rt.update(|h, _| {
-        h.doc.tick(10.0);
-        assert!(!h.doc.tick(11.9), "still copied before 2 s");
-        assert!(h.doc.tick(12.0));
+    rt.update(|h, tx| {
+        // The press stamped the check with the last poll's clock (none ran here: 0).
+        assert!(!h.doc.tick(1.9, tx), "still copied before 2 s");
+        assert!(h.doc.tick(2.0, tx));
     });
     settle(&mut rt);
     assert_eq!(label(&rt).as_deref(), Some("Copy code"));
@@ -647,4 +647,54 @@ fn find_maps_folded_matches_back_through_characters_that_change_length() {
         r.iter().map(|r| &text[r.clone()]).collect::<Vec<_>>(),
         ["aİ"]
     );
+}
+
+/// The host's poll, as Strata's: the document's clock and its queued requests.
+fn host_poll(h: &mut Host, t: f64, tx: &mut Tx) -> bool {
+    let a = h.doc.tick(t, tx);
+    let b = h.doc.flush(tx);
+    a | b
+}
+
+/// Runs the window as a shell that sleeps between wakes: only to each wake deadline, and no
+/// further once there is none.
+fn rest(rt: &mut Runtime<Host>) {
+    for _ in 0..10 {
+        let Some(due) = rt.wake_deadline() else {
+            return;
+        };
+        rt.frame((due - rt.clock).max(1.0 / 60.0));
+        settle(rt);
+    }
+}
+
+#[test]
+fn copy_code_turns_back_on_a_window_at_rest() {
+    // Review 1, B1: the 2 s ran from the first poll after the press, and the press's only
+    // wake came 2 s after the press, before it: a resting window kept "Code copied".
+    let mut rt = runtime(vec![Unit::new(
+        UnitKind::Code {
+            list_depth: None,
+            language: None,
+        },
+        "let a = 1;",
+    )]);
+    rt.poll = Some(host_poll);
+    settle(&mut rt);
+    let label = |rt: &Runtime<Host>| {
+        rt.elements()
+            .into_iter()
+            .find(|e| is(&e.path, "doc-u0/copy"))
+            .and_then(|e| e.label)
+    };
+    let b = rect(&rt, "doc-u0/copy");
+    let (x, y) = (b[0] + b[2] / 2.0, b[1] + b[3] / 2.0);
+    rt.pointer_move(x, y);
+    rt.pointer_down(x, y);
+    rt.frame(1.0 / 60.0);
+    rt.pointer_up(x, y);
+    settle(&mut rt);
+    assert_eq!(label(&rt).as_deref(), Some("Code copied"));
+    rest(&mut rt);
+    assert_eq!(label(&rt).as_deref(), Some("Copy code"));
 }

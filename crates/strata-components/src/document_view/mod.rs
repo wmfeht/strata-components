@@ -17,7 +17,7 @@
 //!     .hosted(&s.doc, |s: &mut App| &mut s.doc)
 //!     .content(view)
 //!     .build(files, &s.look, cx);
-//! // poll: changed |= s.blocks.poll() | s.doc.tick(now) | s.doc.flush(tx);
+//! // poll: changed |= s.blocks.poll() | s.doc.tick(now, tx) | s.doc.flush(tx);
 //! ```
 //!
 //! # The model and what stays in Strata

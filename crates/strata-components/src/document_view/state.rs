@@ -119,6 +119,8 @@ pub struct DocumentState {
     colourable: Vec<bool>,
     /// Ctrl+A asked Rune to select everything, and its selection change hasn't come yet.
     all_pending: bool,
+    /// The host's clock at its last poll ([`DocumentState::tick`]).
+    now: f64,
     /// The document's searchable text, joined and folded on the first find.
     index: OnceCell<Index>,
 }
@@ -147,6 +149,7 @@ impl DocumentState {
             bar: Bar::new(),
             colourable: Vec::new(),
             all_pending: false,
+            now: 0.0,
             index: OnceCell::new(),
         };
         s.set_document(doc);
@@ -289,19 +292,28 @@ impl DocumentState {
     }
 
     /// Runs the host's clock: Copy code goes back to its icon [`COPIED_FOR`] after a press.
-    /// Call it from the host's poll; true when the view changed.
-    pub fn tick(&mut self, now: f64) -> bool {
-        match &mut self.copied {
-            Some((_, at @ None)) => {
-                *at = Some(now);
-                false
-            }
-            Some((_, Some(at))) if now - *at >= COPIED_FOR.as_secs_f64() => {
-                self.copied = None;
-                true
-            }
-            _ => false,
+    /// Call it from the host's poll with the poll's clock; true when the view changed. While
+    /// a button shows its check, it asks `tx` for a wake when the check is due to go, so a
+    /// window at rest turns it back too.
+    pub fn tick(&mut self, now: f64, tx: &mut Tx) -> bool {
+        self.now = now;
+        let Some((_, at)) = &mut self.copied else {
+            return false;
+        };
+        let at = *at.get_or_insert(now);
+        let left = COPIED_FOR.as_secs_f64() - (now - at);
+        // Within a millisecond counts as due: a wake can land a hair early.
+        if left <= 1e-3 {
+            self.copied = None;
+            return true;
         }
+        tx.wake_after(std::time::Duration::from_secs_f64(left));
+        false
+    }
+
+    /// A Copy button on `unit` was pressed: it shows its check from the host's last poll.
+    pub(crate) fn mark_copied(&mut self, unit: usize) {
+        self.copied = Some((unit, Some(self.now)));
     }
 
     /// Applies the selections and scrolls find has asked for. [`HostedPreview::find`] gets no

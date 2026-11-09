@@ -523,7 +523,7 @@ fn copy_button<S: 'static>(
         .child(icon(if copied { p.check } else { p.copy }, p.icon).color(p.muted))
         .on_press_tx(move |s: &mut S, tx| {
             tx.copy(copy.clone());
-            (get_mut)(s).copied = Some((unit, None));
+            (get_mut)(s).mark_copied(unit);
             tx.wake_after(super::state::COPIED_FOR);
         })
 }

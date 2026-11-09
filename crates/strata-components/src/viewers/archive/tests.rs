@@ -231,6 +231,69 @@ fn an_error_clears_the_password_typed() {
 
 // The element, in a runtime.
 
+mod prompt {
+    use rune::accesskit::{Action, Live};
+    use rune::{Cx, El, Env, Runtime};
+    use strata_kit::look::Look;
+
+    use super::super::{ArchivePrompt, PromptState};
+
+    struct App {
+        prompt: PromptState,
+        look: Look,
+    }
+
+    fn view(s: &App, _cx: &mut Cx<App>) -> El {
+        ArchivePrompt::new(&s.prompt, |s: &mut App| &mut s.prompt)
+            .on_unlock(|s: &mut App, _, _| {
+                s.prompt
+                    .set_error(Some("The password is incorrect.".into()));
+            })
+            .build(&s.look)
+    }
+
+    /// The AccessKit ids of the live nodes in the tree.
+    fn live_nodes(rt: &Runtime<App>) -> Vec<u64> {
+        rt.accessibility_tree()
+            .nodes
+            .iter()
+            .filter(|(_, n)| n.live() == Some(Live::Polite))
+            .map(|(id, _)| id.0)
+            .collect()
+    }
+
+    fn unlock(rt: &mut Runtime<App>) -> Vec<u64> {
+        assert!(rt.accessibility_action("archive-prompt-unlock", Action::Click, None));
+        for _ in 0..3 {
+            rt.frame(1.0 / 60.0);
+        }
+        live_nodes(rt)
+    }
+
+    /// `operations/archives/preview`: "A wrong password keeps the prompt open with "The
+    /// password is incorrect."", each time. AT-SPI announces a live region only when its node
+    /// is added or its name changes, and a second error has the same words: it must be a new
+    /// node to be heard.
+    #[test]
+    fn each_wrong_password_is_a_new_live_node() {
+        let app = App {
+            prompt: PromptState::default(),
+            look: Look::fallback(false),
+        };
+        let mut rt = Runtime::new(app, view, (420.0, 400.0), Env::new(false, 1.0));
+        rt.frame(1.0 / 60.0);
+        assert!(live_nodes(&rt).is_empty(), "no error before an attempt");
+        let first = unlock(&mut rt);
+        assert_eq!(first.len(), 1, "one error after the first attempt");
+        let second = unlock(&mut rt);
+        assert_eq!(second.len(), 1, "one error after the second attempt");
+        assert_ne!(
+            first, second,
+            "the second error is a new node, so it is announced"
+        );
+    }
+}
+
 mod element {
     use std::cell::Cell;
 
@@ -249,6 +312,7 @@ mod element {
         archive: ArchiveState,
         look: Look,
         leave: bool,
+        letters: bool,
     }
 
     fn view(s: &App, _cx: &mut Cx<App>) -> El {
@@ -256,7 +320,8 @@ mod element {
             |s: &App| &s.archive,
             |s: &mut App| &mut s.archive,
             |s: &App| &s.look,
-        );
+        )
+        .letters(s.letters);
         if s.leave {
             v = v.on_leave(|_: &mut App, _: &mut Tx| LEFT.with(|l| l.set(l.get() + 1)));
         }
@@ -268,26 +333,31 @@ mod element {
         true
     }
 
-    /// Left at the root, with the tree focused: (keys the window heard, `on_leave` calls).
-    fn left_at_root(leave: bool) -> (u32, u32) {
-        PASSED.with(|p| p.set(0));
-        LEFT.with(|l| l.set(0));
-        let app = App {
-            archive: ArchiveState::new("archive", tree()),
-            look: Look::fallback(false),
-            leave,
-        };
-        let mut rt = Runtime::new(app, view, (420.0, 400.0), Env::new(false, 1.0));
-        rt.on_key = Some(on_key);
-        for _ in 0..20 {
-            rt.frame(1.0 / 60.0);
-        }
-        // Click README.md (a file, so nothing opens) to focus the tree.
+    /// Where Left is pressed.
+    #[derive(Clone, Copy, PartialEq)]
+    enum At {
+        Root,
+        /// In `docs/`.
+        Docs,
+    }
+
+    /// What one Left did.
+    #[derive(Debug, PartialEq)]
+    struct Heard {
+        /// Keys the window heard.
+        passed: u32,
+        /// `on_leave` calls.
+        left: u32,
+        /// At the root afterwards.
+        root: bool,
+    }
+
+    fn click(rt: &mut Runtime<App>, label: &str) {
         let r = rt
             .elements()
             .into_iter()
-            .find(|e| e.label.as_deref() == Some("README.md"))
-            .expect("README.md")
+            .find(|e| e.label.as_deref() == Some(label))
+            .unwrap_or_else(|| panic!("{label}"))
             .rect;
         let (x, y) = (r[0] + r[2] / 2.0, r[1] + r[3] / 2.0);
         rt.pointer_move(x, y);
@@ -295,20 +365,115 @@ mod element {
         rt.frame(1.0 / 60.0);
         rt.pointer_up(x, y);
         rt.frame(1.0 / 60.0);
+    }
+
+    /// `key` (Left, or `h` with the letters on) at `at`, with the tree focused by a click on a
+    /// file, with an `on_leave` when `leave`.
+    fn left(at: At, leave: bool, key: Key) -> Heard {
+        PASSED.with(|p| p.set(0));
+        LEFT.with(|l| l.set(0));
+        let app = App {
+            archive: ArchiveState::new("archive", tree()),
+            look: Look::fallback(false),
+            leave,
+            letters: matches!(key, Key::Text(_)),
+        };
+        let mut rt = Runtime::new(app, view, (420.0, 400.0), Env::new(false, 1.0));
+        rt.on_key = Some(on_key);
+        for _ in 0..20 {
+            rt.frame(1.0 / 60.0);
+        }
+        if at == At::Docs {
+            // A click on a folder opens it.
+            click(&mut rt, "docs/");
+            rt.frame(1.0 / 60.0);
+            assert_eq!(rt.state.archive.listing().crumbs(), ["docs"]);
+            click(&mut rt, "guide.md");
+        } else {
+            click(&mut rt, "README.md");
+        }
         rt.key(KeyEvent {
-            key: Key::Left,
+            key,
             mods: Mods::default(),
         });
         rt.frame(1.0 / 60.0);
-        assert!(rt.state.archive.at_root());
-        (PASSED.with(Cell::get), LEFT.with(Cell::get))
+        Heard {
+            passed: PASSED.with(Cell::get),
+            left: LEFT.with(Cell::get),
+            root: rt.state.archive.at_root(),
+        }
+    }
+
+    fn heard(passed: u32, left: u32) -> Heard {
+        Heard {
+            passed,
+            left,
+            root: true,
+        }
+    }
+
+    /// The description of the option named `name`, or none; panics with no such option.
+    fn description(rt: &Runtime<App>, name: &str) -> Option<String> {
+        let mut stack = vec![rt.accessibility_json()];
+        while let Some(v) = stack.pop() {
+            if v["role"] == "list-box-option" && v["name"] == name {
+                return v["description"].as_str().map(str::to_owned);
+            }
+            if let Some(c) = v["children"].as_array() {
+                stack.extend(c.iter().cloned());
+            }
+        }
+        panic!("no option {name}");
+    }
+
+    /// Strata's archive rows read a file's size after its name; a folder's name ends in "/"
+    /// and says no more.
+    #[test]
+    fn a_file_row_reads_its_size_after_its_name() {
+        let app = App {
+            archive: ArchiveState::new("archive", tree()),
+            look: Look::fallback(false),
+            leave: false,
+            letters: false,
+        };
+        let mut rt = Runtime::new(app, view, (420.0, 400.0), Env::new(false, 1.0));
+        for _ in 0..3 {
+            rt.frame(1.0 / 60.0);
+        }
+        assert_eq!(description(&rt, "README.md").as_deref(), Some("12.4 kB"));
+        assert_eq!(description(&rt, "docs/"), None);
     }
 
     /// Left at the root goes to the host's `on_leave`; with none, it goes on past the tree to
-    /// the window's keys, as Strata's 10xer `h` behaviour does.
+    /// the window's keys, as Strata's 10xer `h` behaviour does, and so does `h` with the
+    /// letters on. In a folder, Left goes up either way, and the host hears nothing.
     #[test]
     fn left_at_the_root_reaches_the_host() {
-        assert_eq!(left_at_root(true), (0, 1), "taken, and on_leave heard it");
-        assert_eq!(left_at_root(false), (1, 0), "passed on to the window");
+        let text = || Key::Text("h".into());
+        assert_eq!(
+            left(At::Root, true, Key::Left),
+            heard(0, 1),
+            "taken: on_leave"
+        );
+        assert_eq!(
+            left(At::Root, false, Key::Left),
+            heard(1, 0),
+            "passed to the window"
+        );
+        assert_eq!(
+            left(At::Root, false, text()),
+            heard(1, 0),
+            "h passed to the window"
+        );
+        assert_eq!(
+            left(At::Docs, false, Key::Left),
+            heard(0, 0),
+            "up, with no on_leave"
+        );
+        assert_eq!(
+            left(At::Docs, true, Key::Left),
+            heard(0, 0),
+            "up, with on_leave"
+        );
     }
 }

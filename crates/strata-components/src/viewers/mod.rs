@@ -7,9 +7,9 @@
 //! | Module | What |
 //! | --- | --- |
 //! | [`image`] | C14a's viewport with the image's name and dimensions |
-//! | [`model`] | The 3D model view: a rendered picture, four camera presets, the camera indicator, badges. Also the G-code, 3MF and FreeCAD pictures saved in a file |
-//! | [`route`] | The route view: the route picture, a marker that plays along it and the elevation profile, drawn with `canvas` shapes |
-//! | [`archive`] | The archive preview: C1e read-only over the member tree, and the password prompt |
+//! | [`model`] | 3D models' views, camera presets; pictures saved in G-code, 3MF and FreeCAD |
+//! | [`route`] | A route's picture, a marker that plays along it, and its elevation profile |
+//! | [`archive`] | An archive's member tree on C1e, read-only, and its password prompt |
 //! | [`layout`] | The player layout the model and route views share, which C13 reuses |
 //! | [`viewport`] | C14a |
 //!
@@ -42,12 +42,12 @@
 //!   with its badges".
 //! - **Badges aren't live regions**: rune-kit's `Badge` is one; Strata's are plain labels
 //!   ([`layout`]).
-//! - **Left at the archive's root is taken** when the host hears it ([`archive::ArchiveView::on_leave`]):
-//!   Strata's tree passes it on, and its listing takes focus back. Here the host moves focus in
+//! - **Left at the archive's root is taken** when the host hears it
+//!   ([`archive::ArchiveView::on_leave`]): Strata's tree passes it on, and its listing takes
+//!   focus back. Here the host moves focus in
 //!   `on_leave`; with no `on_leave`, the key goes on as in Strata.
 //! - **The password error is announced, not described**: a polite live region, with the field
 //!   marked invalid (draft R-C14b-3).
-//! - **Archive file sizes aren't read** by assistive technology ([`archive`], a C1e follow-up).
 //!
 //! # Rune drafts (not filed)
 //!
@@ -65,8 +65,9 @@
 //! - **R-C14b-3: rune-kit's `TextInput` can't describe its editor** (draft, not filed). Its
 //!   `name_field` passes no description to the editor at the pinned rev, so an error can't be the
 //!   field's description; `TextField` can (`error`) but has no `on_submit`. The archive prompt's
-//!   error is a polite live region instead. Repro: `TextInput::new(&edit).build(k).description("x")`
-//!   puts "x" on the outer group, not on the `text-input` node `--tree` shows. Ask:
+//!   error is a polite live region instead. Repro:
+//!   `TextInput::new(&edit).build(k).description("x")` puts "x" on the outer group, not on the
+//!   `text-input` node `--tree` shows. Ask:
 //!   `TextInput::description` (or `error`) applied to the editor.
 //!
 //! Earlier drafts these views meet: U-C1e-4 (no programmatic focus: the archive's "first

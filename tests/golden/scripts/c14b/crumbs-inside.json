@@ -172,6 +172,7 @@
                                           "actions": [
                                             "scroll-into-view"
                                           ],
+                                          "description": "18.2 kB",
                                           "key": "row-8000000003",
                                           "name": "app.png",
                                           "position": 1,
@@ -184,6 +185,7 @@
                                           "actions": [
                                             "scroll-into-view"
                                           ],
+                                          "description": "3.4 kB",
                                           "key": "row-8000000004",
                                           "name": "logo.svg",
                                           "position": 2,

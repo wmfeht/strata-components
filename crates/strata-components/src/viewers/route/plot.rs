@@ -2,11 +2,11 @@
 //! that ride both pictures.
 //!
 //! **Deviation from Strata** (coordinator ruling): Strata's helper draws the profile into an
-//! 800 × 70 PNG in the theme's accent, and the drawer stretches it to the pane (`ContentFit::Fill`).
-//! Here the same line is drawn from the samples, in the same 800 × 70 space stretched to the
-//! element (a `Shape::view_box`, whose strokes stay in points), from Kit tokens, so a theme
-//! switch recolours it without a new render and it stays sharp at any width. The helper's
-//! profile PNG is left unused; the sandbox protocol is unchanged.
+//! 800 × 70 PNG in the theme's accent, and the drawer stretches it to the pane
+//! (`ContentFit::Fill`). Here the same line is drawn from the samples, in the same 800 × 70
+//! space stretched to the element (a `Shape::view_box`, whose strokes stay in points), from Kit
+//! tokens, so a theme switch recolours it without a new render and it stays sharp at any width.
+//! The helper's profile PNG is left unused; the sandbox protocol is unchanged.
 
 use rune::{El, Shape, canvas, el};
 use strata_kit::look::Look;

@@ -162,6 +162,7 @@
                                           "actions": [
                                             "scroll-into-view"
                                           ],
+                                          "description": "22.8 kB",
                                           "key": "row-8000000007",
                                           "name": "api.md",
                                           "position": 1,
@@ -171,6 +172,7 @@
                                           "actions": [
                                             "scroll-into-view"
                                           ],
+                                          "description": "9.6 kB",
                                           "key": "row-8000000008",
                                           "name": "guide.md",
                                           "position": 2,

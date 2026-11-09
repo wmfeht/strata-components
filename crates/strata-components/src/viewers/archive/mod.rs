@@ -14,18 +14,19 @@
 //!
 //! # What it does
 //!
-//! - **Listing.** Folder rows end in "/" and show a chevron; file rows show their size. An
-//!   empty folder says "This folder is empty". The order is the host's tree.
+//! - **Listing.** Folder rows end in "/" and show a chevron; file rows show their size, which
+//!   assistive technology reads as the row's description, after its name (C1e's
+//!   [`Describe`]). An empty folder says "This folder is empty". The order is the host's tree.
 //! - **Crumbs.** "Contents" and the folders down to the one shown; inside a folder, a back arrow
 //!   named "Go up one level" first. A crumb returns to its level.
 //! - **Keys** (C1c with [`controllers::key_map`]): Up and Down (and Home, End, the page keys)
 //!   move the highlight; Right or Enter opens a folder and does nothing on a file; Left goes to
 //!   the parent. At the root Left reaches the host's [`ArchiveView::on_leave`] (Strata returns
 //!   focus to the listing), and the tree takes the key; with no `on_leave`, it goes on past the
-//!   tree to the host's key handling ([`controllers::LeftPasses`]). With Type to search off, `h j k l` act as the arrows
-//!   ([`ArchiveView::letters`]). Edges are taken, so the keys never move focus out of the tree;
-//!   only the cursor's member is outlined. Space isn't taken: it goes on to the host, which
-//!   closes the preview.
+//!   tree to the host's key handling ([`controllers::LeftPasses`]). With Type to search off,
+//!   `h j k l` act as the arrows ([`ArchiveView::letters`]). Edges are taken, so the keys never
+//!   move focus out of the tree; only the cursor's member is outlined. Space isn't taken: it
+//!   goes on to the host, which closes the preview.
 //! - **Pointer** ([`controllers::ArchivePointer`]): a click highlights a member on its release,
 //!   and opens a folder; modifiers act as a plain click; a double click opens one level. Hover
 //!   tints a row and moves neither the highlight nor the cursor (C1e).
@@ -33,15 +34,6 @@
 //!   when the cursor moves onto an archive with the preview open. [`ArchiveState::enter`]
 //!   highlights the first member: Space opening the preview, Right from the listing, Enter in
 //!   Columns, an Unlock.
-//!
-//! # Gap: file sizes aren't read
-//!
-//! A file row shows its size, but assistive technology hears only the name: C1e builds the row's
-//! option node itself (`row.rs`, `.label(entry.name)`) and its slots can't describe it, so the size
-//! text is hidden rather than heard as a stray label inside the option. Strata's GTK row reads the
-//! name, the size and the chevron as separate labels. Closing it needs a C1e addition, for
-//! instance `Collection::describe(|s, rcx| Option<String>)` setting the option's description
-//! (follow-up for C1e's owner).
 //!
 //! What stays in Strata: listing the archive (in its sandbox), the order, the limits and their
 //! messages, and the routing around the tree: which keys enter it from the listing, Escape and
@@ -70,7 +62,7 @@ use rune_kit::{Button, ButtonVariant, ControlSize, IconButton, IconButtonVariant
 use strata_kit::icons::IconName;
 use strata_kit::look::Look;
 
-use crate::collection::element::{Collection, CollectionState, ContentSlot, Intent};
+use crate::collection::element::{Collection, CollectionState, ContentSlot, Describe, Intent};
 use crate::collection::selection::Listing;
 use crate::contract::{Direction, EntrySource};
 
@@ -370,12 +362,21 @@ impl<S: 'static> ArchiveView<S> {
                 f(s, tx);
             }
         })
+        .describe(Describe::new(
+            move |s: &S, rcx| get(s).listing.size(rcx.index).unwrap_or(u64::MAX),
+            move |s: &S, rcx| {
+                let a = get(s);
+                a.listing.size(rcx.index).map(a.labels.size)
+            },
+        ))
         .content(ContentSlot::new(
             move |s: &S, rcx| get(s).listing.size(rcx.index).unwrap_or(u64::MAX),
             move |s: &S, rcx, icon_el, label| {
                 let look = rcx.look;
                 let k = &look.kit;
                 let a = get(s);
+                // The size is the row's description (above): heard there, not as a stray
+                // label inside the option.
                 let trailing = match a.listing.size(rcx.index) {
                     Some(size) => text((a.labels.size)(size))
                         .font(k.ty.small)

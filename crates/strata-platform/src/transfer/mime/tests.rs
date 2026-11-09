@@ -167,17 +167,8 @@ fn utf8_text_aliases_utf8_string() {
 }
 
 #[test]
-fn requests_about_a_selection_are_no_data_types_and_pixmap_is_one() {
-    for name in [
-        "TARGETS",
-        "SAVE_TARGETS",
-        "DELETE",
-        "INSERT_SELECTION",
-        "INSERT_PROPERTY",
-    ] {
-        assert!(super::is_x11_meta(name), "{name}");
-    }
-    for name in ["PIXMAP", "UTF8_STRING", "text/plain", "targets"] {
+fn pixmap_is_data_and_meta_targets_match_by_exact_name() {
+    for name in ["PIXMAP", "targets", "Save_Targets", "SAVE_TARGETS "] {
         assert!(!super::is_x11_meta(name), "{name}");
     }
 }

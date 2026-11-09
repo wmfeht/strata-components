@@ -192,6 +192,7 @@ fn flags(action: Action) -> DndAction {
         Action::Copy => DndAction::Copy,
         Action::Move => DndAction::Move,
         Action::Ask => DndAction::Ask,
+        Action::Link => DndAction::empty(),
     }
 }
 

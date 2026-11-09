@@ -9,7 +9,7 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 use strata_test_peer::protocol::{
     Action, ActivationToken, Button, Command, Event, Exported, Mapped, Message, Offer, Received,
-    Request, Selection, Targets, Via,
+    Request, Selection, Targets, TypedWindow, Via,
 };
 
 use super::{Display, Proc, Session};
@@ -201,6 +201,15 @@ impl Peer {
     pub fn activation_token(&self) -> String {
         self.request_as::<ActivationToken>(Command::ActivationToken)
             .token
+    }
+
+    /// X11: the top-level windows whose `_NET_WM_WINDOW_TYPE` lists `ty`.
+    #[cfg_attr(
+        not(feature = "dnd"),
+        expect(dead_code, reason = "only P1's session tests, behind dnd, use it")
+    )]
+    pub fn windows_of_type(&self, ty: &str) -> Vec<TypedWindow> {
+        self.request_as::<Vec<TypedWindow>>(Command::WindowsOfType { ty: ty.to_owned() })
     }
 
     /// `wayland:<handle>` or `x11:<xid>`.

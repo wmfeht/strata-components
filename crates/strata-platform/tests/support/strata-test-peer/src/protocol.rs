@@ -112,6 +112,12 @@ pub enum Command {
     DropProxy,
     /// Exports the peer's window for another client to parent to ([`Exported`]).
     Export,
+    /// X11 only: the root window's children whose `_NET_WM_WINDOW_TYPE` lists `ty` (an atom
+    /// name such as `_NET_WM_WINDOW_TYPE_DND`), with their size and map state
+    /// ([`TypedWindow`]).
+    WindowsOfType {
+        ty: String,
+    },
     /// Wayland: an `xdg_activation_v1` token for the peer's window, made with the serial of its
     /// last keyboard enter or press ([`ActivationToken`]), for a test to hand another process
     /// as `XDG_ACTIVATION_TOKEN` (P8). Map the window and give it focus first.
@@ -148,6 +154,8 @@ pub enum Action {
     Copy,
     Move,
     Ask,
+    /// X11 only: Wayland's data device has no link action, and offers none.
+    Link,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -249,6 +257,15 @@ pub struct Targets {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Exported {
     pub handle: String,
+}
+
+/// One window in the reply to [`Command::WindowsOfType`].
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TypedWindow {
+    pub xid: u32,
+    pub width: u16,
+    pub height: u16,
+    pub mapped: bool,
 }
 
 /// The reply to [`Command::ActivationToken`].

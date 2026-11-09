@@ -631,10 +631,26 @@ fn actions_follow_modifiers_on_drag_out(display: Display) {
                 plain, "copied",
                 "a plain drag proposes copy, which the peer takes"
             );
+            // Under GTK's rule Ctrl alone proposes copy, as a plain drag does when copy is
+            // allowed, so no outcome tells them apart on X11: Ctrl+Shift below can fail.
             assert_eq!(ctrl, "copied");
             assert_eq!(shift, "moved", "Shift proposes move");
             let late = drag_out_with(&s, &demo, &to, None, Some("shift"));
             assert_eq!(late, "moved", "Shift pressed during the drag proposes move");
+            // Link, X11's only: Ctrl+Shift.
+            demo.offer(
+                &[Offer::text(TEXT, "link")],
+                &["copy", "move", "link"],
+                None,
+                None,
+            );
+            peer.accept_drops(
+                &[TEXT],
+                &[Action::Copy, Action::Move, Action::Link],
+                Action::Move,
+            );
+            let both = drag_out_with(&s, &demo, &to, Some("ctrl+shift"), None);
+            assert_eq!(both, "linked", "Ctrl+Shift proposes link");
         }
     }
     demo.quit();
@@ -708,6 +724,41 @@ fn actions_on_drop_in(display: Display) {
                 fin,
                 Event::DragFinished {
                     action: Some(Action::Move)
+                }
+            );
+            // Ctrl: copy, which a plain drop takes too, so the modifiers it reports are what
+            // can fail here.
+            let (dropped, fin) = drop_in_with(
+                &s,
+                &demo,
+                &peer,
+                &from,
+                &[Action::Move, Action::Copy],
+                Some("ctrl"),
+            );
+            assert_eq!(dropped["mods"]["ctrl"], true, "{dropped}");
+            assert_eq!(dropped["mods"]["shift"], false, "{dropped}");
+            assert_eq!(dropped["action"], "copy", "{dropped}");
+            assert_eq!(
+                fin,
+                Event::DragFinished {
+                    action: Some(Action::Copy)
+                }
+            );
+            // Ctrl+Shift: link, X11's only.
+            let (dropped, fin) = drop_in_with(
+                &s,
+                &demo,
+                &peer,
+                &from,
+                &[Action::Copy, Action::Move, Action::Link],
+                Some("ctrl+shift"),
+            );
+            assert_eq!(dropped["action"], "link", "{dropped}");
+            assert_eq!(
+                fin,
+                Event::DragFinished {
+                    action: Some(Action::Link)
                 }
             );
         }
@@ -915,4 +966,111 @@ fn wayland_in_process_drag_carries_the_typed_payload() {
 #[ignore = "needs a private session: mise run test-platform"]
 fn x11_in_process_drag_carries_the_typed_payload() {
     in_process_typed_payload(Display::X11);
+}
+
+// ---- fast flicks (review round 1, B1 and B2) ----
+
+/// Presses the tile, crosses the threshold and releases at once, `tries` times. Each drag
+/// must end by itself (B1: on X11 a drag left running dropped on the next click anywhere),
+/// no Escape may reach the app's keys (B2: on Wayland P1's Escape leaked when the release
+/// had already ended Rune's capture), and a later plain click on the peer must drop nothing.
+fn fast_flicks(display: Display) {
+    let s = Session::start();
+    let demo = Demo::start(&s, display, false);
+    let (peer, to) = peer_beside(&s, display, &demo);
+    demo.offer(&[Offer::text(TEXT, "flick")], &["copy", "move"], None, None);
+    peer.accept_drops(&[TEXT], &[Action::Copy, Action::Move], Action::Move);
+    for i in 0..5 {
+        let mark = press_on(&s, &demo, "tile");
+        let (tx, ty) = demo.at(&s, "main", "tile", 0.5, 0.5);
+        s.input().pointer_move((tx + 30.0, ty));
+        s.input().button(false);
+        demo.wait(mark, "the drag starting", |v| v["ev"] == "drag-start");
+        let (_, end) = demo.wait(mark, &format!("flick {i} ending by itself"), |v| {
+            v["ev"] == "drag-end"
+        });
+        assert!(end["outcome"].is_string(), "{end}");
+        // A later plain click on the peer drops nothing.
+        let peer_mark = peer.line_count();
+        s.point_at(&peer, to.at(0.5, 0.5));
+        s.input().button(true);
+        s.input().button(false);
+        assert!(
+            !peer.saw_since(peer_mark, Duration::from_millis(500), |e| {
+                matches!(e, Event::Dropped { .. } | Event::DropEnter { .. })
+            }),
+            "flick {i}: a later click on the peer took a drop"
+        );
+    }
+    let escapes: Vec<Value> = demo
+        .lines()
+        .into_iter()
+        .filter(|v| v["ev"] == "key" && v["key"] == "Escape")
+        .collect();
+    assert!(
+        escapes.is_empty(),
+        "P1's Escape reached the app: {escapes:?}"
+    );
+    demo.quit();
+}
+
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn wayland_fast_flicks_end_and_leak_no_escape() {
+    fast_flicks(Display::Wayland);
+}
+
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn x11_fast_flicks_end_by_themselves() {
+    fast_flicks(Display::X11);
+}
+
+/// X11: the drag's icon is an override-redirect window typed `_NET_WM_WINDOW_TYPE_DND`
+/// (review round 1), mapped while the drag runs and gone once it ends.
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn x11_drag_icon_is_a_dnd_window_for_the_drags_life() {
+    const DND: &str = "_NET_WM_WINDOW_TYPE_DND";
+    let s = Session::start();
+    let demo = Demo::start(&s, Display::X11, false);
+    let (peer, to) = peer_beside(&s, Display::X11, &demo);
+    demo.offer(&[Offer::text(TEXT, "icon")], &["copy"], None, Some("image"));
+    peer.accept_drops(&[TEXT], &[Action::Copy], Action::Copy);
+    let mark = press_on(&s, &demo, "tile");
+    let half = (
+        (to.at(0.5, 0.5).0 + demo.at(&s, "main", "tile", 0.5, 0.5).0) / 2.0,
+        to.at(0.5, 0.5).1,
+    );
+    s.input().path(half);
+    demo.wait(mark, "the drag starting", |v| v["ev"] == "drag-start");
+    let deadline = Instant::now() + timeout();
+    let icon = loop {
+        let found = peer.windows_of_type(DND);
+        if let Some(w) = found.iter().find(|w| w.mapped) {
+            break w.clone();
+        }
+        assert!(
+            Instant::now() < deadline,
+            "no mapped {DND} window: {found:?}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    assert_eq!(
+        (icon.width, icon.height),
+        (32, 24),
+        "the example's 32×24 image"
+    );
+    s.input().path(to.at(0.5, 0.5));
+    s.input().button(false);
+    demo.wait(mark, "the outcome", |v| v["ev"] == "drag-end");
+    let deadline = Instant::now() + timeout();
+    while peer.windows_of_type(DND).iter().any(|w| w.xid == icon.xid) {
+        assert!(
+            Instant::now() < deadline,
+            "the icon window outlived its drag"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    demo.quit();
 }

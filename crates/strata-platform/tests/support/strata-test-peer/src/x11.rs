@@ -21,7 +21,8 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::time::{Duration, Instant};
 
 use strata_test_peer::protocol::{
-    Action, Backend, Command, Event, Exported, Mapped, Offer, Request, Selection, Targets, Via,
+    Action, Backend, Command, Event, Exported, Mapped, Offer, Request, Selection, Targets,
+    TypedWindow, Via,
 };
 use x11rb::connection::Connection as _;
 use x11rb::protocol::Event as XEvent;
@@ -42,7 +43,7 @@ x11rb::atom_manager! {
         _NET_WM_NAME, _NET_WM_PID, _NET_CLIENT_LIST, STRATA_PEER_TIME,
         XdndAware, XdndProxy, XdndTypeList, XdndSelection, XdndEnter, XdndPosition,
         XdndStatus, XdndLeave, XdndDrop, XdndFinished, XdndActionCopy, XdndActionMove,
-        XdndActionAsk, XdndActionList,
+        XdndActionAsk, XdndActionList, XdndActionLink,
     }
 }
 
@@ -464,6 +465,7 @@ impl X {
                 );
                 Ok(())
             }
+            Command::WindowsOfType { ty } => self.windows_of_type(&ty).map(|w| out::value(id, w)),
         };
         if let Err(e) = result {
             out::reply(id, Err(e));
@@ -495,6 +497,49 @@ impl X {
             .and_then(|c| c.reply().ok())
             .map(|r| String::from_utf8_lossy(&r.name).into_owned())
             .unwrap_or_default()
+    }
+
+    /// The root's children whose `_NET_WM_WINDOW_TYPE` lists `ty`.
+    fn windows_of_type(&self, ty: &str) -> Result<Vec<TypedWindow>, String> {
+        let (prop, want) = (self.atom("_NET_WM_WINDOW_TYPE")?, self.atom(ty)?);
+        let tree = self
+            .conn
+            .query_tree(self.root)
+            .map_err(err)?
+            .reply()
+            .map_err(err)?;
+        let mut out = Vec::new();
+        for w in tree.children {
+            let listed = self
+                .conn
+                .get_property(false, w, prop, AtomEnum::ATOM, 0, 16)
+                .ok()
+                .and_then(|c| c.reply().ok())
+                .and_then(|r| r.value32().map(|mut v| v.any(|a| a == want)))
+                .unwrap_or(false);
+            if !listed {
+                continue;
+            }
+            let geo = self
+                .conn
+                .get_geometry(w)
+                .map_err(err)?
+                .reply()
+                .map_err(err)?;
+            let attrs = self
+                .conn
+                .get_window_attributes(w)
+                .map_err(err)?
+                .reply()
+                .map_err(err)?;
+            out.push(TypedWindow {
+                xid: w,
+                width: geo.width,
+                height: geo.height,
+                mapped: attrs.map_state == x11rb::protocol::xproto::MapState::VIEWABLE,
+            });
+        }
+        Ok(out)
     }
 
     /// The first 32-bit value of a window property, if it has one.
@@ -530,11 +575,12 @@ impl X {
             Action::Copy => self.atoms.XdndActionCopy,
             Action::Move => self.atoms.XdndActionMove,
             Action::Ask => self.atoms.XdndActionAsk,
+            Action::Link => self.atoms.XdndActionLink,
         }
     }
 
     fn action_of(&self, atom: Atom) -> Option<Action> {
-        [Action::Copy, Action::Move, Action::Ask]
+        [Action::Copy, Action::Move, Action::Ask, Action::Link]
             .into_iter()
             .find(|a| self.action_atom(*a) == atom)
     }

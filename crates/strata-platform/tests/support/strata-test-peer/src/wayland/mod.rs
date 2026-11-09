@@ -288,6 +288,7 @@ impl St {
             }
             Command::DropProxy => Err("XdndProxy is X11's; a Wayland peer has none".into()),
             Command::Export => self.export(id),
+            Command::WindowsOfType { .. } => Err("window types are X11's".into()),
             Command::ActivationToken => self.activation_token(id),
         };
         if let Err(e) = result {

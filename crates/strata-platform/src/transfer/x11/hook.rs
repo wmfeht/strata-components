@@ -85,7 +85,7 @@ impl HookCx<'_> {
                 .set_selection_owner(x11rb::NONE, selection, owned.time());
         }
         // A take still waiting for its timestamp is dropped too.
-        self.actor.owning.retain(|o| o.sel() != selection);
+        self.actor.owning.cancel_selection(selection);
     }
 
     /// Converts `selection` to `mime` as of `time` (an XDND drop's), with INCR. `done` runs

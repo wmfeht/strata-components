@@ -2,6 +2,7 @@
 //! `SelectionRequest`s (INCR above one chunk), converting another client's selection (INCR
 //! too), and following owners through XFixes.
 
+use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -64,9 +65,43 @@ impl Owning {
             cancelled: false,
         }
     }
+}
 
-    pub(super) fn sel(&self) -> Atom {
-        self.sel
+/// Ownership requests waiting for a server timestamp, in the order asked. Each take appends
+/// to a property of our window, and the server's `PropertyNotify`s come back in that order, so
+/// each notify's time belongs to the take at the front. A cancelled take therefore keeps its
+/// place, and is skipped when its time comes: removing it would hand its time to the next.
+#[derive(Default)]
+pub(super) struct Takes(VecDeque<Owning>);
+
+impl Takes {
+    pub(super) fn push(&mut self, o: Owning) {
+        self.0.push_back(o);
+    }
+
+    /// The take a timestamp that just came belongs to: None if it was cancelled.
+    pub(super) fn next(&mut self) -> Option<Owning> {
+        let o = self.0.pop_front()?;
+        (!o.cancelled).then_some(o)
+    }
+
+    /// Cancels the take of `id` still waiting: true if there was one.
+    pub(super) fn cancel(&mut self, id: SourceId) -> bool {
+        match self.0.iter_mut().find(|o| o.id == id && !o.cancelled) {
+            Some(o) => {
+                o.cancelled = true;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Cancels every take of selection `sel` still waiting.
+    #[cfg(feature = "dnd")]
+    pub(super) fn cancel_selection(&mut self, sel: Atom) {
+        for o in self.0.iter_mut().filter(|o| o.sel == sel) {
+            o.cancelled = true;
+        }
     }
 }
 
@@ -242,9 +277,7 @@ impl Actor {
 
     fn property(&mut self, e: PropertyNotifyEvent) {
         if e.window == self.win && e.atom == self.atoms.TRANSFER_TIME {
-            if let Some(owning) = self.owning.pop_front()
-                && !owning.cancelled
-            {
+            if let Some(owning) = self.owning.next() {
                 self.own(owning, e.time);
             }
             return;
@@ -280,7 +313,7 @@ impl Actor {
             AtomEnum::STRING,
             &[],
         );
-        self.owning.push_back(owning);
+        self.owning.push(owning);
     }
 
     fn own(&mut self, o: Owning, time: u32) {
@@ -318,8 +351,7 @@ impl Actor {
     /// never `CurrentTime`).
     fn disown(&mut self, id: SourceId) {
         // A take still waiting for its timestamp is cancelled, and never happens.
-        if let Some(o) = self.owning.iter_mut().find(|o| o.id == id && !o.cancelled) {
-            o.cancelled = true;
+        if self.owning.cancel(id) {
             lock(&self.shared).taking.remove(&id.get());
             self.events.push(Event::SourceCancelled { source: id });
             return;

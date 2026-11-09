@@ -234,7 +234,7 @@ impl X11 {
             atom_of: HashMap::new(),
             owner_of: HashMap::new(),
             owned: HashMap::new(),
-            owning: VecDeque::new(),
+            owning: selection::Takes::default(),
             outgoing: Vec::new(),
             multis: Vec::new(),
             next_multi: 0,
@@ -382,7 +382,7 @@ struct Actor {
     owner_of: HashMap<Selection, Window>,
     owned: HashMap<Atom, selection::Owned>,
     /// Ownership requests waiting for a server timestamp, in order.
-    owning: VecDeque<selection::Owning>,
+    owning: selection::Takes,
     outgoing: Vec<Outgoing>,
     /// `MULTIPLE` requests waiting for lazy writers.
     multis: Vec<multiple::Multi>,

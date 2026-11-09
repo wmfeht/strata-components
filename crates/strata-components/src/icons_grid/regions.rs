@@ -27,6 +27,8 @@ pub fn region(m: &TileMetrics, cell_w: f32, cut: &Cut, details_w: f32, local: Po
             return Region::Name;
         }
     }
+    // The line draws no wider than the card's inside (`tile::content_slot`'s `max_w`).
+    let details_w = details_w.min(cell_w - 2.0 * (m.margin + m.card_x));
     if details_w > 0.0 && m.details_line > 0.0 {
         let details = Rect::new(
             (cell_w - details_w) / 2.0,

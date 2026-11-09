@@ -7,7 +7,7 @@
     {
       "t": 0.2,
       "type": "tap",
-      "key": "row-7/frame"
+      "key": "row-7/icon"
     },
     {
       "t": 0.4,
@@ -23,7 +23,7 @@
     {
       "t": 0.8,
       "type": "key",
-      "name": "-"
+      "name": "="
     },
     {
       "t": 1.0,
@@ -31,17 +31,12 @@
       "name": "-",
       "ctrl": true,
       "alt": true
-    },
-    {
-      "t": 1.2,
-      "type": "key",
-      "name": "-"
     }
   ],
   "expect": [
     {
       "key": "c3-size",
-      "name": "Thumbnail size: 56px"
+      "name": "Thumbnail size: 80px"
     },
     {
       "key": "row-7",

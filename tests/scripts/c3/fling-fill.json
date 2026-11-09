@@ -6,27 +6,12 @@
   "events": [
     {
       "t": 1.2,
-      "type": "wheel",
+      "type": "fling",
       "key": "c3-grid",
-      "dx": 0,
-      "dy": -6000
+      "v": -30000
     },
     {
-      "t": 1.25,
-      "type": "wheel",
-      "key": "c3-grid",
-      "dx": 0,
-      "dy": -6000
-    },
-    {
-      "t": 1.3,
-      "type": "wheel",
-      "key": "c3-grid",
-      "dx": 0,
-      "dy": -6000
-    },
-    {
-      "t": 3.5,
+      "t": 5.0,
       "type": "mark",
       "name": "end"
     }
@@ -34,7 +19,7 @@
   "expect": [
     {
       "key": "c3-filled",
-      "name": "Visible 40: thumbnails 12 of 12, details 40"
+      "name": "Visible 48: thumbnails 16 of 16, details 48"
     }
   ]
 }

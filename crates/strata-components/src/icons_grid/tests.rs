@@ -108,3 +108,98 @@ fn a_middle_press_autoscrolls_from_no_tile_or_a_tiles_blank_space_only() {
     assert!(!bg(Some(3), Region::Content), "its thumbnail");
     assert!(!bg(Some(3), Region::Name), "its name");
 }
+
+/// A tile's frame and name show hover only while `RowCx::hover_live` is on: off after a key
+/// moves the cursor (keyboard mode), until the pointer moves. A bare tile follows it itself.
+#[test]
+fn a_tile_shows_no_hover_in_keyboard_mode() {
+    use crate::collection::element::{RowCx, RowState};
+    use crate::contract::{Entry, EntryId, EntryKind};
+
+    let look = Look::fallback(false);
+    let entry = Entry::new(EntryId::new(1), "a.txt", EntryKind::File, "");
+    let rcx = |hover_live, selected| RowCx {
+        index: 0,
+        entry,
+        state: RowState {
+            selected,
+            ..RowState::default()
+        },
+        look: &look,
+        scope: "grid",
+        hover_live,
+    };
+    for selected in [false, true] {
+        assert!(
+            super::tile::frame_look(&rcx(true, selected)).2.is_some(),
+            "{selected}"
+        );
+        assert!(
+            super::tile::frame_look(&rcx(false, selected)).2.is_none(),
+            "{selected}"
+        );
+    }
+    assert!(super::tile::name_look(&rcx(true, false)).2.is_some());
+    assert!(super::tile::name_look(&rcx(false, false)).2.is_none());
+}
+
+/// A cut keeps whole grapheme clusters at both ends: no combining mark is left without its
+/// letter, and no ZWJ emoji sequence is split, at any caption width.
+#[test]
+fn a_cut_never_splits_a_grapheme_cluster() {
+    use unicode_segmentation::UnicodeSegmentation;
+
+    let font = Look::fallback(false).kit.ty.ui_compact;
+    let combining = "e\u{301}".repeat(30);
+    let family = "\u{1F469}\u{200D}\u{1F469}\u{200D}\u{1F467}\u{200D}\u{1F466}";
+    let name = format!("{combining}{family}{family}{family}{combining}.txt");
+    let whole: Vec<&str> = name.graphemes(true).collect();
+    let mut cuts = 0;
+    for width in (40..240).step_by(3) {
+        let c = cut(&name, font, width as f32, 2);
+        if !c.cut {
+            continue;
+        }
+        cuts += 1;
+        let (head, tail) = c.text.split_once('…').expect("an ellipsis");
+        let head: Vec<&str> = head.graphemes(true).collect();
+        let tail: Vec<&str> = tail.graphemes(true).collect();
+        assert_eq!(head, whole[..head.len()], "the head at {width}: {}", c.text);
+        assert_eq!(
+            tail,
+            whole[whole.len() - tail.len()..],
+            "the tail at {width}: {}",
+            c.text
+        );
+    }
+    assert!(cuts > 10, "the name was cut at most widths");
+}
+
+/// A details line wider than the card is cut to the card's inner width as it draws, so a
+/// point on the tile's margin beside it is blank space, not the line.
+#[test]
+fn a_long_details_line_hits_only_inside_the_card() {
+    use super::caption::Cut;
+    use crate::collection::element::Region;
+    use crate::contract::Point;
+
+    let look = Look::fallback(false);
+    let m = TileMetrics::new(&look, 64.0, 2, true);
+    let cell_w = m.min_cell;
+    let cut = Cut {
+        text: "a".into(),
+        cut: false,
+        size: (8.0, m.name_line),
+    };
+    let y = m.details_top() + m.details_line / 2.0;
+    let wide = 10.0 * cell_w;
+    assert_eq!(
+        super::regions::region(&m, cell_w, &cut, wide, Point::new(cell_w / 2.0, y)),
+        Region::Content
+    );
+    assert_eq!(
+        super::regions::region(&m, cell_w, &cut, wide, Point::new(m.margin / 2.0, y)),
+        Region::Gutter,
+        "the tile's margin"
+    );
+}

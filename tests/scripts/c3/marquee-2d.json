@@ -1,55 +1,59 @@
 {
   "bullets": [
-    "browser/selection/marquee: A plain marquee replaces the selection with the entries under the band.",
-    "browser/selection/pointer-intent: In Icons, the gutter beside the thumbnail inside a card is blank space for marquee.",
-    "browser/selection/pointer-intent: On an unselected entry, a drag from blank row space beside the filename starts a marquee."
+    "browser/selection/marquee: A plain marquee replaces the selection with the entries under the band."
   ],
-  "scene": "c3-default-light",
+  "scene": "c3-short-rows-light",
   "events": [
     {
       "t": 0.2,
       "type": "tap",
-      "key": "row-16/frame"
+      "key": "row-205/icon"
     },
     {
       "t": 0.5,
       "type": "down",
-      "key": "row-1/gap"
+      "key": "line-209"
     },
     {
       "t": 0.55,
       "type": "move",
-      "key": "row-2/gap"
+      "key": "row-206/icon"
     },
     {
       "t": 0.6,
       "type": "move",
-      "key": "row-10/gap"
+      "key": "row-203/icon"
     },
     {
       "t": 0.65,
       "type": "move",
-      "key": "row-101/gap"
+      "key": "row-200/icon"
     },
     {
       "t": 0.7,
       "type": "up",
-      "key": "row-101/gap"
+      "key": "row-200/icon"
     }
   ],
   "expect": [
     {
       "key": "status",
-      "name": "6 items selected"
+      "name": "7 items selected"
     },
     {
-      "key": "row-1",
+      "key": "row-200",
       "states": [
         "selected"
       ]
     },
     {
-      "key": "row-101",
+      "key": "row-209",
+      "states": [
+        "selected"
+      ]
+    },
+    {
+      "key": "row-201",
       "states": [
         "selected"
       ]

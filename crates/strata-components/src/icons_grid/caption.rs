@@ -7,8 +7,8 @@
 //! cut is worked out here by measuring candidates with `rune::text::measure_with`, the same
 //! layout the text element draws, and the shown text is the cut string.
 //!
-//! Cuts fall between characters, not graphemes: a name whose cut lands inside a combining
-//! sequence shows the sequence split. Rune's own cuts fall between graphemes.
+//! Cuts fall between grapheme clusters, as Rune's own do: a letter keeps its combining marks,
+//! and an emoji sequence stays whole.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -17,6 +17,7 @@ use std::rc::Rc;
 
 use rune::TextStyle;
 use rune::text::RichLayoutOptions;
+use unicode_segmentation::UnicodeSegmentation;
 
 /// How many cuts each of the cache's two generations holds: about a few screens of tiles.
 const GENERATION: usize = 4096;
@@ -105,17 +106,17 @@ pub fn cut(name: &str, font: TextStyle, width: f32, lines: usize) -> Cut {
             size: whole,
         };
     }
-    let chars: Vec<char> = name.chars().collect();
+    let graphemes: Vec<&str> = name.graphemes(true).collect();
     let candidate = |keep: usize| -> String {
         let head = keep.div_ceil(2);
         let tail = keep / 2;
-        let mut s: String = chars[..head].iter().collect();
+        let mut s: String = graphemes[..head].concat();
         s.push('…');
-        s.extend(&chars[chars.len() - tail..]);
+        s.push_str(&graphemes[graphemes.len() - tail..].concat());
         s
     };
-    // The most characters kept that still fit: fitting shrinks as more are kept.
-    let (mut lo, mut hi) = (0usize, chars.len().saturating_sub(1));
+    // The most grapheme clusters kept that still fit: fitting shrinks as more are kept.
+    let (mut lo, mut hi) = (0usize, graphemes.len().saturating_sub(1));
     while lo < hi {
         let mid = (lo + hi).div_ceil(2);
         if measure(&candidate(mid), font, width).1 <= limit {

@@ -284,9 +284,14 @@ fn a_scroll_offset_comes_back_only_at_its_grids_width() {
         at,
         "the same width: the offset"
     );
-    // Another width wraps otherwise: the key differs, and the cursor comes into view instead.
-    let other = IconsGrid::<Host>::layout_key(400.0, 64.0, &rt.state.look);
-    assert_ne!(other, layout);
+    // Narrowed, the grid wraps otherwise: its key differs, and the cursor comes into view
+    // instead of the offset.
+    rt.update(|s: &mut Host, _: &mut Tx| s.w = 400.0);
+    for _ in 0..10 {
+        rt.frame(DT);
+    }
+    let other = key(&rt.state);
+    assert_ne!(other, layout, "another count a row");
     rt.update(|s: &mut Host, tx: &mut Tx| {
         s.coll.set_layout_key(other);
         s.coll
@@ -322,4 +327,33 @@ fn a_4k_grid_at_scale_2_settles_its_thumbnail_queue() {
     );
     let st = rt.state.store.stats();
     assert!(st.bytes <= st.budget, "{} of {}", st.bytes, st.budget);
+}
+
+/// The grid syncs the store with its count a row (C25's `Viewport::per_line`), so the margin it
+/// loads past the viewport is whole lines of tiles, as the grid draws them: served as it asks,
+/// the loaded thumbnails end on a line's last tile, a line or more past the viewport.
+#[test]
+fn the_thumbnail_margin_is_whole_lines_of_tiles() {
+    let mut rt = runtime(host(2_000, 900.0, 600.0), 1.0);
+    for _ in 0..10 {
+        serve(&mut rt.state);
+        rt.frame(DT);
+    }
+    let s = &rt.state;
+    let per = s.coll.per_line();
+    assert!(per > 1);
+    let shown = s.coll.visible_range();
+    let loaded: Vec<usize> = (0..s.src.len())
+        .filter(|&i| {
+            let key = s.src.entry(i).thumbnail.expect("every entry has one");
+            matches!(s.store.state(key), crate::thumbnails::State::Ready { .. })
+        })
+        .collect();
+    let end = loaded.last().copied().expect("some loaded") + 1;
+    assert_eq!(loaded.len(), end, "loaded from the top without a hole");
+    assert!(
+        end >= shown.end + per,
+        "a line or more past the viewport: {end} vs {shown:?}"
+    );
+    assert_eq!(end % per, 0, "whole lines of {per}: {end}");
 }

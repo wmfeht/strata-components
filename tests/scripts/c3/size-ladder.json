@@ -1,6 +1,5 @@
 {
   "bullets": [
-    "browser/view-modes/thumbnail-size: The size steps through 32, 36, 40, 44, 48, 56, 64, 72, 80, 96, 112, 128, 144, 160, 192, 224, and 256 px.",
     "browser/view-modes/thumbnail-size: In Icons, Ctrl+Alt++ or Ctrl+Alt+= moves the size one step larger.",
     "browser/view-modes/thumbnail-size: In Icons, Ctrl+Alt+− moves the size one step smaller along the same sizes."
   ],
@@ -9,7 +8,7 @@
     {
       "t": 0.2,
       "type": "tap",
-      "key": "row-7/frame"
+      "key": "row-7/icon"
     },
     {
       "t": 0.4,

@@ -56,15 +56,6 @@
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
                               "description": "Folder",
                               "key": "row-1",
                               "name": "Holidays",
@@ -74,15 +65,6 @@
                             {
                               "actions": [
                                 "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
                               ],
                               "description": "Folder",
                               "key": "row-2",
@@ -94,15 +76,6 @@
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
                               "description": "Folder",
                               "key": "row-3",
                               "name": "Wallpapers",
@@ -113,15 +86,6 @@
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
                               "description": "Folder",
                               "key": "row-4",
                               "name": "Empty album",
@@ -131,15 +95,6 @@
                             {
                               "actions": [
                                 "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
                               ],
                               "description": "Folder",
                               "key": "row-5",
@@ -163,15 +118,6 @@
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
                               "description": "Folder",
                               "key": "row-6",
                               "name": "Raw",
@@ -181,15 +127,6 @@
                             {
                               "actions": [
                                 "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
                               ],
                               "description": "Image",
                               "key": "row-7",
@@ -201,15 +138,6 @@
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
                               "description": "Image",
                               "key": "row-8",
                               "name": "sunset over the bay.jpg",
@@ -220,15 +148,6 @@
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
                               "description": "Image",
                               "key": "row-9",
                               "name": "cat.png",
@@ -238,15 +157,6 @@
                             {
                               "actions": [
                                 "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
                               ],
                               "description": "Image",
                               "key": "row-10",
@@ -270,15 +180,6 @@
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
                               "description": "Archive",
                               "key": "row-11",
                               "name": "2026-10-07-release-candidate-build-final-v3-with-a-very-long-tail.tar.gz",
@@ -288,15 +189,6 @@
                             {
                               "actions": [
                                 "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
                               ],
                               "description": "Video",
                               "key": "row-12",
@@ -308,15 +200,6 @@
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
                               "description": "Audio",
                               "key": "row-13",
                               "name": "song.flac",
@@ -327,15 +210,6 @@
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
                               "description": "Text document",
                               "key": "row-14",
                               "name": "notes.md",
@@ -345,15 +219,6 @@
                             {
                               "actions": [
                                 "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
                               ],
                               "description": "File",
                               "key": "row-15",
@@ -377,15 +242,6 @@
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
                               "description": "Text document",
                               "key": "row-16",
                               "name": "a.txt",
@@ -395,15 +251,6 @@
                             {
                               "actions": [
                                 "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
                               ],
                               "description": "Image",
                               "key": "row-100",
@@ -415,15 +262,6 @@
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
                               "description": "Image",
                               "key": "row-101",
                               "name": "photo-002.jpg",
@@ -434,15 +272,6 @@
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
                               "description": "Video",
                               "key": "row-102",
                               "name": "photo-003.mkv",
@@ -452,15 +281,6 @@
                             {
                               "actions": [
                                 "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
                               ],
                               "description": "File",
                               "key": "row-103",
@@ -484,15 +304,6 @@
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
                               "description": "Image",
                               "key": "row-104",
                               "name": "photo-005.jpg",
@@ -502,15 +313,6 @@
                             {
                               "actions": [
                                 "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
                               ],
                               "description": "Image",
                               "key": "row-105",
@@ -522,15 +324,6 @@
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
                               "description": "Video",
                               "key": "row-106",
                               "name": "photo-007.mkv",
@@ -541,15 +334,6 @@
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
                               "description": "File",
                               "key": "row-107",
                               "name": "photo-008.bin",
@@ -559,15 +343,6 @@
                             {
                               "actions": [
                                 "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
                               ],
                               "description": "Image",
                               "key": "row-108",
@@ -591,15 +366,6 @@
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
                               "description": "Image",
                               "key": "row-109",
                               "name": "photo-010.jpg",
@@ -609,15 +375,6 @@
                             {
                               "actions": [
                                 "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
                               ],
                               "description": "Video",
                               "key": "row-110",
@@ -629,15 +386,6 @@
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
                               "description": "File",
                               "key": "row-111",
                               "name": "photo-012.bin",
@@ -648,15 +396,6 @@
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
                               "description": "Image",
                               "key": "row-112",
                               "name": "photo-013.jpg",
@@ -666,15 +405,6 @@
                             {
                               "actions": [
                                 "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
                               ],
                               "description": "Image",
                               "key": "row-113",
@@ -698,15 +428,6 @@
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
                               "description": "Video",
                               "key": "row-114",
                               "name": "photo-015.mkv",
@@ -716,15 +437,6 @@
                             {
                               "actions": [
                                 "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
                               ],
                               "description": "File",
                               "key": "row-115",
@@ -736,15 +448,6 @@
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
                               "description": "Image",
                               "key": "row-116",
                               "name": "photo-017.jpg",
@@ -755,15 +458,6 @@
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
                               "description": "Image",
                               "key": "row-117",
                               "name": "photo-018.jpg",
@@ -773,15 +467,6 @@
                             {
                               "actions": [
                                 "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
                               ],
                               "description": "Video",
                               "key": "row-118",
@@ -805,15 +490,6 @@
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
                               "description": "File",
                               "key": "row-119",
                               "name": "photo-020.bin",
@@ -823,15 +499,6 @@
                             {
                               "actions": [
                                 "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
                               ],
                               "description": "Image",
                               "key": "row-120",
@@ -843,15 +510,6 @@
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
                               "description": "Image",
                               "key": "row-121",
                               "name": "photo-022.jpg",
@@ -862,15 +520,6 @@
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
                               "description": "Video",
                               "key": "row-122",
                               "name": "photo-023.mkv",
@@ -880,15 +529,6 @@
                             {
                               "actions": [
                                 "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
                               ],
                               "description": "File",
                               "key": "row-123",

@@ -75,9 +75,23 @@ mod c3 {
         run(rt, 0.1);
     }
 
+    /// A point on the blank card space between tile `id`'s frame and its name: 2 pt under
+    /// the frame's drawn bottom, centred under it (the caption gap is 4 pt).
+    fn under_frame(rt: &Runtime<Gallery>, id: u64) -> (f32, f32) {
+        let [x, y, w, h] = element(rt, &format!("row-{id}/icon"))
+            .unwrap_or_else(|| panic!("no tile {id}"))
+            .visible;
+        (x + w / 2.0, y + h + 2.0)
+    }
+
     /// Moves the pointer onto `path` and rests it there past the page's tooltip delay.
     fn rest_on(rt: &mut Runtime<Gallery>, path: &str) -> Option<String> {
         let (x, y) = center(rt, path);
+        rest_at(rt, x, y)
+    }
+
+    /// Moves the pointer to `x`, `y` and rests it there past the page's tooltip delay.
+    fn rest_at(rt: &mut Runtime<Gallery>, x: f32, y: f32) -> Option<String> {
         rt.pointer_move(x, y);
         run(rt, HELP_DELAY + 0.2);
         rt.help_tooltip().map(|(t, _)| t.to_owned())
@@ -107,13 +121,14 @@ mod c3 {
         assert_eq!(rest_on(&mut rt, "row-11/label").as_deref(), Some(LONG));
         rt.pointer_move(1.0, 1.0);
         run(&mut rt, 0.2);
-        assert_eq!(rest_on(&mut rt, "row-11/frame").as_deref(), Some(LONG));
+        assert_eq!(rest_on(&mut rt, "row-11/icon").as_deref(), Some(LONG));
         rt.pointer_move(1.0, 1.0);
         run(&mut rt, 0.2);
         assert_eq!(rest_on(&mut rt, "row-11/details").as_deref(), Some(LONG));
         rt.pointer_move(1.0, 1.0);
         run(&mut rt, 0.2);
-        assert_eq!(rest_on(&mut rt, "row-11/gap"), None, "the card's padding");
+        let (x, y) = under_frame(&rt, 11);
+        assert_eq!(rest_at(&mut rt, x, y), None, "the card's padding");
         rt.pointer_move(1.0, 1.0);
         run(&mut rt, 0.2);
         assert_eq!(rest_on(&mut rt, "row-7/label"), None, "beach.jpg fits");
@@ -139,7 +154,7 @@ mod c3 {
         let mut rt = mount("c3-default-light");
         rt.update(|g, _| g.c3.renaming = Some(EntryId::new(11)));
         run(&mut rt, 0.1);
-        assert_eq!(rest_on(&mut rt, "row-11/frame"), None);
+        assert_eq!(rest_on(&mut rt, "row-11/icon"), None);
         rt.pointer_move(1.0, 1.0);
         let renamed = "renamed-candidate-build-with-another-quite-long-tail-for-the-cut.zip";
         rt.update(|g, tx| {
@@ -157,7 +172,7 @@ mod c3 {
     #[test]
     fn a_key_moving_onto_a_cut_tile_shows_no_tooltip() {
         let mut rt = mount("c3-default-light");
-        click(&mut rt, "row-10/frame", Mods::default());
+        click(&mut rt, "row-10/icon", Mods::default());
         rt.pointer_move(1.0, 1.0);
         key(&mut rt, Key::Right, Mods::default());
         run(&mut rt, HELP_DELAY + 0.3);
@@ -171,20 +186,20 @@ mod c3 {
     fn hover_lights_the_frame_or_the_name_and_not_the_cards_blank_space() {
         let mut rt = mount("c3-default-light");
         let hover = |rt: &Runtime<Gallery>, path: &str| element(rt, path).map_or(0.0, |e| e.hover);
-        let (x, y) = center(&rt, "row-13/gap");
+        let (x, y) = under_frame(&rt, 13);
         rt.pointer_move(x, y);
         run(&mut rt, 0.3);
-        assert_eq!(hover(&rt, "row-13/frame"), 0.0);
+        assert_eq!(hover(&rt, "row-13/icon"), 0.0);
         assert_eq!(hover(&rt, "row-13/label"), 0.0);
-        let (x, y) = center(&rt, "row-13/frame");
+        let (x, y) = center(&rt, "row-13/icon");
         rt.pointer_move(x, y);
         run(&mut rt, 0.3);
-        assert!(hover(&rt, "row-13/frame") > 0.0);
+        assert!(hover(&rt, "row-13/icon") > 0.0);
         let (x, y) = center(&rt, "row-13/label");
         rt.pointer_move(x, y);
         run(&mut rt, 0.3);
         assert!(hover(&rt, "row-13/label") > 0.0);
-        assert_eq!(hover(&rt, "row-13/frame"), 0.0);
+        assert_eq!(hover(&rt, "row-13/icon"), 0.0);
     }
 
     /// icons: "Moving the slider scales existing thumbnails in place without flashing generic
@@ -229,7 +244,7 @@ mod c3 {
     #[test]
     fn a_size_the_host_sets_keeps_the_cursor_tile_in_view() {
         let mut rt = mount("c3-default-light");
-        click(&mut rt, "row-120/frame", Mods::default());
+        click(&mut rt, "row-120/icon", Mods::default());
         rt.update(|g, tx| {
             g.c3.size = 160.0;
             grid().size_changed(g, tx);
@@ -263,5 +278,116 @@ mod c3 {
             .expect("listed");
         assert_ne!(narrow, path, "a reflow moves it to another line");
         assert!(finds(&rt, &narrow), "{narrow}");
+    }
+
+    /// pointer-intent: "In Icons, the gutter beside the thumbnail inside a card is blank space
+    /// for marquee." A drag from the blank card space under an unselected tile's frame draws a
+    /// band (two columns by two rows here), not a file drag.
+    #[test]
+    fn a_drag_from_a_cards_blank_space_draws_a_band() {
+        let mut rt = mount("c3-default-light");
+        let (x0, y0) = under_frame(&rt, 1);
+        let (x1, y1) = under_frame(&rt, 10);
+        rt.pointer_down(x0, y0);
+        rt.frame(FRAME);
+        for i in 1..=6 {
+            let f = i as f32 / 6.0;
+            rt.pointer_move(x0 + (x1 - x0) * f, y0 + (y1 - y0) * f);
+            rt.frame(FRAME);
+        }
+        rt.pointer_up(x1, y1);
+        run(&mut rt, 0.3);
+        assert_eq!(selected(&rt), vec![1, 2, 9, 10]);
+        assert!(
+            !rt.state.c3.intent.starts_with("Dragging"),
+            "{}",
+            rt.state.c3.intent
+        );
+    }
+
+    /// The grid draws each tile where its hit geometry says, a short last row included (its
+    /// cells share the row with empty filler cells): a press lands on the tile drawn there.
+    #[test]
+    fn every_tile_is_drawn_centred_in_its_geometry_rect() {
+        let rt = mount("c3-short-rows-light");
+        let collection = grid().collection(&rt.state);
+        for (index, id) in (200..210).enumerate() {
+            let rect = collection.window_rect_of(&rt.state, index);
+            let [x, _, w, _] = element(&rt, &format!("row-{id}/icon"))
+                .unwrap_or_else(|| panic!("tile {id}"))
+                .rect;
+            let drawn = x + w / 2.0;
+            let laid = rect.x + rect.w / 2.0;
+            assert!(
+                (drawn - laid).abs() < 0.5,
+                "tile {id}: drawn at {drawn}, laid out at {laid}"
+            );
+        }
+    }
+
+    /// thumbnail-size: "The size steps through 32, 36, 40, 44, 48, 56, 64, 72, 80, 96, 112,
+    /// 128, 144, 160, 192, 224, and 256 px." From 32, sixteen steps up land on each size in
+    /// turn, a seventeenth stays at 256, and sixteen down walk back the same sizes.
+    #[test]
+    fn a_step_at_a_time_walks_strata_s_whole_ladder_both_ways() {
+        const LADDER: [f32; 17] = [
+            32.0, 36.0, 40.0, 44.0, 48.0, 56.0, 64.0, 72.0, 80.0, 96.0, 112.0, 128.0, 144.0, 160.0,
+            192.0, 224.0, 256.0,
+        ];
+        let mut rt = mount("c3-size-32-light");
+        let mut sizes = vec![rt.state.c3.size];
+        for dir in [1, -1] {
+            for _ in 0..17 {
+                rt.update(|g, tx| {
+                    grid().apply_size(g, strata_components::icons_grid::SizeCommand::Step(dir), tx);
+                });
+                run(&mut rt, 0.05);
+                sizes.push(rt.state.c3.size);
+            }
+        }
+        let up: Vec<f32> = LADDER.iter().copied().chain([256.0]).collect();
+        let down: Vec<f32> = LADDER.iter().rev().copied().skip(1).chain([32.0]).collect();
+        assert_eq!(&sizes[..18], &up[..], "up");
+        assert_eq!(&sizes[18..], &down[..], "down");
+    }
+
+    /// A size step that keeps the count a row (one tile a row here) still moves every row: a
+    /// cursor tile that showed stays in view, as a reflow keeps it.
+    #[test]
+    fn a_size_step_that_keeps_the_count_keeps_the_cursor_tile_in_view() {
+        let mut rt = mount("c3-narrow-light");
+        assert_eq!(rt.state.c3.coll.per_line(), 1);
+        click(&mut rt, "row-203/icon", Mods::default());
+        assert!(rt.state.c3.coll.visible_range().contains(&3));
+        rt.update(|g, tx| {
+            grid().apply_size(g, strata_components::icons_grid::SizeCommand::Step(6), tx);
+        });
+        run(&mut rt, 0.5);
+        assert_eq!(rt.state.c3.coll.per_line(), 1, "the count stayed");
+        assert_eq!(rt.state.c3.size, 144.0);
+        assert!(
+            rt.state.c3.coll.visible_range().contains(&3),
+            "the cursor tile shows: {:?}",
+            rt.state.c3.coll.visible_range()
+        );
+    }
+
+    /// Turning thumbnails off draws every tile with its icon alone, and on again with its
+    /// image: the tile builds again on each (C25's `version` changes with the switch).
+    #[test]
+    fn thumbnails_off_and_on_rebuild_the_tiles() {
+        let mut rt = mount("c3-default-light");
+        let thumb = |rt: &Runtime<Gallery>| element(rt, "row-7/icon/thumb").is_some();
+        assert!(thumb(&rt), "an image part while on");
+        rt.update(|g, _| {
+            g.c3.store.set_enabled(false);
+        });
+        run(&mut rt, 0.2);
+        assert!(!thumb(&rt), "the icon alone while off");
+        rt.update(|g, _| {
+            g.c3.store.set_enabled(true);
+        });
+        run(&mut rt, 0.2);
+        assert!(thumb(&rt), "the image part again");
     }
 }

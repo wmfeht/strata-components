@@ -21,7 +21,7 @@
             },
             {
               "key": "c3-columns",
-              "name": "4 a row",
+              "name": "3 a row",
               "role": "label"
             },
             {
@@ -56,15 +56,6 @@
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
                               "description": "Image",
                               "key": "row-200",
                               "name": "tile-0.jpg",
@@ -74,15 +65,6 @@
                             {
                               "actions": [
                                 "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
                               ],
                               "description": "Image",
                               "key": "row-201",
@@ -94,43 +76,15 @@
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
                               "description": "Image",
                               "key": "row-202",
                               "name": "tile-2.jpg",
                               "position": 3,
                               "role": "grid-cell"
-                            },
-                            {
-                              "actions": [
-                                "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
-                              "description": "Image",
-                              "key": "row-203",
-                              "name": "tile-3.jpg",
-                              "position": 4,
-                              "role": "grid-cell"
                             }
                           ],
                           "key": "line-200",
-                          "name": "tile-0.jpg tile-1.jpg tile-2.jpg tile-3.jpg",
+                          "name": "tile-0.jpg tile-1.jpg tile-2.jpg",
                           "position": 1,
                           "role": "row",
                           "setSize": 10
@@ -144,14 +98,15 @@
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
+                              "description": "Image",
+                              "key": "row-203",
+                              "name": "tile-3.jpg",
+                              "position": 4,
+                              "role": "grid-cell"
+                            },
+                            {
+                              "actions": [
+                                "scroll-into-view"
                               ],
                               "description": "Image",
                               "key": "row-204",
@@ -163,62 +118,15 @@
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
                               "description": "Image",
                               "key": "row-205",
                               "name": "tile-5.jpg",
                               "position": 6,
                               "role": "grid-cell"
-                            },
-                            {
-                              "actions": [
-                                "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
-                              "description": "Image",
-                              "key": "row-206",
-                              "name": "tile-6.jpg",
-                              "position": 7,
-                              "role": "grid-cell"
-                            },
-                            {
-                              "actions": [
-                                "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
-                              "description": "Image",
-                              "key": "row-207",
-                              "name": "tile-7.jpg",
-                              "position": 8,
-                              "role": "grid-cell"
                             }
                           ],
-                          "key": "line-204",
-                          "name": "tile-4.jpg tile-5.jpg tile-6.jpg tile-7.jpg",
+                          "key": "line-203",
+                          "name": "tile-3.jpg tile-4.jpg tile-5.jpg",
                           "position": 2,
                           "role": "row",
                           "setSize": 10
@@ -232,33 +140,47 @@
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
                               "description": "Image",
-                              "key": "row-208",
-                              "name": "tile-8.jpg",
-                              "position": 9,
+                              "key": "row-206",
+                              "name": "tile-6.jpg",
+                              "position": 7,
                               "role": "grid-cell"
                             },
                             {
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
+                              "description": "Image",
+                              "key": "row-207",
+                              "name": "tile-7.jpg",
+                              "position": 8,
+                              "role": "grid-cell"
+                            },
+                            {
+                              "actions": [
+                                "scroll-into-view"
+                              ],
+                              "description": "Image",
+                              "key": "row-208",
+                              "name": "tile-8.jpg",
+                              "position": 9,
+                              "role": "grid-cell"
+                            }
+                          ],
+                          "key": "line-206",
+                          "name": "tile-6.jpg tile-7.jpg tile-8.jpg",
+                          "position": 3,
+                          "role": "row",
+                          "setSize": 10
+                        },
+                        {
+                          "actions": [
+                            "scroll-into-view"
+                          ],
+                          "children": [
+                            {
+                              "actions": [
+                                "scroll-into-view"
                               ],
                               "description": "Image",
                               "key": "row-209",
@@ -267,16 +189,16 @@
                               "role": "grid-cell"
                             }
                           ],
-                          "key": "line-208",
-                          "name": "tile-8.jpg tile-9.jpg",
-                          "position": 3,
+                          "key": "line-209",
+                          "name": "tile-9.jpg",
+                          "position": 4,
                           "role": "row",
                           "setSize": 10
                         }
                       ],
                       "key": "rows",
                       "role": "group",
-                      "setSize": 3
+                      "setSize": 4
                     }
                   ],
                   "key": "viewport",

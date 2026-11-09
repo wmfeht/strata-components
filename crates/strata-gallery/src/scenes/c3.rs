@@ -550,7 +550,7 @@ fn narrow(g: &mut Gallery, dark: bool) {
 
 fn short_rows(g: &mut Gallery, dark: bool) {
     let d = open(g, dark, Folder::Short);
-    d.pane = Some(520.0);
+    d.pane = Some(400.0);
 }
 
 fn marks(g: &mut Gallery, dark: bool) {

@@ -4,34 +4,27 @@
 //! tile's state, as Strata's `.file-icons` rules light `.icons-card-icon-frame` and
 //! `.icons-card-label`, never the gutters between tiles.
 //!
-//! A line mounts all its tiles in one frame, so a tile is kept to few elements: the card (its
-//! margin and padding in one), the frame, the thumbnail box with the icon and the image in it,
-//! the gap, the name and the details line. The name and the details sit where their reserved
-//! space puts them through margins, not wrappers.
+//! A line mounts all its tiles in one frame, and every element costs there (C3 review round
+//! 1, B1: a 32 pt grid's scroll frames), so a tile is kept to the fewest: the card, which is
+//! the cell itself (`Collection::bare_items`), the frame with the icon and the image in it, the
+//! name and the details line, five or six. The gap and the reserved lines are margins, not
+//! wrappers, and the name is sized from its measured cut, so layout never measures it.
 
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 use rune::{Align, Color, El, SurfaceFit, col, el, icon, row, text};
 use strata_kit::icons::IconName;
-use strata_kit::look::Look;
 use strata_kit::slots::icons as tokens;
 
 use super::Shared;
 use super::caption::Cut;
 use super::metrics::TileMetrics;
-use crate::collection::element::{ContentSlot, ICON, LABEL, RowCx, RowState, Slot};
+use crate::collection::element::{ContentSlot, ICON, LABEL, RowCx, Slot};
 use crate::thumbnails::{Step, THUMB};
-
-/// The key of a tile's thumbnail frame, under its cell (`row-{id}/frame`).
-pub const FRAME: &str = "frame";
 
 /// The key of a tile's details line, under its cell (`row-{id}/details`).
 pub const DETAILS: &str = "details";
-
-/// The key of the blank space between a tile's frame and its name, under its cell
-/// (`row-{id}/gap`): blank space a band starts from, which scripts press.
-pub const GAP: &str = "gap";
 
 /// What one build worked out for every tile.
 #[derive(Clone, Copy, Debug)]
@@ -58,23 +51,23 @@ impl Built {
     }
 
     /// A hash of everything this build draws every tile with: its sizes, the caption width
-    /// (a name's cut follows from it and the name, which the row's own version holds) and the
+    /// and the fonts' epoch (a name's cut follows from them and the name, which the row's own
+    /// version holds: a fallback font loading re-cuts names at the next build), and the
     /// thumbnail step.
     pub fn key(&self) -> u64 {
         let mut h = std::hash::DefaultHasher::new();
         self.m.key().hash(&mut h);
+        rune::text::font_epoch().hash(&mut h);
         self.caption_w.to_bits().hash(&mut h);
         self.step.hash(&mut h);
         h.finish()
     }
 }
 
-/// The frame's look for a tile's state: fill, outline and hover.
-fn frame_look(
-    look: &Look,
-    st: RowState,
-    hover: bool,
-) -> (Option<Color>, Option<(f32, Color)>, Option<Color>) {
+/// The frame's look for a tile: its state's fill and outline, and its hover fill, none in
+/// keyboard mode (`RowCx::hover_live` off) until the pointer moves.
+pub(super) fn frame_look(rcx: &RowCx<'_>) -> (Option<Color>, Option<(f32, Color)>, Option<Color>) {
+    let (look, st, hover) = (rcx.look, rcx.state, rcx.hover_live);
     let k = &look.kit;
     if st.drop_target {
         return (
@@ -101,6 +94,25 @@ fn frame_look(
     (None, ring, hover.then(|| tokens::frame_hover_fill(look)))
 }
 
+/// The name box's look for a tile: its fill and text colour when selected or a drop target,
+/// and its hover fill otherwise, none in keyboard mode until the pointer moves.
+pub(super) fn name_look(rcx: &RowCx<'_>) -> (Option<Color>, Color, Option<Color>) {
+    let (look, st) = (rcx.look, rcx.state);
+    if st.selected || st.drop_target {
+        (
+            Some(tokens::caption_selected_fill(look)),
+            tokens::caption_selected_text(look),
+            None,
+        )
+    } else {
+        (
+            None,
+            look.kit.c.text_base,
+            rcx.hover_live.then(|| tokens::caption_hover_fill(look)),
+        )
+    }
+}
+
 /// The entry's catalog icon, else the Folder or File icon, in the frame's icon colour.
 fn placeholder(rcx: &RowCx<'_>, points: f32) -> El {
     let look = rcx.look;
@@ -115,11 +127,11 @@ fn placeholder(rcx: &RowCx<'_>, points: f32) -> El {
     icon(glyph, points).color(tokens::frame_icon(look))
 }
 
-/// The icon slot: the frame, holding the slot box ([`ICON`], so C23's flights find it) with
-/// the entry's placeholder icon and, when it has a thumbnail key and thumbnails show, its
-/// image over the icon. As C25's `picture` draws them: the image is fitted (letterboxed) in
-/// the box, and the icon fades out through the handle's opacity while an image is held, so a
-/// thumbnail landing, changing size or going needs no build.
+/// The icon slot: the frame (keyed [`ICON`], so C23's flights fly it, selection and all), with
+/// the entry's placeholder icon centred in it and, when the entry has a thumbnail key and
+/// thumbnails show, its image over the slot. As C25's `picture` draws them: the image is fitted
+/// (letterboxed) in the slot, and the icon fades out through the handle's opacity while an image
+/// is held, so a thumbnail landing, changing size or going needs no build.
 ///
 /// Versioned by the store's handles for the key and the step, never the key's state.
 pub(super) fn icon_slot<S: 'static>(shared: &Rc<Shared<S>>, b: Built) -> Slot<S> {
@@ -135,29 +147,27 @@ pub(super) fn icon_slot<S: 'static>(shared: &Rc<Shared<S>>, b: Built) -> Slot<S>
             let m = &b.m;
             let look = rcx.look;
             let glyph = placeholder(rcx, m.slot);
-            let mut slot = row().key(ICON).w(m.slot).h(m.slot).center();
-            slot = match (rcx.entry.thumbnail, (build_shared.parts)(s).thumbs) {
+            let (fill, ring, hover) = frame_look(rcx);
+            let mut frame = row()
+                .key(ICON)
+                .w(m.frame)
+                .h(m.frame)
+                .center()
+                .radius(tokens::frame_radius(look))
+                .a11y_hidden();
+            frame = match (rcx.entry.thumbnail, (build_shared.parts)(s).thumbs) {
                 (Some(key), Some((store, _))) if store.enabled() => {
                     let thumb = store.thumb(key);
-                    slot.child(glyph.live_opacity(thumb.icon_alpha())).child(
+                    frame.child(glyph.live_opacity(thumb.icon_alpha())).child(
                         el().key(THUMB)
-                            .absolute(0.0, 0.0)
+                            .absolute(m.frame_pad, m.frame_pad)
                             .w(m.slot)
                             .h(m.slot)
                             .pixels_fit(thumb.pixels(), SurfaceFit::Fit),
                     )
                 }
-                _ => slot.child(glyph),
+                _ => frame.child(glyph),
             };
-            let (fill, ring, hover) = frame_look(look, rcx.state, rcx.hover_live);
-            let mut frame = row()
-                .key(FRAME)
-                .w(m.frame)
-                .h(m.frame)
-                .center()
-                .radius(tokens::frame_radius(look))
-                .a11y_hidden()
-                .child(slot);
             if let Some(fill) = fill {
                 frame = frame.fill(fill);
             }
@@ -184,14 +194,8 @@ pub(super) fn label_slot<S: 'static>(shared: &Rc<Shared<S>>, b: Built) -> Slot<S
         move |s: &S, rcx: &RowCx<'_>| {
             let m = &b.m;
             let look = rcx.look;
-            let st = rcx.state;
             let cut = b.cut(&build_shared, s, rcx.entry.name);
-            let lit = st.selected || st.drop_target;
-            let color = if lit {
-                tokens::caption_selected_text(look)
-            } else {
-                look.kit.c.text_base
-            };
+            let (fill, color, hover) = name_look(rcx);
             let below = (m.caption_height() - (cut.size.1 + m.caption_pad)).max(0.0);
             let mut name = text(cut.text.to_string())
                 .key(LABEL)
@@ -205,12 +209,15 @@ pub(super) fn label_slot<S: 'static>(shared: &Rc<Shared<S>>, b: Built) -> Slot<S
                 .py(m.caption_pad / 2.0)
                 .mb(below)
                 .radius(tokens::caption_radius(look))
-                .min_w(0.0)
-                .shrink();
-            if lit {
-                name = name.fill(tokens::caption_selected_fill(look));
-            } else if rcx.hover_live {
-                name = name.hover(tokens::caption_hover_fill(look));
+                // Its measured size, so layout doesn't measure the text again for its min- and
+                // max-content widths.
+                .w(cut.size.0 + 2.0 * m.caption_pad)
+                .h(cut.size.1 + m.caption_pad);
+            if let Some(fill) = fill {
+                name = name.fill(fill);
+            }
+            if let Some(hover) = hover {
+                name = name.hover(hover);
             }
             name
         },
@@ -243,28 +250,29 @@ pub(super) fn content_slot<S: 'static>(shared: &Rc<Shared<S>>, b: Built) -> Cont
                 Some(name) => (frame.help(name.clone()), label.help(name.clone())),
                 None => (frame, label),
             };
+            // The card takes no padding of its own: it is the cell, and a padded cell would be
+            // wider than the empty cells that fill a short last row, so the cells of that row
+            // wouldn't share its width equally as the geometry says. Its children keep inside
+            // the card's inner width instead.
+            let inner = (b.cell_w - 2.0 * (m.margin + m.card_x)).max(0.0);
             let mut card = col()
                 .w_full()
                 .h_full()
-                .px(m.margin + m.card_x)
-                .py(m.margin + m.card_y)
                 .items_center()
-                .child(frame);
+                .child(frame.mt(m.margin + m.card_y));
             if m.name_lines > 0 {
                 // The rename editor (C5's) keeps the name's reserved lines, so the details line
                 // stays put.
                 let label = if rcx.state.renaming {
                     col()
-                        .w_full()
+                        .w(inner)
                         .h(m.caption_height())
                         .items_center()
                         .child(label)
                 } else {
                     label
                 };
-                card = card
-                    .child(el().key(GAP).w_full().h(m.caption_gap))
-                    .child(label);
+                card = card.child(label.mt(m.caption_gap));
             }
             if m.details_line > 0.0
                 && let Some(details) = details_of(&build_shared, s, rcx).filter(|d| !d.is_empty())
@@ -278,6 +286,7 @@ pub(super) fn content_slot<S: 'static>(shared: &Rc<Shared<S>>, b: Built) -> Cont
                     .truncate()
                     .h(m.details_line)
                     .px(m.caption_pad)
+                    .max_w(inner)
                     .min_w(0.0)
                     .shrink();
                 if let Some(name) = help {

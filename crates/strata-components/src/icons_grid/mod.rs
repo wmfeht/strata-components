@@ -74,10 +74,10 @@
 //!
 //! The answers to C25's "For C3's review" list:
 //!
-//! - **The part.** The frame holds the slot box keyed `ICON` (so C23's flights find it) with
-//!   the placeholder icon and the image over it, drawn as C25's `picture` draws them (fitted,
-//!   letterboxed, the icon faded through the handle's opacity) with one wrapper fewer; the name
-//!   sits under the box, not the image.
+//! - **The part.** The frame is keyed `ICON` (so C23's flights find it; they fly the frame,
+//!   its selection fill included) and holds the placeholder icon and the image over the slot,
+//!   drawn as C25's `picture` draws them (fitted, letterboxed, the icon faded through the
+//!   handle's opacity) without its two wrappers; the name sits under the slot, not the image.
 //! - **The step.** `Step::for_tile(look, size, scale)`, the scale from the view
 //!   ([`IconsGrid::scale`]) and recorded for handlers. A size change calls
 //!   `ThumbnailStore::set_step` from its handler; [`IconsGrid::poll`] catches a size or scale
@@ -106,7 +106,7 @@
 //! The collection is a grid named by the host, of rows (the lines), of grid cells named by
 //! their file names, each with its place in the listing and its selected state; the cursor's
 //! cell is the grid's active descendant, and the status line counts a selection (C1e). The
-//! frame, name, details and gap are hidden: a cell's description is the host's `Describe`
+//! frame, name and details are hidden: a cell's description is the host's `Describe`
 //! (Strata's entry kind, as the gallery shows). No column index or count (Rune draft
 //! R-C4-3).
 //!
@@ -123,6 +123,11 @@
 //!   hides it until the pointer leaves the element, not until it moves; moving inside an
 //!   element doesn't restart the wait (Strata restarts after 4 px). Sweeping across tiles shows
 //!   none, as each new element starts the wait again. Draft U-C3-2.
+//! - **Ctrl+Shift+wheel right after a plain wheel scrolls** (C3 review round 1): Rune keeps a
+//!   wheel gesture a scroll until it has been still 0.1 s (a trackpad gesture until it ends),
+//!   and never offers its later deltas to `on_wheel` (draft U-C3-3). Strata, whose zoom
+//!   controller runs in GTK's capture phase, steps at once. No clean fix in the grid: claiming
+//!   plain wheels to scroll by hand would lose Rune's scrolling.
 //! - **Hover lights the frame and the name each on its own**, where Strata lights both from
 //!   either: Rune's hover is per element, and a hover group over both would cover the card's
 //!   blank space. No hover after keyboard navigation until the pointer moves (C1e).
@@ -134,9 +139,6 @@
 //! - **The size keys are data** ([`SizeKeys`]): Strata's chords; rebinding and routing window
 //!   keys are the host's.
 //! - **Tiles over 128 pt at scale 2** draw a 256 px image up (above).
-//! - **Names are cut between characters**, not graphemes (U-C3-1).
-//! - **The blank space between the frame and the name is keyed** ([`GAP`]), so scripts can start
-//!   a band on blank tile space without coordinates that follow text widths.
 //!
 //! # Left to other work packages and hosts
 //!
@@ -238,9 +240,14 @@
 //!   never hears a wheel over its content (C1e's `Collection::on_wheel` sits on the viewport
 //!   for it). Repro (probed at 78d22ed and 5d421fd): `col().on_wheel(..)` around a
 //!   `.scroll(..)` viewport; a Ctrl+Shift wheel over the content reaches the viewport's handler
-//!   (2 of 2) and the outer one 0 of 2. Ask: a
-//!   capture-phase `on_wheel`, or let ancestors claim a modified wheel, as GTK's capture phase
-//!   does.
+//!   (2 of 2) and the outer one 0 of 2. Also: a wheel gesture that began as a scroll stays one
+//!   (`offer_wheel`: a gesture with an axis and no handler isn't offered again), and a wheel
+//!   continues the gesture until it has been still 0.1 s (`WHEEL_IDLE`; a trackpad's until it
+//!   ends, or 1 s), so Ctrl+Shift+wheel within 0.1 s of a plain wheel scrolls instead of
+//!   reaching the handler. Repro: five plain notches over the grid, then at once a Ctrl+Shift
+//!   notch: the view scrolls and the size stays; 1.5 s later the same notch steps it (C3 review
+//!   round 1). Ask: a capture-phase `on_wheel`, or let ancestors claim a modified wheel, as
+//!   GTK's capture phase does; and offer a delta whose modifiers changed as a new gesture.
 //!
 //! A fourth probe found nothing to file: a memo whose line is re-keyed by a reflow is reused,
 //! not rebuilt; tiles a reflow builds again are the ones the mounted window newly takes in.
@@ -275,7 +282,7 @@ pub use size::{
     PRECISE_STEP, SizeCommand, SizeKeyed, SizeKeys, SizeRequest, WheelSteps, size_command,
 };
 pub use state::IconsGridState;
-pub use tile::{DETAILS, FRAME, GAP};
+pub use tile::DETAILS;
 
 use crate::collection::element::{
     Collection, CollectionState, Ctx, PointerInput, Region, Roles, RowCx, RowState, entry_path,

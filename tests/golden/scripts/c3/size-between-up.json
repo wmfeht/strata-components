@@ -56,15 +56,6 @@
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
                               "description": "Image",
                               "key": "row-200",
                               "name": "tile-0.jpg",
@@ -74,15 +65,6 @@
                             {
                               "actions": [
                                 "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
                               ],
                               "description": "Image",
                               "key": "row-201",
@@ -94,15 +76,6 @@
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
                               "description": "Image",
                               "key": "row-202",
                               "name": "tile-2.jpg",
@@ -112,15 +85,6 @@
                             {
                               "actions": [
                                 "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
                               ],
                               "description": "Image",
                               "key": "row-203",
@@ -132,15 +96,6 @@
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
                               "description": "Image",
                               "key": "row-204",
                               "name": "tile-4.jpg",
@@ -151,15 +106,6 @@
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
                               "description": "Image",
                               "key": "row-205",
                               "name": "tile-5.jpg",
@@ -169,15 +115,6 @@
                             {
                               "actions": [
                                 "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
                               ],
                               "description": "Image",
                               "key": "row-206",
@@ -201,15 +138,6 @@
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
                               "description": "Image",
                               "key": "row-207",
                               "name": "tile-7.jpg",
@@ -220,15 +148,6 @@
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
                               "description": "Image",
                               "key": "row-208",
                               "name": "tile-8.jpg",
@@ -238,15 +157,6 @@
                             {
                               "actions": [
                                 "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
                               ],
                               "description": "Image",
                               "key": "row-209",

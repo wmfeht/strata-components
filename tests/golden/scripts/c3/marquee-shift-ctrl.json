@@ -6,7 +6,7 @@
           "children": [
             {
               "key": "c3-title",
-              "name": "Pictures · 40 items",
+              "name": "Short · 10 items",
               "role": "label"
             },
             {
@@ -16,17 +16,17 @@
             },
             {
               "key": "c3-intent",
-              "name": "Clicked Wallpapers",
+              "name": "Clicked tile-0.jpg",
               "role": "label"
             },
             {
               "key": "c3-columns",
-              "name": "8 a row",
+              "name": "3 a row",
               "role": "label"
             },
             {
               "key": "c3-filled",
-              "name": "Visible 40: thumbnails 23 of 23, details 40",
+              "name": "Visible 10: thumbnails 10 of 10, details 10",
               "role": "label"
             },
             {
@@ -34,7 +34,7 @@
                 "focus",
                 "context-menu"
               ],
-              "activeDescendant": "row-3",
+              "activeDescendant": "row-200",
               "children": [
                 {
                   "actions": [
@@ -57,18 +57,9 @@
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
-                              "description": "Folder",
-                              "key": "row-1",
-                              "name": "Holidays",
+                              "description": "Image",
+                              "key": "row-200",
+                              "name": "tile-0.jpg",
                               "position": 1,
                               "role": "grid-cell",
                               "states": [
@@ -79,81 +70,54 @@
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
-                              "description": "Folder",
-                              "key": "row-2",
-                              "name": "Screenshots",
+                              "description": "Image",
+                              "key": "row-201",
+                              "name": "tile-1.jpg",
                               "position": 2,
-                              "role": "grid-cell",
-                              "states": [
-                                "selected"
-                              ]
-                            },
-                            {
-                              "actions": [
-                                "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
-                              "description": "Folder",
-                              "key": "row-3",
-                              "name": "Wallpapers",
-                              "position": 3,
                               "role": "grid-cell"
                             },
                             {
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
-                              "description": "Folder",
-                              "key": "row-4",
-                              "name": "Empty album",
-                              "position": 4,
+                              "description": "Image",
+                              "key": "row-202",
+                              "name": "tile-2.jpg",
+                              "position": 3,
                               "role": "grid-cell",
                               "states": [
                                 "selected"
                               ]
+                            }
+                          ],
+                          "key": "line-200",
+                          "name": "tile-0.jpg tile-1.jpg tile-2.jpg",
+                          "position": 1,
+                          "role": "row",
+                          "setSize": 10
+                        },
+                        {
+                          "actions": [
+                            "scroll-into-view"
+                          ],
+                          "children": [
+                            {
+                              "actions": [
+                                "scroll-into-view"
+                              ],
+                              "description": "Image",
+                              "key": "row-203",
+                              "name": "tile-3.jpg",
+                              "position": 4,
+                              "role": "grid-cell"
                             },
                             {
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
-                              "description": "Folder",
-                              "key": "row-5",
-                              "name": "Scans",
+                              "description": "Image",
+                              "key": "row-204",
+                              "name": "tile-4.jpg",
                               "position": 5,
                               "role": "grid-cell"
                             },
@@ -161,37 +125,34 @@
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
-                              "description": "Folder",
-                              "key": "row-6",
-                              "name": "Raw",
+                              "description": "Image",
+                              "key": "row-205",
+                              "name": "tile-5.jpg",
                               "position": 6,
-                              "role": "grid-cell"
-                            },
+                              "role": "grid-cell",
+                              "states": [
+                                "selected"
+                              ]
+                            }
+                          ],
+                          "key": "line-203",
+                          "name": "tile-3.jpg tile-4.jpg tile-5.jpg",
+                          "position": 2,
+                          "role": "row",
+                          "setSize": 10
+                        },
+                        {
+                          "actions": [
+                            "scroll-into-view"
+                          ],
+                          "children": [
                             {
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
                               "description": "Image",
-                              "key": "row-7",
-                              "name": "beach.jpg",
+                              "key": "row-206",
+                              "name": "tile-6.jpg",
                               "position": 7,
                               "role": "grid-cell"
                             },
@@ -199,367 +160,31 @@
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
                               "description": "Image",
-                              "key": "row-8",
-                              "name": "sunset over the bay.jpg",
+                              "key": "row-207",
+                              "name": "tile-7.jpg",
                               "position": 8,
                               "role": "grid-cell"
-                            }
-                          ],
-                          "key": "line-1",
-                          "name": "Holidays Screenshots Wallpapers Empty album Scans Raw beach.jpg sunset over the bay.jpg",
-                          "position": 1,
-                          "role": "row",
-                          "setSize": 40
-                        },
-                        {
-                          "actions": [
-                            "scroll-into-view"
-                          ],
-                          "children": [
+                            },
                             {
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
                               "description": "Image",
-                              "key": "row-9",
-                              "name": "cat.png",
+                              "key": "row-208",
+                              "name": "tile-8.jpg",
                               "position": 9,
                               "role": "grid-cell",
                               "states": [
                                 "selected"
                               ]
-                            },
-                            {
-                              "actions": [
-                                "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
-                              "description": "Image",
-                              "key": "row-10",
-                              "name": "IMG_2041.heic",
-                              "position": 10,
-                              "role": "grid-cell",
-                              "states": [
-                                "selected"
-                              ]
-                            },
-                            {
-                              "actions": [
-                                "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
-                              "description": "Archive",
-                              "key": "row-11",
-                              "name": "2026-10-07-release-candidate-build-final-v3-with-a-very-long-tail.tar.gz",
-                              "position": 11,
-                              "role": "grid-cell",
-                              "states": [
-                                "selected"
-                              ]
-                            },
-                            {
-                              "actions": [
-                                "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
-                              "description": "Video",
-                              "key": "row-12",
-                              "name": "clip.mp4",
-                              "position": 12,
-                              "role": "grid-cell",
-                              "states": [
-                                "selected"
-                              ]
-                            },
-                            {
-                              "actions": [
-                                "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
-                              "description": "Audio",
-                              "key": "row-13",
-                              "name": "song.flac",
-                              "position": 13,
-                              "role": "grid-cell"
-                            },
-                            {
-                              "actions": [
-                                "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
-                              "description": "Text document",
-                              "key": "row-14",
-                              "name": "notes.md",
-                              "position": 14,
-                              "role": "grid-cell"
-                            },
-                            {
-                              "actions": [
-                                "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
-                              "description": "File",
-                              "key": "row-15",
-                              "name": "Quarterly report for the infrastructure committee, final revision.pdf",
-                              "position": 15,
-                              "role": "grid-cell"
-                            },
-                            {
-                              "actions": [
-                                "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
-                              "description": "Text document",
-                              "key": "row-16",
-                              "name": "a.txt",
-                              "position": 16,
-                              "role": "grid-cell"
                             }
                           ],
-                          "key": "line-9",
-                          "name": "cat.png IMG_2041.heic 2026-10-07-release-candidate-build-final-v3-with-a-very-long-tail.tar.gz clip.mp4 song.flac notes.md Quarterly report for the infrastructure committee, final revision.pdf a.txt",
-                          "position": 2,
-                          "role": "row",
-                          "setSize": 40
-                        },
-                        {
-                          "actions": [
-                            "scroll-into-view"
-                          ],
-                          "children": [
-                            {
-                              "actions": [
-                                "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
-                              "description": "Image",
-                              "key": "row-100",
-                              "name": "photo-001.jpg",
-                              "position": 17,
-                              "role": "grid-cell"
-                            },
-                            {
-                              "actions": [
-                                "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
-                              "description": "Image",
-                              "key": "row-101",
-                              "name": "photo-002.jpg",
-                              "position": 18,
-                              "role": "grid-cell"
-                            },
-                            {
-                              "actions": [
-                                "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
-                              "description": "Video",
-                              "key": "row-102",
-                              "name": "photo-003.mkv",
-                              "position": 19,
-                              "role": "grid-cell"
-                            },
-                            {
-                              "actions": [
-                                "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
-                              "description": "File",
-                              "key": "row-103",
-                              "name": "photo-004.bin",
-                              "position": 20,
-                              "role": "grid-cell"
-                            },
-                            {
-                              "actions": [
-                                "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
-                              "description": "Image",
-                              "key": "row-104",
-                              "name": "photo-005.jpg",
-                              "position": 21,
-                              "role": "grid-cell"
-                            },
-                            {
-                              "actions": [
-                                "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
-                              "description": "Image",
-                              "key": "row-105",
-                              "name": "photo-006.jpg",
-                              "position": 22,
-                              "role": "grid-cell"
-                            },
-                            {
-                              "actions": [
-                                "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
-                              "description": "Video",
-                              "key": "row-106",
-                              "name": "photo-007.mkv",
-                              "position": 23,
-                              "role": "grid-cell"
-                            },
-                            {
-                              "actions": [
-                                "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
-                              "description": "File",
-                              "key": "row-107",
-                              "name": "photo-008.bin",
-                              "position": 24,
-                              "role": "grid-cell"
-                            }
-                          ],
-                          "key": "line-100",
-                          "name": "photo-001.jpg photo-002.jpg photo-003.mkv photo-004.bin photo-005.jpg photo-006.jpg photo-007.mkv photo-008.bin",
+                          "key": "line-206",
+                          "name": "tile-6.jpg tile-7.jpg tile-8.jpg",
                           "position": 3,
                           "role": "row",
-                          "setSize": 40
+                          "setSize": 10
                         },
                         {
                           "actions": [
@@ -570,329 +195,23 @@
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
                               "description": "Image",
-                              "key": "row-108",
-                              "name": "photo-009.jpg",
-                              "position": 25,
-                              "role": "grid-cell"
-                            },
-                            {
-                              "actions": [
-                                "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
-                              "description": "Image",
-                              "key": "row-109",
-                              "name": "photo-010.jpg",
-                              "position": 26,
-                              "role": "grid-cell"
-                            },
-                            {
-                              "actions": [
-                                "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
-                              "description": "Video",
-                              "key": "row-110",
-                              "name": "photo-011.mkv",
-                              "position": 27,
-                              "role": "grid-cell"
-                            },
-                            {
-                              "actions": [
-                                "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
-                              "description": "File",
-                              "key": "row-111",
-                              "name": "photo-012.bin",
-                              "position": 28,
-                              "role": "grid-cell"
-                            },
-                            {
-                              "actions": [
-                                "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
-                              "description": "Image",
-                              "key": "row-112",
-                              "name": "photo-013.jpg",
-                              "position": 29,
-                              "role": "grid-cell"
-                            },
-                            {
-                              "actions": [
-                                "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
-                              "description": "Image",
-                              "key": "row-113",
-                              "name": "photo-014.jpg",
-                              "position": 30,
-                              "role": "grid-cell"
-                            },
-                            {
-                              "actions": [
-                                "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
-                              "description": "Video",
-                              "key": "row-114",
-                              "name": "photo-015.mkv",
-                              "position": 31,
-                              "role": "grid-cell"
-                            },
-                            {
-                              "actions": [
-                                "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
-                              "description": "File",
-                              "key": "row-115",
-                              "name": "photo-016.bin",
-                              "position": 32,
+                              "key": "row-209",
+                              "name": "tile-9.jpg",
+                              "position": 10,
                               "role": "grid-cell"
                             }
                           ],
-                          "key": "line-108",
-                          "name": "photo-009.jpg photo-010.jpg photo-011.mkv photo-012.bin photo-013.jpg photo-014.jpg photo-015.mkv photo-016.bin",
+                          "key": "line-209",
+                          "name": "tile-9.jpg",
                           "position": 4,
                           "role": "row",
-                          "setSize": 40
-                        },
-                        {
-                          "actions": [
-                            "scroll-into-view"
-                          ],
-                          "children": [
-                            {
-                              "actions": [
-                                "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
-                              "description": "Image",
-                              "key": "row-116",
-                              "name": "photo-017.jpg",
-                              "position": 33,
-                              "role": "grid-cell"
-                            },
-                            {
-                              "actions": [
-                                "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
-                              "description": "Image",
-                              "key": "row-117",
-                              "name": "photo-018.jpg",
-                              "position": 34,
-                              "role": "grid-cell"
-                            },
-                            {
-                              "actions": [
-                                "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
-                              "description": "Video",
-                              "key": "row-118",
-                              "name": "photo-019.mkv",
-                              "position": 35,
-                              "role": "grid-cell"
-                            },
-                            {
-                              "actions": [
-                                "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
-                              "description": "File",
-                              "key": "row-119",
-                              "name": "photo-020.bin",
-                              "position": 36,
-                              "role": "grid-cell"
-                            },
-                            {
-                              "actions": [
-                                "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
-                              "description": "Image",
-                              "key": "row-120",
-                              "name": "photo-021.jpg",
-                              "position": 37,
-                              "role": "grid-cell"
-                            },
-                            {
-                              "actions": [
-                                "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
-                              "description": "Image",
-                              "key": "row-121",
-                              "name": "photo-022.jpg",
-                              "position": 38,
-                              "role": "grid-cell"
-                            },
-                            {
-                              "actions": [
-                                "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
-                              "description": "Video",
-                              "key": "row-122",
-                              "name": "photo-023.mkv",
-                              "position": 39,
-                              "role": "grid-cell"
-                            },
-                            {
-                              "actions": [
-                                "scroll-into-view"
-                              ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "gap",
-                                  "role": "group"
-                                }
-                              ],
-                              "description": "File",
-                              "key": "row-123",
-                              "name": "photo-024.bin",
-                              "position": 40,
-                              "role": "grid-cell"
-                            }
-                          ],
-                          "key": "line-116",
-                          "name": "photo-017.jpg photo-018.jpg photo-019.mkv photo-020.bin photo-021.jpg photo-022.jpg photo-023.mkv photo-024.bin",
-                          "position": 5,
-                          "role": "row",
-                          "setSize": 40
+                          "setSize": 10
                         }
                       ],
                       "key": "rows",
                       "role": "group",
-                      "setSize": 5
+                      "setSize": 4
                     }
                   ],
                   "key": "viewport",
@@ -903,7 +222,7 @@
                 },
                 {
                   "key": "status",
-                  "name": "7 items selected",
+                  "name": "4 items selected",
                   "role": "label",
                   "states": [
                     "live-polite"
@@ -911,7 +230,7 @@
                 }
               ],
               "key": "c3-grid",
-              "name": "Pictures",
+              "name": "Short",
               "role": "grid",
               "states": [
                 "focused"

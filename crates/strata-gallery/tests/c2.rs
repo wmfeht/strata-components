@@ -1182,16 +1182,14 @@ mod c2 {
         );
     }
 
-    /// Column `depth`'s laid-out width and how much of it shows.
+    /// Column `depth`'s laid-out width and how much of it shows (its shell keyed by its slot,
+    /// the depth plus one in these scenes).
     fn shown(rt: &Runtime<Gallery>, depth: usize) -> (f32, f32) {
-        let slot = rt
-            .state
-            .c2
-            .columns
-            .column(depth)
-            .map(|_| depth + 1)
-            .unwrap();
-        let i = info(rt, &format!("c2-slot-{slot}")).expect("slot");
+        assert!(
+            rt.state.c2.columns.column(depth).is_some(),
+            "column {depth}"
+        );
+        let i = info(rt, &format!("c2-slot-{}", depth + 1)).expect("slot");
         (i.rect[2], i.visible[2])
     }
 

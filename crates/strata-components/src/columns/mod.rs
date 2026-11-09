@@ -95,8 +95,10 @@
 //! - **Reveals and the drag autoscroll glide** on Rune springs (C1d's and C24's glide lead),
 //!   rather than stepping the adjustment each frame as Strata does; the speeds are Strata's. The
 //!   reveal's spring stands in for Strata's 220 ms emphasized deceleration, and the lifecycle's
-//!   for its 220 ms curves. After a key, the strip's glide starts a frame late: the row's own
-//!   reveal would jump the strip, so the strip is held for that frame (Rune draft U-C2-4).
+//!   for its 220 ms curves. The strip moves on that glide alone: each column's rows reveal
+//!   within their listing (C1e's `CollectionState::set_own_viewport_reveals`), since Rune's
+//!   reveal request would jump the strip too (Rune draft U-C2-4). A reveal asked for while one
+//!   glides (key repeat) carries on at its speed.
 //! - **In Columns the drop edge scroll is Strata's** (44 points, up to 520 points a second, with
 //!   its ramp), not C1e's row-height steps: the view replaces C1e's through `on_drag_over`.
 //! - **A swapped-in sibling's shell keeps the old column's width until it springs to the new
@@ -113,11 +115,18 @@
 //!
 //! - **A change of the strip's width more than half a second after a reveal** isn't followed:
 //!   the reveal is worked out again on each tick while the strip's drawn width moves within
-//!   that time (a drawer opening in the same handler, a width spring), not later.
+//!   half a second of it (a drawer opening in the same handler, a width spring), counted from
+//!   the reveal, so a window resized on and on isn't held to the column. A scroll of the
+//!   person's (the strip moving other than toward the reveal's target) ends it sooner.
+//! - **A wheel in the frame a reveal is asked for loses one step of it**: Rune applies the
+//!   view's request after the wheel, and the view can't hear a wheel over a listing (Rune hands
+//!   `on_wheel` only up to the nearest scroll view), so the glide takes one step from where
+//!   the wheel left the strip before the next tick stops it there.
 //! - **An idle collection costs about 0.14 ms a frame while another scrolls**, where an idle
-//!   rune-kit Table costs nothing, so four columns scroll at about 1.8× four Tables' frame time
-//!   (still about 0.55 ms at p50 and 1.7 ms at p95, `tests/perf.rs`). Four bare C1e collections
-//!   in a row cost the same, so it is C1e's, open for a C1e follow-up.
+//!   rune-kit Table costs nothing, so four columns scroll at about 1.75× four Tables' frame time
+//!   at p50 (about 0.55 ms, steady across runs) and 1.8× to 2.2× at p95 (1.6 to 2.1 ms, with
+//!   the machine's load; `tests/perf.rs`). Four bare C1e collections in a row cost the same,
+//!   so it is C1e's, open for a C1e follow-up.
 //! - **A vertical swipe that crosses columns scrolls each of them** (Rune draft U-C24-3).
 //! - **Shift+wheel can't be tested headless** (Rune draft U-C24-7); the plain-wheel half is.
 //! - **During a width spring** (a swapped sibling's), the columns' spans the drag autoscroll and
@@ -159,17 +168,17 @@
 //! | 18 A closing column takes no clicks, hovers or drops | page `a_closing_column_takes_no_presses…` (Rune's presence makes it inert) |
 //! | 19 Another location or a rebuild replaces columns with no exit | page `a_rebuilt_strip_replaces…` ([`ColumnsState::replace`]) |
 //! | 20, 21 Deleting the focused open folder reveals and mirrors the next | Strata policy (deletion and mirroring) |
-//! | 22 A keyboard move reveals a column clipped by up to 4 px | page `a_keyboard_move_reveals…`, `a_keyboard_reveal_glides_the_strip`, `a_reveal_in_the_same_handler…`, `a_drawer_opening_in_the_same_handler…`; unit `a_column_clipped_even_a_little…` |
+//! | 22 A keyboard move reveals a column clipped by up to 4 px | page `a_keyboard_move_reveals…`, `a_keyboard_reveal_glides_the_strip`, `holding_down_glides…`, `holding_left_glides…`, `right_into_a_clipped_new_column…`, `a_column_opened_with_its_first_entry…`, `a_reveal_in_the_same_handler…`, `a_drawer_opening_in_the_same_handler…`, `a_reveal_follows_the_strips_width…`; unit `a_column_clipped_even_a_little…` |
 //! | 23 A column wider than the strip that fills it stays | page `a_column_wider_than_the_strip…`; unit `a_column_wider_than_the_strip…` |
 //! | 24 Mirroring shows a folder's contents without moving focus | *partial*: [`Focus::No`] keeps the active column (page tests open with it); mirroring is Strata's |
 //! | 25–27, 29–32 Mirroring, Quick Preview, the 75 ms wait | Strata policy (the view reports [`ColumnsIntent::Cursor`]) |
 //! | 28 With no cursor, Home/Ctrl+Up land first, End/Ctrl+Down last | `home-end-no-cursor`; page `ctrl_a_page_and_home…` |
 //! | 33, 34 Open as Administrator; the lock notice | Strata policy (the host fills the column's `empty` part) |
-//! | 35 Back to an ancestor selects the folder you came from | `back-to-ancestor`; page `back_to_an_ancestor…`, `back_to_an_ancestor_scrolls…`, *partial*: navigation is the host's ([`ColumnsState::return_to`]) |
+//! | 35 Back to an ancestor selects the folder you came from | `back-to-ancestor`; page `back_to_an_ancestor…`, `back_to_an_ancestor_scrolls…`, `back_to_a_clipped_ancestor…`, `forward_to_a_deeper_open_column…`, *partial*: navigation is the host's ([`ColumnsState::return_to`]) |
 //! | 36 The came-from folder's own column stays closed | `back-to-ancestor` |
 //! | 37, 38 Back to a non-ancestor; a sidebar ancestor | Strata policy |
 //! | 39 Left into a column with no cursor lands on its open folder | page `left_into_a_column_with_no_cursor…`; Right into one, its first entry: `right_into_a_child_column…` |
-//! | 40 …once the column is listed; nothing if the folder went | page `left_into_a_loading_column…`, `a_late_listing_in_a_column_left_behind…` (none once the keyboard left it); [`ColumnsState::sync`] |
+//! | 40 …once the column is listed; nothing if the folder went | page `left_into_a_loading_column…`, `a_late_listing_in_a_column_left_behind…` (none once the keyboard left it), `a_late_listing_in_the_active_column…` (the strip's glide goes on); [`ColumnsState::sync`] |
 //! | 41 F2, Delete and copy fall back only in the deepest column | Strata policy |
 //! | 42, 43 F5 keeps focus; F2 after a reload | Strata and C5/C21 (the strip keeps focus through a reload) |
 //! | 44–46 Renaming a folder whose column is open | C5 and Strata (the host keeps the column under its new name) |
@@ -194,7 +203,7 @@
 //! | 72 Clicking a heading focuses the column, keeps selection and child | `title-click` |
 //! | 73 Empty space keeps the column's scroll | page `a_click_on_empty_space_keeps_the_columns_scroll`, *partial*: a column with blank space below its rows can't scroll here, so the test checks the click lands and a scrolled column keeps its offset |
 //! | 74 Shift+wheel scrolls the strip; vertical ticks only the listing | page `a_sideways_wheel…`, *partial*: the vertical half (Rune draft U-C24-7) |
-//! | 75 Horizontal touchpad gestures scroll the strip | page `a_sideways_wheel…` |
+//! | 75 Horizontal touchpad gestures scroll the strip | page `a_sideways_wheel…`, `a_wheel_during_the_reveals_recheck_wins`, `a_wheel_in_the_same_frame_as_a_key_wins` (one step lost, see Known gaps) |
 //! | 76 Columns fill the strip's height; the paste destination's header is marked | PNG goldens, *partial*: the active column's header is marked; the destination is Strata's |
 //! | 77 The horizontal bar shows no square at its leading edge | PNG `c2-overflow-*` (C24's strip bar, shown) |
 //! | 78 Dragging an edge resizes only that column, never below 300 | page `dragging_an_edge_resizes…`; unit `widths_never_draw_below…` |
@@ -280,7 +289,9 @@
 //!   viewport of virtual rows; `scroll_into_view_in("c3", "row-3-2")` (a row already in view
 //!   vertically) puts column 3's drawn x at 900, 600, 600 over the next frames, where the
 //!   strip's own `scroll_to` to the same place glides 900, 887, 858, 823. Ask: a reveal limited
-//!   to an axis, or to the viewports inside its scope.
+//!   to an axis, or to the viewports inside its scope. C2 works around it with C1e's
+//!   own-viewport reveals, an offset worked out from the collection's geometry, which gives up
+//!   Rune's following of a row that layout moves after the reveal (C2's rows don't move).
 //!
 //! Drafts this view leans on, already written: C15's `Tx::focus` (focus by key), U-C24-3 (a
 //! vertical gesture's latch), U-C24-7 (headless Shift+wheel), R-C4-2 (no word to a drag whose

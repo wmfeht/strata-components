@@ -8,6 +8,12 @@
 //! long route the tenths change faster than frames, and a commit a frame would rebuild the whole
 //! window for a label (C1d's auto-scroll applies at about 10 Hz the same way). Whatever stops
 //! playback (its end, a pause, a seek, a hover) commits the exact text at once.
+//!
+//! That holds for what asks the view to commit: [`RouteState::tick`]'s answer, the view's own
+//! handlers and [`RouteState::command_tx`]. [`RouteState::pause`] and [`RouteState::command`]
+//! only change the state, so a host that calls them directly commits itself: from its poll it
+//! returns true, and a handler mustn't say `live_only`. Otherwise the text stays behind the
+//! marker until something else commits.
 
 use std::cell::RefCell;
 
@@ -307,13 +313,14 @@ impl RouteState {
     }
 
     /// Stops playback where the marker is: another file was selected, the preview closed or
-    /// hid in a narrow window.
+    /// hid in a narrow window. It doesn't commit: the caller does (module docs).
     pub fn pause(&mut self) {
         self.playing = false;
         self.last_tick = None;
     }
 
-    /// A media key. False when it does nothing here (a route of zero length).
+    /// A media key. False when it does nothing here (a route of zero length). It doesn't
+    /// commit: the caller does (module docs), or calls [`RouteState::command_tx`].
     pub fn command(&mut self, command: RouteCommand) -> bool {
         if !self.playable() {
             return false;

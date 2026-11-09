@@ -22,10 +22,10 @@
 //!   move the highlight; Right or Enter opens a folder and does nothing on a file; Left goes to
 //!   the parent. At the root Left reaches the host's [`ArchiveView::on_leave`] (Strata returns
 //!   focus to the listing), and the tree takes the key; with no `on_leave`, it goes on past the
-//!   tree to the host's key handling ([`controllers::LeftPasses`]). With Type to search off, `h j k l` act as the arrows
-//!   ([`ArchiveView::letters`]). Edges are taken, so the keys never move focus out of the tree;
-//!   only the cursor's member is outlined. Space isn't taken: it goes on to the host, which
-//!   closes the preview.
+//!   tree to the host's key handling ([`controllers::LeftPasses`]). With Type to search off,
+//!   `h j k l` act as the arrows ([`ArchiveView::letters`]). Edges are taken, so the keys never
+//!   move focus out of the tree; only the cursor's member is outlined. Space isn't taken: it
+//!   goes on to the host, which closes the preview.
 //! - **Pointer** ([`controllers::ArchivePointer`]): a click highlights a member on its release,
 //!   and opens a folder; modifiers act as a plain click; a double click opens one level. Hover
 //!   tints a row and moves neither the highlight nor the cursor (C1e).

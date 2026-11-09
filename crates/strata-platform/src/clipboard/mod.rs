@@ -60,8 +60,9 @@
 //! # After the app exits
 //!
 //! - **X11:** at [`shutdown`] a copy that still holds `CLIPBOARD` is handed to the clipboard
-//!   manager, if one runs (gsd-clipboard, Klipper, xfce4-clipman), every type of it
-//!   (`SAVE_TARGETS`, then `MULTIPLE`): lazy writers run then. The exit waits for its answer
+//!   manager, if one runs, every type of it (`SAVE_TARGETS`, then `MULTIPLE`): lazy writers
+//!   run then. The test peer asks as gsd-clipboard's and xfsettingsd's sources ask; other
+//!   managers (Klipper among them) are hand tests below. The exit waits for its answer
 //!   at most [`KEEP_AFTER_EXIT`] (2 s), or the copy's own wait
 //!   ([`Content::keep_after_exit`]); [`Closed::hand_off`] says how it went. Without a manager
 //!   nothing waits, and the copy goes with the app. Under wlroots' Xwayland (sway) the
@@ -70,8 +71,8 @@
 //!   [`HandOff::Saved`], and what survives is whatever wlroots' Wayland clipboard had already
 //!   taken from the copy, which it does only while an Xwayland window has focus.
 //! - **Wayland:** no client can hand a selection on. The copy goes with the app, unless the
-//!   compositor or a clipboard manager keeps it (wl-clip-persist on sway and Hyprland,
-//!   Klipper on KDE; what mutter keeps is a hand test).
+//!   compositor or a clipboard manager keeps it (wl-clip-persist on sway and Hyprland, say;
+//!   what KDE and mutter keep are hand tests below).
 //!
 //! # Known limits
 //!
@@ -82,8 +83,9 @@
 //! - **A data-device write needs a fresh serial.** It takes the serial of the newest key or
 //!   click the app had. A write whose serial is older than the current selection's is dropped
 //!   by the compositor without a word; P0 notices the missing echo and the copy is
-//!   [`Lost::Refused`]. A write made while the app has no keyboard focus gets no echo either
-//!   way, so it stays [`CopyState::Pending`]: copy from the key or click handler that asked.
+//!   [`Lost::Refused`]. On wlroots (sway) a write made while the app has no keyboard focus
+//!   gets no echo either way, so it stays [`CopyState::Pending`]; what mutter does with one
+//!   is a hand test below (it may refuse it). Copy from the key or click handler that asked.
 //! - **The primary selection needs data control or X11.** On the data device route
 //!   ([`Status::primary`] false) a primary copy is [`Error::Refused`]. This module binds no
 //!   `zwp_primary_selection_v1`, which mutter has (a deliberate gap: nothing here needs it).
@@ -96,6 +98,19 @@
 //!   `UTF8_STRING` ([`TEXT_TYPES`] lists every name text goes by).
 //! - **libwayland < 1.23 with data control** (Ubuntu 24.04 on KDE, say) takes data control on
 //!   a connection of its own: everything works but the data device, which isn't needed.
+//!
+//! # Hand tests pending
+//!
+//! Not run here: each needs a session the headless harness can't give.
+//!
+//! | Where | What to check |
+//! | --- | --- |
+//! | GNOME (mutter), libwayland ≥ 1.23 | the data-device route: copy and paste with Nautilus; another app's copy heard at focus; a copy made unfocused (Pending, or Refused?) |
+//! | GNOME on Ubuntu 24.04 (libwayland 1.22) | the Xwayland route: does mutter's bridge carry `x-special/gnome-copied-files` and `text/uri-list` both ways, focused or not |
+//! | GNOME on X11 (gsd-clipboard), Xfce (xfsettingsd) | the copy outlives the app ([`HandOff::Saved`], then paste elsewhere) |
+//! | KDE Plasma (KWin, Klipper) | data control (ext only); Dolphin copy, cut and paste both ways; on X11, whether Klipper takes a hand-off at all |
+//! | Hyprland | data control; Nautilus and Dolphin both ways |
+//! | Nemo, Caja, Thunar, the GNOME desktop icons | paste a copy and a cut made here |
 //!
 //! Work package: P2, `docs/work/phase-2-composites/P2-clipboard.md`.
 

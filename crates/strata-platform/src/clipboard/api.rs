@@ -236,8 +236,9 @@ impl CopyId {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CopyState {
     /// Written, not yet confirmed. On X11 the server's timestamp is a round trip away; on
-    /// Wayland the compositor's echo is. A data-device write made while the app had no
-    /// keyboard focus is never confirmed: no echo comes either way.
+    /// Wayland the compositor's echo is. On wlroots a data-device write made while the app had
+    /// no keyboard focus is never confirmed, as no echo comes either way (mutter: a hand test).
+    /// Reads of the selection get this copy meanwhile.
     Pending,
     /// The selection holds it.
     Holding,

@@ -16,24 +16,24 @@
       "key": "c16-jobs-row-4-cancel"
     },
     {
-      "t": 0.6,
-      "type": "key",
-      "name": "Escape"
-    },
-    {
-      "t": 0.6,
+      "t": 0.5,
       "type": "mark",
       "name": "end"
     }
   ],
   "expect": [
     {
-      "key": "c16-heard",
-      "name": "Jobs: Cancel(4) · probes 0"
+      "key": "c16-jobs-row-4-cancel",
+      "absent": true
     },
     {
-      "key": "c16-jobs",
-      "name": "5 jobs finished · failures"
+      "key": "c16-jobs-row-4-dismiss",
+      "absent": true
+    },
+    {
+      "key": "c16-jobs-row-3-dismiss",
+      "role": "button",
+      "name": "Dismiss"
     }
   ]
 }

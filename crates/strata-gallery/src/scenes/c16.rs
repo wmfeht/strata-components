@@ -26,6 +26,10 @@ use crate::{Gallery, Scene};
 /// How long a fake operation takes to stop after Cancel.
 const STOP_AFTER: f64 = 0.5;
 
+/// How long a fake job takes to stop after Cancel: long enough for a script's final tree,
+/// a second after its last event, to see it "Cancelling…".
+const JOB_STOP_AFTER: f64 = 2.0;
+
 /// What the page does when a cancelled operation has stopped.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum CancelPath {
@@ -772,10 +776,10 @@ pub fn poll(g: &mut Gallery, t: f64, tx: &mut Tx) -> bool {
     let mut changed = d.step(t, tx);
     changed |= d.dock.tick(t, tx);
     changed |= d.jobs_ui.tick(t, &d.jobs, tx);
-    // A cancelled job stops half a second after Cancel.
+    // A cancelled job stops JOB_STOP_AFTER after Cancel.
     for r in &mut d.jobs {
         if r.status == JobStatus::Cancelling {
-            let since = *r.ended_at.get_or_insert(t + STOP_AFTER);
+            let since = *r.ended_at.get_or_insert(t + JOB_STOP_AFTER);
             if t >= since {
                 r.status = JobStatus::Cancelled;
                 changed = true;

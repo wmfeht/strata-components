@@ -206,6 +206,11 @@
 //! - **Check notices are a card wide** (340 pt): a wrapping text in a row without a width lays
 //!   out at its narrowest in Rune, so a notice can't size to its words up to Strata's 60
 //!   characters. A status notice is one line and fits its words.
+//! - **The Jobs button with no jobs.** Clear finished on a list of finished jobs leaves the list
+//!   open on "No background jobs.", and its button stays, reading "Jobs", until the list closes.
+//!   Strata hides the button as soon as no job is left (its popover goes with it). The list
+//!   needs its anchor while it shows, and closing it sends focus to
+//!   [`Jobs::return_focus`](jobs::Jobs::return_focus) rather than nowhere.
 //! - Icons the catalog lacks (W2d follow-up): Details and Hide use chevrons for Strata's eye and
 //!   eye-off, the Jobs header a list icon for `list-checks`.
 //!
@@ -241,8 +246,8 @@
 //! | Closing a tab with a docked operation running … "File operations are still active" | **Strata policy** |
 //! | A finished copy, compression, or deletion retitles its card … check icon, 100%, and a Complete button | script `card-completes`, `deletion`; unit `a_completed_card_closes_after_five_seconds_from_wake_to_wake` |
 //! | A completed card counts down 5 seconds with a shrinking bar and "closing in" text, then fades out and closes | test `a_completed_card_closes_after_five_seconds_in_a_resting_window`; script `countdown`; golden `c16-complete` |
-//! | Hovering or focusing a completed card pauses its countdown … leaving resumes | **partial**: hover by tests `hover_pauses_the_countdown_and_leaving_resumes_the_rest`, `a_card_that_finishes_under_a_resting_pointer_stays_paused`, scripts `countdown-pause`, `countdown-resume`, `countdown-resume-kept`; focus is a **Rune gap** (U-C16-4) |
-//! | The pin button, "Keep notification", keeps a completed card open and shows "pinned" | test `a_pinned_card_stays_until_dismissed`; script `pin` |
+//! | Hovering or focusing a completed card pauses its countdown … leaving resumes | **partial**: hover by tests `hover_pauses_the_countdown_and_leaving_resumes_the_rest`, `a_card_that_finishes_under_a_resting_pointer_stays_paused`, scripts `countdown-pause`, `countdown-resume`, `countdown-resume-kept` (closed by 8 s, where a restart of the full 5 s would still show); focus is a **Rune gap** (U-C16-4) |
+//! | The pin button, "Keep notification", keeps a completed card open and shows "pinned" | tests `a_pinned_card_stays_until_dismissed`, `unpinning_resumes_the_countdown_in_a_resting_window`; script `pin` |
 //! | Complete or X on a completed card dismisses only that card | scripts `dismiss-one`, `dismiss-x`, `pin` |
 //! | A docked transfer reports its renamed and left-out items once, after it ends | **Strata policy** (the report is a joining [`Notice`], script `notices`) |
 //! | If another operation starts before a docked copy … does not reveal or select its result | **Strata policy** |
@@ -252,7 +257,7 @@
 //! | Showing a notice while another notice is visible … removes the old one; progress cards stay | script `notices`; unit `a_notice_replaces_the_notices_showing_unless_it_joins_and_cards_stay` |
 //! | A transfer report notice is the exception: it joins the dock | script `notices` |
 //! | Notice text, not its heading, wraps and is cut to 3 lines with an ellipsis | golden `c16-notices` (PNG) |
-//! | When a notice expires and the dock holds no other row, the dock closes | test `a_notice_expires_from_its_own_wake_and_the_dock_closes`; script `notices-expire` |
+//! | When a notice expires and the dock holds no other row, the dock closes | tests `a_notice_expires_from_its_own_wake_and_the_dock_closes`, unit `a_notice_shows_for_its_own_time`; script `notices-expire` |
 //!
 //! `operations/progress`:
 //!
@@ -292,7 +297,7 @@
 //! | --- | --- |
 //! | Queue, Invocation and Run directory (all) | **not applicable**: Strata's job service |
 //! | Remove on a queued job ends it as Cancelled with "Removed before starting" | **partial**: script `jobs-cancel` (Remove sends the intent); the outcome is the service's |
-//! | Cancel on a running job shows "Cancelling…" and sends SIGTERM … | **partial**: script `jobs-cancel` (Cancel sends the intent; a row in `Cancelling` reads "Cancelling…"); the signals are the service's |
+//! | Cancel on a running job shows "Cancelling…" and sends SIGTERM … | **partial**: script `jobs-cancel` (Cancel sends the intent; the row then has neither Cancel nor Dismiss, and its golden tree pins the row's description "Cancelling… · 4/10 · ~/Pictures"); unit `jobs_words_follow_strata` (a cancelling job still counts as running); the signals are the service's |
 //! | A job still cancelling after 10 seconds …; Closing the last application window … | **not applicable**: the service's and Strata's |
 //! | The footer shows a Jobs button only when jobs exist … | scripts `jobs-none`, `jobs-button`; unit `jobs_words_follow_strata` |
 //! | Launching an action opens Jobs in the launching window with the new job first | **partial**: script `jobs-launch` ([`JobsState::open`](jobs::JobsState::open); the order is the host's rows) |
@@ -303,7 +308,7 @@
 //! | Details expands a job's captured output and Hide collapses it; … "No output yet." | script `jobs-details` |
 //! | Details on a running job shows output as it arrives, follows the bottom … | **partial**: script `jobs-details` (it shows the rows' output); following the end is Rune's `stick_bottom` |
 //! | Terminal colour and control sequences are stripped from the shown output | unit `terminal_sequences_are_stripped_from_output`; script `jobs-details`; golden `c16-jobs` |
-//! | Dismiss removes one finished job; Clear finished removes every finished job | scripts `jobs-dismiss`, `jobs-clear-all`; test `clearing_every_job_leaves_a_note_then_focus_on_the_fallback_and_the_list_shut` (the intents; the gallery's host drops the rows) |
+//! | Dismiss removes one finished job; Clear finished removes every finished job | scripts `jobs-dismiss`, `jobs-clear-all`; test `clearing_every_job_leaves_a_note_then_focus_on_the_fallback_and_the_list_shut` (the intents; the gallery's host drops the rows). **Difference**: while the emptied list is open the button reads "Jobs" with no jobs, where Strata hides it at once (below) |
 //! | The dashboard lists at most 12 jobs, then shows "`<n>` older jobs are hidden" | script `jobs-limit` |
 //!
 //! # Rune drafts (not filed)

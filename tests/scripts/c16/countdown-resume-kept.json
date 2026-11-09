@@ -16,7 +16,7 @@
       "y": 300
     },
     {
-      "t": 6.3,
+      "t": 7.0,
       "type": "mark",
       "name": "end"
     }
@@ -24,11 +24,11 @@
   "expect": [
     {
       "key": "c16-dock-card-1",
-      "name": "Copy complete"
+      "absent": true
     },
     {
-      "key": "c16-dock-card-1-meta",
-      "name": "· closing in 1s"
+      "key": "c16-dock-card-2",
+      "name": "Copy complete"
     }
   ]
 }

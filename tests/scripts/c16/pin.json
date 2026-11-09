@@ -1,7 +1,6 @@
 {
   "bullets": [
-    "operations/progress/dock: The pin button, \"Keep notification\"",
-    "operations/progress/dock: Complete or X on a completed card dismisses only that card"
+    "operations/progress/dock: The pin button, \"Keep notification\""
   ],
   "scene": "c16-complete-light",
   "events": [

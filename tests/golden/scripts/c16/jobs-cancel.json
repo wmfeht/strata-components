@@ -5,194 +5,270 @@
         {
           "children": [
             {
-              "name": "Pictures",
-              "role": "label"
-            },
-            {
-              "actions": [
-                "focus"
-              ],
               "children": [
                 {
-                  "name": "Holiday photos",
+                  "key": "c16-jobs-running",
+                  "name": "1 running",
                   "role": "label"
-                }
-              ],
-              "key": "c16-cursor",
-              "name": "Holiday photos",
-              "role": "button"
-            },
-            {
-              "name": "Raw footage",
-              "role": "label"
-            },
-            {
-              "name": "notes.md",
-              "role": "label"
-            },
-            {
-              "name": "photos.zip",
-              "role": "label"
-            },
-            {
-              "name": "node_modules",
-              "role": "label"
-            },
-            {
-              "actions": [
-                "click",
-                "focus"
-              ],
-              "key": "c16-start-copy",
-              "name": "Copy",
-              "role": "button"
-            },
-            {
-              "actions": [
-                "click",
-                "focus"
-              ],
-              "key": "c16-start-move",
-              "name": "Move (dialog)",
-              "role": "button"
-            },
-            {
-              "actions": [
-                "click",
-                "focus"
-              ],
-              "key": "c16-start-move-stuck",
-              "name": "Move from a stalled device",
-              "role": "button"
-            },
-            {
-              "actions": [
-                "click",
-                "focus"
-              ],
-              "key": "c16-start-compress",
-              "name": "Compress",
-              "role": "button"
-            },
-            {
-              "actions": [
-                "click",
-                "focus"
-              ],
-              "key": "c16-start-delete",
-              "name": "Delete one folder",
-              "role": "button"
-            },
-            {
-              "actions": [
-                "click",
-                "focus"
-              ],
-              "key": "c16-start-delete-stuck",
-              "name": "Delete on a stalled device",
-              "role": "button"
-            },
-            {
-              "actions": [
-                "click",
-                "focus"
-              ],
-              "key": "c16-start-small-fast",
-              "name": "Small copy, 0.2 s",
-              "role": "button"
-            },
-            {
-              "actions": [
-                "click",
-                "focus"
-              ],
-              "key": "c16-start-small-slow",
-              "name": "Small copy, 2 s",
-              "role": "button"
-            },
-            {
-              "actions": [
-                "click",
-                "focus"
-              ],
-              "key": "c16-start-stuck",
-              "name": "Copy to a stalled device",
-              "role": "button"
-            },
-            {
-              "actions": [
-                "click",
-                "focus"
-              ],
-              "key": "c16-start-notice",
-              "name": "Notice",
-              "role": "button"
-            },
-            {
-              "actions": [
-                "click",
-                "focus"
-              ],
-              "key": "c16-start-notice-2",
-              "name": "Another notice",
-              "role": "button"
-            },
-            {
-              "actions": [
-                "click",
-                "focus"
-              ],
-              "key": "c16-start-report",
-              "name": "Transfer report",
-              "role": "button"
-            },
-            {
-              "actions": [
-                "click",
-                "focus"
-              ],
-              "key": "c16-start-job",
-              "name": "Run an action",
-              "role": "button"
-            },
-            {
-              "actions": [
-                "click",
-                "focus"
-              ],
-              "key": "c16-probe",
-              "name": "Probe",
-              "role": "button"
-            },
-            {
-              "key": "c16-heard",
-              "name": "Jobs: Cancel(4) · probes 0",
-              "role": "label"
-            },
-            {
-              "children": [
+                },
                 {
-                  "name": "5 items",
+                  "key": "c16-jobs-finished",
+                  "name": "4 finished",
                   "role": "label"
                 },
                 {
                   "actions": [
                     "click",
-                    "focus",
-                    "expand"
+                    "focus"
                   ],
-                  "description": "Show background jobs",
-                  "key": "c16-jobs",
-                  "name": "5 jobs finished · failures",
+                  "key": "c16-jobs-clear",
+                  "name": "Clear finished",
                   "role": "button",
                   "states": [
-                    "focused",
-                    "collapsed"
+                    "focused"
+                  ]
+                },
+                {
+                  "actions": [
+                    "click",
+                    "focus"
+                  ],
+                  "description": "Minimize",
+                  "key": "c16-jobs-minimize",
+                  "name": "Minimize",
+                  "role": "button"
+                },
+                {
+                  "actions": [
+                    "scroll-up",
+                    "scroll-down",
+                    "set-scroll-offset"
+                  ],
+                  "children": [
+                    {
+                      "actions": [
+                        "scroll-into-view"
+                      ],
+                      "children": [
+                        {
+                          "actions": [
+                            "click",
+                            "focus",
+                            "expand",
+                            "scroll-into-view"
+                          ],
+                          "description": "Details",
+                          "key": "c16-jobs-row-4-details",
+                          "name": "Details",
+                          "role": "button",
+                          "states": [
+                            "collapsed"
+                          ]
+                        },
+                        {
+                          "actions": [
+                            "scroll-into-view"
+                          ],
+                          "key": "c16-jobs-row-4-bar",
+                          "name": "Resize images",
+                          "range": [
+                            0.45,
+                            0.0,
+                            1.0,
+                            null
+                          ],
+                          "role": "progress-indicator",
+                          "value": "45%"
+                        }
+                      ],
+                      "description": "Cancelling… · 4/10 · ~/Pictures",
+                      "key": "c16-jobs-row-4",
+                      "name": "Resize images",
+                      "role": "group"
+                    },
+                    {
+                      "actions": [
+                        "scroll-into-view"
+                      ],
+                      "children": [
+                        {
+                          "actions": [
+                            "click",
+                            "focus",
+                            "expand",
+                            "scroll-into-view"
+                          ],
+                          "description": "Details",
+                          "key": "c16-jobs-row-3-details",
+                          "name": "Details",
+                          "role": "button",
+                          "states": [
+                            "collapsed"
+                          ]
+                        },
+                        {
+                          "actions": [
+                            "click",
+                            "focus",
+                            "scroll-into-view"
+                          ],
+                          "description": "Dismiss",
+                          "key": "c16-jobs-row-3-dismiss",
+                          "name": "Dismiss",
+                          "role": "button"
+                        }
+                      ],
+                      "description": "Cancelled after 0s · Removed before starting · ~/Documents",
+                      "key": "c16-jobs-row-3",
+                      "name": "Batch rename",
+                      "role": "group"
+                    },
+                    {
+                      "actions": [
+                        "scroll-into-view"
+                      ],
+                      "children": [
+                        {
+                          "actions": [
+                            "click",
+                            "focus",
+                            "expand",
+                            "scroll-into-view"
+                          ],
+                          "description": "Details",
+                          "key": "c16-jobs-row-5-details",
+                          "name": "Details",
+                          "role": "button",
+                          "states": [
+                            "collapsed"
+                          ]
+                        },
+                        {
+                          "actions": [
+                            "click",
+                            "focus",
+                            "scroll-into-view"
+                          ],
+                          "description": "Dismiss",
+                          "key": "c16-jobs-row-5-dismiss",
+                          "name": "Dismiss",
+                          "role": "button"
+                        }
+                      ],
+                      "description": "Done in 1s · ~/Projects",
+                      "key": "c16-jobs-row-5",
+                      "name": "Open terminal here",
+                      "role": "group"
+                    },
+                    {
+                      "actions": [
+                        "scroll-into-view"
+                      ],
+                      "children": [
+                        {
+                          "actions": [
+                            "click",
+                            "focus",
+                            "collapse",
+                            "scroll-into-view"
+                          ],
+                          "description": "Hide",
+                          "key": "c16-jobs-row-2-details",
+                          "name": "Hide",
+                          "role": "button",
+                          "states": [
+                            "expanded"
+                          ]
+                        },
+                        {
+                          "actions": [
+                            "click",
+                            "focus",
+                            "scroll-into-view"
+                          ],
+                          "description": "Dismiss",
+                          "key": "c16-jobs-row-2-dismiss",
+                          "name": "Dismiss",
+                          "role": "button"
+                        },
+                        {
+                          "actions": [
+                            "scroll-into-view",
+                            "scroll-up",
+                            "scroll-down",
+                            "set-scroll-offset"
+                          ],
+                          "children": [
+                            {
+                              "actions": [
+                                "scroll-into-view"
+                              ],
+                              "key": "c16-jobs-row-2-output",
+                              "name": "ok iso.img.sha256\nok notes.txt.sha256",
+                              "role": "label"
+                            }
+                          ],
+                          "role": "scroll-view",
+                          "states": [
+                            "clips"
+                          ]
+                        }
+                      ],
+                      "description": "Done in 1m 5s · ~/Downloads",
+                      "key": "c16-jobs-row-2",
+                      "name": "SHA-256 checksums",
+                      "role": "group"
+                    },
+                    {
+                      "actions": [
+                        "scroll-into-view"
+                      ],
+                      "children": [
+                        {
+                          "actions": [
+                            "click",
+                            "focus",
+                            "expand",
+                            "scroll-into-view"
+                          ],
+                          "description": "Details",
+                          "key": "c16-jobs-row-1-details",
+                          "name": "Details",
+                          "role": "button",
+                          "states": [
+                            "collapsed"
+                          ]
+                        },
+                        {
+                          "actions": [
+                            "click",
+                            "focus",
+                            "scroll-into-view"
+                          ],
+                          "description": "Dismiss",
+                          "key": "c16-jobs-row-1-dismiss",
+                          "name": "Dismiss",
+                          "role": "button"
+                        }
+                      ],
+                      "description": "Failed after 10s · Home",
+                      "key": "c16-jobs-row-1",
+                      "name": "Strip EXIF",
+                      "role": "group"
+                    }
+                  ],
+                  "role": "scroll-view",
+                  "states": [
+                    "clips"
                   ]
                 }
               ],
-              "key": "c16-footer",
-              "role": "group"
+              "key": "c16-jobs-list",
+              "name": "Jobs",
+              "role": "dialog",
+              "states": [
+                "modal"
+              ]
             }
           ],
           "key": "kit-root",

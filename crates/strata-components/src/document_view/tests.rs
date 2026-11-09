@@ -764,3 +764,32 @@ fn a_double_click_on_a_link_opens_it_once() {
     settle(&mut rt);
     rt.update(|h, _| assert_eq!(h.intents.len(), 2));
 }
+
+#[test]
+fn a_find_queued_before_a_document_swap_selects_nothing_in_the_new_one() {
+    // Review 1, should-fix 3: the queued selection kept the old match's unit and bytes, and
+    // selected whatever the new document had there.
+    let mut rt = runtime(vec![
+        Unit::new(UnitKind::Paragraph, "zz"),
+        Unit::new(UnitKind::Paragraph, "the second line"),
+    ]);
+    rt.update(|h, _| h.doc.find("line"));
+    rt.update(|h, tx| {
+        h.doc.set_document(Arc::new(Document::new(vec![
+            Unit::new(UnitKind::Paragraph, "zz"),
+            Unit::new(UnitKind::Paragraph, "ÉÉÉÉÉÉÉÉÉÉÉÉÉÉÉÉÉÉÉÉ"),
+        ])));
+        h.doc.flush(tx);
+    });
+    settle(&mut rt);
+    assert_eq!(rt.selected_text(), None);
+    rt.update(|h, _| {
+        assert_eq!(
+            h.doc.find_status(),
+            Some(FindStatus {
+                current: None,
+                total: 0
+            })
+        )
+    });
+}

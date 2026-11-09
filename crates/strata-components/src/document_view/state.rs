@@ -179,8 +179,9 @@ impl DocumentState {
         self.content.clone()
     }
 
-    /// Replaces the document (a reload). Media states are dropped; an open find runs again
-    /// on the new text without moving the selection.
+    /// Replaces the document (a reload). Media states are dropped. An open find runs again on
+    /// the new text with no match selected (the next step selects one), and selections find
+    /// queued and hasn't flushed are dropped: they name the old document's bytes.
     pub fn set_document(&mut self, doc: Arc<Document>) {
         self.searchable = doc
             .units
@@ -207,10 +208,8 @@ impl DocumentState {
         self.media.clear();
         self.copied = None;
         self.matches = self.run_find();
-        self.current = self
-            .current
-            .filter(|&c| c < self.matches.len())
-            .or((!self.matches.is_empty()).then_some(0));
+        self.current = None;
+        self.pending.retain(|r| *r == Request::Clear);
     }
 
     pub fn document(&self) -> &Arc<Document> {

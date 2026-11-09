@@ -60,7 +60,7 @@ Maintained by the coordinator on `integration`. States: waiting (dependencies no
 | C13 | ready | | |
 | C16 | ready | | |
 | C17 | ready | | |
-| C18 | ready | | |
+| C18 | planning (M3) | | |
 | C19 | ready | note from C1c: KeyMap aliases (h j k l) aren't removed by unbind_chord | |
 | C1b | merged | 3 review rounds; settings via Ctx::settings (shared handle dropped); no rename timeout (Strata); modifier bullets in-process (Rune draft U-C1b-1); click runs count like GTK; round-3 nits open (run distance from previous press not first; two half-bullet labels; secondary press ends a run: doc); follow-up from the Rune audit: Rune dev scripts can hold modifiers ({"hold": "ctrl"}, fixes U-C1b-1), so in-process modifier tests in C1b, W1, C1e and X2 can become scripts | c4b35d3 |
 | C1c | merged | 3 review rounds; default + 10xer maps; layout-aware chord workaround (U-C1c-1); open should-fix for whichever WP builds key rebinding: unbind_chord leaves aliases (h j k l) — add unalias or unbind aliases; aliases follow the key not the command | 3b4c852 |

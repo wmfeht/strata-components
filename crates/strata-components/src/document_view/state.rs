@@ -17,10 +17,6 @@ use super::shown::{Insert, Shown, math_inserts};
 use crate::preview_drawer::{DocumentView, FindStatus, HostedPreview};
 use crate::scroll::Bar;
 
-/// How many host polls Ctrl+A waits for the selection change its select-all makes: Rune
-/// applies it after the key's frame, and reports it in the next (after that frame's poll).
-const ALL_PENDING_POLLS: u8 = 2;
-
 /// The double-click time until the host sets the desktop's: Rune's fixed 0.5 s on Linux.
 pub const DOUBLE_CLICK: f64 = 0.5;
 
@@ -124,9 +120,9 @@ pub struct DocumentState {
     pub(crate) copied: Option<(usize, Option<f64>)>,
     pub(crate) bar: Bar,
     colourable: Vec<bool>,
-    /// Ctrl+A asked Rune to select everything, and its selection change hasn't come yet: the
-    /// host polls left before it is taken not to come.
-    all_pending: u8,
+    /// Ctrl+A asked Rune to select everything from a selection that didn't hold it, and the
+    /// selection change that makes hasn't come yet.
+    all_pending: bool,
     /// The host's clock at its last poll ([`DocumentState::tick`]).
     now: f64,
     /// The last link opened (its text and number) and when, and the double-click time.
@@ -159,7 +155,7 @@ impl DocumentState {
             copied: None,
             bar: Bar::new(),
             colourable: Vec::new(),
-            all_pending: 0,
+            all_pending: false,
             now: 0.0,
             last_link: None,
             double_click: DOUBLE_CLICK,
@@ -208,6 +204,7 @@ impl DocumentState {
             })
             .collect();
         self.content = Rc::new(Content::new(self.content.key.clone(), doc));
+        self.all_pending = false;
         self.index = OnceCell::new();
         self.revision += 1;
         self.media.clear();
@@ -276,13 +273,15 @@ impl DocumentState {
         })
     }
 
-    /// Ctrl+A: the whole document is selected, and copies from the model, from the selection
-    /// change Rune's select-all makes until the next one. (Pressed again with everything
-    /// selected, Rune's selection doesn't change, and the copy-everything holds.)
-    pub(crate) fn select_all(&mut self) {
-        if !self.content.all.get() {
-            self.all_pending = ALL_PENDING_POLLS;
-        }
+    /// Ctrl+A, with the selection as it stood at the key. Over a selection that already
+    /// reads as the whole document, Rune's select-all changes nothing: copy-everything starts
+    /// now, and the next change (a Shift-click narrowing it, say) ends it. Otherwise it waits
+    /// for the one change select-all makes, and takes it only if that reads as the whole
+    /// document too.
+    pub(crate) fn select_all(&mut self, before: Option<&TextSelection>) {
+        let already = before.is_some_and(|sel| copy::reads_whole(&self.content, sel));
+        self.content.all.set(already);
+        self.all_pending = !already;
     }
 
     pub(crate) fn all_selected(&self) -> bool {
@@ -295,11 +294,13 @@ impl DocumentState {
         self.content.all.set(false);
     }
 
-    /// The selection changed: the change Ctrl+A's select-all makes starts copy-everything;
-    /// any other ends it. (Rune reports a selection over unbuilt rows without all of them,
-    /// so the change itself can't say it is the whole document.)
+    /// The selection changed: the change Ctrl+A's select-all makes starts copy-everything, if
+    /// it reads as the whole document; any other ends it. Where Rune's report can't tell
+    /// (a selection cut at its 10,000-row cap that didn't come from Ctrl+A), Ctrl+C copies
+    /// what Rune reports, cut short (R4), rather than more than was selected.
     pub(crate) fn selection_changed(&mut self, sel: Option<&TextSelection>) {
-        let all = std::mem::take(&mut self.all_pending) > 0 && sel.is_some();
+        let pending = std::mem::take(&mut self.all_pending);
+        let all = pending && sel.is_some_and(|sel| copy::reads_whole(&self.content, sel));
         self.content.all.set(all);
     }
 
@@ -349,11 +350,6 @@ impl DocumentState {
     /// `Tx`, so they wait here: call this from the host's poll (which has one). True when it
     /// asked for anything.
     pub fn flush(&mut self, tx: &mut Tx) -> bool {
-        // Ctrl+A's select-all changes the selection by the second poll after the key, if it
-        // changes it at all: over a selection that already holds everything it doesn't, and
-        // a later change (a Shift-click narrowing it, whose frame polls first) mustn't be
-        // taken for it.
-        self.all_pending = self.all_pending.saturating_sub(1);
         let any = !self.pending.is_empty();
         for r in self.pending.drain(..) {
             match r {
@@ -490,6 +486,7 @@ impl HostedPreview for DocumentState {
         // Each edit to the query clears the selection; the first match then takes it.
         self.pending.push(Request::Clear);
         self.content.all.set(false);
+        self.all_pending = false;
         self.select_current();
     }
 

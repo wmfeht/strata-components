@@ -127,3 +127,65 @@ fn table_part(out: &mut String, pieces: &[Piece<'_>]) {
         out.push_str(p.text.text());
     }
 }
+
+/// Rune's collection cap for a selection across unbuilt rows (R4): a report this long may be
+/// cut short.
+const RUNE_ROWS: usize = 10_000;
+const RUNE_BYTES: usize = 4 << 20;
+
+/// The first and last texts a selection of the whole document holds: the first and last
+/// unit drawing selectable text, and in a table its first and last cell with text.
+fn ends(state: &Content) -> Option<((usize, Part), (usize, Part))> {
+    let units = &state.doc.units;
+    let part = |i: usize, last: bool| -> Option<(usize, Part)> {
+        let u = &units[i];
+        match &u.kind {
+            UnitKind::Table { rows, .. } => {
+                let mut cells = rows.iter().enumerate().flat_map(|(r, row)| {
+                    row.iter()
+                        .enumerate()
+                        .filter(|(_, c)| !c.text.is_empty())
+                        .map(move |(c, _)| Part::Cell(r, c))
+                });
+                let p = if last { cells.last() } else { cells.next() };
+                p.map(|p| (i, p))
+            }
+            // An image's alt text shows only when it failed: its state isn't the model's, so
+            // an image never counts as an end. A failed one at either end reads as "not
+            // whole", the safe direction.
+            UnitKind::Media { .. } => None,
+            kind => (super::state::searchable(kind) && !state.shown(i).0.is_empty())
+                .then_some((i, Part::Text)),
+        }
+    };
+    let first = (0..units.len()).find_map(|i| part(i, false))?;
+    let last = (0..units.len()).rev().find_map(|i| part(i, true))?;
+    Some((first, last))
+}
+
+/// Whether `sel` reads as the whole document: every selected text whole, from the document's
+/// first text to its last, or to where Rune's collection stops (R4).
+pub(crate) fn reads_whole(state: &Content, sel: &TextSelection) -> bool {
+    let key = state.key.as_str();
+    let selected: Vec<&SelectedText> = sel.texts().iter().filter(|t| t.is_selected()).collect();
+    let (Some(first), Some(last)) = (selected.first(), selected.last()) else {
+        return false;
+    };
+    if !selected.iter().all(|t| t.is_whole()) {
+        return false;
+    }
+    let Some((doc_first, doc_last)) = ends(state) else {
+        return false;
+    };
+    if locate(key, first.path()) != Some(doc_first) {
+        return false;
+    }
+    let mut units: Vec<usize> = selected
+        .iter()
+        .filter_map(|t| locate(key, t.path()).map(|(u, _)| u))
+        .collect();
+    units.dedup();
+    let bytes: usize = selected.iter().map(|t| t.len()).sum();
+    let cut = units.len() >= RUNE_ROWS || bytes >= RUNE_BYTES;
+    locate(key, last.path()) == Some(doc_last) || cut
+}

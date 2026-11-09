@@ -915,3 +915,119 @@ fn a_coloured_block_coming_into_reach_asks_for_a_build() {
     assert!(!d.set_visible(81..91), "still within reach: nothing new");
     assert!(d.set_visible(150..160), "it left reach");
 }
+
+/// Frames as a shell does: one, then more only while something animates or input is
+/// queued. The number of frames run.
+fn shell(rt: &mut Runtime<Host>) -> u32 {
+    let mut n = 0;
+    loop {
+        let moving = rt.frame(1.0 / 60.0);
+        n += 1;
+        if !(moving || rt.has_pending_input()) || n > 200 {
+            return n;
+        }
+    }
+}
+
+#[test]
+fn ctrl_a_over_a_full_selection_then_a_shift_click_on_a_resting_window_copies_the_click() {
+    // Review 2, SF-A: Ctrl+A over a selection that already held everything changed nothing
+    // and queued no frame, and the modifier presses frame nothing either, so the Shift-click's
+    // own change came while the poll countdown still waited for select-all's: it turned
+    // copy-everything on, and Ctrl+C copied the whole document.
+    let mut rt = runtime(vec![
+        Unit::new(UnitKind::Paragraph, "Alpha beta"),
+        Unit::new(UnitKind::Paragraph, "Gamma delta"),
+    ]);
+    rt.poll = Some(host_poll);
+    let clip = clipboard::memory();
+    rt.use_clipboard(&clip);
+    let a = rect(&rt, "doc-u0/t");
+    let b = rect(&rt, "doc-u1/t");
+    drag(
+        &mut rt,
+        (a[0] + 0.5, a[1] + a[3] / 2.0),
+        (b[0] + b[2] - 1.0, b[1] + b[3] / 2.0),
+    );
+    let at = (b[0] + 20.0, b[1] + b[3] / 2.0);
+    rt.pointer_move(at.0, at.1);
+    shell(&mut rt);
+    rt.frame(1.0);
+    shell(&mut rt);
+    let command = KeyEvent {
+        key: Key::Command('a'),
+        mods: Mods {
+            cmd: true,
+            ..Mods::default()
+        },
+    };
+    rt.key(command);
+    shell(&mut rt);
+    rt.physical_input(PhysicalInput::Modifiers(Mods {
+        shift: true,
+        ..Mods::default()
+    }));
+    rt.pointer_down(at.0, at.1);
+    rt.pointer_up(at.0, at.1);
+    rt.physical_input(PhysicalInput::Modifiers(Mods::default()));
+    shell(&mut rt);
+    let narrowed = rt.selected_text().expect("a selection");
+    assert!(
+        narrowed.len() < "Alpha beta\nGamma delta".len(),
+        "{narrowed:?}"
+    );
+    rt.key(KeyEvent {
+        key: Key::Command('c'),
+        mods: Mods {
+            cmd: true,
+            ..Mods::default()
+        },
+    });
+    shell(&mut rt);
+    assert_eq!(clip.text().as_deref(), Some(&narrowed));
+}
+
+#[test]
+fn past_runes_cap_a_shift_click_after_ctrl_a_copies_the_click_not_the_document() {
+    // SF-A where Rune's report is cut at its 10,000-row cap: a second Ctrl+A changes nothing,
+    // and the Shift-click that narrows the selection after it must still end copy-everything.
+    let units: Vec<Unit> = (0..12_000)
+        .map(|i| Unit::new(UnitKind::Paragraph, format!("unit {i}")))
+        .collect();
+    let mut rt = runtime(units);
+    rt.poll = Some(host_poll);
+    let clip = clipboard::memory();
+    rt.use_clipboard(&clip);
+    let t = rect(&rt, "doc-u0/t");
+    click(&mut rt, (t[0] + 2.0, t[1] + 4.0));
+    shell(&mut rt);
+    let ctrl_a = KeyEvent {
+        key: Key::Command('a'),
+        mods: Mods {
+            cmd: true,
+            ..Mods::default()
+        },
+    };
+    rt.key(ctrl_a.clone());
+    shell(&mut rt);
+    rt.update(|h, _| assert!(h.doc.all_selected(), "Ctrl+A selects the document"));
+    rt.key(ctrl_a);
+    shell(&mut rt);
+    rt.update(|h, _| assert!(h.doc.all_selected(), "a second Ctrl+A keeps it"));
+    let u3 = rect(&rt, "doc-u3/t");
+    rt.physical_input(PhysicalInput::Modifiers(Mods {
+        shift: true,
+        ..Mods::default()
+    }));
+    rt.pointer_down(u3[0] + 2.0, u3[1] + 4.0);
+    rt.pointer_up(u3[0] + 2.0, u3[1] + 4.0);
+    rt.physical_input(PhysicalInput::Modifiers(Mods::default()));
+    shell(&mut rt);
+    rt.update(|h, _| assert!(!h.doc.all_selected(), "the Shift-click ended it"));
+    command(&mut rt, 'c');
+    let got = clip.text().map(|t| t.to_string()).unwrap_or_default();
+    assert!(
+        got.starts_with("unit 0\nunit 1\nunit 2\n") && got.len() < 40,
+        "{got:?}"
+    );
+}

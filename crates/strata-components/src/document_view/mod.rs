@@ -39,8 +39,14 @@
 //!   follows Strata's rule: units between the ends copy their copy text, so images
 //!   and rules between them copy too. Ctrl+A is the view's own (the root takes focus from a
 //!   click on its text, and hears the key before the selection does): Rune's selection
-//!   collects at most 10,000 unbuilt rows (R4), so Ctrl+A then Ctrl+C copies the whole
-//!   document from the model, from the selection change Ctrl+A makes until the next one.
+//!   collects at most 10,000 unbuilt rows (R4), so after Ctrl+A, Ctrl+C copies the whole
+//!   document from the model. That holds from Ctrl+A over a selection that already reads as
+//!   the whole document (Rune's select-all then changes nothing), or from the one change
+//!   select-all makes if that reads as the whole document, until the next change. "Reads as
+//!   the whole document": every selected text whole, from the document's first text to its
+//!   last, or to Rune's cap. A change that didn't come from Ctrl+A never turns it on, so where
+//!   Rune's report can't tell, Ctrl+C copies what Rune reports, cut short, not more than was
+//!   selected.
 //! - **Code.** Coloured by C10a's [`CodeBlocks`] (one pool per window, polled by the host),
 //!   only when the block is one unit, as Strata does, and only near the viewport: rows Rune
 //!   builds elsewhere (for a copy) draw plain, so a copy never floods the highlighter. Copy
@@ -111,7 +117,9 @@
 //!   exist for edit-field pills only).
 //! - **R4** (draft, not filed) Copying or reading a selection across unbuilt virtual rows
 //!   stops at 10,000 rows or 4 MiB, silently: `selection_copy` sees a cut list, and nothing
-//!   says it was cut (probe P3: 10,057 of 12,000 texts).
+//!   says it was cut (probe P3: 10,057 of 12,000 texts). C11 copies Ctrl+A's selection from
+//!   its model, but only once select-all's change has come, in the frame after the key: a
+//!   Ctrl+C in the same frame as the Ctrl+A copies Rune's report, cut short.
 //! - **R5** (draft, not filed) Rune's README says a virtual row scrolling out drops the
 //!   selection it holds; the runtime pins both ends instead, and keeps it.
 //! - **R6** (draft, not filed) A press on a link inside selectable text is the link's: a
@@ -305,8 +313,8 @@ fn key_in<S: 'static>(
     let plain = !m.shift && !m.alt;
     let st = get_mut(s);
     if ev.is_command('a') && plain {
+        st.select_all(tx.text_selection());
         tx.select_all_text(st.list_key());
-        st.select_all();
         return true;
     }
     if ev.is_command('c') && plain && st.all_selected() {

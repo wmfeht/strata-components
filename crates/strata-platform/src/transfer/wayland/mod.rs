@@ -572,6 +572,12 @@ impl Conn {
         lock(&self.state).sources.contains_key(&source.get())
     }
 
+    /// Whether `source` was cancelled because the compositor dropped its data-device write
+    /// (see `echo`), rather than lost to another client.
+    pub(crate) fn write_was_dropped(&self, source: SourceId) -> bool {
+        lock(&self.state).echoes.was_dropped(source.get())
+    }
+
     /// Offers `spec` as `selection` on `route`. A data-device write uses the newest input
     /// serial: call [`Conn::dispatch`] first so the event that triggered the copy is in.
     pub(crate) fn set_selection(

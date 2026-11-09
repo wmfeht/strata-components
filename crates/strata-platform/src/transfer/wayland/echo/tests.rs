@@ -56,3 +56,16 @@ fn a_second_event_before_the_first_sync_answers_no_later_write() {
     assert!(!e.done(1));
     assert!(e.done(2), "the second write had no echo of its own");
 }
+
+#[test]
+fn a_dropped_write_is_remembered_and_one_that_took_isnt() {
+    let mut e = Echoes::default();
+    e.arm(1);
+    e.done(1);
+    e.arm(2);
+    e.selection();
+    e.done(2);
+    assert!(e.was_dropped(1));
+    assert!(!e.was_dropped(2));
+    assert!(!e.was_dropped(3), "never written");
+}

@@ -389,6 +389,12 @@ impl Transfer {
         }
     }
 
+    /// Whether `source`'s cancel was the compositor dropping its data-device write (P0 heard
+    /// no echo before its `wl_display.sync`), not another client taking the selection.
+    pub fn write_was_dropped(&self, source: SourceId) -> bool {
+        self.shared().is_some_and(|c| c.write_was_dropped(source))
+    }
+
     /// Gives up the selection `source` holds, if it still holds it: nobody holds that
     /// selection after. Subscribers hear [`Event::SourceCancelled`] for it. False if it held
     /// nothing. On winit's display, call it on the UI thread.

@@ -77,15 +77,28 @@ mod c7 {
         rt.frame(FRAME);
     }
 
-    /// Steps a resting window: a frame only at each requested wake, none in between, for at
-    /// most `limit` seconds. Returns the clock it stopped at.
+    /// Steps a resting window for at most `limit` seconds: a frame each 1/60 s while something
+    /// animates (a window draws then), else only at each requested wake, none in between.
+    /// Returns the clock it stopped at.
     fn rest(rt: &mut Runtime<Gallery>, limit: f64) -> f64 {
+        rest_until(rt, limit, |_| false)
+    }
+
+    /// [`rest`], stopping at the first frame after which `done` holds.
+    fn rest_until(rt: &mut Runtime<Gallery>, limit: f64, done: impl Fn(&Gallery) -> bool) -> f64 {
         let start = rt.state.c7.now;
-        for _ in 0..200 {
+        for _ in 0..400 {
+            let now = rt.state.c7.now;
+            if now - start > limit || done(&rt.state) {
+                break;
+            }
+            if rt.animating {
+                rt.frame(FRAME);
+                continue;
+            }
             let Some(deadline) = rt.wake_deadline() else {
                 break;
             };
-            let now = rt.state.c7.now;
             if deadline - start > limit {
                 break;
             }
@@ -110,7 +123,7 @@ mod c7 {
         rt.drag_files(vec!["/home/demo/report.pdf".into()], Some(at));
         rt.frame(FRAME);
         let arrived = rt.state.c7.now;
-        let stopped = rest(&mut rt, 3.0);
+        let stopped = rest_until(&mut rt, 3.0, |g| !g.c7.log.is_empty());
         assert_eq!(rt.state.c7.log, "Select Documents (spring)");
         assert_eq!(rt.state.c7.active, Some(TabId(2)));
         let took = stopped - arrived;
@@ -204,6 +217,61 @@ mod c7 {
         assert!(t[0] >= viewport[0] - 0.5, "{t:?} in {viewport:?}");
     }
 
+    // browser/tabs: "Selecting a tab scrolls it into view", clear of the strip's edge fades, at
+    // either end (review 1: a revealed tab landed under the fade, U-C7-7).
+    #[test]
+    fn a_revealed_tab_is_clear_of_the_edge_fades() {
+        let mut rt = mount("c7-overflow-light");
+        let fade = strata_kit::slots::tabs::fade_width(&rt.state.look);
+        let viewport = rect(&rt, "c7-scroll");
+        let t = rect(&rt, &tab(22));
+        assert!(
+            t[0] + t[2] <= viewport[0] + viewport[2] - fade + 0.5,
+            "tab 22 {t:?} ends clear of the right fade in {viewport:?}"
+        );
+        let mods = Mods {
+            ctrl: true,
+            shift: true,
+            ..Mods::default()
+        };
+        // Ctrl+Shift+0: tab 10, off to the left. In a window at rest: a frame only at each
+        // wake the strip asked for.
+        key(&mut rt, Key::Command('0'), mods);
+        rest(&mut rt, 2.0);
+        assert_eq!(rt.state.c7.active, Some(TabId(10)));
+        let t = rect(&rt, &tab(10));
+        assert!(
+            t[0] >= viewport[0] + fade - 0.5,
+            "tab 10 {t:?} starts clear of the left fade in {viewport:?}"
+        );
+    }
+
+    /// The width a tab gives its title, from rune-kit's `title` element inside it.
+    fn title_width(rt: &Runtime<Gallery>, tab: &str) -> f32 {
+        rt.elements()
+            .into_iter()
+            .find(|e| {
+                e.key.as_deref() == Some("title")
+                    && !e.exiting
+                    && e.path.contains(&format!("/{tab}/"))
+            })
+            .unwrap_or_else(|| panic!("no title in {tab}"))
+            .rect[2]
+    }
+
+    // browser/tabs: "Names longer than 22 characters are ellipsized", so names up to there show:
+    // at the narrowest, a tab still leaves room for about 10 characters of its label, active
+    // (clear of its close button) or at rest (review 1: at 96 points they read "Folder").
+    #[test]
+    fn the_narrowest_tab_still_shows_about_ten_characters() {
+        let rt = mount("c7-overflow-light");
+        let ten = 10.0 * rt.state.look.kit.ty.ui_compact.size * 0.6;
+        for id in [22, 18] {
+            let w = title_width(&rt, &tab(id));
+            assert!(w >= ten - 0.5, "tab {id}'s title has {w} of {ten} points");
+        }
+    }
+
     fn underline_x(rt: &Runtime<Gallery>) -> f32 {
         rt.elements()
             .into_iter()
@@ -293,6 +361,8 @@ mod c7 {
         heard: Vec<TabsIntent>,
         /// Rune's own binder instead of the recording one.
         rune_binder: bool,
+        /// Whether the host's own drags open tabs (it sets `opens_tabs`).
+        opens: bool,
     }
 
     fn host(n: u64) -> Host {
@@ -310,6 +380,7 @@ mod c7 {
             tabs_state: BrowserTabsState::default(),
             heard: Vec::new(),
             rune_binder: false,
+            opens: true,
         }
     }
 
@@ -333,11 +404,15 @@ mod c7 {
             |h| &mut h.tabs_state.drag,
         )
         .dnd(if h.rune_binder { Dnd::rune() } else { binder() })
-        // The host's own drags (from this process) open tabs here.
-        .opens_tabs(|_, offer| offer.local)
         .content_types(&["text/plain"])
-        .on_intent(|h: &mut Host, intent, _| h.heard.push(intent))
-        .build(&h.look, cx);
+        .on_intent(|h: &mut Host, intent, _| h.heard.push(intent));
+        // The host's own drags (from this process) open tabs here.
+        let strip = if h.opens {
+            strip.opens_tabs(|_, offer| offer.local)
+        } else {
+            strip
+        };
+        let strip = strip.build(&h.look, cx);
         rune::col().w_full().h_full().child(strip)
     }
 
@@ -601,6 +676,31 @@ mod c7 {
         rt.frame(FRAME);
         assert_eq!(opened(&rt.state), [3]);
         assert_eq!(rt.state.tabs_state.drop_hover(), None);
+    }
+
+    // Review 1: a zone that follows moves asks for a frame on each motion of a drag over it, so
+    // only a strip whose host has drags that open tabs (which place the gap) follows them.
+    #[test]
+    fn without_drags_that_open_tabs_no_zone_follows_moves() {
+        let mut h = host(4);
+        h.opens = false;
+        let rt = mount_host(h);
+        ZONES.with(|z| {
+            assert!(!z.borrow().is_empty());
+            assert!(z.borrow().iter().all(|(_, zone)| !zone.follows_moves()));
+        });
+        drop(rt);
+        let rt = mount_host(host(4));
+        let (x, y) = centre(&rt, "t-tabs-4");
+        assert!(
+            zone_at(x, y).follows_moves(),
+            "a tab follows a drag that opens tabs"
+        );
+        let (x, y) = centre(&rt, "tabs-new");
+        assert!(
+            !zone_at(x, y).follows_moves(),
+            "New tab opens at the end, wherever it is"
+        );
     }
 
     /// The median time, in milliseconds, of a frame of a reorder drag across a strip of `n` tabs.

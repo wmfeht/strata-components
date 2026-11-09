@@ -8,34 +8,29 @@
     {
       "t": 0.2,
       "type": "tap",
-      "key": "t-c7-3/pill/status/close"
+      "key": "t-c7-6/pill/status/close"
     },
     {
       "t": 0.6,
       "type": "tap",
-      "key": "t-c7-6"
-    },
-    {
-      "t": 1.0,
-      "type": "tap",
-      "key": "t-c7-6/pill/status/close"
+      "key": "t-c7-3/pill/status/close"
     }
   ],
   "expect": [
-    {
-      "key": "t-c7-3",
-      "absent": true
-    },
     {
       "key": "t-c7-6",
       "absent": true
     },
     {
-      "key": "c7-log",
-      "name": "Close share"
+      "key": "t-c7-3",
+      "absent": true
     },
     {
-      "key": "t-c7-5",
+      "key": "c7-log",
+      "name": "Close Music"
+    },
+    {
+      "key": "t-c7-4",
       "states": [
         "selected"
       ]

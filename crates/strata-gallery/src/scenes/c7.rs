@@ -11,8 +11,10 @@
 //!   Ctrl+Shift+Tab, Ctrl+Page Up and Down, Ctrl+Shift+Page Up and Down, Ctrl+Shift+1…0, and F9
 //!   in place of holding Ctrl+Shift for the badges.
 //! - **Drops** run Strata's rules on fake data: every folder is on one volume, so a plain drop
-//!   moves and Ctrl copies. A dropped path ending in `/` stands in for one of Strata's own
-//!   folder-only drags (X2's binder tells them by the drag's payload), which opens tabs.
+//!   moves and Ctrl copies. Rune's binder brings every drag from outside the process, so the
+//!   page needs a stand-in for one of Strata's own folder-only drags, which open tabs (X2's
+//!   binder tells them by the drag's in-process payload): folders under [`OWN_DRAG`]. Any other
+//!   folder is another app's, and transfers like a file.
 //! - **Every tab's view stays mounted**, the inactive ones drawn under the active one at the
 //!   same place, hidden by styling. A drag that a spring carries to another tab then keeps its
 //!   source mounted at its path with its handlers, as P1's capture needs.
@@ -32,6 +34,12 @@ use crate::{Gallery, Scene};
 
 /// The strip's key: tabs are `t-c7-<id>`, New tab `c7-new`.
 pub const KEY: &str = "c7";
+
+/// Dropped folders under this path stand in for Strata's own folder-only drags, which open
+/// tabs (at the folder past it: `/strata-own-drag/home/demo/Projects/` opens
+/// `/home/demo/Projects`). Under Rune's binder the page hears a drag's paths only at the drop
+/// (U3), so before it nothing tells them apart, and no gap opens.
+pub const OWN_DRAG: &str = "/strata-own-drag";
 
 /// One fake tab.
 #[derive(Clone, Debug, PartialEq)]
@@ -191,9 +199,10 @@ impl Demo {
                 let mut last = None;
                 for (k, path) in dropped.data.file_paths().iter().enumerate() {
                     let text = path.to_string_lossy();
+                    let text = text.strip_prefix(OWN_DRAG).unwrap_or(&text);
                     let name = text.trim_end_matches('/').rsplit('/').next().unwrap_or("/");
                     let name = name.to_owned();
-                    last = Some((self.open(&name, &text, IconName::Folder, at + k), name));
+                    last = Some((self.open(&name, text, IconName::Folder, at + k), name));
                 }
                 if let Some((id, name)) = last {
                     self.active = Some(id);
@@ -242,14 +251,17 @@ fn action(offer: &DropOffer, mods: rune::Mods) -> Option<DropAction> {
     ))
 }
 
-/// The stand-in for X2's check of Strata's own folder-only drags: every dragged path ends in
-/// `/`. Rune's binder reads paths only at the drop (U3), so under it this holds only there.
+/// The stand-in for X2's check of Strata's own folder-only drags: every dragged path is a
+/// folder under [`OWN_DRAG`].
 fn opens_tabs(offer: &DropOffer) -> bool {
     offer.uris.as_ref().is_some_and(|uris| {
         !uris.is_empty()
-            && uris
-                .iter()
-                .all(|u| uri_to_path(u).is_some_and(|p| p.to_string_lossy().ends_with('/')))
+            && uris.iter().all(|u| {
+                uri_to_path(u).is_some_and(|p| {
+                    let p = p.to_string_lossy();
+                    p.starts_with(OWN_DRAG) && p.ends_with('/')
+                })
+            })
     })
 }
 

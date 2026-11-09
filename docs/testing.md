@@ -88,13 +88,36 @@ as Strata does. `strata_gallery::spec` passes it to `AppSpec::fonts` and `famili
 accessibility goldens, page tests) shape text as `--snap` and `--script` runs do. A page test
 that builds a runtime of its own with `Runtime::new` shapes in Rune's built-in Inter instead;
 use `strata_gallery::runtime`. strata-components' own unit tests use `Runtime::new` and stay
-in Inter. `rune::text::measure` reads process-wide state: any text system built elsewhere
-(`TextSystem::new`, `Runtime::new`) moves its fonts, and a runtime's `set_font_families` (K2's
-picker) moves its families. So a test that measures text first takes a
-`rune::text::with_families(fonts::FAMILY, fonts::FAMILY)` guard, then calls
-`TextSystem::new(fonts::FONTS, fonts::FAMILIES)` (or builds its runtime) on the same thread:
-the guard copies whatever fonts are process-wide when it's made, and a text system built under
-it pins the bundled ones to this thread.
+in Inter.
+
+`rune::text::measure` (and `advance`, `ink`, `font_epoch`) reads process-wide state: any text
+system built elsewhere (`TextSystem::new`, `Runtime::new`) moves its fonts, and a runtime's
+`set_font_families` (K2's picker) moves its families. A `rune::text::with_families` guard taken
+first, with `TextSystem::new(fonts::FONTS, fonts::FAMILIES)` (or the runtime) built after it on
+the same thread, narrows that hazard, since the guard copies whatever fonts are process-wide
+when it's made and the text system built under it lands the bundled ones there. It doesn't
+close it (R-K6-1 below). So a test that needs the measure path's fonts pinned lives alone in
+its own test binary, with nothing beside it that builds a text system: strata-kit's
+`tests/fonts_weight.rs`, and the gallery's `tests/k6.rs`, which holds one test. A test that
+only needs a font's measurements measures on a `TextSystem` of its own
+(`TextSystem::measure`), which no other test can move.
+
+**Rune draft R-K6-1 (draft, not filed): a measurer can keep the wrong fonts.** At the pinned
+rev, `with_text` (`crates/rune/src/text/measure.rs`) builds a thread's measurer from the fonts
+it read, then reads the state's `fonts_generation` again (line 226) to tag it, with no lock held
+across the build. A `TextSystem::new` with other fonts on another thread in between leaves the
+measurer holding the old fonts under the new fonts' generation. Later, the families-only branch
+(line 216) sees that generation match and keeps the loaded fonts, changing only the families:
+text measures in the old fonts under the new names. In strata-kit this showed as JetBrains
+Mono's name over Inter's fonts (258 pt where 600 was due, about one run in six). There, a
+`with_families` guard taken while the process had no measure state yet built the measurer
+(Inter, from `TextSystem::default()`), while a parallel test's `TextSystem::new` with
+JetBrains Mono moved the state. Repro sketch, headless, run in a loop of fresh processes:
+thread A takes `with_families("F", "F")` on a process with no text system yet, while thread B
+calls `TextSystem::new(&[FONT_F], ("F", "F"))`. A then calls `TextSystem::new(&[FONT_F],
+("F", "F"))` and `rune::text::advance` on a run whose width tells F from Inter: some runs
+measure Inter. A fix would tag the measurer with the generation it read the fonts at, or hold
+the state's lock from the read through the tag.
 
 Open the gallery with `mise run gallery`. A button on the index opens its page (click, Space
 or Return), and Escape returns to the index. `mise run gallery -- --scene c1-ten-rows-dark`

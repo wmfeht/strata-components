@@ -54,7 +54,6 @@
                               "actions": [
                                 "click"
                               ],
-                              "description": "Navigate (Enter)",
                               "key": "c6-loc-navigate",
                               "name": "Navigate (Enter)",
                               "role": "button"
@@ -63,7 +62,6 @@
                               "actions": [
                                 "click"
                               ],
-                              "description": "Cancel (Escape)",
                               "key": "c6-loc-cancel",
                               "name": "Cancel (Escape)",
                               "role": "button"

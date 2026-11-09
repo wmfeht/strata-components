@@ -87,7 +87,6 @@
                                     "focus",
                                     "scroll-into-view"
                                   ],
-                                  "description": "Path copied",
                                   "key": "c6-loc-copy",
                                   "name": "Path copied",
                                   "role": "button",

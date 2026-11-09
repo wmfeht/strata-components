@@ -1132,9 +1132,9 @@ fn wayland_capture_ends_for_a_drag_that_never_enters_our_windows() {
 
 /// R2-B2's last case: a drag that starts over no surface at all (one jump into sway's outer
 /// gap around the window) gets no proof: nothing enters the app's windows and no target
-/// answers. It is released there: the capture still ends once the drag has (by sway's focus
-/// change at the drop, or failing that P1's late Escape), no Escape reaches the app, and
-/// hover comes back.
+/// answers, so P1 sends no Escape (path 3 in the module docs). It is released there: on
+/// sway the capture ends by sway's focus change at the drop, no Escape reaches the app, and
+/// hover comes back. Elsewhere it would wait for the window's next press or focus change.
 #[test]
 #[ignore = "needs a private session: mise run test-platform"]
 fn wayland_a_drag_over_nothing_ends_its_capture_after_it_ends() {

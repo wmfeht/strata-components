@@ -3,7 +3,8 @@
 use std::rc::Rc;
 
 use rune::{
-    Align, El, KeyEvent, LiveRegion, PointerPress, Side, TextStyle, Tx, col, row, text, text_input,
+    Align, Drag, El, KeyEvent, LiveRegion, PointerButton, PointerPress, Side, TextStyle, Tx, col,
+    row, text, text_input,
 };
 use strata_kit::look::Look;
 
@@ -193,11 +194,21 @@ fn build<S: 'static>(cfg: &Rc<RenameEditor<S>>, s: &S, rcx: &RowCx<'_>) -> El {
     // The box is a `textbox`, as rune-kit's text inputs are: Rune routes a press anywhere in it
     // to the field (`runtime/input/hit.rs`, `textbox_input`), so a press in its margin, off the
     // text line, edits rather than reaching the collection under it and ending the edit. Its
-    // menu press is the field's too.
+    // menu press is the field's too (which gives the box a context-menu action of its own:
+    // without it, a right-click in the margin would open the row's menu).
+    //
+    // The `textbox` routing is for primary presses only. A middle press walks up to the
+    // nearest element that takes the middle button (`runtime/input/gesture.rs`,
+    // `button_down`), which would be the collection's root: the row being renamed would open in
+    // a new tab. So the box takes the middle button itself, with a drag handler that does
+    // nothing (an empty `on_press` would give it a click action). Back and Forward stay the
+    // host's: its own handling commits the edit (D4).
     row()
         .key(EDITOR)
         .role("textbox")
         .on_secondary_press(menu_press(cfg))
+        .pointer_buttons([PointerButton::Middle])
+        .on_drag(|_: &mut S, _: &mut Drag, _: &mut Tx| {})
         .grow(1.0)
         .min_w(0.0)
         .h_full()

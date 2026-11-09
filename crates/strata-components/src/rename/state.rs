@@ -42,11 +42,21 @@ pub struct RenameState {
     seen_focus: bool,
     /// The row showed in the viewport since the edit opened: leaving it now is a scroll out.
     seen_shown: bool,
-    /// A field menu the host opened is showing: the field's lost keyboard isn't a blur.
-    menu: bool,
-    /// The field lost the keyboard while the menu held the edit: once it has it back, the
-    /// menu is gone, whether or not the host said so.
-    menu_lost: bool,
+    /// A field menu the host opened holds the edit: the field's lost keyboard isn't a blur.
+    hold: Hold,
+}
+
+/// The field menu's hold on the edit ([`RenameState::menu_opened`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Hold {
+    #[default]
+    None,
+    /// The host opened a menu, which hasn't been seen to take the keyboard yet. A menu that
+    /// takes it (rune-kit's, C21's) has it by the first `tick` after: it opens and takes it in
+    /// the commit of the press or key that asked for it, which runs before the next poll.
+    Opened,
+    /// The menu has the keyboard.
+    Lost,
 }
 
 impl RenameState {
@@ -83,8 +93,7 @@ impl RenameState {
         self.error = None;
         self.seen_focus = false;
         self.seen_shown = false;
-        self.menu = false;
-        self.menu_lost = false;
+        self.hold = Hold::None;
         out.changed = true;
         out
     }
@@ -172,11 +181,11 @@ impl RenameState {
     }
 
     /// One poll, with the key, listing and collection of the edit's scope
-    /// ([`RenameState::scope`]). It ends an edit
-    /// whose entry left the listing or was renamed elsewhere ([`By::Listing`]), whose row
-    /// scrolled out of the viewport after it had shown there ([`By::Scrolled`], as Strata's
-    /// editor ends when its row unmaps), or whose field lost the keyboard ([`By::Blur`], a
-    /// commit: Rune has no focus-change hook, upstream #106).
+    /// ([`RenameState::scope`]). It ends an edit whose entry left the listing or was renamed
+    /// elsewhere ([`By::Listing`]), whose row scrolled out of the viewport after it had shown
+    /// there ([`By::Scrolled`], as Strata's editor ends when its row unmaps), or whose field
+    /// lost the keyboard ([`By::Blur`], a commit: Rune has no focus-change hook, upstream
+    /// #106).
     ///
     /// Passing another collection's state would judge the row against the wrong viewport: a
     /// debug build panics when `scope` isn't the edit's.
@@ -212,33 +221,34 @@ impl RenameState {
         }
         if self.edit.focused {
             self.seen_focus = true;
-            if std::mem::take(&mut self.menu_lost) {
-                self.menu = false;
-            }
+            // Either the menu gave the keyboard back (closed, whether or not the host said
+            // so), or it never took it (it isn't one that takes it, or the host opened none):
+            // either way, nothing holds the edit any more.
+            self.hold = Hold::None;
         } else if self.seen_focus {
-            if !self.menu {
+            if self.hold == Hold::None {
                 return self.commit(By::Blur);
             }
-            self.menu_lost = true;
+            self.hold = Hold::Lost;
         }
         Polled::default()
     }
 
-    /// The host opened a field menu for a [`RenameIntent::FieldMenu`]: until
-    /// [`RenameState::menu_closed`], the field losing the keyboard to it ends nothing. The hold
-    /// also ends once the field has the keyboard back after losing it.
+    /// The host opened a field menu for a [`RenameIntent::FieldMenu`], one that takes the
+    /// keyboard (rune-kit's, C21's): until [`RenameState::menu_closed`], the field losing the
+    /// keyboard to it ends nothing. Call it from the intent's handler, so the menu opens in the
+    /// same commit. The hold also ends on any [`RenameState::tick`] that finds the field with
+    /// the keyboard: the menu gave it back, or never took it.
     pub fn menu_opened(&mut self) {
         if self.open.is_some() {
-            self.menu = true;
-            self.menu_lost = false;
+            self.hold = Hold::Opened;
         }
     }
 
     /// The field menu closed: the field asks for the keyboard back if the menu didn't
     /// return it.
     pub fn menu_closed(&mut self) -> Polled {
-        self.menu_lost = false;
-        if !std::mem::take(&mut self.menu) || self.open.is_none() {
+        if std::mem::take(&mut self.hold) == Hold::None || self.open.is_none() {
             return Polled::default();
         }
         if !self.edit.focused {
@@ -309,8 +319,7 @@ impl RenameState {
         self.error = None;
         self.seen_focus = false;
         self.seen_shown = false;
-        self.menu = false;
-        self.menu_lost = false;
+        self.hold = Hold::None;
         // A fresh spare: the old text and its history go, and Rune's focus sync for the
         // removed field lands here (#180).
         self.edit = TextEdit::new("");

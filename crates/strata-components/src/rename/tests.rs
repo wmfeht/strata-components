@@ -1,4 +1,6 @@
-use rune::{Cx, El, Env, Key, KeyEvent, Mods, Runtime, TextEdit, Tx, col, text_input};
+use rune::{
+    Cx, El, Env, Key, KeyEvent, Mods, PointerButton, Runtime, TextEdit, Tx, col, text_input,
+};
 use strata_kit::look::Look;
 
 use super::*;
@@ -247,18 +249,37 @@ struct App {
     rename: RenameState,
     other: TextEdit,
     heard: Vec<RenameIntent>,
-    menu_opens: bool,
+    menu: HostMenu,
+    menu_at: Option<rune::PointerPress>,
+    /// What the collection heard: its presses (`on_press`) and its controllers' intents.
+    collection_heard: Vec<String>,
+}
+
+/// What the host does with a [`RenameIntent::FieldMenu`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum HostMenu {
+    /// Nothing.
+    #[default]
+    None,
+    /// Opens a menu (rune-kit's, as C21's), which takes the keyboard, and says when it
+    /// closes.
+    Real,
+    /// Opens that menu, and never calls `menu_closed`.
+    Forgetful,
+    /// Calls `menu_opened`, and opens nothing.
+    HoldOnly,
 }
 
 fn listing(n: usize) -> ListSource {
     ListSource::new(
         (1..=n as u64)
             .map(|i| {
-                let name = match i {
-                    1 => "Notes.md".to_owned(),
-                    _ => format!("item {i:03}.txt"),
+                let (name, kind) = match i {
+                    1 => ("Notes.md".to_owned(), EntryKind::File),
+                    3 => ("Projects".to_owned(), EntryKind::Folder),
+                    _ => (format!("item {i:03}.txt"), EntryKind::File),
                 };
-                ListEntry::new(EntryId::new(i), name, EntryKind::File, "text")
+                ListEntry::new(EntryId::new(i), name, kind, "text")
             })
             .collect(),
     )
@@ -268,8 +289,13 @@ fn editor() -> RenameEditor<App> {
     RenameEditor::new(|s: &App| &s.rename, |s: &mut App| &mut s.rename)
         .validate(|_: &App, _, name: &str| name.contains("//").then(|| "Enter a name".to_owned()))
         .on_intent(|s: &mut App, intent, _: &mut Tx| {
-            if matches!(intent, RenameIntent::FieldMenu { .. }) && s.menu_opens {
+            if let RenameIntent::FieldMenu { at, .. } = &intent
+                && s.menu != HostMenu::None
+            {
                 s.rename.menu_opened();
+                if s.menu != HostMenu::HoldOnly {
+                    s.menu_at = Some(rune::PointerPress { x: at.x, y: at.y });
+                }
             }
             s.heard.push(intent);
         })
@@ -284,6 +310,8 @@ fn view(s: &App, _: &mut Cx<App>) -> El {
         |_: &App| 0,
     )
     .rename(|s: &App| s.rename.renaming_in(KEY), editor().slot())
+    .on_press(|s: &mut App, p, _| s.collection_heard.push(format!("press {:?}", p.button)))
+    .on_intent(|s: &mut App, i, _| s.collection_heard.push(format!("{i:?}")))
     .build(s);
     let page = col()
         .w_full()
@@ -296,10 +324,17 @@ fn view(s: &App, _: &mut Cx<App>) -> El {
                 .on_edit(|s: &mut App| &mut s.other),
         )
         .child(col().w(300.0).grow(1.0).min_h(0.0).child(list));
-    rune_kit::root(
-        page,
-        editor().message(s, &s.look).into_iter().collect::<Vec<_>>(),
-    )
+    let mut layer: Vec<El> = editor().message(s, &s.look).into_iter().collect();
+    let menu = rune_kit::context_menu("menu", rune::el().key("menu-trigger"), s.menu_at)
+        .item(rune_kit::MenuItem::new("Copy"))
+        .on_close(|s: &mut App| {
+            s.menu_at = None;
+            if s.menu == HostMenu::Real {
+                let _ = s.rename.menu_closed();
+            }
+        })
+        .build(&s.look.kit, &mut layer);
+    rune_kit::root(page.child(menu), layer)
 }
 
 fn mount(n: usize) -> Runtime<App> {
@@ -310,7 +345,9 @@ fn mount(n: usize) -> Runtime<App> {
         rename: RenameState::new(),
         other: TextEdit::new(""),
         heard: Vec::new(),
-        menu_opens: false,
+        menu: HostMenu::None,
+        menu_at: None,
+        collection_heard: Vec::new(),
     };
     let mut rt = Runtime::new(app, view, (400.0, 300.0), Env::new(false, 1.0));
     rt.poll = Some(|s: &mut App, _, _| {
@@ -516,43 +553,107 @@ fn a_press_in_the_editors_box_off_the_text_line_keeps_editing() {
     assert!(rt.popup_menu().is_none());
 }
 
-#[test]
-fn a_host_menu_holds_the_edit_open_while_it_has_the_keyboard() {
-    let mut rt = mount(20);
-    rt.state.menu_opens = true;
-    begin(&mut rt, 1);
+fn right_click_field(rt: &mut Runtime<App>) {
+    let [x, y, w, h] = rect(rt, keys::FIELD);
+    let (x, y) = (x + w / 2.0, y + h / 2.0);
+    rt.pointer_move(x, y);
+    rt.secondary_down(x, y);
+    frames(rt, 1);
+    rt.secondary_up(x, y);
+    frames(rt, 3);
+}
+
+fn menu_key(rt: &mut Runtime<App>) {
     rt.key(KeyEvent {
         key: Key::ContextMenu,
         mods: Mods::default(),
     });
-    frames(&mut rt, 2);
-    assert!(matches!(last(&rt), Some(RenameIntent::FieldMenu { .. })));
-    // The host's menu takes the keyboard (here: another field).
-    tap(&mut rt, "other");
-    assert!(rt.state.rename.is_open(), "{:?}", rt.state.heard);
-    rt.update(|s, _| {
-        let _ = s.rename.menu_closed();
-    });
-    frames(&mut rt, 3);
-    assert_eq!(focused(&rt).as_deref(), Some(keys::FIELD));
-    assert!(rt.state.rename.is_open());
+    frames(rt, 3);
+}
+
+#[test]
+fn a_host_menu_holds_the_edit_open_while_it_has_the_keyboard() {
+    for open in [menu_key, right_click_field] {
+        let mut rt = mount(20);
+        rt.state.menu = HostMenu::Real;
+        begin(&mut rt, 1);
+        open(&mut rt);
+        assert!(matches!(last(&rt), Some(RenameIntent::FieldMenu { .. })));
+        assert!(!rt.state.rename.edit.focused, "the menu has the keyboard");
+        assert!(rt.state.rename.is_open(), "{:?}", rt.state.heard);
+        rt.key(KeyEvent {
+            key: Key::Escape,
+            mods: Mods::default(),
+        });
+        frames(&mut rt, 3);
+        assert_eq!(focused(&rt).as_deref(), Some(keys::FIELD));
+        assert!(rt.state.rename.is_open());
+        tap(&mut rt, "other");
+        assert_eq!(last(&rt).and_then(RenameIntent::by), Some(By::Blur));
+    }
+}
+
+#[test]
+fn a_middle_press_in_the_editor_is_not_the_rows() {
+    let mut rt = mount(20);
+    rt.state.coll.controllers.pointer =
+        Some(Box::new(crate::collection::pointer::PointerIntent::new()));
+    // A folder's row: a middle press on it opens it in a new tab.
+    begin(&mut rt, 3);
+    let [bx, by, _, bh] = rect(&rt, keys::EDITOR);
+    let [fx, fy, fw, fh] = rect(&rt, keys::FIELD);
+    let middle = |rt: &mut Runtime<App>, x: f32, y: f32| {
+        rt.pointer_move(x, y);
+        rt.button_down(x, y, PointerButton::Middle);
+        frames(rt, 1);
+        rt.button_up(x, y, PointerButton::Middle);
+        frames(rt, 3);
+    };
+    // The text line, then the box's margin before it.
+    for (x, y) in [(fx + fw / 2.0, fy + fh / 2.0), (bx + 1.0, by + bh / 2.0)] {
+        middle(&mut rt, x, y);
+        assert!(
+            rt.state.collection_heard.is_empty(),
+            "a middle press at ({x}, {y}) reached the collection: {:?}",
+            rt.state.collection_heard
+        );
+        assert!(rt.state.rename.has_keyboard());
+    }
+    // Not vacuous: a middle press on another row is the collection's.
+    let [x, y, w, h] = rect(&rt, "row-6");
+    middle(&mut rt, x + w / 2.0, y + h / 2.0);
+    assert!(!rt.state.collection_heard.is_empty());
 }
 
 #[test]
 fn a_menu_hold_ends_once_the_field_has_the_keyboard_back() {
-    // The host opened a menu and never said it closed: the user clicks back in the field,
-    // then away. That press commits.
+    // The host's menu closed and the host never said so: the keyboard came back to the
+    // field, so the next press away commits.
     let mut rt = mount(20);
-    rt.state.menu_opens = true;
+    rt.state.menu = HostMenu::Forgetful;
     begin(&mut rt, 1);
+    right_click_field(&mut rt);
+    assert!(!rt.state.rename.edit.focused, "the menu has the keyboard");
     rt.key(KeyEvent {
-        key: Key::ContextMenu,
+        key: Key::Escape,
         mods: Mods::default(),
     });
-    frames(&mut rt, 2);
+    frames(&mut rt, 3);
+    assert!(rt.state.rename.has_keyboard());
     tap(&mut rt, "other");
-    assert!(rt.state.rename.is_open(), "the menu holds the edit");
-    tap(&mut rt, keys::FIELD);
+    assert!(!rt.state.rename.is_open(), "{:?}", rt.state.heard);
+    assert_eq!(last(&rt).and_then(RenameIntent::by), Some(By::Blur));
+}
+
+#[test]
+fn a_hold_whose_menu_never_takes_the_keyboard_ends_at_once() {
+    // `menu_opened` with no menu that takes the keyboard, and no `menu_closed`: the field
+    // keeps the keyboard, and a press away still commits.
+    let mut rt = mount(20);
+    rt.state.menu = HostMenu::HoldOnly;
+    begin(&mut rt, 1);
+    menu_key(&mut rt);
+    assert!(matches!(last(&rt), Some(RenameIntent::FieldMenu { .. })));
     assert!(rt.state.rename.has_keyboard());
     tap(&mut rt, "other");
     assert!(!rt.state.rename.is_open(), "{:?}", rt.state.heard);

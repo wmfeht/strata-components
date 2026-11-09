@@ -27,7 +27,8 @@
 //!   the row (`CollectionState::reveal`, which reaches unmounted rows too). A new item's
 //!   default name opens with [`Initial::All`].
 //! - **Every poll** it calls [`RenameState::tick`] with the key, listing and collection of the
-//!   edit's scope ([`RenameState::scope`]), builds the view again when the result changed, and acts on its intents.
+//!   edit's scope ([`RenameState::scope`]), builds the view again when the result changed,
+//!   and acts on its intents.
 //! - **Intents.** [`RenameIntent::Rename`] and [`RenameIntent::Move`] (a typed path) are the
 //!   host's to carry out; [`RenameIntent::Keep`] renames nothing. An ending [`By::Next`] or
 //!   [`By::Previous`] (Tab, Shift+Tab) asks the host to move the selection to the neighbour
@@ -79,16 +80,23 @@
 //!   reaches what lies under it (the row below) and ends the edit, as any press outside the
 //!   field does in Strata.
 //! - **The field's menu.** The field has its own `on_secondary_press`, which hears a
-//!   right-click, the Menu key and Shift+F10, so Rune's native field menu (empty on Linux at the
-//!   pinned rev) never opens. It asks for [`RenameIntent::FieldMenu`]; the menu is C21's. A host
-//!   that opens one calls [`RenameState::menu_opened`], so the field losing the keyboard to it
-//!   ends nothing, and [`RenameState::menu_closed`] after. The hold also ends once the field
-//!   has the keyboard back after losing it, so a host that forgets `menu_closed` doesn't leave
-//!   the edit deaf to blurs.
+//!   right-click, the Menu key and Shift+F10, so Rune's native field menu (which never shows on
+//!   Linux at the pinned rev) never opens. It asks for [`RenameIntent::FieldMenu`]; the menu is
+//!   C21's. A host that opens one, from the intent's handler, calls
+//!   [`RenameState::menu_opened`], so the field losing the keyboard to it ends nothing, and
+//!   [`RenameState::menu_closed`] after. The hold ends on its own too, on the first `tick` that
+//!   finds the field with the keyboard: the menu gave it back (a host that forgot
+//!   `menu_closed`), or never took it (no menu opened, or one that doesn't take the keyboard).
+//!   A menu that takes the keyboard has it by the first `tick` after: it opens and takes it in
+//!   the commit of the press or key that asked for it, which comes before the next poll
+//!   (probed with rune-kit's context menu, as C21's is built, from a right-click and the Menu
+//!   key).
 //! - **The box.** The field's box (its fill and outline, a row tall) is a `textbox`, as
 //!   rune-kit's text inputs are: Rune routes a press anywhere in it to the field, so a press in
 //!   its margin, off the text line, moves the caret rather than ending the edit. A right-click
-//!   there is the field's menu press too.
+//!   there is the field's menu press too. That routing is for primary presses: the box also
+//!   takes the middle button, or a middle press in it would walk up to the collection's root
+//!   and open the row being renamed in a new tab. Back and Forward stay the host's.
 //! - **Spellcheck** is off: a file name isn't prose. Rune has no checker on Linux anyway.
 //! - **Upstream #180.** Rune syncs focus into every field of the last view, the one just
 //!   removed too, so [`RenameState::edit`] is always present: a spare while no edit is open.
@@ -124,11 +132,24 @@
 //!     element inside one (C24's bar, toolbar buttons built that way);
 //!   - a primary press on a link in text;
 //!   - a primary press on an element with `keeps_text_selection`, or inside one;
-//!   - any secondary or middle press (probed: a right-click or middle click on another row
-//!     leaves the field focused).
+//!   - a primary press on an unfocusable element inside another `textbox` (rune-kit
+//!     `TextInput`'s copy and clear buttons);
+//!   - a primary press outside an open modal that dismisses on an outside press: it closes
+//!     the modal and goes no further;
+//!   - any press with another button: secondary, middle, Back, Forward (probed: a right-click
+//!     or middle click on another row leaves the field focused).
 //!
-//!   A host calls [`RenameState::commit`] for each it has: C1e's `Collection::on_press` hears
-//!   every press on the listing outside the editor, any button. Rune draft U-C5-2.
+//!   Where the host commits for each:
+//!   - **Presses on the listing.** C1e's `Collection::on_press` hears every primary, middle
+//!     and secondary press on the listing outside the editor, so the host commits there.
+//!     Back and Forward never reach it (C1e takes only the middle button besides the primary
+//!     and secondary); the host commits from its own Back and Forward handling.
+//!   - **Presses elsewhere.** Preserve-focus controls, links, `keeps_text_selection`
+//!     elements and other text inputs sit outside the listing (toolbars, headers, the
+//!     sidebar, the preview), so the host commits from those controls' own handlers.
+//!   - **A dismissed modal** is one the host opened, and closing it is its own handler's.
+//!
+//!   Rune draft U-C5-2.
 //! - **D5: no field menu on Linux until C21** (owner ruling). Strata's GTK entry shows Cut,
 //!   Copy, Paste, Delete, Select All and Insert Emoji.
 //! - **D6: a pasted tab or line break is dropped** (Rune's single-line field).
@@ -192,9 +213,11 @@
 //! - **C2:** the size badge hidden while editing (`RowState::renaming` says so).
 //!
 //! In process, without bullets (`rename/tests.rs`): a row scrolled out, the entry leaving the
-//! listing or renamed elsewhere, the field menu and its hold (and the hold ending without
-//! `menu_closed`), a press in the box's margin, a press on the message, a `tick` with another
-//! collection's scope, #180, a composition ending in a blur, and paste.
+//! listing or renamed elsewhere, the field menu and its hold with a real rune-kit menu (opened
+//! by a right-click and by the Menu key), the hold ending without `menu_closed` and when no
+//! menu takes the keyboard, a press in the box's margin, a middle press in the field and its
+//! margin, a press on the message, a `tick` with another collection's scope, #180, a
+//! composition ending in a blur, and paste.
 //!
 //! # Rune
 //!
@@ -218,8 +241,9 @@
 //!   `TextInput::new(&edit).build(k).on_secondary_press(f)`, right-click the field: `f` never
 //!   runs. Ask: forward `on_secondary_press` (or expose the inner field's `El`).
 //! - **U-C5-2: no "press outside" for a field.** A press that leaves a field focused (D4's
-//!   list: a `preserve_focus_on_press` control, a link, a `keeps_text_selection` element, any
-//!   secondary or middle press) tells it nothing, so an inline editor can't end on a press
+//!   list: a `preserve_focus_on_press` control, a link, a `keeps_text_selection` element, a
+//!   part of another `textbox`, a press dismissing a modal, any press with another button)
+//!   tells it nothing, so an inline editor can't end on a press
 //!   elsewhere, as a GTK capture-phase click or a web `pointerdown` listener on the document
 //!   can. Repro: a focused `text_input` beside a `preserve_focus_on_press(true)` button; press
 //!   the button, or right-click beside the field: no handler of the field's runs, and it stays

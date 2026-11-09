@@ -45,8 +45,13 @@ Nothing is released yet. The first release is planned for milestone M1 with the 
   - `DragItem::local` and `DropTarget::local`: a typed payload between the app's own windows,
     with nothing serialized.
   - On Wayland, Rune's capture of the press ends once the compositor has taken the pointer
-    (a synthetic Escape, a workaround for draft U10). On X11 a release before the drag's XI2
-    events were selected still ends it. A drag from another app takes the compositor's action. X11's
+    (a synthetic Escape, a workaround for draft U10), and only while the pressed element is
+    still mounted where it was: keep a drag's source mounted until the drag ends. The module
+    docs list every path where the capture ends late. On X11 a release before the drag's
+    XI2 events were selected still ends it.
+  - Every Wayland drag lists `application/x-local-drag;id=<pid>.<counter>.<nonce>`, which
+    other clients see; on X11 only a drag with a local payload does.
+  - `Dnd::start_drag` takes the phase and the element's key. A drag from another app takes the compositor's action. X11's
     source shows no cursor feedback. Link is X11 only.
 - `glib-bridge`: a GLib main loop for Rune apps. `GlibThread::start` runs a fresh `MainContext`
   on its own thread and wakes the app's `poll` as answers land in its state.

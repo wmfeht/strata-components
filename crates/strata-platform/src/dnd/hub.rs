@@ -37,8 +37,6 @@ pub(crate) enum Job {
     },
     /// The picture of drag `id`, rendered.
     Icon { id: u64, image: Option<DragImage> },
-    /// Drag `id` ended a while ago: end Rune's capture if nothing has (see `session`).
-    LateEscape { id: u64 },
     /// P0's turn: dispatch its queue (see [`transfer::Turn`]).
     Run(Box<dyn FnOnce() + Send>),
 }

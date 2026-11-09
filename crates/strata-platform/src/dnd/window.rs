@@ -85,7 +85,8 @@ pub(crate) struct Core<S: 'static> {
 }
 
 /// The element a drag started from: its key, its exact path in Rune's tree (learned by a
-/// pick in the handler that started the drag, before any commit), and a point inside it.
+/// pick in the handler that started the drag, before any commit), and the press point,
+/// which Rune found inside its visible box.
 ///
 /// Rune's capture ends on an Escape only if the captured element is still live at the path
 /// it was pressed at: `cancel_drag` finds it by that path, skipping exiting subtrees. An
@@ -96,7 +97,8 @@ pub(crate) struct Core<S: 'static> {
 #[derive(Clone, Debug)]
 struct SourceAt {
     id: u64,
-    path: Option<String>,
+    /// Shared with the pick's callback, so a check copies no string.
+    path: Option<Rc<str>>,
     at: (f32, f32),
 }
 
@@ -125,11 +127,6 @@ fn under(picked: &str, path: &str) -> bool {
             .is_some_and(|r| r.starts_with('/'))
 }
 
-/// How long after a drag ended P1 waits before ending a capture that no proof ended (see
-/// `session`): long enough for a compositor's focus change at the drop (sway's, 14 ms in S2)
-/// to have ended it first, which leaves nothing to do.
-pub(crate) const LATE_ESCAPE: std::time::Duration = std::time::Duration::from_millis(150);
-
 impl<S: 'static> Sink for Core<S> {
     fn queue(&self, r: Routed) {
         self.queue.borrow_mut().push_back(r);
@@ -153,21 +150,25 @@ fn run<S: 'static>(key: &str, job: Job, s: &mut S, tx: &mut Tx) -> bool {
     let Some(core) = hub::core::<Core<S>>(key) else {
         return false;
     };
-    match job {
-        Job::Pump | Job::Run(_) => core.drain(s, tx),
-        Job::Dropped(id) => core.deliver(id, s, tx),
-        Job::Peeked {
-            serial,
-            mime,
-            bytes,
-        } => core.peeked(serial, mime, bytes, s, tx),
-        Job::Icon { id, image } => {
-            hub::icon_ready(id, image);
-            false
-        }
-        Job::LateEscape { id } => {
-            core.late_escape(id, tx);
-            false
+    core.run_job(job, s, tx)
+}
+
+impl<S: 'static> Core<S> {
+    /// A job for this window, once routed.
+    fn run_job(self: &Rc<Self>, job: Job, s: &mut S, tx: &mut Tx) -> bool {
+        let core = self;
+        match job {
+            Job::Pump | Job::Run(_) => core.drain(s, tx),
+            Job::Dropped(id) => core.deliver(id, s, tx),
+            Job::Peeked {
+                serial,
+                mime,
+                bytes,
+            } => core.peeked(serial, mime, bytes, s, tx),
+            Job::Icon { id, image } => {
+                hub::icon_ready(id, image);
+                false
+            }
         }
     }
 }
@@ -331,10 +332,12 @@ impl<S: 'static> Dnd<S> {
         // On Wayland the Escape that ends Rune's capture waits for the compositor's proof
         // that it took the pointer (`Routed::Holding`): see `session`.
         self.0.guard.borrow_mut().started(release);
-        // The source's centre, in window points, from the press's geometry; and its path,
-        // picked now, while Rune's tree is the one this phase reached it in.
+        // The press point, in window points: Rune hit-tested it inside the source's visible
+        // box, which its centre may not be (a row more than half scrolled out, review round
+        // 3, SF1). And the source's path, picked now, while Rune's tree is the one this phase
+        // reached it in.
         let [wx, wy] = drag.window_point();
-        let at = (wx - drag.x + drag.w / 2.0, wy - drag.y + drag.h / 2.0);
+        let at = (wx - drag.dx, wy - drag.dy);
         *self.0.source.borrow_mut() = Some(SourceAt { id, path: None, at });
         let core = Rc::downgrade(&self.0);
         let k = source_key.to_owned();
@@ -344,7 +347,7 @@ impl<S: 'static> Dnd<S> {
             at.1,
             Pick::new().transparent(true),
             move |_: &mut S, picked: Option<Picked>, _: &mut Tx| {
-                let path = picked.and_then(|p| through(p.path(), &k));
+                let path = picked.and_then(|p| through(p.path(), &k)).map(Rc::from);
                 if let Some(core) = core.upgrade()
                     && let Some(src) = core.source.borrow_mut().as_mut().filter(|s| s.id == id)
                 {
@@ -370,18 +373,23 @@ impl<S: 'static> Dnd<S> {
         self.0.drain(s, tx);
     }
 
+    /// For the headless tests: jobs go to `poster`, as an attached window's go to its
+    /// update; [`Dnd::run_job_for_test`] runs them.
+    #[cfg(test)]
+    pub(crate) fn set_poster_for_test(&self, poster: Poster) {
+        *self.0.poster.borrow_mut() = Some(poster);
+    }
+
+    /// For the headless tests: runs a posted job, as the window's update would.
+    #[cfg(test)]
+    pub(crate) fn run_job_for_test(&self, job: Job, s: &mut S, tx: &mut Tx) -> bool {
+        self.0.run_job(job, s, tx)
+    }
+
     /// For the headless tests: the drag this window started, if any.
     #[cfg(test)]
     pub(crate) fn drag_id_for_test(&self) -> Option<u64> {
         self.0.out.get().map(|(id, _)| id)
-    }
-
-    /// For the headless tests: the late Escape's timer fires now.
-    #[cfg(test)]
-    pub(crate) fn late_escape_for_test(&self, tx: &mut Tx) {
-        if let Some((id, _)) = self.0.out.get() {
-            self.0.late_escape(id, tx);
-        }
     }
 }
 
@@ -407,18 +415,22 @@ impl<S: 'static> Core<S> {
     /// Sends the Escape, from a pick's callback, only if the drag's source is still live at
     /// the path it started from (see [`SourceAt`]), and the guard still allows it.
     fn escape_if_live(self: &Rc<Self>, id: u64, tx: &mut Tx) {
-        let Some(src) = self.source.borrow().clone().filter(|s| s.id == id) else {
-            return;
-        };
-        let Some(path) = src.path else {
-            // The start's pick found no source: nothing says the capture is live.
-            return;
+        let (path, at) = {
+            let src = self.source.borrow();
+            let Some(src) = src.as_ref().filter(|s| s.id == id) else {
+                return;
+            };
+            // No path: the start's pick found no source, and nothing says the capture is live.
+            let Some(path) = src.path.clone() else {
+                return;
+            };
+            (path, src.at)
         };
         let core = Rc::downgrade(self);
         tx.element_at_in_with(
             selector(&path),
-            src.at.0,
-            src.at.1,
+            at.0,
+            at.1,
             Pick::new().transparent(true),
             move |_: &mut S, picked: Option<Picked>, tx: &mut Tx| {
                 let live = picked.is_some_and(|p| under(p.path(), &path));
@@ -436,30 +448,6 @@ impl<S: 'static> Core<S> {
         );
     }
 
-    /// The drag ended with no proof having ended Rune's capture (it never entered the app's
-    /// windows, and no target answered it): after [`LATE_ESCAPE`], if the guard still holds
-    /// the press, end it then (see `session`).
-    fn schedule_late_escape(&self, id: u64) {
-        let Some(poster) = self.poster.borrow().clone() else {
-            return;
-        };
-        let spawned = std::thread::Builder::new()
-            .name("dnd-late-escape".into())
-            .spawn(move || {
-                std::thread::sleep(LATE_ESCAPE);
-                poster(Job::LateEscape { id });
-            });
-        if let Err(e) = spawned {
-            hub::diagnostic(&format!("no thread for the late Escape: {e}"));
-        }
-    }
-
-    fn late_escape(self: &Rc<Self>, id: u64, tx: &mut Tx) {
-        if self.out.get() == Some((id, Release::Escape)) && self.guard.borrow().may_escape() {
-            self.escape_if_live(id, tx);
-        }
-    }
-
     /// Handles what was routed to this window. True if app code ran.
     fn drain(self: &Rc<Self>, s: &mut S, tx: &mut Tx) -> bool {
         let mut changed = false;
@@ -475,14 +463,11 @@ impl<S: 'static> Core<S> {
                     false
                 }
                 Routed::Ended { id, outcome } => {
+                    // Nothing ends Rune's capture after the drag (review round 3, B1): Rune
+                    // drops a capture without an Up when a press replaces it or a modal
+                    // mounts, so a later Escape could reach the app. A drag no proof reached
+                    // keeps it until the next press or focus change (module docs, path 3).
                     let f = self.ends.borrow_mut().remove(&id);
-                    // The drag's own record stays until the next starts: a late Escape may
-                    // still need it.
-                    if self.out.get() == Some((id, Release::Escape))
-                        && self.guard.borrow().may_escape()
-                    {
-                        self.schedule_late_escape(id);
-                    }
                     match f {
                         Some(f) => {
                             f(s, outcome, tx);

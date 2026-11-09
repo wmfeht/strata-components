@@ -317,59 +317,6 @@ fn a_proof_for_a_drag_that_already_dropped_sends_no_escape() {
     );
 }
 
-/// R2-B2: a drag no proof ever reached (it never entered the app's windows and no target
-/// answered) ended: once the late Escape's wait is over, the capture ends.
-#[test]
-fn the_capture_ends_late_for_a_drag_no_proof_reached() {
-    let (mut rt, at) = runtime(Release::Escape);
-    let id = started(&mut rt, at);
-    route(
-        &mut rt,
-        super::hub::Routed::Ended {
-            id,
-            outcome: rune::DragOutcome::Copied,
-        },
-    );
-    rt.frame(0.0);
-    assert!(rt.pressing(), "not before the wait");
-    rt.update_if(|s, tx| {
-        s.dnd.clone().late_escape_for_test(tx);
-        false
-    });
-    rt.frame(0.0);
-    assert!(!rt.pressing(), "the late Escape ended the capture");
-    assert!(rt.state.keys.is_empty(), "{:?}", rt.state.keys);
-}
-
-/// R2-B2: a focus change at the drop (sway's bounce) ended the capture first: the late
-/// Escape finds the guard released and sends nothing.
-#[test]
-fn no_late_escape_once_a_focus_change_ended_the_capture() {
-    let (mut rt, at) = runtime(Release::Escape);
-    let id = started(&mut rt, at);
-    route(
-        &mut rt,
-        super::hub::Routed::Ended {
-            id,
-            outcome: rune::DragOutcome::Copied,
-        },
-    );
-    rt.window_focus(false);
-    rt.frame(0.0);
-    rt.window_focus(true);
-    rt.frame(0.0);
-    rt.update_if(|s, tx| {
-        s.dnd.clone().late_escape_for_test(tx);
-        false
-    });
-    rt.frame(0.0);
-    assert!(
-        rt.state.keys.is_empty(),
-        "the Escape leaked: {:?}",
-        rt.state.keys
-    );
-}
-
 /// R2-B1: the source moves to another place in the tree when its drag starts (wrapped in a
 /// new parent): Rune's capture names the old path, so no Escape may be sent.
 mod moved {
@@ -432,3 +379,5 @@ mod moved {
         );
     }
 }
+
+mod review3;

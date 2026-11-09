@@ -18,9 +18,13 @@
 //!         .on_end(|s: &mut App, outcome, _| s.last = Some(outcome)))
 //! ```
 //!
-//! Call [`shutdown`] on the UI thread before the event loop ends (before `Tx::quit`, and in
-//! the last window's `on_close`): it ends a running drag and tears down P0's substrate while
-//! winit's display is alive (see `transfer`).
+//! Call [`shutdown`] on the UI thread before the event loop ends: it ends a running drag and
+//! tears down P0's substrate while winit's display is alive (see `transfer`). Call it before
+//! `Tx::quit` or `AppHandle::quit`, **and** in the last window's `on_close`. Rune's
+//! `App::on_quit` (not in the pinned Rune `78d22ed`; once the pin moves to a Rune that has
+//! it) runs before teardown on `Tx::quit` and `AppHandle::quit`, so call it there too, but it
+//! runs in no window when the last window closes, and Linux has no system quit to hook: the
+//! last window's `on_close` stays needed.
 //!
 //! # What Rune lacks
 //!
@@ -44,8 +48,9 @@
 //!   once the compositor proves it took the pointer (the drag's own `wl_data_device.enter`
 //!   on an app window, or a target's `target` or `action` answer), the drag hasn't dropped
 //!   or ended, the pressed element is still live where it was, and P1 saw the press. A drag
-//!   no proof reaches has its capture ended when it ends. Upstream Rune `dev` (44 commits
-//!   past the pin) still has no way to end it. Tests guard it at the pinned Rune rev.
+//!   no proof reaches keeps its capture until the window's next press or focus change.
+//!   Upstream Rune `dev` (44 commits past the pin) still has no way to end it. "Rune's
+//!   capture on Wayland" below lists what remains. Tests guard it at the pinned Rune rev.
 //! - **U3** (draft, not filed): file-drop acceptance sees no app state and no drag identity.
 //! - **U-P1-1** (draft, not filed): an element has one handler of each kind, and a shim
 //!   can't read an element's key. So [`Dnd::drag_source`] takes the element's `on_drag` and
@@ -76,8 +81,9 @@
 //!
 //! # Rune's capture on Wayland
 //!
-//! Every path where Rune's capture of a drag's press ends late, or P1's Escape could reach
-//! the app's keys:
+//! Every path where Rune's capture of a drag's press is left held, or P1's Escape reaches
+//! the app's keys. Each is a residue of U10 (draft, not filed): with a public way to end a
+//! capture, none would remain.
 //!
 //! 1. **Focus lost before the proof's update.** Keyboard focus leaves the window for a
 //!    reason other than the drop (the user switching windows, a window mapping and taking
@@ -85,39 +91,49 @@
 //!    (normally a few milliseconds: one P0 dispatch and one window update). Rune ends the
 //!    capture at that focus loss; if its cancelled `Up` hasn't reached P1 by the update, the
 //!    Escape finds no capture and the app's keys hear one Escape.
-//! 2. **Focus lost before the late Escape.** For a drag no proof reached: the same, for a
-//!    focus loss in the late wait (150 ms) after the drag ended whose cancelled `Up`
-//!    hasn't reached P1 when the late Escape goes out. sway's own focus change at the drop
-//!    comes about 14 ms after it, and its `Up` is handled in the next frame, well inside
-//!    the wait.
-//! 3. **No proof, no focus change: the capture outlives the drag by the late wait.** For
-//!    those 150 ms after a drag no proof reached, hover stays frozen and a user's Escape
-//!    ends the capture instead of reaching the app's keys.
+//! 2. **A modal mounting before the proof's update.** A modal that mounts in the window
+//!    between the drag's start and that update (one opened from `on_start`, say) clears
+//!    Rune's capture without an `Up`, which P1 can't see: the proof's Escape goes to the
+//!    modal or the app's keys, once, and a modal that closes on Escape closes. Not a race:
+//!    a modal opened from `on_start` takes it every time. Don't open one while a drag starts.
+//! 3. **No proof: the capture is held until the window's next press or focus change.** A
+//!    drag that never enters the app's windows and that no target answers (one started and
+//!    released over no surface, or over clients that never answer) gets no Escape from P1.
+//!    Rune's capture then stays held until the compositor's focus change at the drop where
+//!    there is one (sway's, about 14 ms after it), else the window's next press (which
+//!    replaces it), its next focus change, or a modal mounting. Meanwhile hover is frozen,
+//!    and the user's first Escape ends the capture instead of reaching the app's keys. P1
+//!    ends nothing later on a timer: Rune drops a capture without an `Up` when a press
+//!    replaces it or a modal mounts, and an Escape sent after that would reach the app.
 //! 4. **The source left its place.** The element the drag started from leaves the tree,
 //!    starts exiting, or moves to another path (the app hides what it drags, a tab torn
-//!    off, a popover closing), or is laid out so that its centre at the start is no longer
-//!    inside it, before P1's Escape. P1 sends none, so the app's keys hear nothing, but
-//!    Rune's capture stays: it then ends at the compositor's focus change at the drop where
-//!    there is one (sway), else at the window's next press or focus loss. Until then hover
-//!    is frozen, and the user's first Escape ends the capture instead of reaching the app.
-//!    **Keep the source mounted at the same path, not exiting, until the drag ends.**
-//! 5. **A compositor that accepts `start_drag` after the button was released.** wlroots
+//!    off, a popover closing), or no longer covers the press point, before the proof's
+//!    update. P1 sends no Escape, and the capture is held as in 3.
+//! 5. **The source lost its `on_drag`.** The element keeps its key and path but is drawn
+//!    without its drag source (`on_drag`) before the proof's update. P1 can't see handlers:
+//!    it sends the Escape, Rune's `cancel_drag` refuses an element with no `on_drag`, the
+//!    app's keys hear one Escape, and the capture is held as in 3.
+//! 6. **A compositor that accepts `start_drag` after the button was released.** wlroots
 //!    refuses one. Elsewhere, winit would have had the release, and an Escape sent before
 //!    Rune ran the release's handler would reach the app's keys. Hand tests (mutter, KWin)
 //!    pending.
-//! 6. **A drag source the guard didn't see pressed** (an app's own `on_drag` that calls
-//!    [`Dnd::start_drag`] without routing the press through [`Dnd::owns`]): no Escape, so
-//!    its capture ends as in 4.
+//! 7. **A drag source the guard didn't see pressed** (an app's own `on_drag` that calls
+//!    [`Dnd::start_drag`] without routing the press through [`Dnd::owns`]): no Escape, and
+//!    the capture is held as in 3.
+//!
+//! So a drag's source must **stay mounted at the same path, not exiting, covering the press
+//! point, and keep its `on_drag` (stay a drag source) until the drag ends**, and nothing
+//! should open a modal as a drag starts.
 //!
 //! X11 has none of these: winit keeps the grab, and Rune hears the real release.
 //!
 //! # The in-process token
 //!
-//! A drag lists `application/x-local-drag;id=<pid>.<counter>.<nonce>` (the owner's ruling)
-//! so a drop in this process knows the drag as its own. On X11 it is listed only for a drag
-//! with a [`DragItem::local`] payload. On Wayland it is listed on every drag: it is also how
-//! P1 recognises its own drag entering its windows, the compositor's proof above. So other
-//! Wayland clients see it, and with it this process's id.
+//! A drag lists `application/x-local-drag;id=<counter>.<nonce>` (no process id: the owner's
+//! ruling) so a drop in this process knows the drag as its own. On X11 it is listed only for
+//! a drag with a [`DragItem::local`] payload. On Wayland it is listed on every drag: it is
+//! also how P1 recognises its own drag entering its windows, the compositor's proof above,
+//! so other Wayland clients see it.
 //!
 //! # For X2 (wiring components to P1)
 //!
@@ -127,10 +143,13 @@
 //!   [`Dnd::drag_source`]. From C1b's begin-drag intent call [`Dnd::start_drag`] with the
 //!   row's `Drag` and its key, and route every phase through [`Dnd::owns`] first, ignoring
 //!   the ones it claims.
-//! - A row the drag starts from must stay mounted at the same path, not exiting, until the
-//!   drag ends (path 4 above): a virtualized row scrolled out, a row removed when its entry
-//!   moves, or a list re-keyed during the drag leaves Rune's capture held. Hide a dragged
-//!   row by styling it, not by dropping it from the tree, until `on_end`.
+//! - A row the drag starts from must stay mounted at the same path, not exiting, and keep
+//!   its `on_drag` (stay a drag source) until the drag ends (paths 4 and 5 above): a
+//!   virtualized row scrolled out, a row removed when its entry moves, or a list re-keyed
+//!   during the drag leaves Rune's capture held; a row redrawn without C1b's `on_drag`
+//!   lets one Escape reach the keys. Hide a dragged row by styling it, not by dropping it
+//!   from the tree or its handlers, until `on_end`. Don't open a modal from the drag's start
+//!   (path 2).
 //! - W1's `choose_action` maps onto [`DropTarget::action`], which wins over P1's modifier
 //!   rule.
 //!

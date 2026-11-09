@@ -31,16 +31,15 @@
 //!   - Only while the element the press captured is live at the path it had when the drag
 //!     started (review round 2, R2-B1): Rune's `cancel_drag` finds it by that path, and
 //!     skips exiting subtrees. P1 records the path by a pick when the drag starts, and sends
-//!     the Escape from a pick at the element's centre that runs against the same tree,
-//!     just before Rune handles the key.
+//!     the Escape from a pick at the press point (which Rune found inside the element's
+//!     visible box) that runs against the same tree, just before Rune handles the key.
 //!   - Only for a press the guard saw go down, and once.
 //!
-//!   With no proof at all (the drag starts over no surface, and no target answers it), the
-//!   capture ends when the drag does: by the compositor's focus change at the drop where it
-//!   makes one (sway's, about 14 ms after it), else by P1's Escape [`LATE_ESCAPE`] after
-//!   the drag ended, under the same checks.
-//!
-//!   [`LATE_ESCAPE`]: super::window::LATE_ESCAPE
+//!   With no proof at all (the drag starts over no surface, and no target answers it), P1
+//!   sends nothing: Rune's capture is held until the window's next press or focus change.
+//!   Nothing ends it later on a timer (review round 3, B1): Rune drops a capture without an
+//!   `Up` when a press replaces it or a modal mounts, and an Escape after that would reach
+//!   the app.
 //!
 //!   What remains is listed in the module docs, "Rune's capture on Wayland".
 //! - **X11:** the source is grab-less and winit keeps its implicit grab, so Rune hears every

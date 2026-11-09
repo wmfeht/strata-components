@@ -116,7 +116,7 @@ pub(super) fn tab<S: 'static>(
         let cx = &hover_cx;
         let over = hover != DropHover::Left;
         if cx.opens(s, offer) {
-            (cx.access)(s).follow_open(site, over);
+            (cx.access)(s).follow_open(site, over, tx);
         } else {
             let st = (cx.access)(s);
             st.set_drop_hover(site, hover);
@@ -183,7 +183,7 @@ pub(super) fn opener<S: 'static>(cx: &Ctx<S>, site: DropSite) -> DropZone<S> {
         let opens = cx.opens(s, offer);
         let st = (cx.access)(s);
         match site {
-            DropSite::Strip if opens => st.follow_open(site, over),
+            DropSite::Strip if opens => st.follow_open(site, over, tx),
             // The button lights for a drag that opens tabs (and for any while the host says one
             // runs: `set_open_drag`).
             DropSite::NewTab if opens || !over => st.set_drop_hover(site, hover),

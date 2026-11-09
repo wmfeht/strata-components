@@ -29,7 +29,10 @@ struct Spring {
 /// before they deliver its drop (Rune's `runtime/input/drop.rs`, P1's `dnd/window.rs`): W1's
 /// `Left` means "left, moved, or dropped". So the gap closes at once, as a cancel or a drag
 /// leaving the strip needs, and its slot waits here for the drop that may follow in the same
-/// turn: the drop takes it, the next accepting hover drops it, and so do the ticks after.
+/// turn: the drop takes it. A zone the drag reaches next keeps it until that zone's own gap has
+/// built (a drop in the same turn has no other slot to go by: rune-kit finds a gap's slot as
+/// the strip builds), and the ticks after drop it, each asking for the next, so it expires in
+/// a window at rest too.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct LeftLanding {
     slot: usize,
@@ -147,10 +150,16 @@ impl BrowserTabsState {
     /// became active (a click, the keyboard, a reopen, a restore).
     pub fn tick(&mut self, now: f64, data: &TabsData<'_>, tx: &mut Tx) -> Polled {
         let mut out = Polled::default();
+        if self.drag.incoming_slot().is_some() {
+            // A newer gap built: it is the drop's slot now.
+            self.left_landing = None;
+        }
         if let Some(left) = self.left_landing.as_mut() {
             left.ticks += 1;
             if left.ticks > LEFT_LANDING_TICKS {
                 self.left_landing = None;
+            } else {
+                tx.wake_after(Duration::ZERO);
             }
         }
         if let Some(spring) = self.spring.as_mut() {
@@ -262,17 +271,22 @@ impl BrowserTabsState {
 
     /// A drag that opens tabs reached `site` (`Some`), or left it: only the zone holding the
     /// gap closes it, so moving from a tab to the gap beside it never closes it for a frame.
-    pub(super) fn follow_open(&mut self, site: DropSite, over: bool) {
+    pub(super) fn follow_open(&mut self, site: DropSite, over: bool, tx: &mut Tx) {
         if over {
             self.incoming_from = Some(site);
-            self.left_landing = None;
         } else if self.incoming_from == Some(site) {
-            self.left_landing = self
+            // Its gap's slot, or, for a zone whose gap hasn't built yet, the one kept before.
+            let slot = self
                 .drag
                 .incoming_slot()
-                .map(|slot| LeftLanding { slot, ticks: 0 });
+                .or(self.left_landing.map(|l| l.slot));
+            self.left_landing = slot.map(|slot| LeftLanding { slot, ticks: 0 });
             self.incoming_from = None;
             self.drag.set_incoming(None);
+            if self.left_landing.is_some() {
+                // The ticks that expire it, in a window at rest too.
+                tx.wake_after(Duration::ZERO);
+            }
         }
     }
 

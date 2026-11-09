@@ -441,6 +441,8 @@ mod c7 {
         rune_binder: bool,
         /// Whether the host's own drags open tabs (it sets `opens_tabs`).
         opens: bool,
+        /// The clock at the last poll.
+        now: f64,
     }
 
     fn host(n: u64) -> Host {
@@ -459,6 +461,7 @@ mod c7 {
             heard: Vec::new(),
             rune_binder: false,
             opens: true,
+            now: 0.0,
         }
     }
 
@@ -495,6 +498,7 @@ mod c7 {
     }
 
     fn host_poll(h: &mut Host, t: f64, tx: &mut Tx) -> bool {
+        h.now = t;
         let tabs = data_tabs(h);
         let polled = h.tabs_state.tick(t, &TabsData::new(&tabs, h.active), tx);
         let changed = !polled.intents.is_empty();
@@ -624,6 +628,75 @@ mod c7 {
         });
         run(&mut rt, 0.2);
         assert_eq!(opened(&rt.state), [2]);
+    }
+
+    // A drag that leaves a tab's gap for the strip's and drops there, all in one turn: the
+    // strip's gap hasn't built, so its slot isn't known, and the drop keeps the tab's rather
+    // than falling to the end (review 2).
+    #[test]
+    fn a_drop_on_a_zone_reached_in_the_same_turn_keeps_the_last_slot() {
+        let mut rt = mount_host(host(5));
+        let t1 = rect(&rt, "t-tabs-1");
+        let (x, y) = (t1[0] + t1[2] * 0.25, t1[1] + t1[3] / 2.0);
+        let tab_zone = zone_at(x, y);
+        rt.update(|h, tx| {
+            tab_zone.hover(h, DropHover::Accepting, &local_folders(), tx);
+            tab_zone.moved(h, point(x, y), tx);
+        });
+        run(&mut rt, 0.5);
+        assert_eq!(rt.state.tabs_state.drag.incoming_slot(), Some(0));
+        let t2 = rect(&rt, "t-tabs-2");
+        let gap = (t2[0] + t2[2] + 2.0, t2[1] + t2[3] / 2.0);
+        let strip = zone_at(gap.0, gap.1);
+        let dropped = Dropped::new(
+            local_folders(),
+            DropData::files(&["/srv/a/".into()]),
+            Mods::default(),
+        );
+        rt.update(|h, tx| {
+            tab_zone.hover(h, DropHover::Left, &local_folders(), tx);
+            strip.hover(h, DropHover::Accepting, &local_folders(), tx);
+            strip.moved(h, point(gap.0, gap.1), tx);
+            strip.hover(h, DropHover::Left, &local_folders(), tx);
+            strip.deliver(h, dropped, tx);
+        });
+        assert_eq!(opened(&rt.state), [0]);
+    }
+
+    // A leave with no drop keeps the gap's slot only briefly, and it expires in a window at
+    // rest too: it asks for the wakes that expire it (review 2: it relied on frames that
+    // happened to come).
+    #[test]
+    fn a_kept_slot_expires_from_wake_to_wake() {
+        let mut rt = mount_host(host(5));
+        let t2 = rect(&rt, "t-tabs-2");
+        let gap = (t2[0] + t2[2] + 2.0, t2[1] + t2[3] / 2.0);
+        let strip = zone_at(gap.0, gap.1);
+        rt.update(|h, tx| {
+            strip.hover(h, DropHover::Accepting, &local_folders(), tx);
+            strip.moved(h, point(gap.0, gap.1), tx);
+        });
+        run(&mut rt, 0.5);
+        rt.update(|h, tx| strip.hover(h, DropHover::Left, &local_folders(), tx));
+        // The frame the leave asks for, then only wakes: no frames for motion.
+        rt.frame(FRAME);
+        for _ in 0..20 {
+            let Some(deadline) = rt.wake_deadline() else {
+                break;
+            };
+            rt.frame((deadline - rt.state.now).max(0.001));
+        }
+        let dropped = Dropped::new(
+            local_folders(),
+            DropData::files(&["/srv/a/".into()]),
+            Mods::default(),
+        );
+        rt.update(|h, tx| strip.deliver(h, dropped, tx));
+        assert_eq!(
+            opened(&rt.state),
+            [5],
+            "a later hoverless drop opens at the end"
+        );
     }
 
     // browser/tabs: "After an Escape-cancelled drag, the strip shows no insertion line": the

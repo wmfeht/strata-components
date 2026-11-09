@@ -11,13 +11,14 @@ mod k6 {
 
     #[test]
     fn the_gallery_runtime_shapes_in_the_bundled_font() {
+        // `measure` follows the fonts and families the latest text system was given,
+        // process-wide. The guard makes this thread's state its own, so another test in this
+        // binary, if any, that builds a runtime or switches families can't move it; the
+        // runtime built under it then sets this thread's fonts.
+        let _families = rune::text::with_families("JetBrains Mono", "JetBrains Mono");
         let mut rt = strata_gallery::runtime(Gallery::default(), Env::new(false, 1.0));
         rt.frame(0.0);
         assert_eq!(rt.font_families(), ("JetBrains Mono", "JetBrains Mono"));
-        // `measure` follows the fonts the latest runtime was given, process-wide. The guard
-        // keeps this thread on the app's families while another test (K2's picker) switches
-        // its own runtime's.
-        let _families = rune::text::with_families("JetBrains Mono", "JetBrains Mono");
         let style = TextStyle::new(100.0, 400.0);
         for style in [style, style.mono()] {
             for run in ["iiiiiiiiii", "MMMMMMMMMM"] {

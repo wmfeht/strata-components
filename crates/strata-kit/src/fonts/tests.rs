@@ -132,7 +132,18 @@ fn text_shapes_in_jetbrains_mono_not_a_fallback() {
 /// doesn't draw as regular.
 #[test]
 fn the_wght_axis_follows_the_weight() {
+    // `ink` and `advance` read the measure state, which is process-wide: another test's text
+    // system (icon_coverage's, say) can put it back on Inter, which is variable too. The guard
+    // makes this thread's state its own, and the text system built under it lands the bundled
+    // fonts there, so both are pinned whatever runs alongside.
+    let _families = rune::text::with_families(FAMILY, FAMILY);
     let _text = TextSystem::new(FONTS, FAMILIES);
+    // JetBrains Mono's 600-unit advance: this path measures the bundled face.
+    let advance = rune::text::advance("iiiiiiiiii", TextStyle::new(100.0, 400.0));
+    assert!(
+        (advance - 600.0).abs() < 0.01,
+        "{advance} pt, not JetBrains Mono's"
+    );
     let ink = |weight| {
         rune::text::ink("l", TextStyle::new(100.0, weight))
             .expect("ink")

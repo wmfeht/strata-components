@@ -1686,7 +1686,8 @@ fn a_block_is_coloured_up_to_the_32_kib_cut_and_asked_once() {
         h.iter().all(|(r, _)| r.end <= cut),
         "colours stop at the 32 KiB cut"
     );
-    assert!(blocks.cached_bytes() <= cut);
+    // The cut code, plus the entry's own 96 bytes.
+    assert!(blocks.cached_bytes() <= cut + 96);
 }
 
 /// A block of about 30 KB, under rune-kit's 32 KiB cut: a comment line the thread colours,
@@ -1880,4 +1881,274 @@ fn a_failed_text_is_opened_again_on_the_next_edit() {
         "retried",
     );
     assert!(doc.settle(Duration::ZERO));
+}
+
+/// Every block under one key: what a crafted document gets against a fixed hash key.
+fn one_key(_: &str, _: &str) -> u64 {
+    7
+}
+
+#[test]
+fn two_blocks_with_one_key_on_screen_come_to_rest() {
+    // Review 5, SF1: each asked for the other's entry, so every landing replaced the other
+    // and asked again, and a host rebuilding on `poll` never came to rest.
+    let mut pump = Pump::new(light());
+    let mut blocks = pump.blocks();
+    blocks.key_with(one_key);
+    let codes = ["fn a() {}\n".to_string(), "fn b() {}\n".to_string()];
+    let (builds, _) = build_until_rest(&mut pump, &mut blocks, &[&codes]);
+    assert!(builds <= 3, "builds until rest: {builds}");
+    assert!(
+        pump.blocks_asked <= 2,
+        "blocks asked: {}",
+        pump.blocks_asked
+    );
+    // The first is coloured; the one that lost the key draws plain rather than pending.
+    assert!(blocks.has_landed("rust", &codes[0]));
+    assert_eq!(blocks.highlight(Some("rust"), &codes[1]), Some(Vec::new()));
+}
+
+/// Blocks keyed by their first byte, so `a…` blocks share a key and `c…` ones another.
+fn first_byte_key(_: &str, code: &str) -> u64 {
+    u64::from(code.as_bytes()[0])
+}
+
+#[test]
+fn a_reply_for_a_block_that_lost_its_key_is_ignored() {
+    // Review 5, SF4: the reply carries the code's `Arc`, which tells a stale reply apart.
+    let mut pump = Pump::new(light());
+    let mut blocks = pump.blocks();
+    blocks.key_with(first_byte_key);
+    let (a, b, c) = ("a_one(1);\n", "a_two(\"s\");\n", "c();\n");
+    // One build asks for `c` and `a`; `c` lands and bumps the epoch, then `a` finishes too,
+    // its reply still on the channel.
+    blocks.highlight(Some("rust"), c);
+    blocks.highlight(Some("rust"), a);
+    pump.requests();
+    pump.step();
+    assert!(blocks.poll(), "c landed");
+    pump.step();
+    // The next build asks for `b` only: `a` wasn't asked since the bump, so `b` takes its key.
+    assert_eq!(blocks.highlight(Some("rust"), b), None);
+    blocks.poll();
+    assert_eq!(
+        blocks.highlight(Some("rust"), b),
+        None,
+        "b took a's colours from a's late reply"
+    );
+    pump.run();
+    blocks.poll();
+    let got = blocks.highlight(Some("rust"), b).expect("b landed");
+    assert_eq!(highlight_runs(&got), block_reference("rust", b, &light()));
+}
+
+/// Builds `view` each frame, with `polls` landings polled before each build, until a build
+/// lands nothing. The builds, and whether it came to rest within `max`.
+fn build_polling(
+    pump: &mut Pump,
+    blocks: &mut CodeBlocks,
+    view: &[String],
+    polls: usize,
+    max: usize,
+) -> (usize, bool) {
+    for build in 1..=max {
+        build_view(blocks, view);
+        pump.requests();
+        let mut changed = false;
+        for _ in 0..polls {
+            pump.step();
+            pump.step();
+            changed |= blocks.poll();
+        }
+        if !changed {
+            pump.run();
+            if !blocks.poll() {
+                return (build, true);
+            }
+        }
+    }
+    (max, false)
+}
+
+#[test]
+fn three_polls_between_builds_over_the_cap_come_to_rest() {
+    // Review 5, SF2: Rune's resting wake polls, then the frame polls, then the view builds.
+    // Each poll that landed something moved the build marks, so the blocks the last build
+    // asked for fell out of the last two builds and were trimmed while on screen.
+    let mut pump = Pump::new(light());
+    let mut blocks = pump.blocks();
+    let view: Vec<String> = (0..200).map(|i| view_block("a", i)).collect();
+    let (builds, rested) = build_polling(&mut pump, &mut blocks, &view, 3, 300);
+    assert!(rested, "never came to rest in {builds} builds");
+    assert_eq!(pump.blocks_asked, 200, "each block asked for once");
+}
+
+#[test]
+fn two_polls_between_builds_over_the_cap_come_to_rest() {
+    // Review 5, SF3: the last-two-builds rule holds with two polls per build.
+    let mut pump = Pump::new(light());
+    let mut blocks = pump.blocks();
+    let view: Vec<String> = (0..200).map(|i| view_block("a", i)).collect();
+    let (builds, rested) = build_polling(&mut pump, &mut blocks, &view, 2, 300);
+    assert!(rested, "never came to rest in {builds} builds");
+    assert_eq!(pump.blocks_asked, 200, "each block asked for once");
+}
+
+#[test]
+fn a_block_from_the_last_build_outlives_one_trim() {
+    // Review 5, SF3: a block asked for in either of the last two builds is never trimmed,
+    // so a document left for one build keeps its colours; the next trim takes it.
+    let mut pump = Pump::new(light());
+    let mut blocks = pump.blocks();
+    let x: Vec<String> = (0..160).map(|i| view_block("x", i)).collect();
+    let small = |i: usize| vec![format!("fn s{i}() {{}}\n")];
+    build_view(&blocks, &x);
+    pump.run();
+    assert!(blocks.poll());
+    // A build of something else, landing: x was asked for in the build before, so it stays.
+    build_view(&blocks, &small(1));
+    pump.run();
+    assert!(blocks.poll());
+    assert!(
+        x.iter().all(|c| blocks.has_landed("rust", c)),
+        "x was trimmed one build after it was on screen"
+    );
+    // Another: x is two builds back now, and the trim takes it down to the cap.
+    build_view(&blocks, &small(2));
+    pump.run();
+    assert!(blocks.poll());
+    let kept = x.iter().filter(|c| blocks.has_landed("rust", c)).count();
+    assert!(kept < x.len(), "x outlived its two builds: {kept} kept");
+    assert!(
+        blocks.cached_bytes() <= 4 << 20,
+        "{} bytes",
+        blocks.cached_bytes()
+    );
+}
+
+/// At most `8 n log2 n` entries looked at: what sorting once and keeping running totals cost.
+fn n_log_n_bound(n: usize) -> u64 {
+    8 * n as u64 * u64::from(usize::BITS - n.leading_zeros())
+}
+
+#[test]
+fn misses_and_trims_cost_n_log_n() {
+    // Review 5, SF5: each miss summed the current build's bytes over every entry, and each
+    // trim looked for the oldest entry once per entry it dropped, both on the UI thread.
+    let n = 5000;
+    let mut pump = Pump::new(light());
+    let mut blocks = pump.blocks();
+    // 5000 blocks of about 1 KiB, over the 4 MiB cap, in a language the thread answers at
+    // once.
+    let codes: Vec<String> = (0..n)
+        .map(|i| format!("// {i}\n{}\n", "x".repeat(1024)))
+        .collect();
+    for c in &codes {
+        blocks.highlight(Some("zzz"), c);
+    }
+    let misses = blocks.visits();
+    pump.run();
+    blocks.poll();
+    // Two builds of something else: the second trim drops the old document to the cap.
+    for k in 0..2 {
+        blocks.highlight(Some("zzz"), &format!("g({k});\n"));
+        pump.run();
+        blocks.poll();
+    }
+    let trims = blocks.visits() - misses;
+    assert!(blocks.cached_bytes() <= 4 << 20, "trimmed to the cap");
+    let bound = n_log_n_bound(n);
+    assert!(
+        misses <= bound,
+        "{n} misses looked at {misses} entries (bound {bound})"
+    );
+    assert!(
+        trims <= bound,
+        "the trims looked at {trims} entries (bound {bound})"
+    );
+}
+
+#[test]
+fn tiny_blocks_count_their_entries_against_the_cap() {
+    // Review 5, SF6: the cap counted code bytes only, so 50,000 blocks of a few bytes stayed
+    // under it whatever their entries, tokens and keys cost. Each entry now counts 96 bytes
+    // more, as rune-kit's hook cache does.
+    let mut pump = Pump::new(light());
+    let mut blocks = pump.blocks();
+    for i in 0..50_000 {
+        blocks.highlight(Some("zzz"), &format!("f({i});\n"));
+    }
+    pump.run();
+    blocks.poll();
+    for k in 0..2 {
+        blocks.highlight(Some("zzz"), &format!("g({k});\n"));
+        pump.run();
+        blocks.poll();
+    }
+    let most = (4 << 20) / 96;
+    assert!(
+        blocks.entry_count() <= most,
+        "{} entries kept, at most {most} fit the cap",
+        blocks.entry_count()
+    );
+}
+
+#[test]
+fn a_build_past_the_ceiling_evicts_the_old_document_in_n_log_n() {
+    // Review 1 of C11 on SF5: the first test stayed under the 16 MiB ceiling, so the miss
+    // path's eviction (and its running total) went untested. Here an old document of about
+    // 15 MB from an earlier build is still cached when a new build of about 12 MB arrives:
+    // its misses go past the ceiling and must evict the old blocks, never refuse new ones,
+    // and stay n log n however many misses there are.
+    let mut pump = Pump::new(light());
+    let mut blocks = pump.blocks();
+    let old: Vec<String> = (0..500)
+        .map(|i| format!("// old {i}\n{}\n", "x".repeat(30_000)))
+        .collect();
+    for c in &old {
+        blocks.highlight(Some("zzz"), c);
+    }
+    pump.run();
+    assert!(blocks.poll(), "the old document landed");
+    let (visits, asked) = (blocks.visits(), pump.blocks_asked);
+    let new: Vec<String> = (0..1500)
+        .map(|i| format!("// new {i}\n{}\n", "y".repeat(8_000)))
+        .collect();
+    let mut refused = 0;
+    for c in &new {
+        if blocks.highlight(Some("zzz"), c).is_some() {
+            refused += 1;
+        }
+        let (running, counted) = blocks.current_check();
+        assert_eq!(running, counted, "the running total drifted");
+    }
+    pump.requests();
+    assert_eq!(
+        refused, 0,
+        "new blocks answered plain instead of evicting old ones"
+    );
+    assert_eq!(pump.blocks_asked - asked, new.len());
+    assert!(
+        blocks.cached_bytes() <= 16 << 20,
+        "{} bytes",
+        blocks.cached_bytes()
+    );
+    let looked = blocks.visits() - visits;
+    let bound = n_log_n_bound(old.len() + new.len());
+    assert!(
+        looked <= bound,
+        "the misses looked at {looked} entries (bound {bound})"
+    );
+}
+
+#[test]
+fn each_pool_hashes_with_its_own_key() {
+    // SF1: a fixed hash key let a crafted document collide its blocks in every pool.
+    let pump = Pump::new(light());
+    let (a, b) = (pump.blocks(), pump.blocks());
+    assert_ne!(
+        a.key_for("rust", "fn main() {}"),
+        b.key_for("rust", "fn main() {}"),
+        "two pools keyed a block alike"
+    );
 }

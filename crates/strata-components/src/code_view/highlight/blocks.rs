@@ -7,15 +7,19 @@
 //! the hook's cache key, so the next build asks again and gets them.
 //!
 //! An epoch bump is also where the cache trims: after one, the host builds again and every
-//! block on screen is asked for, through any number of hooks. So a block asked for in the
+//! block on screen is asked for, through any number of hooks. A host may poll any number of
+//! times before it builds: a bump with nothing asked since the last one doesn't count as a
+//! build. So a block asked for in the
 //! last two builds (between bumps) is on screen, or was a moment ago, and is never evicted;
 //! the others go, least recently asked first, down to [`CACHE_BYTES`]. A miss never evicts
 //! a block the current build may still ask for.
+//!
+//! Blocks are keyed by a hash with the pool's own random key. Two blocks with one key still
+//! take turns: one asked for since the last bump keeps the key, and the other draws plain.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
+use std::hash::{BuildHasher, RandomState};
 use std::ops::Range;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -35,15 +39,26 @@ use super::worker::Request;
 const CACHE_BYTES: usize = 4 << 20;
 
 /// How far the cap stretches (512 blocks at the 32 KiB cut). A miss past it first evicts
-/// blocks not asked for since the last bump; a block that would still take the cache past it
-/// answers plain and is never asked for, so nothing lands, nothing wakes the host, and memory
-/// stays bounded. A host that never polls (one that waits on misses) never trims, so its
-/// cache grows to here.
+/// blocks not asked for since the last bump, down to three quarters of it; a block that would
+/// still take the cache past it answers plain and is never asked for, so nothing lands,
+/// nothing wakes the host, and memory stays bounded. A host that never polls (one that waits
+/// on misses) never trims, so its cache grows to here.
 ///
-/// Both bounds count code bytes. Each landed block also keeps its runs, 12 bytes each: about
-/// one run per 5 to 8 bytes of typical code, so 2 to 3 times the code, and at worst (a run per
-/// byte) 13 times. rune-kit's hook keeps its own cache besides, within its own budget.
+/// Both bounds count each block as its code's bytes plus [`ENTRY_BYTES`], so a mass of tiny
+/// blocks is bounded by their number too. They don't count a landed block's runs, 12 bytes
+/// each: about one run per 5 to 8 bytes of typical code, so 2 to 3 times the code, and at
+/// worst (a run per byte) 13 times. rune-kit's hook keeps its own cache besides, within its
+/// own budget.
 const CACHE_CEILING: usize = 4 * CACHE_BYTES;
+
+/// What an entry costs besides its code, as rune-kit's hook cache counts each entry: the
+/// entry, its map slot, its language and the code's `Arc` header.
+const ENTRY_BYTES: usize = 96;
+
+/// What the cache counts for a block of `code`.
+fn cost(code: &str) -> usize {
+    code.len() + ENTRY_BYTES
+}
 
 /// A block colours up to its last line end within this many bytes, rune-kit's cut for an
 /// app's highlighter (`rune_kit::syntax`). `Markdown` already hands over no more; C11's own
@@ -83,12 +98,63 @@ struct Entry {
     used: u64,
 }
 
+/// The cache's entries by key. Every scan of them (`values`, `iter`) goes through here, and
+/// in tests each entry a scan yields counts as a visit, so a test can bound the work misses
+/// and trims do on the UI thread however a scan is written.
+#[derive(Default)]
+struct Entries {
+    map: HashMap<u64, Entry>,
+    #[cfg(test)]
+    visits: std::cell::Cell<u64>,
+}
+
+impl Entries {
+    fn get(&self, key: &u64) -> Option<&Entry> {
+        self.map.get(key)
+    }
+
+    fn get_mut(&mut self, key: &u64) -> Option<&mut Entry> {
+        self.map.get_mut(key)
+    }
+
+    fn insert(&mut self, key: u64, entry: Entry) {
+        self.map.insert(key, entry);
+    }
+
+    fn remove(&mut self, key: &u64) -> Option<Entry> {
+        self.map.remove(key)
+    }
+
+    fn values(&self) -> impl Iterator<Item = &Entry> {
+        self.map.values().inspect(|_| self.visit())
+    }
+
+    fn iter(&self) -> impl Iterator<Item = (&u64, &Entry)> {
+        self.map.iter().inspect(|_| self.visit())
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.map.len()
+    }
+
+    #[cfg(test)]
+    fn visit(&self) {
+        self.visits.set(self.visits.get() + 1);
+    }
+
+    #[cfg(not(test))]
+    fn visit(&self) {}
+}
+
 struct Blocks {
     id: u64,
     tx: Option<Sender<Request>>,
     rx: Receiver<Reply>,
-    entries: HashMap<u64, Entry>,
+    entries: Entries,
     bytes: usize,
+    /// The bytes of the blocks asked for since the last bump, kept as they are asked.
+    current: usize,
     /// Counts `highlight` calls.
     tick: u64,
     /// The tick at the last epoch bump: blocks asked for after it belong to the current build.
@@ -98,12 +164,11 @@ struct Blocks {
     palette: Vec<Option<Color>>,
     epoch: u64,
     wait: Option<Duration>,
-}
-
-fn key_of(lang: &str, code: &str) -> u64 {
-    let mut h = DefaultHasher::new();
-    (lang, code).hash(&mut h);
-    h.finish()
+    /// The pool's own random hash key, so no document can be crafted to collide its blocks.
+    hasher: RandomState,
+    /// Tests force keys (to collide them) with this.
+    #[cfg(test)]
+    key_fn: Option<fn(&str, &str) -> u64>,
 }
 
 impl CodeBlocks {
@@ -118,20 +183,29 @@ impl CodeBlocks {
                 id,
                 tx,
                 rx,
-                entries: HashMap::new(),
+                entries: Entries::default(),
                 bytes: 0,
+                current: 0,
                 tick: 0,
                 build_start: 0,
                 prev_start: 0,
                 palette: Vec::new(),
                 epoch: 0,
                 wait: None,
+                hasher: RandomState::new(),
+                #[cfg(test)]
+                key_fn: None,
             })),
         }
     }
 
     /// A highlighter for `Markdown::highlighter`. Build a fresh one each time the view
     /// builds: its cache key changes when colours land or the theme changes.
+    ///
+    /// A host that memoises a view holding such a `Markdown` (`rune::memo`) must make the
+    /// memo's version change with each [`poll`](Self::poll) that returns true, counting them
+    /// itself; otherwise the memo keeps the plain answers of the first build and the colours
+    /// never show.
     pub fn markdown(&self) -> rune_kit::syntax::Highlighter {
         let (id, epoch) = {
             let s = self.state.borrow();
@@ -153,6 +227,43 @@ impl CodeBlocks {
         self.state.borrow_mut().highlight(lang, code)
     }
 
+    /// Keys blocks with `f` instead of the hash, so a test can make two blocks share a key.
+    #[cfg(test)]
+    pub(crate) fn key_with(&self, f: fn(&str, &str) -> u64) {
+        self.state.borrow_mut().key_fn = Some(f);
+    }
+
+    /// Entries the cache's misses and trims have looked at so far.
+    #[cfg(test)]
+    pub(crate) fn visits(&self) -> u64 {
+        self.state.borrow().entries.visits.get()
+    }
+
+    /// The key this pool gives a block.
+    #[cfg(test)]
+    pub(crate) fn key_for(&self, lang: &str, code: &str) -> u64 {
+        self.state.borrow().key(lang, code)
+    }
+
+    /// The running total of the current build's bytes, and the same counted afresh.
+    #[cfg(test)]
+    pub(crate) fn current_check(&self) -> (usize, usize) {
+        let s = self.state.borrow();
+        let counted = s
+            .entries
+            .map
+            .values()
+            .filter(|e| e.used > s.build_start)
+            .map(|e| cost(&e.code))
+            .sum();
+        (s.current, counted)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn entry_count(&self) -> usize {
+        self.state.borrow().entries.len()
+    }
+
     #[cfg(test)]
     pub(crate) fn cached_bytes(&self) -> usize {
         self.state.borrow().bytes()
@@ -164,7 +275,8 @@ impl CodeBlocks {
         let s = self.state.borrow();
         let code = &code[..coloured_len(code)];
         s.entries
-            .get(&key_of(lang, code))
+            .map
+            .get(&s.key(lang, code))
             .is_some_and(|e| *e.code == *code && e.tokens.is_some())
     }
 
@@ -173,6 +285,7 @@ impl CodeBlocks {
     pub(crate) fn pending_keys(&self) -> Vec<u64> {
         let s = self.state.borrow();
         s.entries
+            .map
             .iter()
             .filter(|(_, e)| e.tokens.is_none())
             .map(|(&k, _)| k)
@@ -226,18 +339,35 @@ impl CodeBlocks {
 }
 
 impl Blocks {
+    fn key(&self, lang: &str, code: &str) -> u64 {
+        #[cfg(test)]
+        if let Some(f) = self.key_fn {
+            return f(lang, code);
+        }
+        self.hasher.hash_one((lang, code))
+    }
+
     fn pending(&self) -> bool {
         self.tx.is_some() && self.entries.values().any(|e| e.tokens.is_none())
     }
 
     /// A new epoch: the next build asks for every block on screen. Trims the cache to
     /// [`CACHE_BYTES`], sparing the blocks asked for in the last two builds.
+    ///
+    /// A bump with nothing asked since the last one (a host polling several times before it
+    /// builds) leaves the build marks where they are: moving them would push the last real
+    /// build out of the last two, and its blocks, still on screen, would be trimmed.
     fn bump(&mut self) {
         self.epoch += 1;
         let spare_after = self.prev_start;
-        self.evict(CACHE_BYTES, 0, spare_after);
-        self.prev_start = self.build_start;
-        self.build_start = self.tick;
+        self.evict(CACHE_BYTES, 0, CACHE_BYTES, spare_after);
+        if self.tick > self.build_start {
+            self.prev_start = self.build_start;
+            self.build_start = self.tick;
+            // Every block is now from an earlier build. (Trims and misses only ever drop
+            // blocks from earlier builds, so `current` needs no other upkeep.)
+            self.current = 0;
+        }
     }
 
     fn apply(&mut self, reply: Reply) -> bool {
@@ -272,9 +402,14 @@ impl Blocks {
             return Some(Vec::new());
         }
         self.tick += 1;
-        let key = key_of(lang, code);
+        let key = self.key(lang, code);
         match self.entries.get_mut(&key) {
-            Some(e) if *e.lang == *lang && *e.code == *code => e.used = self.tick,
+            Some(e) if *e.lang == *lang && *e.code == *code => {
+                if e.used <= self.build_start {
+                    self.current += cost(&e.code);
+                }
+                e.used = self.tick;
+            }
             _ => {
                 if !self.request(key, lang, code) {
                     return Some(Vec::new());
@@ -298,25 +433,37 @@ impl Blocks {
 
     /// Asks the thread for a block and keeps a pending entry. False, and nothing asked, when
     /// the block would take the cache past [`CACHE_CEILING`] even without the blocks not
-    /// asked for since the last bump, or there is no thread: it is then plain.
+    /// asked for since the last bump, when another block holds its key and was asked for since
+    /// then, or there is no thread: it is then plain.
     fn request(&mut self, key: u64, lang: &str, code: &str) -> bool {
-        // A hash collision replaces the other block: count only the one kept, and drop its job.
+        // A hash collision. The other block, if the current build asked for it, keeps the key
+        // and this one draws plain: replacing it would ask again on every landing, and two
+        // such blocks on screen would never come to rest. Otherwise it gives way: count only
+        // the one kept, and drop its job.
+        if self
+            .entries
+            .get(&key)
+            .is_some_and(|e| e.used > self.build_start)
+        {
+            return false;
+        }
         if let Some(old) = self.entries.remove(&key) {
-            self.bytes = self.bytes.saturating_sub(old.code.len());
+            self.bytes = self.bytes.saturating_sub(cost(&old.code));
             if old.tokens.is_none() {
                 self.forget(vec![key]);
             }
         }
-        let current: usize = self
-            .entries
-            .values()
-            .filter(|e| e.used > self.build_start)
-            .map(|e| e.code.len())
-            .sum();
-        if current + code.len() > CACHE_CEILING {
+        if self.current + cost(code) > CACHE_CEILING {
             return false;
         }
-        self.evict(CACHE_CEILING, code.len(), self.build_start);
+        // Past the ceiling, free a quarter of it at once, as `Budget` does, so a host that
+        // never polls doesn't sort the cache again on every miss.
+        self.evict(
+            CACHE_CEILING,
+            cost(code),
+            CACHE_CEILING / 4 * 3,
+            self.build_start,
+        );
         let Some(tx) = &self.tx else {
             return false;
         };
@@ -332,7 +479,8 @@ impl Blocks {
             self.tx = None;
             return false;
         }
-        self.bytes += code.len();
+        self.bytes += cost(&code);
+        self.current += cost(&code);
         let entry = Entry {
             lang: lang.into(),
             code,
@@ -343,20 +491,30 @@ impl Blocks {
         true
     }
 
-    /// Drops the least recently asked blocks asked for at or before tick `spare_after` until
-    /// `extra` more bytes fit under `limit`. The thread drops the jobs of those still pending.
-    fn evict(&mut self, limit: usize, extra: usize, spare_after: u64) {
+    /// When `extra` more bytes don't fit under `limit`, drops the least recently asked blocks
+    /// asked for at or before tick `spare_after` until they fit under `target`. The thread
+    /// drops the jobs of those still pending.
+    ///
+    /// It sorts the candidates once, as rune-kit's `Budget::evict` does, so a trim of `n`
+    /// blocks costs `n log n` on the UI thread rather than `n` per block dropped.
+    fn evict(&mut self, limit: usize, extra: usize, target: usize, spare_after: u64) {
+        if self.bytes + extra <= limit {
+            return;
+        }
+        let mut old: Vec<(u64, u64)> = self
+            .entries
+            .iter()
+            .filter(|(_, e)| e.used <= spare_after)
+            .map(|(&k, e)| (e.used, k))
+            .collect();
+        old.sort_unstable();
         let mut forgotten = Vec::new();
-        while self.bytes + extra > limit {
-            let oldest = self
-                .entries
-                .iter()
-                .filter(|(_, e)| e.used <= spare_after)
-                .min_by_key(|(_, e)| e.used)
-                .map(|(&k, _)| k);
-            let Some(key) = oldest else { break };
+        for (_, key) in old {
+            if self.bytes + extra <= target {
+                break;
+            }
             if let Some(e) = self.entries.remove(&key) {
-                self.bytes = self.bytes.saturating_sub(e.code.len());
+                self.bytes = self.bytes.saturating_sub(cost(&e.code));
                 if e.tokens.is_none() {
                     forgotten.push(key);
                 }

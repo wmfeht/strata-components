@@ -5,7 +5,7 @@
 //! channels of its own: requests come in as calls, and replies collect in an outbox the
 //! worker routes, so tests drive it directly.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::Range;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
@@ -721,8 +721,10 @@ impl Engine {
         }
     }
 
-    /// Drops the queued jobs of blocks the pool's cache no longer holds.
+    /// Drops the queued jobs of blocks the pool's cache no longer holds: one pass over the
+    /// queue, whatever the number of keys.
     pub(crate) fn forget(&mut self, pool: u64, keys: &[u64]) {
+        let keys: HashSet<u64> = keys.iter().copied().collect();
         self.blocks
             .retain(|b| b.pool != pool || !keys.contains(&b.key));
     }

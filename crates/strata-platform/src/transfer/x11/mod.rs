@@ -10,8 +10,10 @@
 //! large data with INCR, reads others' selections (INCR too), and hears every ownership change
 //! through XFixes, so a lost selection shows at once.
 
+mod handoff;
 #[cfg(feature = "dnd")]
 pub(crate) mod hook;
+mod multiple;
 mod selection;
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -34,6 +36,7 @@ use super::data::{ReadLimits, SourceSpec};
 use super::error::{Error, ReadError};
 use super::event::{Done, Event, ReadOffer, Selection, SelectionOffer, SourceId, Subscribers};
 use super::pipe;
+pub use handoff::HandOff;
 use selection::{Incoming, Outgoing};
 
 x11rb::atom_manager! {
@@ -43,6 +46,9 @@ x11rb::atom_manager! {
         TARGETS,
         TIMESTAMP,
         MULTIPLE,
+        ATOM_PAIR,
+        SAVE_TARGETS,
+        CLIPBOARD_MANAGER,
         INCR,
         ATOM,
         INTEGER,
@@ -67,6 +73,21 @@ enum Cmd {
         mime: String,
         limits: ReadLimits,
         done: Reply,
+    },
+    /// Give up the selection source `id` holds, if it still holds one.
+    Disown {
+        id: SourceId,
+    },
+    /// Hand `CLIPBOARD` to a clipboard manager, answering by `deadline`.
+    HandOff {
+        deadline: Instant,
+        reply: Sender<HandOff>,
+    },
+    /// The lazy writer of `target`, asked by `MULTIPLE` request `key`, finished on a worker.
+    MultiReady {
+        key: u64,
+        target: Atom,
+        bytes: Option<Arc<[u8]>>,
     },
     /// A lazy writer finished on a worker: answer the request that asked for it.
     Ready {
@@ -120,6 +141,8 @@ fn refuse_all(rx: &Receiver<Cmd>) {
 struct Shared {
     offers: HashMap<Selection, SelectionOffer>,
     owned: HashSet<u64>,
+    /// Takes asked for and not yet settled: the actor waits for their server timestamp.
+    taking: HashSet<u64>,
 }
 
 /// The way into the actor, from any thread.
@@ -211,8 +234,11 @@ impl X11 {
             atom_of: HashMap::new(),
             owner_of: HashMap::new(),
             owned: HashMap::new(),
-            owning: VecDeque::new(),
+            owning: selection::Takes::default(),
             outgoing: Vec::new(),
+            multis: Vec::new(),
+            next_multi: 0,
+            handoff: None,
             incoming: Vec::new(),
             free_props: Vec::new(),
             next_prop: 0,
@@ -247,6 +273,7 @@ impl X11 {
             return Err(Error::Refused("a source with no types"));
         }
         let id = SourceId::next();
+        lock(&self.shared).taking.insert(id.get());
         let own = Cmd::Own {
             selection,
             id,
@@ -254,6 +281,27 @@ impl X11 {
         };
         self.mailbox.post(own).map_err(|_| Error::Shutdown)?;
         Ok(id)
+    }
+
+    /// Gives up the selection `source` holds, if it still holds it, or cancels its take if it
+    /// still waits for its timestamp. True if it held one or was about to when asked; the
+    /// actor then gives it up and [`Event::SourceCancelled`] follows.
+    pub(crate) fn clear_selection(&self, source: SourceId) -> Result<bool, Error> {
+        let pending = lock(&self.shared).taking.contains(&source.get());
+        if !self.owns(source) && !pending {
+            return Ok(false);
+        }
+        self.mailbox
+            .post(Cmd::Disown { id: source })
+            .map_err(|_| Error::Shutdown)?;
+        Ok(true)
+    }
+
+    /// Hands `CLIPBOARD`, if this process holds it, to a running clipboard manager with every
+    /// type, so it outlives the process. Blocks until the manager answers, at most about
+    /// `timeout`; the actor serves the manager's requests meanwhile.
+    pub(crate) fn hand_off(&self, timeout: std::time::Duration) -> HandOff {
+        handoff::hand_off(&self.mailbox, timeout)
     }
 
     /// Installs `hook` on the actor thread, replacing any earlier one. False if the actor is
@@ -334,8 +382,13 @@ struct Actor {
     owner_of: HashMap<Selection, Window>,
     owned: HashMap<Atom, selection::Owned>,
     /// Ownership requests waiting for a server timestamp, in order.
-    owning: VecDeque<selection::Owning>,
+    owning: selection::Takes,
     outgoing: Vec<Outgoing>,
+    /// `MULTIPLE` requests waiting for lazy writers.
+    multis: Vec<multiple::Multi>,
+    next_multi: u64,
+    /// A hand-off to a clipboard manager, waiting for its answer.
+    handoff: Option<handoff::Waiting>,
     incoming: Vec<Incoming>,
     free_props: Vec<Atom>,
     next_prop: u32,
@@ -414,10 +467,12 @@ impl Actor {
     }
 
     fn fail(&mut self, message: String) {
+        self.end_hand_off(None, HandOff::Gone);
         // Nothing is held or heard any more: owns() turns false for every source.
         {
             let mut shared = lock(&self.shared);
             shared.owned.clear();
+            shared.taking.clear();
             shared.offers.clear();
         }
         self.events.push(Event::Failed { message });
@@ -426,6 +481,7 @@ impl Actor {
     }
 
     fn quit(&mut self) {
+        self.end_hand_off(None, HandOff::Gone);
         #[cfg(feature = "dnd")]
         self.with_hook(|h, cx| h.stop(cx));
         self.abort_reads();
@@ -505,6 +561,8 @@ impl Actor {
             .iter()
             .map(Incoming::deadline)
             .chain(self.outgoing.iter().map(Outgoing::deadline))
+            .chain(self.handoff.as_ref().map(handoff::Waiting::deadline))
+            .chain(self.multis.iter().map(multiple::Multi::deadline))
             .chain(hook)
             .min()
     }

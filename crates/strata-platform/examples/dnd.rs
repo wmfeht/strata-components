@@ -14,7 +14,8 @@
 //! - `{"cmd":"zone","mimes":[…],"read_all":bool,"local":bool,"action":"copy"|"move"|"ask"|"refuse"|null,"ask_answer":"move"|null,"peek":[…]}`;
 //! - `{"cmd":"cancel"}`, `{"cmd":"quit"}`.
 //!
-//! Flags: `--title T`, `--two-windows` (a second window, `second`, titled `T second`).
+//! Flags: `--title T`, `--two-windows` (a second window, `second`, titled `T second`), and the
+//! test switches `--as-if-libwayland-1-22` and `--as-if-no-data-control` (P0's).
 
 #[cfg(feature = "dnd")]
 fn main() {
@@ -39,7 +40,7 @@ mod demo {
     use serde_json::{Value, json};
     use strata_platform::dnd::{
         Actions, AskReply, Dnd, DragAction, DragIcon, DragImage, DragItem, DragSource, DropData,
-        DropTarget, Hover,
+        DropTarget, Hover, TestRoute,
     };
     use strata_test_peer::protocol::{Offer, fnv1a64};
 
@@ -435,8 +436,13 @@ mod demo {
         shutdown(&s.window, "close");
     }
 
-    fn window_app(title: &'static str, key: &str, handles: &Handles) -> App<State> {
-        let dnd = Dnd::<State>::new();
+    fn window_app(
+        title: &'static str,
+        key: &str,
+        handles: &Handles,
+        route: TestRoute,
+    ) -> App<State> {
+        let dnd = Dnd::<State>::new().test_route(route);
         let state_dnd = dnd.clone();
         let window = key.to_owned();
         let mut spec = AppSpec::new(title, (720.0, 480.0), || unreachable!("init is set"), view);
@@ -490,10 +496,15 @@ mod demo {
             .map_or("dnd", |t| Box::leak(t.clone().into_boxed_str()));
         rune::tooling::set_app_id("strata-dnd-demo");
         let handles: Handles = Arc::default();
-        let mut app = window_app(title, "main", &handles);
+        let route = TestRoute {
+            as_if_libwayland_below_1_23: flag("--as-if-libwayland-1-22"),
+            as_if_no_data_control: flag("--as-if-no-data-control"),
+        };
+        let mut app = window_app(title, "main", &handles, route);
         if flag("--two-windows") {
             let second: &'static str = Box::leak(format!("{title} second").into_boxed_str());
-            let spec = WindowSpec::from_app("second", window_app(second, "second", &handles));
+            let spec =
+                WindowSpec::from_app("second", window_app(second, "second", &handles, route));
             let _ = app.window(spec);
         }
         let stdin_handles = handles.clone();

@@ -85,6 +85,13 @@ pub enum Command {
         via: Via,
         mime: String,
     },
+    /// X11 only: reads `mimes` in one `MULTIPLE` conversion, each pair into a property of its
+    /// own, repeats included ([`MultipleRead`]). Small data only: a pair answered by INCR
+    /// counts as refused.
+    SelectionReadMultiple {
+        selection: Selection,
+        mimes: Vec<String>,
+    },
     /// Starts a drag from the peer's own window. Needs a press on it that is still held
     /// ([`Event::PointerButton`]): the session's input peer presses, then drags. On X11 it
     /// proposes the first of `actions` and lists them all in `XdndActionList`.
@@ -112,6 +119,17 @@ pub enum Command {
     DropProxy,
     /// Exports the peer's window for another client to parent to ([`Exported`]).
     Export,
+    /// X11 only: become the session's clipboard manager (take `CLIPBOARD_MANAGER`). An owner
+    /// that hands `CLIPBOARD` over (`SAVE_TARGETS`, naming its types in the request's
+    /// property) has them all taken in one `MULTIPLE` conversion, INCR included, asked exactly
+    /// as gsd-clipboard and xfsettingsd ask it (into the property `MULTIPLE`, each pair
+    /// `(target, target)`). As they do, the peer takes `CLIPBOARD` once the `MULTIPLE` lands,
+    /// then answers the owner when every part is in, and reports [`Event::ManagerSaved`]. With
+    /// `answer: false` it takes `CLIPBOARD_MANAGER` and never answers, so the owner's wait
+    /// runs out.
+    ClipboardManager {
+        answer: bool,
+    },
     /// X11 only: the root window's children whose `_NET_WM_WINDOW_TYPE` lists `ty` (an atom
     /// name such as `_NET_WM_WINDOW_TYPE_DND`), with their size and map state
     /// ([`TypedWindow`]).
@@ -246,6 +264,13 @@ pub struct Mapped {
     pub xid: Option<u32>,
 }
 
+/// The reply to [`Command::SelectionReadMultiple`]: each pair's data, in the order asked, or
+/// None where the owner refused it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MultipleRead {
+    pub results: Vec<Option<Received>>,
+}
+
 /// The reply to [`Command::SelectionTargets`].
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Targets {
@@ -374,6 +399,12 @@ pub enum Event {
         mime: String,
         action: Option<Action>,
         data: Received,
+    },
+    /// As clipboard manager: an owner handed `CLIPBOARD` over. `saved` are the types it
+    /// gave, `refused` those its `MULTIPLE` answer refused.
+    ManagerSaved {
+        saved: Vec<String>,
+        refused: Vec<String>,
     },
     /// Something failed outside a request.
     Error {

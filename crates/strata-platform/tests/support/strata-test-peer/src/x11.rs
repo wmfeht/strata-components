@@ -21,8 +21,8 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::time::{Duration, Instant};
 
 use strata_test_peer::protocol::{
-    Action, Backend, Command, Event, Exported, Mapped, Offer, Request, Selection, Targets,
-    TypedWindow, Via,
+    Action, Backend, Command, Event, Exported, Mapped, MultipleRead, Offer, Payload, Request,
+    Selection, Targets, TypedWindow, Via,
 };
 use x11rb::connection::Connection as _;
 use x11rb::protocol::Event as XEvent;
@@ -40,6 +40,7 @@ use crate::{out, read_stdin};
 x11rb::atom_manager! {
     Atoms: AtomsCookie {
         CLIPBOARD, PRIMARY, TARGETS, TIMESTAMP, MULTIPLE, INCR, UTF8_STRING,
+        CLIPBOARD_MANAGER, SAVE_TARGETS, ATOM_PAIR,
         _NET_WM_NAME, _NET_WM_PID, _NET_CLIENT_LIST, STRATA_PEER_TIME,
         XdndAware, XdndProxy, XdndTypeList, XdndSelection, XdndEnter, XdndPosition,
         XdndStatus, XdndLeave, XdndDrop, XdndFinished, XdndActionCopy, XdndActionMove,
@@ -92,6 +93,28 @@ enum Conversion {
         mime: String,
         action: Option<Action>,
     },
+    /// As clipboard manager: the `MULTIPLE` conversion of a hand-over.
+    Multiple,
+    /// As clipboard manager: pair `n` of that conversion, which came by INCR.
+    Part(usize),
+    /// A test's `MULTIPLE` read: the request id and each pair's property.
+    ReadMultiple(u64, Vec<Atom>),
+}
+
+/// A hand-over in progress: the `SAVE_TARGETS` request to answer, and each type's data as it
+/// arrives.
+struct Saving {
+    requestor: Window,
+    property: Atom,
+    time: u32,
+    parts: Vec<SavedPart>,
+}
+
+struct SavedPart {
+    mime: String,
+    target: Atom,
+    property: Atom,
+    data: Option<Result<Vec<u8>, String>>,
 }
 
 /// A selection the peer owns: its offers and the server time it took it.
@@ -181,6 +204,9 @@ struct X {
     drop: Option<DropIn>,
     drag: Option<DragOut>,
     proxy: Option<Proxy>,
+    /// As clipboard manager: whether it answers hand-overs.
+    manager: Option<bool>,
+    saving: Option<Saving>,
 }
 
 pub fn run() -> Result<(), String> {
@@ -280,6 +306,8 @@ pub fn run() -> Result<(), String> {
         drop: None,
         drag: None,
         proxy: None,
+        manager: None,
+        saving: None,
     };
     loop {
         let input = match x.next_input() {
@@ -434,6 +462,9 @@ impl X {
                 let target = self.atom(&mime)?;
                 self.convert(self.selection_atom(selection), target, Conversion::Read(id))
             }),
+            Command::SelectionReadMultiple { selection, mimes } => {
+                self.read_multiple(id, selection, &mimes)
+            }
             Command::DragStart { offers, actions } => self.drag_start(id, offers, actions),
             Command::DropAccept {
                 mimes,
@@ -466,6 +497,13 @@ impl X {
                 Ok(())
             }
             Command::WindowsOfType { ty } => self.windows_of_type(&ty).map(|w| out::value(id, w)),
+            Command::ClipboardManager { answer } => self.server_time().and_then(|time| {
+                let manager = self.atoms.CLIPBOARD_MANAGER;
+                self.own(manager, Vec::new(), time)?;
+                self.manager = Some(answer);
+                out::ok(id);
+                Ok(())
+            }),
         };
         if let Err(e) = result {
             out::reply(id, Err(e));
@@ -903,6 +941,18 @@ impl X {
 
     /// A reader asks for one of the peer's selections.
     fn serve(&mut self, r: SelectionRequestEvent) {
+        if r.selection == self.atoms.CLIPBOARD_MANAGER
+            && r.target == self.atoms.SAVE_TARGETS
+            && self.manager.is_some()
+        {
+            if self.manager == Some(true)
+                && let Err(e) = self.start_save(&r)
+            {
+                out::error(format!("SAVE_TARGETS: {e}"));
+                self.notify(&r, x11rb::NONE);
+            }
+            return;
+        }
         let property = if r.property == x11rb::NONE {
             r.target
         } else {
@@ -1088,6 +1138,14 @@ impl X {
             Ok(r) => r,
             Err(e) => return self.finish(why, Err(e)),
         };
+        if let Conversion::ReadMultiple(id, props) = why {
+            let pairs: Vec<u32> = reply.value32().map(Iterator::collect).unwrap_or_default();
+            return self.multiple_read_landed(id, &props, &pairs);
+        }
+        if matches!(why, Conversion::Multiple) {
+            let pairs: Vec<u32> = reply.value32().map(Iterator::collect).unwrap_or_default();
+            return self.multiple_landed(&pairs);
+        }
         if reply.type_ == self.atoms.INCR {
             self.incr_in.insert(
                 n.property,
@@ -1112,6 +1170,25 @@ impl X {
 
     fn finish(&mut self, why: Conversion, data: Result<Vec<u8>, String>) {
         match why {
+            Conversion::ReadMultiple(id, _) => {
+                out::reply(id, data.map(|_| serde_json::Value::Null))
+            }
+            Conversion::Multiple => {
+                // Refused as a whole: every part failed.
+                if let Some(saving) = self.saving.as_mut() {
+                    for part in &mut saving.parts {
+                        part.data
+                            .get_or_insert_with(|| data.clone().map(|_| Vec::new()));
+                    }
+                }
+                self.save_if_done();
+            }
+            Conversion::Part(n) => {
+                if let Some(part) = self.saving.as_mut().and_then(|s| s.parts.get_mut(n)) {
+                    part.data = Some(data);
+                }
+                self.save_if_done();
+            }
             Conversion::Read(id) => out::reply(
                 id,
                 data.and_then(|d| serde_json::to_value(out::received(&d)).map_err(err)),
@@ -1178,6 +1255,255 @@ impl X {
                 }
             }
         }
+    }
+
+    // ---- a test's MULTIPLE read ----
+
+    fn read_multiple(
+        &mut self,
+        id: u64,
+        selection: Selection,
+        mimes: &[String],
+    ) -> Result<(), String> {
+        let mut pairs = Vec::with_capacity(mimes.len() * 2);
+        let mut props = Vec::with_capacity(mimes.len());
+        for mime in mimes {
+            self.next_property += 1;
+            let property = self.atom(&format!("STRATA_PEER_{}", self.next_property))?;
+            pairs.extend([self.atom(mime)?, property]);
+            props.push(property);
+        }
+        self.next_property += 1;
+        let multi = self.atom(&format!("STRATA_PEER_{}", self.next_property))?;
+        self.conn
+            .change_property32(
+                PropMode::REPLACE,
+                self.win,
+                multi,
+                self.atoms.ATOM_PAIR,
+                &pairs,
+            )
+            .map_err(err)?;
+        let sel = self.selection_atom(selection);
+        let time = self.server_time()?;
+        self.pending.insert(
+            multi,
+            (
+                sel,
+                self.atoms.MULTIPLE,
+                Conversion::ReadMultiple(id, props),
+            ),
+        );
+        self.conn
+            .convert_selection(self.win, sel, self.atoms.MULTIPLE, multi, time)
+            .map_err(err)?;
+        Ok(())
+    }
+
+    fn multiple_read_landed(&mut self, id: u64, props: &[Atom], pairs: &[u32]) {
+        let answered: Vec<Atom> = pairs.as_chunks::<2>().0.iter().map(|[_, p]| *p).collect();
+        let mut results = Vec::with_capacity(props.len());
+        for (i, &property) in props.iter().enumerate() {
+            let refused = answered.get(i).is_none_or(|p| *p == x11rb::NONE);
+            let data = (!refused)
+                .then(|| {
+                    self.conn
+                        .get_property(true, self.win, property, AtomEnum::ANY, 0, u32::MAX / 4)
+                        .ok()
+                        .and_then(|c| c.reply().ok())
+                })
+                .flatten()
+                .filter(|r| r.type_ != self.atoms.INCR)
+                .map(|r| out::received(&r.value));
+            results.push(data);
+        }
+        out::value(id, MultipleRead { results });
+    }
+
+    // ---- clipboard manager ----
+
+    fn notify(&self, r: &SelectionRequestEvent, property: Atom) {
+        let notify = SelectionNotifyEvent {
+            response_type: SELECTION_NOTIFY_EVENT,
+            sequence: 0,
+            time: r.time,
+            requestor: r.requestor,
+            selection: r.selection,
+            target: r.target,
+            property,
+        };
+        let _ = self
+            .conn
+            .send_event(false, r.requestor, EventMask::NO_EVENT, notify);
+    }
+
+    /// An owner hands `CLIPBOARD` over: take every type it names in one `MULTIPLE`, asked as
+    /// gsd-clipboard and xfsettingsd ask (`clipboard-manager.c`, `save_targets`): into the
+    /// property `MULTIPLE` itself, each pair `(target, target)`, so each type lands in a
+    /// property named after it.
+    fn start_save(&mut self, r: &SelectionRequestEvent) -> Result<(), String> {
+        if r.property == x11rb::NONE {
+            return Err("no property names the types to save".into());
+        }
+        let targets: Vec<Atom> = self
+            .conn
+            .get_property(false, r.requestor, r.property, AtomEnum::ATOM, 0, 4096)
+            .map_err(err)?
+            .reply()
+            .map_err(err)?
+            .value32()
+            .map(Iterator::collect)
+            .unwrap_or_default();
+        let mut parts = Vec::with_capacity(targets.len());
+        let mut pairs = Vec::with_capacity(targets.len() * 2);
+        for target in targets {
+            let property = target;
+            pairs.extend([target, property]);
+            parts.push(SavedPart {
+                mime: self.atom_name(target),
+                target,
+                property,
+                data: None,
+            });
+        }
+        let multi = self.atoms.MULTIPLE;
+        self.conn
+            .change_property32(
+                PropMode::REPLACE,
+                self.win,
+                multi,
+                self.atoms.ATOM_PAIR,
+                &pairs,
+            )
+            .map_err(err)?;
+        let clipboard = self.atoms.CLIPBOARD;
+        let multiple = self.atoms.MULTIPLE;
+        self.pending
+            .insert(multi, (clipboard, multiple, Conversion::Multiple));
+        self.conn
+            .convert_selection(self.win, clipboard, multiple, multi, r.time)
+            .map_err(err)?;
+        self.saving = Some(Saving {
+            requestor: r.requestor,
+            property: r.property,
+            time: r.time,
+            parts,
+        });
+        Ok(())
+    }
+
+    /// The `MULTIPLE` answer landed: each pair's property holds its data, or INCR's size, or
+    /// the pair names `None` (refused).
+    fn multiple_landed(&mut self, pairs: &[u32]) {
+        let answered: Vec<(Atom, Atom)> = pairs
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|[t, p]| (*t, *p))
+            .collect();
+        let Some(n) = self.saving.as_ref().map(|s| s.parts.len()) else {
+            return;
+        };
+        for i in 0..n {
+            let (target, property) = {
+                let part = &self.saving.as_ref().expect("saving").parts[i];
+                (part.target, part.property)
+            };
+            let answer = answered.iter().find(|(t, _)| *t == target).map(|(_, p)| *p);
+            let data = match answer {
+                None | Some(x11rb::NONE) => Some(Err("refused".to_owned())),
+                Some(p) if p != property => Some(Err("answered into another property".to_owned())),
+                Some(_) => match self
+                    .conn
+                    .get_property(true, self.win, property, AtomEnum::ANY, 0, u32::MAX / 4)
+                    .map_err(err)
+                    .and_then(|c| c.reply().map_err(err))
+                {
+                    Ok(reply) if reply.type_ == self.atoms.INCR => {
+                        self.incr_in.insert(
+                            property,
+                            IncrIn {
+                                why: Conversion::Part(i),
+                                data: Vec::new(),
+                                last: Instant::now(),
+                            },
+                        );
+                        None
+                    }
+                    Ok(reply) => Some(Ok(reply.value)),
+                    Err(e) => Some(Err(e)),
+                },
+            };
+            if let Some(data) = data
+                && let Some(part) = self.saving.as_mut().map(|s| &mut s.parts[i])
+            {
+                part.data = Some(data);
+            }
+        }
+        // As gsd: take CLIPBOARD now, while INCR parts may still be coming, and answer the
+        // owner once they are all in.
+        let clipboard = self.atoms.CLIPBOARD;
+        match self.server_time() {
+            Ok(time) => {
+                if let Err(e) = self.own(clipboard, Vec::new(), time) {
+                    out::error(format!("taking the saved clipboard: {e}"));
+                }
+            }
+            Err(e) => out::error(format!("taking the saved clipboard: {e}")),
+        }
+        self.save_if_done();
+    }
+
+    /// Every part is in: serve it from `CLIPBOARD` (taken when the `MULTIPLE` landed), answer
+    /// the owner, and say what was saved.
+    fn save_if_done(&mut self) {
+        if self
+            .saving
+            .as_ref()
+            .is_none_or(|s| s.parts.iter().any(|p| p.data.is_none()))
+        {
+            return;
+        }
+        let Some(saving) = self.saving.take() else {
+            return;
+        };
+        let mut offers = Vec::new();
+        let (mut saved, mut refused) = (Vec::new(), Vec::new());
+        for part in saving.parts {
+            match part.data {
+                Some(Ok(bytes)) => {
+                    let got = out::received(&bytes);
+                    let data = match (got.text, got.file) {
+                        (Some(text), _) => Payload::Text(text),
+                        (None, Some(file)) => Payload::File(file),
+                        (None, None) => Payload::Text(String::new()),
+                    };
+                    offers.push(Offer {
+                        mime: part.mime.clone(),
+                        data,
+                    });
+                    saved.push(part.mime);
+                }
+                _ => refused.push(part.mime),
+            }
+        }
+        if let Some(owned) = self.owned.get_mut(&self.atoms.CLIPBOARD) {
+            owned.offers = offers;
+        }
+        let notify = SelectionNotifyEvent {
+            response_type: SELECTION_NOTIFY_EVENT,
+            sequence: 0,
+            time: saving.time,
+            requestor: saving.requestor,
+            selection: self.atoms.CLIPBOARD_MANAGER,
+            target: self.atoms.SAVE_TARGETS,
+            property: saving.property,
+        };
+        let _ = self
+            .conn
+            .send_event(false, saving.requestor, EventMask::NO_EVENT, notify);
+        let _ = self.conn.flush();
+        out::event(Event::ManagerSaved { saved, refused });
     }
 
     // ---- XDND ----

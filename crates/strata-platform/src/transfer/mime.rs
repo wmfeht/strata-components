@@ -213,6 +213,25 @@ pub fn decode_kde_cut(payload: &[u8]) -> bool {
     payload.first() == Some(&b'1')
 }
 
+/// X11 targets that name no data type but a request about the selection (ICCCM 2.6.2, and
+/// the clipboard managers' `SAVE_TARGETS`): an offer lists them, but nothing reads them as
+/// data, and a copy can't offer them. The list xfsettingsd's clipboard manager excludes, less
+/// `PIXMAP`, which is data.
+pub const X11_META_TARGETS: &[&str] = &[
+    "TARGETS",
+    "TIMESTAMP",
+    "MULTIPLE",
+    "SAVE_TARGETS",
+    "DELETE",
+    "INSERT_SELECTION",
+    "INSERT_PROPERTY",
+];
+
+/// Whether `name` is one of [`X11_META_TARGETS`].
+pub fn is_x11_meta(name: &str) -> bool {
+    X11_META_TARGETS.contains(&name)
+}
+
 /// The X11 target names that stand for the same data as `mime`, for a source that also wants
 /// to serve X11 clients that ask by the old names. `text/plain;charset=utf-8` is
 /// `UTF8_STRING`. `text/plain` is `STRING` and `TEXT`, but ICCCM makes `STRING` ISO Latin-1

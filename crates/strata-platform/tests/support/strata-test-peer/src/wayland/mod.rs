@@ -289,6 +289,12 @@ impl St {
             Command::DropProxy => Err("XdndProxy is X11's; a Wayland peer has none".into()),
             Command::Export => self.export(id),
             Command::WindowsOfType { .. } => Err("window types are X11's".into()),
+            Command::SelectionReadMultiple { .. } => {
+                Err("MULTIPLE is X11's; Wayland reads one type at a time".into())
+            }
+            Command::ClipboardManager { .. } => {
+                Err("CLIPBOARD_MANAGER is X11's; Wayland has no clipboard-manager protocol".into())
+            }
             Command::ActivationToken => self.activation_token(id),
         };
         if let Err(e) = result {

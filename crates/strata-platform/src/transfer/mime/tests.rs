@@ -165,3 +165,10 @@ fn utf8_text_aliases_utf8_string() {
     assert_eq!(x11_aliases("text/plain"), ["STRING", "TEXT"]);
     assert!(x11_aliases(URI_LIST).is_empty());
 }
+
+#[test]
+fn pixmap_is_data_and_meta_targets_match_by_exact_name() {
+    for name in ["PIXMAP", "targets", "Save_Targets", "SAVE_TARGETS "] {
+        assert!(!super::is_x11_meta(name), "{name}");
+    }
+}

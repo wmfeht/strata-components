@@ -82,6 +82,8 @@ pub(crate) struct Core<S: 'static> {
     /// Where the drag started from this window's source sits, to check before an Escape that
     /// Rune still holds a live element there (see [`SourceAt`]).
     source: RefCell<Option<SourceAt>>,
+    /// Test switches for strata-platform's own tests ([`Dnd::test_route`]).
+    test: Cell<hub::TestRoute>,
 }
 
 /// The element a drag started from: its key, its exact path in Rune's tree (learned by a
@@ -187,7 +189,16 @@ impl<S: 'static> Dnd<S> {
             seq: Cell::new(0),
             out: Cell::new(None),
             source: RefCell::new(None),
+            test: Cell::new(hub::TestRoute::default()),
         }))
+    }
+
+    /// A test switch for strata-platform's own tests: what the first attach behaves as if it
+    /// found. Not API.
+    #[doc(hidden)]
+    pub fn test_route(self, route: hub::TestRoute) -> Self {
+        self.0.test.set(route);
+        self
     }
 
     /// Attaches this window: call it on the UI thread from `App::on_window`, every time it
@@ -206,7 +217,7 @@ impl<S: 'static> Dnd<S> {
         *self.0.poster.borrow_mut() = Some(poster.clone());
         let sink: Rc<dyn Sink> = self.0.clone();
         let core: Rc<dyn Any> = self.0.clone();
-        let status = hub::attach(window, sink, core, poster.clone())?;
+        let status = hub::attach(window, sink, core, poster.clone(), self.0.test.get())?;
         // Anything heard while binding waits for a pump.
         poster(Job::Pump);
         Ok(status)

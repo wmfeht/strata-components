@@ -2,6 +2,7 @@
 //! `SelectionRequest`s (INCR above one chunk), converting another client's selection (INCR
 //! too), and following owners through XFixes.
 
+use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -27,14 +28,18 @@ pub(super) struct Owned {
     time: u32,
 }
 
-#[cfg(feature = "dnd")]
 impl Owned {
+    #[cfg(feature = "dnd")]
     pub(super) fn id(&self) -> SourceId {
         self.id
     }
 
     pub(super) fn time(&self) -> u32 {
         self.time
+    }
+
+    pub(super) fn mimes(&self) -> Vec<String> {
+        self.spec.mimes().map(str::to_owned).collect()
     }
 }
 
@@ -45,26 +50,70 @@ pub(super) struct Owning {
     sel: Atom,
     id: SourceId,
     spec: SourceSpec,
+    /// Cleared before its timestamp came: skipped when it does. It keeps its place, as each
+    /// take's timestamp arrives in the order the takes were asked.
+    cancelled: bool,
 }
 
 #[cfg(feature = "dnd")]
 impl Owning {
     pub(super) fn new(sel: Atom, id: SourceId, spec: SourceSpec) -> Owning {
-        Owning { sel, id, spec }
+        Owning {
+            sel,
+            id,
+            spec,
+            cancelled: false,
+        }
+    }
+}
+
+/// Ownership requests waiting for a server timestamp, in the order asked. Each take appends
+/// to a property of our window, and the server's `PropertyNotify`s come back in that order, so
+/// each notify's time belongs to the take at the front. A cancelled take therefore keeps its
+/// place, and is skipped when its time comes: removing it would hand its time to the next.
+#[derive(Default)]
+pub(super) struct Takes(VecDeque<Owning>);
+
+impl Takes {
+    pub(super) fn push(&mut self, o: Owning) {
+        self.0.push_back(o);
     }
 
-    pub(super) fn sel(&self) -> Atom {
-        self.sel
+    /// The take a timestamp that just came belongs to: None if it was cancelled.
+    pub(super) fn next(&mut self) -> Option<Owning> {
+        let o = self.0.pop_front()?;
+        (!o.cancelled).then_some(o)
+    }
+
+    /// Cancels the take of `id` still waiting: true if there was one.
+    pub(super) fn cancel(&mut self, id: SourceId) -> bool {
+        match self.0.iter_mut().find(|o| o.id == id && !o.cancelled) {
+            Some(o) => {
+                o.cancelled = true;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Cancels every take of selection `sel` still waiting.
+    #[cfg(feature = "dnd")]
+    pub(super) fn cancel_selection(&mut self, sel: Atom) {
+        for o in self.0.iter_mut().filter(|o| o.sel == sel) {
+            o.cancelled = true;
+        }
     }
 }
 
 /// A `SelectionRequest` to answer.
 pub(super) struct Request {
-    requestor: Window,
+    pub(super) requestor: Window,
     selection: Atom,
-    target: Atom,
-    property: Atom,
+    pub(super) target: Atom,
+    pub(super) property: Atom,
     time: u32,
+    /// The request named no property (an obsolete requestor): `property` is the target.
+    pub(super) obsolete: bool,
 }
 
 /// An answer too large for one property, sent in chunks as the requestor deletes each.
@@ -167,7 +216,12 @@ impl Actor {
                 spec,
             } => {
                 let sel = self.selection_atom(selection);
-                self.take_with_server_time(Owning { sel, id, spec });
+                self.take_with_server_time(Owning {
+                    sel,
+                    id,
+                    spec,
+                    cancelled: false,
+                });
             }
             Cmd::Read {
                 selection,
@@ -191,7 +245,10 @@ impl Actor {
                     then: Then::User(done),
                 });
             }
+            Cmd::Disown { id } => self.disown(id),
+            Cmd::HandOff { deadline, reply } => self.start_hand_off(deadline, reply),
             Cmd::Ready { request, bytes } => self.answer(request, bytes),
+            Cmd::MultiReady { key, target, bytes } => self.multi_ready(key, target, bytes),
             Cmd::KillSelf => {
                 // KillClient on a resource of ours closes our own connection.
                 let _ = self.conn.kill_client(self.win);
@@ -220,7 +277,7 @@ impl Actor {
 
     fn property(&mut self, e: PropertyNotifyEvent) {
         if e.window == self.win && e.atom == self.atoms.TRANSFER_TIME {
-            if let Some(owning) = self.owning.pop_front() {
+            if let Some(owning) = self.owning.next() {
                 self.own(owning, e.time);
             }
             return;
@@ -256,10 +313,11 @@ impl Actor {
             AtomEnum::STRING,
             &[],
         );
-        self.owning.push_back(owning);
+        self.owning.push(owning);
     }
 
     fn own(&mut self, o: Owning, time: u32) {
+        lock(&self.shared).taking.remove(&o.id.get());
         let sel = o.sel;
         let _ = self.conn.set_selection_owner(self.win, sel, time);
         let ours = self
@@ -287,6 +345,30 @@ impl Actor {
             self.events.push(Event::SourceCancelled { source: old.id });
         }
         lock(&self.shared).owned.insert(o.id.get());
+    }
+
+    /// Gives up whichever selection source `id` holds, with the time it was taken (ICCCM:
+    /// never `CurrentTime`).
+    fn disown(&mut self, id: SourceId) {
+        // A take still waiting for its timestamp is cancelled, and never happens.
+        if self.owning.cancel(id) {
+            lock(&self.shared).taking.remove(&id.get());
+            self.events.push(Event::SourceCancelled { source: id });
+            return;
+        }
+        let Some(sel) = self
+            .owned
+            .iter()
+            .find(|(_, o)| o.id == id)
+            .map(|(sel, _)| *sel)
+        else {
+            return;
+        };
+        if let Some(owned) = self.owned.remove(&sel) {
+            let _ = self.conn.set_selection_owner(NONE, sel, owned.time);
+            lock(&self.shared).owned.remove(&id.get());
+            self.events.push(Event::SourceCancelled { source: id });
+        }
     }
 
     fn cleared(&mut self, c: SelectionClearEvent) {
@@ -389,7 +471,7 @@ impl Actor {
     }
 
     fn converted(&mut self, n: SelectionNotifyEvent) {
-        if n.requestor != self.win {
+        if n.requestor != self.win || self.hand_off_answered(&n) {
             return;
         }
         let selection = n.selection;
@@ -520,6 +602,7 @@ impl Actor {
                     .into_iter()
                     .filter(|a| *a != NONE && !meta.contains(a))
                     .filter_map(|a| self.name(a))
+                    .filter(|n| !super::super::mime::is_x11_meta(n))
                     .collect();
                 self.announce(selection, owner, mimes);
             }
@@ -552,6 +635,7 @@ impl Actor {
             target: r.target,
             property,
             time: r.time,
+            obsolete: r.property == NONE,
         };
         let Some(owned) = self.owned.get(&r.selection).filter(|_| r.owner == self.win) else {
             return self.notify(&req, NONE);
@@ -561,7 +645,11 @@ impl Actor {
         }
         if r.target == self.atoms.TARGETS {
             let mimes: Vec<String> = owned.spec.mimes().map(str::to_owned).collect();
-            let mut list = vec![self.atoms.TARGETS, self.atoms.TIMESTAMP];
+            let mut list = vec![
+                self.atoms.TARGETS,
+                self.atoms.TIMESTAMP,
+                self.atoms.MULTIPLE,
+            ];
             list.extend(mimes.iter().filter_map(|m| self.atom(m)));
             let _ = self.conn.change_property32(
                 PropMode::REPLACE,
@@ -583,11 +671,15 @@ impl Actor {
             );
             return self.notify(&req, req.property);
         }
+        if r.target == self.atoms.MULTIPLE {
+            let (id, spec, time) = (owned.id, owned.spec.clone(), owned.time);
+            return self.multiple(req, id, spec, time);
+        }
         let (id, spec) = (owned.id, owned.spec.clone());
         let Some(mime) = self.name(r.target) else {
             return self.notify(&req, NONE);
         };
-        // MULTIPLE and unknown types are refused.
+        // Unknown types are refused.
         let Some(writer) = spec.writer(&mime).cloned() else {
             return self.notify(&req, NONE);
         };
@@ -615,35 +707,36 @@ impl Actor {
         let Some(data) = bytes else {
             return self.notify(&req, NONE);
         };
+        self.put(req.requestor, req.property, req.target, data);
+        self.notify(&req, req.property);
+    }
+
+    /// Writes `data` into `property` of `requestor` as type `target`: at once, or by INCR when
+    /// it is larger than one chunk (the size now, then a chunk each time the requestor
+    /// deletes the property, ending with an empty one).
+    pub(super) fn put(&mut self, requestor: Window, property: Atom, target: Atom, data: Arc<[u8]>) {
         if data.len() <= self.chunk {
-            let _ = self.conn.change_property8(
-                PropMode::REPLACE,
-                req.requestor,
-                req.property,
-                req.target,
-                &data,
-            );
-            return self.notify(&req, req.property);
+            let _ =
+                self.conn
+                    .change_property8(PropMode::REPLACE, requestor, property, target, &data);
+            return;
         }
-        // INCR: announce the size, then send a chunk each time the requestor deletes the
-        // property, ending with an empty one.
         let _ = self.conn.change_window_attributes(
-            req.requestor,
+            requestor,
             &ChangeWindowAttributesAux::new().event_mask(EventMask::PROPERTY_CHANGE),
         );
         let len = u32::try_from(data.len()).unwrap_or(u32::MAX);
         let _ = self.conn.change_property32(
             PropMode::REPLACE,
-            req.requestor,
-            req.property,
+            requestor,
+            property,
             self.atoms.INCR,
             &[len],
         );
-        self.notify(&req, req.property);
         self.outgoing.push(Outgoing {
-            requestor: req.requestor,
-            property: req.property,
-            target: req.target,
+            requestor,
+            property,
+            target,
             data,
             offset: 0,
             ended: false,
@@ -671,7 +764,7 @@ impl Actor {
         out.deadline = Instant::now() + WRITE_IDLE;
     }
 
-    fn notify(&mut self, req: &Request, property: Atom) {
+    pub(super) fn notify(&mut self, req: &Request, property: Atom) {
         let event = SelectionNotifyEvent {
             response_type: SELECTION_NOTIFY_EVENT,
             sequence: 0,
@@ -689,6 +782,8 @@ impl Actor {
     // ---- timeouts ----
 
     pub(super) fn expire(&mut self, now: Instant) {
+        self.end_hand_off(Some(now), super::HandOff::TimedOut);
+        self.expire_multis(now);
         #[cfg(feature = "dnd")]
         if self
             .hook

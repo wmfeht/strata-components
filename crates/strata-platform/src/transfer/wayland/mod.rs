@@ -14,6 +14,7 @@
 
 mod control;
 mod display;
+mod echo;
 mod offer;
 mod reader;
 
@@ -27,6 +28,7 @@ use rune::WindowHandle;
 use rune::raw_window_handle::RawWindowHandle;
 use wayland_backend::client::ObjectId;
 use wayland_client::globals::{GlobalList, GlobalListContents, registry_queue_init};
+use wayland_client::protocol::wl_callback::{self, WlCallback};
 use wayland_client::protocol::wl_compositor::WlCompositor;
 use wayland_client::protocol::wl_data_device::{self, WlDataDevice};
 use wayland_client::protocol::wl_data_device_manager::WlDataDeviceManager;
@@ -49,6 +51,7 @@ use super::event::{Action, Event, Route, Selection, SelectionOffer, SourceId, Su
 use super::gate::Gate;
 use super::pipe;
 use control::Control;
+use echo::Echoes;
 pub use offer::DragOffer;
 use offer::{AnyOffer, Home, WlSelection};
 use reader::Reader;
@@ -127,6 +130,10 @@ pub(crate) struct State {
     latest_serial: Option<u32>,
     /// The newest left-button press serial, for a drag (P1).
     press_serial: Option<u32>,
+    /// This client has keyboard focus (our own `wl_keyboard` is entered).
+    focused: bool,
+    /// Data-device writes waiting to learn whether they took.
+    echoes: Echoes,
     /// Offers being announced: their MIME types arrive before the event that uses them.
     announced: HashMap<ObjectId, Vec<String>>,
     /// A drag offer's source actions, which also arrive before its `enter`.
@@ -159,6 +166,8 @@ impl State {
             control: None,
             latest_serial: None,
             press_serial: None,
+            focused: false,
+            echoes: Echoes::default(),
             announced: HashMap::new(),
             source_actions: HashMap::new(),
             selections: HashMap::new(),
@@ -320,9 +329,16 @@ impl Conn {
     }
 
     /// Connects to the compositor on a connection of our own, for data control alone.
-    pub(crate) fn own(subs: Subscribers, prefer: Prefer) -> Result<Arc<Conn>, Error> {
+    /// `as_if_none`: a test switch that leaves the data-control globals unbound, as on a
+    /// compositor without them.
+    pub(crate) fn own(
+        subs: Subscribers,
+        prefer: Prefer,
+        as_if_none: bool,
+    ) -> Result<Arc<Conn>, Error> {
         let conn = Connection::connect_to_env().map_err(|e| Error::Connection(e.to_string()))?;
-        Conn::bind(Kind::Own, conn, Arc::default(), subs, Some(prefer), None)
+        let control = (!as_if_none).then_some(prefer);
+        Conn::bind(Kind::Own, conn, Arc::default(), subs, control, None)
     }
 
     fn bind(
@@ -556,6 +572,12 @@ impl Conn {
         lock(&self.state).sources.contains_key(&source.get())
     }
 
+    /// Whether `source` was cancelled because the compositor dropped its data-device write
+    /// (see `echo`), rather than lost to another client.
+    pub(crate) fn write_was_dropped(&self, source: SourceId) -> bool {
+        lock(&self.state).echoes.was_dropped(source.get())
+    }
+
     /// Offers `spec` as `selection` on `route`. A data-device write uses the newest input
     /// serial: call [`Conn::dispatch`] first so the event that triggered the copy is in.
     pub(crate) fn set_selection(
@@ -590,6 +612,15 @@ impl Conn {
                 }
                 // No set_actions: on a selection source it is a protocol error.
                 device.set_selection(Some(&source), serial);
+                // A write the compositor drops is told by nothing but a missing echo (`echo`).
+                if state.focused
+                    && let Some(backend) = self.home.backend.upgrade()
+                {
+                    let _ = Connection::from_backend(backend)
+                        .display()
+                        .sync(&self.qh, id.get());
+                    state.echoes.arm(id.get());
+                }
                 SourceProxy::Device(source)
             }
             Route::DataControl => {
@@ -605,6 +636,37 @@ impl Conn {
         drop(state);
         self.home.flush();
         Ok(id)
+    }
+
+    /// Gives up `source`'s selection, if it still holds it: the source is destroyed, which
+    /// clears the selection if the compositor still has it as the selection.
+    /// Subscribers hear [`Event::SourceCancelled`] at once. False if `source` no longer held
+    /// anything. A data-device clear uses the newest input serial, as a write does.
+    pub(crate) fn clear_selection(&self, source: SourceId) -> Result<bool, Error> {
+        if !self.home.here() {
+            return Err(Error::Refused(ON_UI));
+        }
+        if self.failed.load(Ordering::Acquire) {
+            return Ok(false);
+        }
+        let mut state = lock(&self.state);
+        let Some(held) = state.sources.remove(&source.get()) else {
+            return Ok(false);
+        };
+        // Destroying the source clears the selection only while it still holds it. A data
+        // control set_selection(None) carries no serial, so it would also wipe a copy another
+        // app made since, which we haven't heard of yet. The data device's carries the newest
+        // serial, which the compositor refuses when another copy is newer.
+        if let (SourceProxy::Device(_), Some(device), Some(serial)) =
+            (&held.proxy, &state.device, state.latest_serial)
+        {
+            device.set_selection(None, serial);
+        }
+        held.proxy.destroy();
+        drop(state);
+        self.home.flush();
+        self.subs.emit(vec![Event::SourceCancelled { source }]);
+        Ok(true)
     }
 
     /// Stops the reader, then destroys every object, on the UI thread for a shared
@@ -855,6 +917,8 @@ impl Dispatch<WlKeyboard, ()> for State {
             // Dropping the fd closes it.
             wl_keyboard::Event::Keymap { fd, .. } => drop(fd),
             wl_keyboard::Event::Key { serial, .. } => st.latest_serial = Some(serial),
+            wl_keyboard::Event::Enter { .. } => st.focused = true,
+            wl_keyboard::Event::Leave { .. } => st.focused = false,
             _ => {}
         }
     }
@@ -933,6 +997,7 @@ impl Dispatch<WlDataDevice, ()> for State {
                 }
             }
             wl_data_device::Event::Selection { id } => {
+                st.echoes.selection();
                 let oid = id.as_ref().map(Proxy::id);
                 st.set_selection_offer(
                     Selection::Clipboard,
@@ -999,6 +1064,26 @@ impl Dispatch<WlDataOffer, ()> for State {
                 }
             }
             _ => {}
+        }
+    }
+}
+
+/// The sync after a data-device write (see `echo`): a write with no echo before it was
+/// dropped, and its source is reported cancelled, as a lost selection is.
+impl Dispatch<WlCallback, u64> for State {
+    fn event(
+        st: &mut Self,
+        _: &WlCallback,
+        e: wl_callback::Event,
+        id: &u64,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let wl_callback::Event::Done { .. } = e
+            && st.echoes.done(*id)
+            && st.sources.contains_key(id)
+        {
+            st.source_cancelled(*id);
         }
     }
 }

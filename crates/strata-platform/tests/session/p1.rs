@@ -1179,3 +1179,27 @@ fn wayland_a_drag_over_nothing_ends_its_capture_after_it_ends() {
     assert_eq!(escapes, 0, "P1's Escape reached the app");
     demo.quit();
 }
+
+/// Drag and drop alone, where Wayland has no route at all (libwayland < 1.23 and a compositor
+/// without data control, both simulated, with Xwayland at hand): attaching is unsupported,
+/// and opens no X11 connection to Xwayland, which drag and drop has no use for.
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn wayland_without_any_route_dnd_alone_stays_unsupported() {
+    let s = Session::start();
+    let mut cmd = s.command(example("dnd"), Display::Wayland);
+    cmd.envs(s.env(Display::X11));
+    cmd.args([
+        "--title",
+        "p1 dnd",
+        "--as-if-libwayland-1-22",
+        "--as-if-no-data-control",
+    ]);
+    let app = s.spawn("dnd", cmd);
+    let v = app.wait_json("attach", |v| {
+        v["ev"] == "attached" || v["ev"] == "attach-error"
+    });
+    assert_eq!(v["ev"], "attach-error", "{v}");
+    let error = v["error"].as_str().unwrap_or_default();
+    assert!(error.contains("unsupported"), "{v}");
+}

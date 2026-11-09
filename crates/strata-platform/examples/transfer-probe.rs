@@ -13,8 +13,10 @@
 //! is read, then the drop is finished.
 //!
 //! Flags: `--title T`, `--own-data-control` (data control on a connection of its own),
-//! `--data-control ext|wlr` (which protocol first), `--no-shared` (don't bind on winit's
-//! display), `--as-if-libwayland-1-22` (behave as on libwayland < 1.23, which has no route to
+//! `--data-control ext|wlr` (which protocol first), `--as-if-no-data-control` (a compositor
+//! without data control, as mutter: a test switch), `--x11-fallback` (X11 selections through
+//! Xwayland when Wayland has no route, as the clipboard asks), `--no-shared` (don't bind on
+//! winit's display), `--as-if-libwayland-1-22` (behave as on libwayland < 1.23, which has no route to
 //! winit's display: a test switch), `--answer-ask-with-move` (prefer ask on enter, answer the
 //! drop with move), `--clear-actions-after-drop` (set no actions once dropped). The `break-own` command makes the compositor end the Wayland connection
 //! of our own with a protocol error (a test switch); `shutdown-elsewhere` calls the shutdown
@@ -152,6 +154,7 @@ mod probe {
                         "own": s.own,
                         "data_control": s.data_control,
                         "unsupported": s.unsupported.as_ref().map(ToString::to_string),
+                        "x11": s.x11,
                     }),
                 );
                 if fresh {
@@ -450,7 +453,9 @@ mod probe {
                 Some("wlr") => Prefer::Wlr,
                 _ => Prefer::Ext,
             },
+            x11_fallback: flag("--x11-fallback"),
             as_if_libwayland_below_1_23: flag("--as-if-libwayland-1-22"),
+            as_if_no_data_control: flag("--as-if-no-data-control"),
         };
         rune::tooling::set_app_id("strata-transfer-probe");
         let app =

@@ -61,13 +61,23 @@
 //!   batch keeps the highlight on its result by id, else at its place, clamped (Strata's
 //!   `restore_selection`).
 //! - **Scrolling as answers land** ([`PaletteState::deliver`], Strata's `restore_scroll` with its
-//!   `navigation_started`): a new query's answer scrolls the list to the top, where its
-//!   highlighted first result is. Until the user moves the highlight in this query, a batch
-//!   keeps the list's pixel offset (0 at the start), so better results it puts above the first
-//!   row show; Rune's virtual rows would keep the old first row in place (U-C17-3), so the
-//!   palette asks for an instant scroll to the old offset in the batch's commit, which wins.
-//!   Once the user has moved it, a batch that moves the highlighted row reveals it, so Enter
-//!   never opens a row they can't see. An arrow reveals its row from the key handler.
+//!   `navigation_started`):
+//!   - A new query's answer scrolls the list to the top, where its highlighted first result is.
+//!   - A batch keeps the list's pixel offset, so better results it puts above the rows in view
+//!     show, at offset 0 too. Rows are keyed by place ([`option_key`]): Rune's virtual rows
+//!     keep the row whose key was first in view where it is (U-C17-3), and with keys by place
+//!     that row's place doesn't move, so the offset stays without any scroll request. Nothing
+//!     the palette asks for can then undo a wheel or stop a fling that lands in the same frame.
+//!   - After the user moved the highlight in this query, any batch that changes the results
+//!     reveals the highlighted row (Strata's `scroll_row_into_view`), only as far as it takes:
+//!     a row still in view moves nothing, so rows added above stay visible with it. A list the
+//!     user is still scrolling (the offset moved since the last tick: a fling, a wheel landing)
+//!     is left alone, as Strata's `interaction_revision` leaves it.
+//!   - An arrow reveals its row from the key handler, and wins over a batch in its frame.
+//!   - The palette's scrolls are Rune's reveals (`Tx::scroll_into_view_in`), which a wheel or a
+//!     fling wins over. One case still loses: after the user moved the highlight, a batch
+//!     handed over in the very frame a wheel arrives, before Rune has applied the wheel,
+//!     reveals the highlighted row over it (Strata does too).
 //! - **States** ([`Phase`]): idle, loading ("Searching…"), results, no results (the empty-query
 //!   words for the jump's history), error ([`PaletteState::fail`]) and unavailable
 //!   ([`PaletteState::unavailable`]: the field takes neither text nor focus, the panel keeps the
@@ -135,8 +145,8 @@
 //! | When indexing stops early, the footer shows "Partial results"; its description… | script `partial-results`; golden `c17-partial` (a11y: the description) |
 //! | Hovering Partial results shows a tooltip…; complete results clear the tooltip | test `the_partial_notice_shows_its_causes_on_hover_until_results_are_complete` |
 //! | While indexing adds results, the highlighted result stays selected by path and unchanged rows are not rebuilt | script `highlight-by-path`; unit `a_same_query_batch_keeps_the_highlight_on_its_result`, `rows_build_again_only_when_their_result_or_highlight_changes` |
-//! | (the same bullet) the list's scroll as batches land | tests `a_batch_above_the_first_row_shows_at_the_top_until_the_user_moves`, `the_streamed_best_result_shows_in_every_frame`, `a_moved_highlight_stays_in_view_when_a_batch_pushes_it_down` (every frame of a resting window); unit `answers_scroll_as_strata_restores_them` |
-//! | Up and Down move the highlight while the caret stays in the query field… | scripts `arrows`, `arrows-second`; tests `up_and_down_leave_the_caret_where_it_was`, `a_resting_pointer_never_moves_the_highlight` |
+//! | (the same bullet) the list's scroll as batches land | tests `a_batch_above_the_first_row_shows_at_the_top_until_the_user_moves`, `the_streamed_best_result_shows_in_every_frame`, `a_moved_highlight_stays_in_view_when_a_batch_pushes_it_down` (every frame of a resting window); review round 2: `a_batch_in_a_wheel_s_frame_keeps_the_wheel_s_scroll`, `an_arrow_in_a_batch_s_frame_reveals_its_row`, `a_new_query_s_answers_in_one_poll_scroll_to_the_top`, `a_batch_mid_fling_leaves_the_fling_alone`, `a_batch_keeps_a_wheeled_offset_until_the_user_moves`, `after_moving_any_changed_batch_reveals_the_highlighted_row`, `after_moving_rows_added_above_show_while_the_highlight_stays_in_view`, `after_moving_a_batch_during_a_wheel_keeps_the_wheel_s_scroll`; unit `answers_scroll_as_strata_restores_them` |
+//! | Up and Down move the highlight while the caret stays in the query field… | scripts `arrows`, `arrows-second`; tests `up_and_down_leave_the_caret_where_it_was`, `arrows_keep_the_highlighted_row_in_view`, `arrows_while_composing_leave_the_highlight`, `a_resting_pointer_never_moves_the_highlight` |
 //! | When the first result is preselected, one Down highlights the second result | script `arrows-second`; unit `a_new_query_highlights_its_first_result_and_arrows_stop_at_the_ends`; test `a_new_query_s_highlighted_first_result_shows_after_arrowing_down` (a new query scrolls to the top: coordinator ruling) |
 //! | Enter or a single click on a result opens it and closes search | scripts `enter-opens`, `click-opens` |
 //! | With an input method composing…, Enter that the input method passes back… opens the highlighted result | test `an_enter_after_the_composition_commits_opens_the_highlighted_result` (scripts have no input-method events: U-C6-7) |
@@ -239,13 +249,16 @@
 //!   `virtual_rows` lists anchor "this way"; but a `virtual_rows` list at offset 0 that gets rows
 //!   inserted above its first row keeps that row at the top, scrolling the new ones out above
 //!   the viewport. A search list streaming better results first hides them though the user
-//!   never scrolled. Repro, headless (strata-spikes/c17-probes/probe_reveal.rs): a 200 pt
+//!   never scrolled; and a list that wants to keep its pixel offset as rows move (Strata's)
+//!   can't say so. Repro, headless (strata-spikes/c17-probes/probe_reveal.rs): a 200 pt
 //!   viewport over `virtual_rows` of 30 rows `b00..b29`, 20 pt each, at offset 0; one commit
 //!   later the same rows with `a0`, `a1` in front: `a0` is drawn at y = −40, above the
 //!   viewport, and `b00` stays at y = 0. Ask: skip
 //!   the anchor at offset 0, as the docs say, or an opt-out. Searched upstream ("scroll_anchor",
-//!   "virtual_rows anchor", "overflow-anchor", "first visible row"): none. Here:
-//!   `PaletteState::deliver` scrolls to the old offset in the same commit.
+//!   "virtual_rows anchor", "overflow-anchor", "first visible row"): none. Here: rows are
+//!   keyed by place, so the anchored key keeps its place and the offset stays. (Round 1 asked
+//!   for an instant scroll to the old offset in the batch's commit instead; that request beat
+//!   a wheel or fling in the same frame, review round 2's B1.)
 //! - **U-C17-4 (draft, not filed): `reveal_selected` does nothing for rows built by index.** At
 //!   the pin, `runtime/commit/measure.rs:531` checks `focus.reveal_selected` only in the branch
 //!   for rows handed over as children (`virtualize`), not for `virtual_rows`' index-built rows,
@@ -329,19 +342,13 @@ pub fn results_key(key: &str) -> String {
     format!("{key}-results")
 }
 
-/// The key of result `id`'s row, under the palette keyed `key`: also the field's active
-/// descendant while it is highlighted. Rune reads a `/` in a key as a key path, so `/` (and
-/// `%`, to keep keys apart) are escaped: `/home/u` keys as `%2Fhome%2Fu`.
-pub fn option_key(key: &str, id: &str) -> String {
-    let mut out = String::with_capacity(key.len() + 8 + id.len());
-    out.push_str(key);
-    out.push_str("-option-");
-    for c in id.chars() {
-        match c {
-            '%' => out.push_str("%25"),
-            '/' => out.push_str("%2F"),
-            c => out.push(c),
-        }
-    }
-    out
+/// The key of the row at `index` in the result list, under the palette keyed `key`: also the
+/// field's active descendant while that row is highlighted.
+///
+/// Rows are keyed by place, not by result: Rune's virtual rows keep the row whose key was
+/// first in view where it is when a commit adds or removes rows (U-C17-3), so keys by place
+/// keep the list's pixel offset as a batch reorders its results, as Strata's list does, with no
+/// scroll request of the palette's to fight a wheel or a fling.
+pub fn option_key(key: &str, index: usize) -> String {
+    format!("{key}-option-{index}")
 }

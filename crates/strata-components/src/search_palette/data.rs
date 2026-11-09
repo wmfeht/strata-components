@@ -13,7 +13,8 @@ use crate::contract::ThumbKey;
 pub struct PaletteItem {
     /// The host's id for it (its path). [`super::PaletteIntent::Open`] and
     /// [`super::PaletteIntent::Reveal`] name it, the highlight follows it from one answer to
-    /// the next, and its row's key is built from it ([`super::option_key`]).
+    /// the next, and its row is built again only when it changes (rows are keyed by place,
+    /// [`super::option_key`]).
     pub id: String,
     /// The first line: the name.
     pub label: String,

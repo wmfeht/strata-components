@@ -5,6 +5,11 @@
 //! change) while the platform still says the source holds it. Several copies of ours can be
 //! in flight at once (a copy, then another before the first's echo), so the echo is matched
 //! to the newest copy that still holds and offers exactly the echoed types.
+//!
+//! That rule is guarded by the unit tests in `book/tests.rs`, not by the session tests: every
+//! platform here cancels a source before it announces the next owner, on the same
+//! connection, so no session can deliver another client's offer while one of our copies
+//! still holds, which is what the rule's checks (the types, and `holds`) are for.
 
 use std::collections::{HashMap, VecDeque};
 

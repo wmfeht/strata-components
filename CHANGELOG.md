@@ -45,8 +45,8 @@ Nothing is released yet. The first release is planned for milestone M1 with the 
 
 - One cargo feature per shim, each gating its own module: `dnd`, `clipboard`, `csd`,
   `foreign-parent`, `settings`, `icon-theme`, `media-audio`, `single-instance` and `glib-bridge`.
-  Apart from `dnd`, `glib-bridge`, `csd`, `settings` and `single-instance`, the modules are
-  placeholders until their work packages land.
+  Apart from `dnd`, `clipboard`, `glib-bridge`, `csd`, `settings` and `single-instance`, the
+  modules are placeholders until their work packages land.
 - `dnd`: system drag and drop on Wayland (`wl_data_device`) and X11 (XDND 5), mirroring Rune's
   `drag_out` and `on_drop_files` with any MIME types. Each window has a `Dnd`, attached from
   `App::on_window`.
@@ -74,6 +74,28 @@ Nothing is released yet. The first release is planned for milestone M1 with the 
     `on_close`; once the pinned Rune has `App::on_quit`, there too (it doesn't run when the
     last window closes). A drag from another app takes the compositor's action. X11's
     source shows no cursor feedback. Link is X11 only.
+- `clipboard`: copy and paste with any MIME types on Wayland and X11, beside Rune's own
+  text clipboard. A `Clipboard` per state type, attached from `App::on_window`.
+  - `Clipboard::copy` writes a `Content` of any types at once, each with bytes or a lazy
+    writer (run once per copy, on a worker), images too (`Content::png`, `Content::image`),
+    and text under every name it goes by (`Content::text`, `TEXT_TYPES`).
+  - `Clipboard::offered` lists what a selection offers; `Clipboard::read` reads the first of
+    several types off the UI thread with `Limits`, as `Tx::read_clipboard` does; a read of
+    the app's own copy is served in process.
+  - `on_change` hears another app's copy, the selection emptied, and each copy holding and
+    losing it (`Change::Lost` with why: taken, replaced, cleared, refused by the compositor,
+    failed). `Clipboard::clear` empties a selection only while the copy still holds it.
+  - `Files` writes and reads `text/uri-list`, `x-special/gnome-copied-files` and
+    `application/x-kde-cutselection` as GTK does, with the cut flag.
+  - Routes: Wayland data control (hears unfocused), else `wl_data_device` on mutter (hears
+    another app's copy at the next focus, writes with the triggering event's serial), else X11
+    selections through Xwayland when Wayland has no route (libwayland < 1.23 on mutter); X11
+    selections on X11. The primary selection needs data control or X11.
+  - On X11, `clipboard::shutdown()` hands a copy that still holds the clipboard to a running
+    clipboard manager, every type of it, waiting at most 2 s (`Content::keep_after_exit`);
+    `Closed::hand_off` says how it went. On Wayland a copy goes with the app.
+  - Call `clipboard::shutdown()` (or `dnd::shutdown()`: either does both) where drag and drop's
+    is called.
 - `glib-bridge`: a GLib main loop for Rune apps. `GlibThread::start` runs a fresh `MainContext`
   on its own thread and wakes the app's `poll` as answers land in its state.
   - `Glib::spawn` runs a GIO future there, and its output lands in a `Task`.

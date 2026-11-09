@@ -353,7 +353,9 @@ impl<'a, S: 'static> PreviewDrawer<'a, S> {
         self
     }
 
-    /// Dragging the header's icon and name drags the previewed file, through `dnd`.
+    /// Dragging the header's icon and name drags the previewed file, through `dnd`. The source
+    /// reaches the binder keyed `preview-handle` (W1's `Dnd::drag_source_keyed`), so a window
+    /// has one drawer with a drag source.
     pub fn drag_source(mut self, dnd: Dnd<S>, source: DragSource<S>) -> Self {
         self.drag = Some((dnd, source));
         self

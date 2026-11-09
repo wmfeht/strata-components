@@ -862,3 +862,56 @@ fn copy_source_copies_a_display_equation_source() {
         Some("e^{i\\pi} + 1 = 0")
     );
 }
+
+#[test]
+fn find_skips_text_in_tables_images_and_rules() {
+    // D8: these units carry text (a table's, should Strata's converter give it one, an
+    // image's alt, a rule's line), and find still reads only the text blocks.
+    let mut d = doc(vec![
+        Unit::new(UnitKind::Paragraph, "a needle in prose"),
+        table(&[&["needle"], &["needle"]]).copy_text("needle\nneedle\n"),
+        Unit::new(
+            UnitKind::Table {
+                list_depth: None,
+                rows: Vec::new(),
+            },
+            "needle",
+        ),
+        Unit::new(
+            UnitKind::Media {
+                list_depth: None,
+                media: Media::Image,
+            },
+            "needle alt",
+        ),
+        Unit::new(UnitKind::Rule { list_depth: None }, "needle ──"),
+    ]);
+    d.find("needle");
+    assert_eq!(d.find_status().map(|s| s.total), Some(1));
+    assert!(d.matches().iter().all(|m| m.start.unit == 0));
+}
+
+#[test]
+fn a_coloured_block_coming_into_reach_asks_for_a_build() {
+    let units: Vec<Unit> = (0..200)
+        .map(|i| {
+            if i == 100 {
+                Unit::new(
+                    UnitKind::Code {
+                        list_depth: None,
+                        language: Some("rust".into()),
+                    },
+                    "let x = 1;",
+                )
+            } else {
+                Unit::new(UnitKind::Paragraph, format!("p {i}"))
+            }
+        })
+        .collect();
+    let mut d = doc(units);
+    assert!(!d.set_visible(0..10), "nothing that colours is near");
+    // Reach is twice the visible rows (here 20) either side.
+    assert!(d.set_visible(80..90), "the block at 100 came within reach");
+    assert!(!d.set_visible(81..91), "still within reach: nothing new");
+    assert!(d.set_visible(150..160), "it left reach");
+}

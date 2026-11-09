@@ -19,24 +19,30 @@
 //!   - Not from the `Move` that crossed the threshold: a fast flick brings that move and the
 //!     release in one batch, and Rune ends the capture at the release's input, before any
 //!     handler runs (review round 1, B2).
-//!   - Only once the compositor proves it took the pointer: the drag's own
-//!     `wl_data_device.enter` on the app's window, which comes at the start of a drag the
-//!     compositor accepted. A compositor takes a drag only while the button is held
+//!   - Only once the compositor proves it took the pointer, by the first of: the drag's own
+//!     `wl_data_device.enter` on one of the app's windows, or a target answering the drag
+//!     (`wl_data_source.target` or `action`), for a drag that starts or stays outside them
+//!     (review round 2, R2-B2). A compositor takes a drag only while the button is held
 //!     (wlroots checks the press serial), and then winit never hears the release.
 //!   - In that update, P1 first dispatches P0's queue and checks that the drag hasn't dropped
 //!     or ended: a focus change at the drop (sway's bounce) follows those in the protocol
 //!     stream. Nothing winit reads can run until the update returns, and Rune handles the
 //!     sent key before it does.
+//!   - Only while the element the press captured is live at the path it had when the drag
+//!     started (review round 2, R2-B1): Rune's `cancel_drag` finds it by that path, and
+//!     skips exiting subtrees. P1 records the path by a pick when the drag starts, and sends
+//!     the Escape from a pick at the element's centre that runs against the same tree,
+//!     just before Rune handles the key.
 //!   - Only for a press the guard saw go down, and once.
 //!
-//!   What remains, both an Escape reaching the app's keys once:
-//!   - Keyboard focus leaving the window for another reason (the user switching windows, a
-//!     window mapping) between the drag's start and that update: Rune ends the capture at
-//!     the focus loss, and if its cancelled `Up` hasn't reached the guard by the update, the
-//!     Escape finds no capture.
-//!   - A compositor that accepted `start_drag` after the button was released (wlroots
-//!     refuses one): winit would have had the release already, and the same holds if Rune
-//!     hasn't run the release's handler by the update. Other compositors are hand tests.
+//!   With no proof at all (the drag starts over no surface, and no target answers it), the
+//!   capture ends when the drag does: by the compositor's focus change at the drop where it
+//!   makes one (sway's, about 14 ms after it), else by P1's Escape [`LATE_ESCAPE`] after
+//!   the drag ended, under the same checks.
+//!
+//!   [`LATE_ESCAPE`]: super::window::LATE_ESCAPE
+//!
+//!   What remains is listed in the module docs, "Rune's capture on Wayland".
 //! - **X11:** the source is grab-less and winit keeps its implicit grab, so Rune hears every
 //!   move and the real release. The guard swallows them, and the real release also drops
 //!   the drag (a backstop for a release the XI2 events missed, B1). A cancelled `Up` (the

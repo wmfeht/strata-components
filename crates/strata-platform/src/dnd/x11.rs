@@ -787,8 +787,6 @@ fn hub_note(message: &str) {
     eprintln!("strata-platform dnd: {message}");
 }
 
-/// An override-redirect window with a 32-bit visual showing `image`, taking no input, so the
-/// walk to the target under the pointer passes through it.
 /// The largest icon side, in pixels: a bigger picture is cropped to it.
 const ICON_MAX: u32 = 1024;
 
@@ -833,6 +831,8 @@ fn icon_pixels(image: &DragImage) -> (u16, u16, Vec<u8>) {
     (w as u16, h as u16, pixels)
 }
 
+/// An override-redirect window with a 32-bit visual showing `image`, taking no input, so the
+/// walk to the target under the pointer passes through it.
 fn icon_window(cx: &mut HookCx<'_>, a: &Atoms, image: &DragImage) -> Result<IconWin, String> {
     let err = |e: &dyn std::fmt::Display| e.to_string();
     let conn = cx.conn();
@@ -1057,6 +1057,9 @@ impl Hook for Xdnd {
             }
             Cmd::Released { id } => {
                 // Already dropped or ended when the raw release came first: nothing to do.
+                // Otherwise it drops on the last target the drag reached (or cancels), with
+                // CurrentTime: the release's own time is the X server's, which Rune's Up
+                // doesn't carry, and XDND accepts CurrentTime for XdndDrop.
                 if self
                     .outgoing
                     .as_ref()

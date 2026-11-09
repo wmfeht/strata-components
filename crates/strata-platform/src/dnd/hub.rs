@@ -37,6 +37,8 @@ pub(crate) enum Job {
     },
     /// The picture of drag `id`, rendered.
     Icon { id: u64, image: Option<DragImage> },
+    /// Drag `id` ended a while ago: end Rune's capture if nothing has (see `session`).
+    LateEscape { id: u64 },
     /// P0's turn: dispatch its queue (see [`transfer::Turn`]).
     Run(Box<dyn FnOnce() + Send>),
 }
@@ -448,6 +450,20 @@ fn route_wayland_source(hub: &mut Hub, to: &mut To<'_>) {
         let Some(out) = hub.out.as_mut().filter(|o| o.id == id) else {
             continue;
         };
+        // A target answering the drag (`target`, `action`) is the compositor's proof that
+        // it took the pointer, for a drag that never enters the app's windows (R2-B2).
+        if matches!(
+            ev,
+            wayland::SrcEvent::Target(_) | wayland::SrcEvent::Action(_)
+        ) && !out.holding
+        {
+            out.holding = true;
+            let w = out.window.clone();
+            to(hub, &w, Routed::Holding { id });
+        }
+        let Some(out) = hub.out.as_mut() else {
+            continue;
+        };
         if let Some(outcome) = out.wl.on(ev) {
             let out = hub.out.take().expect("matched above");
             wayland::end(&conn, id);
@@ -536,9 +552,11 @@ pub(crate) fn start_drag(key: &str, item: DragItem, mods: Mods) -> Result<(u64, 
     cancel_drag();
     let id = next_id();
     let actions = negotiate::source_actions(item.actions, mods);
-    // Every drag lists its token: it marks the drag as ours when it enters our windows, for
-    // its payload if it has one, and as the compositor's proof that it took the pointer.
-    let token = Some(local::new_token());
+    // On Wayland every drag lists its token: it marks the drag as ours when it enters our
+    // windows, for its payload if it has one and as the compositor's proof that it took the
+    // pointer. On X11 it is listed only with a payload: other clients see it otherwise.
+    let x11 = with(|hub| hub.transfer.x11().is_some()).unwrap_or(false);
+    let token = (!x11 || item.local.is_some()).then(local::new_token);
     let spec = item.spec(token.as_deref());
     let started = with(|hub| -> Result<(bool, Release), Error> {
         let window = hub
@@ -623,6 +641,10 @@ pub(crate) fn released() {
 /// Whether Wayland drag `id` still runs after dispatching what P0 has read: not dropped,
 /// not ended. On the UI thread, in an update: nothing winit reads runs until it returns.
 pub(crate) fn still_holding(id: u64) -> bool {
+    #[cfg(test)]
+    if let Some(live) = tests::FAKE_LIVE.get() {
+        return live;
+    }
     let Some(t) = with(|hub| hub.transfer.clone()) else {
         return false;
     };

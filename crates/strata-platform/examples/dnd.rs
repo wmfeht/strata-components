@@ -282,7 +282,7 @@ mod demo {
             && let Some(item) = item(s)
         {
             let dnd = s.dnd.clone();
-            match dnd.start_drag(tx, item, ended) {
+            match dnd.start_drag(tx, d, "manual", item, ended) {
                 Ok(()) => log(&s.window, "drag-start", json!({ "tile": "manual" })),
                 Err(e) => log(&s.window, "drag-error", json!({ "error": e.to_string() })),
             }

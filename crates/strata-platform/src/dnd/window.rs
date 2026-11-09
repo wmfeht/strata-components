@@ -79,7 +79,56 @@ pub(crate) struct Core<S: 'static> {
     seq: Cell<u64>,
     /// The drag started from this window, and whether its guard waits for a real release.
     out: Cell<Option<(u64, Release)>>,
+    /// Where the drag started from this window's source sits, to check before an Escape that
+    /// Rune still holds a live element there (see [`SourceAt`]).
+    source: RefCell<Option<SourceAt>>,
 }
+
+/// The element a drag started from: its key, its exact path in Rune's tree (learned by a
+/// pick in the handler that started the drag, before any commit), and a point inside it.
+///
+/// Rune's capture ends on an Escape only if the captured element is still live at the path
+/// it was pressed at: `cancel_drag` finds it by that path, skipping exiting subtrees. An
+/// Escape sent otherwise goes on to the app's keys (review round 2, R2-B1). Rune has no
+/// public query for that, but `Tx::element_at_in` runs its callback after the handler and
+/// before the keys it sent are handled, against the same tree, and skips exiting subtrees
+/// too: the Escape is sent from that callback only if what it picks lies at that path.
+#[derive(Clone, Debug)]
+struct SourceAt {
+    id: u64,
+    path: Option<String>,
+    at: (f32, f32),
+}
+
+/// The keyed segments of `path`, as `Tx::element_at_in` takes a scope: `#n` segments stand
+/// for elements without keys.
+fn selector(path: &str) -> String {
+    path.split('/')
+        .filter(|s| !s.is_empty() && !s.starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// `path` up to and including its segment `key`: the keyed element's own path, from a pick
+/// that may have found one of its descendants.
+fn through(path: &str, key: &str) -> Option<String> {
+    let segs: Vec<&str> = path.split('/').collect();
+    let i = segs.iter().position(|s| *s == key)?;
+    Some(segs[..=i].join("/"))
+}
+
+/// Whether `picked` is the element at `path` or inside it.
+fn under(picked: &str, path: &str) -> bool {
+    picked == path
+        || picked
+            .strip_prefix(path)
+            .is_some_and(|r| r.starts_with('/'))
+}
+
+/// How long after a drag ended P1 waits before ending a capture that no proof ended (see
+/// `session`): long enough for a compositor's focus change at the drop (sway's, 14 ms in S2)
+/// to have ended it first, which leaves nothing to do.
+pub(crate) const LATE_ESCAPE: std::time::Duration = std::time::Duration::from_millis(150);
 
 impl<S: 'static> Sink for Core<S> {
     fn queue(&self, r: Routed) {
@@ -116,6 +165,10 @@ fn run<S: 'static>(key: &str, job: Job, s: &mut S, tx: &mut Tx) -> bool {
             hub::icon_ready(id, image);
             false
         }
+        Job::LateEscape { id } => {
+            core.late_escape(id, tx);
+            false
+        }
     }
 }
 
@@ -132,6 +185,7 @@ impl<S: 'static> Dnd<S> {
             ends: RefCell::new(HashMap::new()),
             seq: Cell::new(0),
             out: Cell::new(None),
+            source: RefCell::new(None),
         }))
     }
 
@@ -176,6 +230,7 @@ impl<S: 'static> Dnd<S> {
     /// [`Dnd::start_drag`] and [`Dnd::owns`] from that handler instead.
     pub fn drag_source(&self, el: El, key: &str, source: DragSource<S>) -> El {
         let me = self.clone();
+        let source_key = key.to_owned();
         el.key(key)
             .on_drag(move |s: &mut S, d: &mut Drag, tx: &mut Tx| {
                 let decision = me.0.guard.borrow_mut().phase(Step::of(d), source.threshold);
@@ -195,7 +250,7 @@ impl<S: 'static> Dnd<S> {
                             return pass(s, d, tx);
                         };
                         let end = source.on_end.clone();
-                        match me.begin(tx, item, end) {
+                        match me.begin(tx, d, &source_key, item, end) {
                             Ok(()) => {
                                 if let Some(f) = &source.on_start {
                                     f(s, tx);
@@ -212,15 +267,22 @@ impl<S: 'static> Dnd<S> {
     }
 
     /// Starts a system drag from the press the app's own `on_drag` is handling, once it has
-    /// decided the press is a drag. Call [`Dnd::owns`] first in that handler on every phase:
-    /// the phases after this belong to the system drag.
+    /// decided the press is a drag: `drag` is the phase it is handling, and `key` the key of
+    /// the element whose `on_drag` that is (unique in the window). Call [`Dnd::owns`] first
+    /// in that handler on every phase: the phases after this belong to the system drag.
+    ///
+    /// Keep that element mounted at the same place in the tree, and not exiting, until the
+    /// drag ends: on Wayland, P1 ends Rune's capture of the press only while it is (see the
+    /// module docs).
     pub fn start_drag(
         &self,
         tx: &mut Tx,
+        drag: &Drag,
+        key: &str,
         item: DragItem,
         on_end: impl Fn(&mut S, DragOutcome, &mut Tx) + 'static,
     ) -> Result<(), Error> {
-        self.begin(tx, item, Some(Rc::new(on_end)))
+        self.begin(tx, drag, key, item, Some(Rc::new(on_end)))
     }
 
     /// Whether `drag` (a phase of an app's own `on_drag`) belongs to a system drag this
@@ -249,7 +311,14 @@ impl<S: 'static> Dnd<S> {
         hub::cancel_drag();
     }
 
-    fn begin(&self, tx: &mut Tx, item: DragItem, end: Option<EndFn<S>>) -> Result<(), Error> {
+    fn begin(
+        &self,
+        tx: &mut Tx,
+        drag: &Drag,
+        source_key: &str,
+        item: DragItem,
+        end: Option<EndFn<S>>,
+    ) -> Result<(), Error> {
         #[cfg(test)]
         let key = self.0.key.borrow().clone().unwrap_or_default();
         #[cfg(not(test))]
@@ -262,6 +331,27 @@ impl<S: 'static> Dnd<S> {
         // On Wayland the Escape that ends Rune's capture waits for the compositor's proof
         // that it took the pointer (`Routed::Holding`): see `session`.
         self.0.guard.borrow_mut().started(release);
+        // The source's centre, in window points, from the press's geometry; and its path,
+        // picked now, while Rune's tree is the one this phase reached it in.
+        let [wx, wy] = drag.window_point();
+        let at = (wx - drag.x + drag.w / 2.0, wy - drag.y + drag.h / 2.0);
+        *self.0.source.borrow_mut() = Some(SourceAt { id, path: None, at });
+        let core = Rc::downgrade(&self.0);
+        let k = source_key.to_owned();
+        tx.element_at_in_with(
+            source_key.to_owned(),
+            at.0,
+            at.1,
+            Pick::new().transparent(true),
+            move |_: &mut S, picked: Option<Picked>, _: &mut Tx| {
+                let path = picked.and_then(|p| through(p.path(), &k));
+                if let Some(core) = core.upgrade()
+                    && let Some(src) = core.source.borrow_mut().as_mut().filter(|s| s.id == id)
+                {
+                    src.path = path;
+                }
+            },
+        );
         Ok(())
     }
 
@@ -270,6 +360,27 @@ impl<S: 'static> Dnd<S> {
     pub(crate) fn holding_for_test(&self, tx: &mut Tx) {
         if let Some((id, _)) = self.0.out.get() {
             self.0.holding(id, tx, || true);
+        }
+    }
+
+    /// For the headless tests: `r` is routed to this window, as the hub would.
+    #[cfg(test)]
+    pub(crate) fn route_for_test(&self, r: Routed, s: &mut S, tx: &mut Tx) {
+        self.0.queue.borrow_mut().push_back(r);
+        self.0.drain(s, tx);
+    }
+
+    /// For the headless tests: the drag this window started, if any.
+    #[cfg(test)]
+    pub(crate) fn drag_id_for_test(&self) -> Option<u64> {
+        self.0.out.get().map(|(id, _)| id)
+    }
+
+    /// For the headless tests: the late Escape's timer fires now.
+    #[cfg(test)]
+    pub(crate) fn late_escape_for_test(&self, tx: &mut Tx) {
+        if let Some((id, _)) = self.0.out.get() {
+            self.0.late_escape(id, tx);
         }
     }
 }
@@ -282,7 +393,7 @@ impl<S: 'static> Core<S> {
     /// The compositor took the pointer for drag `id`: end Rune's capture of its press with an
     /// Escape, if the guard still holds that press and `live` confirms the drag hasn't
     /// dropped or ended (see `session`).
-    fn holding(&self, id: u64, tx: &mut Tx, live: impl FnOnce() -> bool) {
+    fn holding(self: &Rc<Self>, id: u64, tx: &mut Tx, live: impl FnOnce() -> bool) {
         if self.out.get() != Some((id, Release::Escape)) {
             return;
         }
@@ -290,12 +401,62 @@ impl<S: 'static> Core<S> {
         if !may || !live() {
             return;
         }
-        if self.guard.borrow_mut().take_escape() {
-            // The cancelled Up this brings is the guard's to swallow.
-            tx.send_key(KeyEvent {
-                key: Key::Escape,
-                mods: Mods::default(),
+        self.escape_if_live(id, tx);
+    }
+
+    /// Sends the Escape, from a pick's callback, only if the drag's source is still live at
+    /// the path it started from (see [`SourceAt`]), and the guard still allows it.
+    fn escape_if_live(self: &Rc<Self>, id: u64, tx: &mut Tx) {
+        let Some(src) = self.source.borrow().clone().filter(|s| s.id == id) else {
+            return;
+        };
+        let Some(path) = src.path else {
+            // The start's pick found no source: nothing says the capture is live.
+            return;
+        };
+        let core = Rc::downgrade(self);
+        tx.element_at_in_with(
+            selector(&path),
+            src.at.0,
+            src.at.1,
+            Pick::new().transparent(true),
+            move |_: &mut S, picked: Option<Picked>, tx: &mut Tx| {
+                let live = picked.is_some_and(|p| under(p.path(), &path));
+                let Some(core) = core.upgrade() else {
+                    return;
+                };
+                if live && core.guard.borrow_mut().take_escape() {
+                    // The cancelled Up this brings is the guard's to swallow.
+                    tx.send_key(KeyEvent {
+                        key: Key::Escape,
+                        mods: Mods::default(),
+                    });
+                }
+            },
+        );
+    }
+
+    /// The drag ended with no proof having ended Rune's capture (it never entered the app's
+    /// windows, and no target answered it): after [`LATE_ESCAPE`], if the guard still holds
+    /// the press, end it then (see `session`).
+    fn schedule_late_escape(&self, id: u64) {
+        let Some(poster) = self.poster.borrow().clone() else {
+            return;
+        };
+        let spawned = std::thread::Builder::new()
+            .name("dnd-late-escape".into())
+            .spawn(move || {
+                std::thread::sleep(LATE_ESCAPE);
+                poster(Job::LateEscape { id });
             });
+        if let Err(e) = spawned {
+            hub::diagnostic(&format!("no thread for the late Escape: {e}"));
+        }
+    }
+
+    fn late_escape(self: &Rc<Self>, id: u64, tx: &mut Tx) {
+        if self.out.get() == Some((id, Release::Escape)) && self.guard.borrow().may_escape() {
+            self.escape_if_live(id, tx);
         }
     }
 
@@ -315,8 +476,12 @@ impl<S: 'static> Core<S> {
                 }
                 Routed::Ended { id, outcome } => {
                     let f = self.ends.borrow_mut().remove(&id);
-                    if self.out.get().is_some_and(|(o, _)| o == id) {
-                        self.out.set(None);
+                    // The drag's own record stays until the next starts: a late Escape may
+                    // still need it.
+                    if self.out.get() == Some((id, Release::Escape))
+                        && self.guard.borrow().may_escape()
+                    {
+                        self.schedule_late_escape(id);
                     }
                     match f {
                         Some(f) => {

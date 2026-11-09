@@ -32,8 +32,14 @@ fn view(s: &S, _: &mut Cx<S>) -> El {
                 if d.phase == Phase::Move && d.dx > 8.0 && s.started == 0 {
                     s.started += 1;
                     let dnd = s.dnd.clone();
-                    dnd.start_drag(tx, DragItem::new().text("own"), |_: &mut S, _, _| {})
-                        .expect("the fake start");
+                    dnd.start_drag(
+                        tx,
+                        d,
+                        "own",
+                        DragItem::new().text("own"),
+                        |_: &mut S, _, _| {},
+                    )
+                    .expect("the fake start");
                 }
             });
     col()
@@ -206,4 +212,223 @@ fn start_drag_from_a_press_the_guard_never_saw_sends_no_escape() {
         rt.state.own
     );
     assert!(rt.state.keys.is_empty(), "{:?}", rt.state.keys);
+}
+
+/// Review round 2, R2-B1: the source leaves the tree when its drag starts (an app hiding what
+/// it moves, a tab torn off). Rune's `cancel_drag` finds no live element, so an Escape would
+/// go on to the app's keys: none may be sent.
+mod gone {
+    use rune::{Cx, El, Env, KeyEvent, Runtime, Tx, col, el};
+
+    use super::super::hub::tests::FAKE_START;
+    use super::super::session::Release;
+    use super::super::*;
+
+    struct G {
+        dnd: Dnd<G>,
+        hide: bool,
+        keys: Vec<String>,
+    }
+
+    fn view(s: &G, _: &mut Cx<G>) -> El {
+        let source = DragSource::new(|_: &G, _| Some(DragItem::new().text("hello")))
+            .on_start(|s: &mut G, _| s.hide = true);
+        let mut c = col().w_full().h_full();
+        if !s.hide {
+            c = c.child(s.dnd.drag_source(el().size(100.0, 60.0), "tile", source));
+        }
+        c.child(el().key("rest").size(100.0, 60.0))
+    }
+
+    fn heard(s: &mut G, ev: &KeyEvent, _: &mut Tx) -> bool {
+        s.keys.push(format!("{:?}", ev.key));
+        false
+    }
+
+    #[test]
+    fn no_escape_when_the_source_has_left_the_tree() {
+        FAKE_START.set(Some(Release::Escape));
+        let st = G {
+            dnd: Dnd::new(),
+            hide: false,
+            keys: Vec::new(),
+        };
+        let mut rt = Runtime::new(st, view, (300.0, 200.0), Env::new(true, 1.0));
+        rt.on_key = Some(heard);
+        rt.frame(0.0);
+        let (x, y) = rt.find("tile").expect("tile");
+        rt.pointer_move(x, y);
+        rt.pointer_down(x, y);
+        rt.frame(0.0);
+        rt.pointer_move(x + 12.0, y);
+        rt.frame(0.0);
+        assert!(rt.state.hide, "the drag started and hid its source");
+        rt.update_if(|s, tx| {
+            s.dnd.clone().holding_for_test(tx);
+            false
+        });
+        rt.frame(0.0);
+        assert!(
+            rt.state.keys.is_empty(),
+            "the Escape leaked: {:?}",
+            rt.state.keys
+        );
+    }
+}
+
+/// Starts a Wayland drag from the tile, under the threshold first, and returns the drag's id.
+fn started(rt: &mut Runtime<S>, (x, y): (f32, f32)) -> u64 {
+    rt.pointer_move(x, y);
+    rt.pointer_down(x, y);
+    rt.frame(0.0);
+    rt.pointer_move(x + 12.0, y);
+    rt.frame(0.0);
+    assert_eq!(rt.state.started, 1);
+    rt.state.dnd.drag_id_for_test().expect("a drag")
+}
+
+fn route(rt: &mut Runtime<S>, r: super::hub::Routed) {
+    let cell = std::cell::Cell::new(Some(r));
+    rt.update_if(move |s, tx| {
+        if let Some(r) = cell.take() {
+            s.dnd.clone().route_for_test(r, s, tx);
+        }
+        false
+    });
+}
+
+/// Review round 2: the proof's update first checks the drag still runs (`still_holding`).
+/// Here the window lost focus before the update (Rune ended the capture at that input, and
+/// its cancelled Up waits for the next frame), and the drag has dropped meanwhile: no Escape.
+#[test]
+fn a_proof_for_a_drag_that_already_dropped_sends_no_escape() {
+    let (mut rt, at) = runtime(Release::Escape);
+    let id = started(&mut rt, at);
+    rt.window_focus(false);
+    super::hub::tests::FAKE_LIVE.set(Some(false));
+    route(&mut rt, super::hub::Routed::Holding { id });
+    super::hub::tests::FAKE_LIVE.set(None);
+    rt.frame(0.0);
+    rt.frame(0.0);
+    assert!(
+        rt.state.keys.is_empty(),
+        "the Escape leaked: {:?}",
+        rt.state.keys
+    );
+}
+
+/// R2-B2: a drag no proof ever reached (it never entered the app's windows and no target
+/// answered) ended: once the late Escape's wait is over, the capture ends.
+#[test]
+fn the_capture_ends_late_for_a_drag_no_proof_reached() {
+    let (mut rt, at) = runtime(Release::Escape);
+    let id = started(&mut rt, at);
+    route(
+        &mut rt,
+        super::hub::Routed::Ended {
+            id,
+            outcome: rune::DragOutcome::Copied,
+        },
+    );
+    rt.frame(0.0);
+    assert!(rt.pressing(), "not before the wait");
+    rt.update_if(|s, tx| {
+        s.dnd.clone().late_escape_for_test(tx);
+        false
+    });
+    rt.frame(0.0);
+    assert!(!rt.pressing(), "the late Escape ended the capture");
+    assert!(rt.state.keys.is_empty(), "{:?}", rt.state.keys);
+}
+
+/// R2-B2: a focus change at the drop (sway's bounce) ended the capture first: the late
+/// Escape finds the guard released and sends nothing.
+#[test]
+fn no_late_escape_once_a_focus_change_ended_the_capture() {
+    let (mut rt, at) = runtime(Release::Escape);
+    let id = started(&mut rt, at);
+    route(
+        &mut rt,
+        super::hub::Routed::Ended {
+            id,
+            outcome: rune::DragOutcome::Copied,
+        },
+    );
+    rt.window_focus(false);
+    rt.frame(0.0);
+    rt.window_focus(true);
+    rt.frame(0.0);
+    rt.update_if(|s, tx| {
+        s.dnd.clone().late_escape_for_test(tx);
+        false
+    });
+    rt.frame(0.0);
+    assert!(
+        rt.state.keys.is_empty(),
+        "the Escape leaked: {:?}",
+        rt.state.keys
+    );
+}
+
+/// R2-B1: the source moves to another place in the tree when its drag starts (wrapped in a
+/// new parent): Rune's capture names the old path, so no Escape may be sent.
+mod moved {
+    use rune::{Cx, El, Env, KeyEvent, Runtime, Tx, col, el};
+
+    use super::super::hub::tests::FAKE_START;
+    use super::super::session::Release;
+    use super::super::*;
+
+    struct M {
+        dnd: Dnd<M>,
+        wrap: bool,
+        keys: Vec<String>,
+    }
+
+    fn view(s: &M, _: &mut Cx<M>) -> El {
+        let source = DragSource::new(|_: &M, _| Some(DragItem::new().text("hello")))
+            .on_start(|s: &mut M, _| s.wrap = true);
+        let tile = s.dnd.drag_source(el().size(100.0, 60.0), "tile", source);
+        let c = col().w_full().h_full();
+        if s.wrap {
+            c.child(col().key("wrapper").child(tile))
+        } else {
+            c.child(tile)
+        }
+    }
+
+    fn heard(s: &mut M, ev: &KeyEvent, _: &mut Tx) -> bool {
+        s.keys.push(format!("{:?}", ev.key));
+        false
+    }
+
+    #[test]
+    fn no_escape_when_the_source_moved_to_another_path() {
+        FAKE_START.set(Some(Release::Escape));
+        let st = M {
+            dnd: Dnd::new(),
+            wrap: false,
+            keys: Vec::new(),
+        };
+        let mut rt = Runtime::new(st, view, (300.0, 200.0), Env::new(true, 1.0));
+        rt.on_key = Some(heard);
+        rt.frame(0.0);
+        let (x, y) = rt.find("tile").expect("tile");
+        rt.pointer_move(x, y);
+        rt.pointer_down(x, y);
+        rt.frame(0.0);
+        rt.pointer_move(x + 12.0, y);
+        rt.frame(0.0);
+        assert!(rt.state.wrap, "the drag started and moved its source");
+        rt.update_if(|s, tx| {
+            s.dnd.clone().holding_for_test(tx);
+            false
+        });
+        rt.frame(0.0);
+        assert!(
+            rt.state.keys.is_empty(),
+            "the Escape leaked: {:?}",
+            rt.state.keys
+        );
+    }
 }

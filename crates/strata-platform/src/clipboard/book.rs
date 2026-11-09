@@ -24,6 +24,9 @@ struct Entry {
     state: CopyState,
     /// [`Book::clearing`] ran: its cancel is the clear's.
     clearing: bool,
+    /// Another client's offer was heard while this copy was still pending: whatever became
+    /// of the write, the selection has moved on.
+    superseded: bool,
 }
 
 #[derive(Default)]
@@ -43,6 +46,7 @@ impl Book {
                 mimes,
                 state: CopyState::Pending,
                 clearing: false,
+                superseded: false,
             },
         );
     }
@@ -82,10 +86,17 @@ impl Book {
                     changes.push(Change::Holding { selection, copy });
                 }
             }
-            None => changes.push(Change::Offered {
-                selection,
-                mimes: mimes.clone(),
-            }),
+            None => {
+                for e in self.copies.values_mut() {
+                    if e.selection == selection && e.state == CopyState::Pending {
+                        e.superseded = true;
+                    }
+                }
+                changes.push(Change::Offered {
+                    selection,
+                    mimes: mimes.clone(),
+                });
+            }
         }
         self.offers.insert(selection, Offered { mimes, ours });
         changes
@@ -172,6 +183,16 @@ impl Book {
 
     pub(super) fn offered(&self, selection: Selection) -> Option<&Offered> {
         self.offers.get(&selection)
+    }
+
+    /// The copy of ours a read of `selection` gets, if any: the newest one holding, or still
+    /// pending with no other client's offer heard since (a read right after a copy gets the
+    /// copy, but a write that never took doesn't shadow what came after it).
+    pub(super) fn serving(&self, selection: Selection) -> Option<CopyId> {
+        self.live(selection).into_iter().find(|c| {
+            let e = &self.copies[c];
+            e.state == CopyState::Holding || !e.superseded
+        })
     }
 
     /// The live copies of `selection`, newest first.

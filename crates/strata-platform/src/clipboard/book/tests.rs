@@ -228,3 +228,23 @@ fn an_echo_listing_the_types_in_another_order_is_still_ours() {
         }]
     );
 }
+
+#[test]
+fn a_pending_copy_is_served_until_another_apps_offer_is_heard_after_it() {
+    let mut b = Book::default();
+    b.copied(C, CopyId(1), m(&["a"]));
+    assert_eq!(
+        b.serving(C),
+        Some(CopyId(1)),
+        "a read right after the copy gets it"
+    );
+    // A write never confirmed (a data-device write the compositor dropped while another
+    // client's event was taken for its echo, say) mustn't shadow what came after it.
+    b.selection(C, Some(m(&["theirs"])), &|_| false);
+    assert_eq!(b.serving(C), None);
+    // A later copy of ours is served again, and once holding, stays served.
+    b.copied(C, CopyId(2), m(&["b"]));
+    assert_eq!(b.serving(C), Some(CopyId(2)));
+    b.selection(C, Some(m(&["b"])), &holds_all);
+    assert_eq!(b.serving(C), Some(CopyId(2)));
+}

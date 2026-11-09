@@ -372,9 +372,8 @@ fn source_of(selection: Selection) -> Result<Option<Src>, ReadError> {
     with(|hub| {
         if let Some(spec) = hub
             .book
-            .live(selection)
-            .into_iter()
-            .find_map(|copy| hub.specs.get(&copy).map(|(spec, _)| spec.clone()))
+            .serving(selection)
+            .and_then(|copy| hub.specs.get(&copy).map(|(spec, _)| spec.clone()))
         {
             return Some(Src::Ours(spec));
         }

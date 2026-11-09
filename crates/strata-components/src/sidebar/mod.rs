@@ -52,6 +52,11 @@
 //!   there, so an empty PINNED section shows its gap and rows drop their hover fill and focus
 //!   ring. One site owns the drop indicator at a time.
 //!
+//! Each zone reaches the binder with its element's key (W1's `Dnd::drop_zone_keyed`), unique in
+//! the window given a sidebar key of its own ([`PlacesSidebar::key`], [`DEFAULT_KEY`] by
+//! default): the sidebar by that key, gap `i` by `<key>-band-{i}`, and a row by
+//! [`ItemId::key`] (`<key>-place-…`, `<key>-pin-…`, `<key>-device-…`).
+//!
 //! # The Trash target
 //!
 //! The Trash icon's box is keyed [`trash_target_key`] (`places-trash-icon` by default,

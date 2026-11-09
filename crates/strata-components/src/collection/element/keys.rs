@@ -4,7 +4,9 @@
 //! Keys are one namespace in Rune, and sibling keys must be unique. Rows are keyed by entry id
 //! (`row-{id}`), which is unique inside one collection; two collections showing the same
 //! folder (two panes) tell their rows apart by path: [`row_path`] starts at the collection's
-//! own key.
+//! own key. A folder row's drop zone reaches the host's binder keyed [`row_key`] with the
+//! collection's key as its scope (W1's `ElementKey::within`), so a binder that finds zones by
+//! key tells them apart the same way.
 
 use crate::contract::{EntryId, EntrySource};
 

@@ -329,7 +329,9 @@ impl<'a, S: 'static> Viewport<'a, S> {
     ///
     /// It has to be the viewport's: a drag goes to the element pressed, and the viewport's frame
     /// is a control (focusable, with key and wheel handlers), so a drag source on an element
-    /// around it never hears the drag.
+    /// around it never hears the drag. The source reaches the binder by the viewport's key
+    /// ([`Viewport::key`], W1's `Dnd::drag_source_keyed`), which the viewers set to
+    /// `<key>-picture`.
     pub fn drag_source(mut self, dnd: Dnd<S>, source: DragSource<S>) -> Self {
         self.drag = Some((dnd, source));
         self
@@ -483,7 +485,7 @@ impl<'a, S: 'static> Viewport<'a, S> {
                 PanDrag::Never => false,
             };
         if !pans && let Some((dnd, source)) = drag {
-            frame = dnd.drag_source(frame, source);
+            frame = dnd.drag_source_keyed(frame, key.clone(), source);
         }
         if !full {
             return frame;

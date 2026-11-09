@@ -14,7 +14,7 @@ use super::Config;
 use super::keys::{ICON, LABEL, header_key, line_key, row_key};
 use super::lines::{Group, GroupStyle, Line, LineMap};
 use super::state::DropOver;
-use crate::contract::{DropHover, DropZone, Entry, EntryId, Point, Rect};
+use crate::contract::{DropHover, DropZone, ElementKey, Entry, EntryId, Point, Rect};
 
 /// Marks the host puts on rows, each with its own look.
 ///
@@ -646,7 +646,11 @@ fn finish_item<S: 'static>(
     if let Some(on_drop) = &cfg.on_drop
         && entry.kind.is_folder_like()
     {
-        outer = cfg.dnd.drop_zone(outer, row_zone(cfg, on_drop.clone(), id));
+        // Row keys are unique only inside the collection: its key is their scope.
+        let key = ElementKey::new(row_key(id)).within(cfg.key.to_string());
+        outer = cfg
+            .dnd
+            .drop_zone_keyed(outer, key, row_zone(cfg, on_drop.clone(), id));
     }
     outer
 }

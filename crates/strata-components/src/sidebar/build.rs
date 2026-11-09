@@ -199,7 +199,8 @@ impl<'a, S: 'static> PlacesSidebar<'a, S> {
         if !rail {
             root = root.child(grip(&self.key, look, self.access, width));
         }
-        self.dnd.drop_zone(root, drops::background(self.access))
+        self.dnd
+            .drop_zone_keyed(root, self.key.clone(), drops::background(self.access))
     }
 }
 
@@ -344,14 +345,16 @@ fn gap<S: 'static>(
     let height = if open { slot::gap_open(look) } else { closed };
     let reach = slot::gap_reach(look);
     let gap = gap_at(pins, i);
+    let band_key = format!("{}-band-{i}", ctx.key);
     let band = el()
-        .key(format!("{}-band-{i}", ctx.key))
+        .key(band_key.clone())
         .absolute(0.0, -reach)
         .w_full()
         .h(height + 2.0 * reach)
         .raise();
-    let band = ctx.dnd.drop_zone(
+    let band = ctx.dnd.drop_zone_keyed(
         band,
+        band_key,
         drops::gap(ctx.access, &ctx.emit, gap, verdict, &ctx.state.pin_check),
     );
     let mut g = col()

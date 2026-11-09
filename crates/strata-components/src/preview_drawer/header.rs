@@ -132,7 +132,7 @@ pub(super) fn header<S: 'static>(
         }))
         .child(heading);
     if let Some((dnd, source)) = parts.drag {
-        handle = dnd.drag_source(handle, source.clone());
+        handle = dnd.drag_source_keyed(handle, "preview-handle", source.clone());
     }
 
     // Sized like the window's header bar, as Strata's `.preview-header` is: the bar's height

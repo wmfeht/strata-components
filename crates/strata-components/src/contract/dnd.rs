@@ -22,7 +22,7 @@ mod uri;
 #[cfg(test)]
 mod tests;
 
-pub use binder::Dnd;
+pub use binder::{Dnd, ElementKey};
 pub use uri::{file_uri, parse_uri_list, uri_to_path};
 
 /// The `text/uri-list` MIME type: files as `file://` URIs, one per line.

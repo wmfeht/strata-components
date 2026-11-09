@@ -24,7 +24,8 @@ pub mod matched;
 
 pub use dnd::{
     ActionInput, CrossDevice, Dnd, DragPayload, DragSource, DropAction, DropActions, DropData,
-    DropHover, DropItem, DropOffer, DropZone, Dropped, URI_LIST, VolumeRelation, choose_action,
+    DropHover, DropItem, DropOffer, DropZone, Dropped, ElementKey, URI_LIST, VolumeRelation,
+    choose_action,
 };
 pub use entry::{
     Entry, EntryId, EntryKind, EntrySource, LinkTarget, ListEntry, ListSource, ThumbKey,

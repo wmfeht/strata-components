@@ -528,3 +528,155 @@ fn a_drag_moving_to_another_zone_never_reuses_an_earlier_drags_serial() {
         rt.state.offers
     );
 }
+
+// ---- Keyed binders (W1e) ----
+
+thread_local! {
+    /// What the keyed binder heard, in the order the view attached it: zone or source, the
+    /// key and the scope.
+    static HEARD: std::cell::RefCell<Vec<(&'static str, String, Option<String>)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn heard() -> Vec<(&'static str, String, Option<String>)> {
+    HEARD.with(|h| h.borrow().clone())
+}
+
+/// A binder that records each key it is given and attaches nothing.
+fn recording() -> Dnd<Pane> {
+    let note = |what: &'static str, key: &ElementKey| {
+        HEARD.with(|h| {
+            h.borrow_mut()
+                .push((what, key.key().to_owned(), key.scope().map(str::to_owned)))
+        });
+    };
+    Dnd::custom_keyed(
+        move |el, key, _| {
+            note("zone", key);
+            el
+        },
+        move |el, key, _| {
+            note("source", key);
+            el
+        },
+    )
+}
+
+fn source() -> DragSource<Pane> {
+    DragSource::new(|_: &Pane| None)
+}
+
+/// Elements given no key of their own, attached with keys: the zone binder, the source binder,
+/// and both without a key (which a keyed binder hears nothing of).
+fn keyed_view(_: &Pane, _: &mut Cx<Pane>) -> El {
+    let dnd = recording();
+    let cell = || el().size(100.0, 100.0);
+    let rows = row()
+        .key("list")
+        .child(dnd.drop_zone_keyed(cell(), "list-bg", logging("bg")))
+        .child(dnd.drop_zone_keyed(
+            cell(),
+            ElementKey::new("row-7").within("list"),
+            logging("row"),
+        ))
+        .child(dnd.drag_source_keyed(cell(), "handle", source()))
+        .child(dnd.drop_zone(cell().key("plain"), logging("plain")))
+        .child(dnd.drag_source(cell().key("plain-source"), source()));
+    col().child(rows)
+}
+
+#[test]
+fn a_keyed_binder_hears_each_elements_key_and_scope_and_the_element_carries_it() {
+    HEARD.with(|h| h.borrow_mut().clear());
+    let mut rt = Runtime::new(
+        Pane::default(),
+        keyed_view,
+        (500.0, 100.0),
+        Env::new(true, 1.0),
+    );
+    rt.frame(0.0);
+    let expected = [
+        ("zone", "list-bg".to_owned(), None),
+        ("zone", "row-7".to_owned(), Some("list".to_owned())),
+        ("source", "handle".to_owned(), None),
+    ];
+    let all = heard();
+    // The view may build more than once: each build hears the same three, in order.
+    assert!(!all.is_empty() && all.len().is_multiple_of(3), "{all:?}");
+    for build in all.chunks(3) {
+        assert_eq!(
+            build, expected,
+            "nothing heard for the unkeyed zone and source"
+        );
+    }
+    let keys: Vec<String> = rt.elements().into_iter().filter_map(|e| e.key).collect();
+    for k in ["list-bg", "row-7", "handle", "plain", "plain-source"] {
+        assert!(keys.iter().any(|e| e == k), "{k} is keyed: {keys:?}");
+    }
+    let row7 = rt
+        .elements()
+        .into_iter()
+        .find(|e| e.key.as_deref() == Some("row-7"))
+        .expect("row-7");
+    assert!(
+        row7.path.contains("list/"),
+        "inside its scope: {}",
+        row7.path
+    );
+}
+
+/// `pane()`'s view with every zone attached by key through Rune's binder.
+fn keyed_rune_view(_: &Pane, _: &mut Cx<Pane>) -> El {
+    let dnd = Dnd::<Pane>::rune();
+    let follow = logging("row").on_move(|s: &mut Pane, p, _| {
+        s.log.push(format!("row move {},{}", p.x, p.y));
+    });
+    let pane = el().size(400.0, 300.0).child(dnd.drop_zone_keyed(
+        el().size(100.0, 100.0),
+        ElementKey::new("row").within("outer"),
+        follow,
+    ));
+    dnd.drop_zone_keyed(pane, "outer", logging("outer"))
+}
+
+#[test]
+fn rune_and_unkeyed_custom_binders_take_keyed_zones_as_before() {
+    let mut rt = Runtime::new(
+        Pane::default(),
+        keyed_rune_view,
+        (400.0, 300.0),
+        Env::new(true, 1.0),
+    );
+    rt.frame(0.0);
+    let mut f = 0;
+    drop_at(&mut rt, &mut f, &["/a"], (50.0, 50.0));
+    drop_at(&mut rt, &mut f, &["/b"], (50.0, 250.0));
+    assert_eq!(
+        rt.state.log,
+        [
+            "row Accepting",
+            "row move 50,50",
+            "row Left",
+            "row drop",
+            "outer Accepting",
+            "outer Left",
+            "outer drop"
+        ]
+    );
+    // A binder of the host's own without keys hears keyed zones and sources too.
+    let count = std::rc::Rc::new(std::cell::Cell::new(0));
+    let (c, d) = (count.clone(), count.clone());
+    let dnd = Dnd::<Pane>::custom(
+        move |el, _| {
+            c.set(c.get() + 1);
+            el
+        },
+        move |el, _| {
+            d.set(d.get() + 10);
+            el
+        },
+    );
+    let _ = dnd.drop_zone_keyed(el(), "z", logging("z"));
+    let _ = dnd.drag_source_keyed(el(), "s", source());
+    assert_eq!(count.get(), 11);
+}

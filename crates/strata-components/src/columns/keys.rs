@@ -18,7 +18,9 @@ pub fn strip(view: &str) -> String {
     format!("{view}-strip")
 }
 
-/// The key of the blank space after the last column.
+/// The key of the blank space after the last column: also the key its drop zone reaches the
+/// binder by (W1's `Dnd::drop_zone_keyed`). Each column's rows and background reach it as C1e's
+/// do, under the column's own key.
 pub fn blank(view: &str) -> String {
     format!("{view}-blank")
 }

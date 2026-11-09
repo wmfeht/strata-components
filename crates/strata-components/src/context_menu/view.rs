@@ -1,0 +1,289 @@
+//! Drawing a menu on rune-kit's `Menu`, then adjusting the surfaces it pushed into the layer:
+//! their name, Strata's look, and the keys rune-kit's menu leaves out (submenus, Ctrl+A).
+//!
+//! rune-kit (5d421fd) pushes a pointer menu with a close request as `[scrim, point, surface,
+//! submenus…]`, an open submenu after its menu and before any deeper one. The adjustments
+//! find the surfaces by that order: an El's key can't be read once built.
+//! `layer_order_is_runekits` (tests) fails if a Rune bump changes it.
+
+use std::rc::Rc;
+
+use rune::{El, Key, KeyEvent, Tx, el};
+use rune_kit::{Menu, MenuEntry, MenuItem};
+use strata_kit::look::Look;
+
+use super::model::Section;
+use crate::contract::Point;
+
+/// Strata's menu corners before roundness (`.item-context-menu`, 9 px).
+pub(super) const RADIUS: f32 = 9.0;
+/// rune-kit's compact menus' least width.
+pub(super) const MIN_WIDTH: f32 = 160.0;
+
+/// What a submenu is being opened by: keys move the keyboard into it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum By {
+    Pointer,
+    Keys,
+}
+
+type Select<S> = Rc<dyn Fn(&mut S, &[usize], &mut Tx)>;
+type Submenu<S> = Rc<dyn Fn(&mut S, Vec<usize>, By)>;
+type CloseTo<S> = Rc<dyn Fn(&mut S, usize)>;
+type Dismiss<S> = Rc<dyn Fn(&mut S)>;
+
+/// One menu to draw.
+pub(super) struct Render<'a, S> {
+    /// The menu's key: its surface is `{key}-menu`, its rows `{key}-item{n}`.
+    pub key: &'a str,
+    /// Where it opens, in window points.
+    pub at: Point,
+    /// The menu's accessible name.
+    pub name: &'a str,
+    pub header: &'a [String],
+    pub sections: &'a [Section],
+    /// The open submenus (item indices at each level), and whether keys opened each.
+    pub open: &'a [usize],
+    pub keys_opened: &'a [bool],
+    pub look: &'a Look,
+    /// An item without a submenu was chosen: its path.
+    pub on_select: Select<S>,
+    /// Open the submenu at a path.
+    pub on_submenu: Submenu<S>,
+    /// Close the submenus this many levels in and deeper.
+    pub close_to: CloseTo<S>,
+    /// Escape, or a press outside: close the whole menu.
+    pub on_dismiss: Dismiss<S>,
+}
+
+/// A row as the surfaces' key handlers see it.
+#[derive(Clone, Debug)]
+struct Row {
+    key: String,
+    path: Vec<usize>,
+    submenu: bool,
+}
+
+impl<S: 'static> Render<'_, S> {
+    /// The menu's anchor element (zero size, out of the layout), with its surfaces pushed into
+    /// `layer`.
+    pub fn build(self, layer: &mut Vec<El>) -> El {
+        let kit = &self.look.kit;
+        let mut rows = Vec::new();
+        let mut menu = Menu::new(self.key.to_owned())
+            .trigger(el().size(0.0, 0.0))
+            .open(true)
+            .at(self.at.x, self.at.y)
+            .min_width(MIN_WIDTH);
+        let dismiss = self.on_dismiss.clone();
+        menu = menu.on_close(move |s: &mut S| dismiss(s));
+        let mut entries: Vec<MenuEntry> =
+            self.header.iter().cloned().map(MenuEntry::Label).collect();
+        let body = self.entries(self.sections, &[], self.key, self.open, &mut rows);
+        if !entries.is_empty() && !body.is_empty() {
+            entries.push(MenuEntry::Separator);
+        }
+        // The header's separator shifts every row's index by one, so number the rows again.
+        let shift = entries.len();
+        entries.extend(body);
+        let rows: Rc<Vec<Row>> = Rc::new(renumber(rows, self.key, shift));
+        for e in entries {
+            menu = match e {
+                MenuEntry::Item(i) => menu.item(*i),
+                MenuEntry::Separator => menu.separator(),
+                MenuEntry::Label(l) => menu.group_label(l),
+            };
+        }
+        let before = layer.len();
+        let anchor = menu.build(kit, layer).absolute(0.0, 0.0);
+        let surfaces = before + 2;
+        debug_assert!(
+            layer.len() > surfaces + self.open.len(),
+            "rune-kit's layer order changed"
+        );
+        for depth in 0..=self.open.len() {
+            let Some(slot) = layer.get_mut(surfaces + depth) else {
+                break;
+            };
+            let surface = std::mem::replace(slot, el());
+            *slot = self.adjust(surface, depth, rows.clone());
+        }
+        anchor
+    }
+
+    /// The rune-kit entries for `sections`, under item key prefix `prefix`, numbered from 0:
+    /// the top level's caller renumbers them past the header.
+    fn entries(
+        &self,
+        sections: &[Section],
+        path: &[usize],
+        prefix: &str,
+        open: &[usize],
+        rows: &mut Vec<Row>,
+    ) -> Vec<MenuEntry> {
+        let mut out = Vec::new();
+        let mut n = 0;
+        for section in sections.iter().filter(|s| !s.items.is_empty()) {
+            if !out.is_empty() {
+                out.push(MenuEntry::Separator);
+            }
+            if let Some(label) = &section.label {
+                out.push(MenuEntry::Label(label.clone()));
+            }
+            for item in &section.items {
+                let key = format!("{prefix}-item{}", out.len());
+                let mut here = path.to_vec();
+                here.push(n);
+                let mut mi = MenuItem::new(item.label.clone())
+                    .danger(item.danger)
+                    .disabled(!item.enabled);
+                if let Some(icon) = item.icon {
+                    mi = mi.icon(self.look.icon(icon));
+                }
+                if let Some(s) = &item.shortcut {
+                    mi = mi.shortcut(s.clone());
+                }
+                if let Some(d) = &item.description {
+                    mi = mi.description(d.clone());
+                }
+                if let Some(on) = item.checked {
+                    mi = mi.checked(on);
+                }
+                match &item.submenu {
+                    Some(sub) => {
+                        let is_open = open.first() == Some(&n);
+                        let deeper = if is_open { &open[1..] } else { &[] };
+                        let sub_entries =
+                            self.entries(sub, &here, &format!("{key}-sub"), deeper, rows);
+                        let (toggle, close_to) = (self.on_submenu.clone(), self.close_to.clone());
+                        let at = here.clone();
+                        mi = mi
+                            .submenu(sub_entries, is_open)
+                            .on_select(move |s: &mut S| {
+                                if is_open {
+                                    close_to(s, at.len() - 1);
+                                } else {
+                                    toggle(s, at.clone(), By::Pointer);
+                                }
+                            });
+                    }
+                    None => {
+                        let select = self.on_select.clone();
+                        let at = here.clone();
+                        mi = mi.on_select_tx(move |s: &mut S, tx: &mut Tx| select(s, &at, tx));
+                    }
+                }
+                rows.push(Row {
+                    key,
+                    path: here,
+                    submenu: item.submenu.is_some(),
+                });
+                out.push(MenuEntry::item(mi));
+                n += 1;
+            }
+        }
+        out
+    }
+
+    /// Strata's look and the keys rune-kit leaves out, on the surface `depth` levels in.
+    fn adjust(&self, surface: El, depth: usize, rows: Rc<Vec<Row>>) -> El {
+        let look = self.look;
+        let kit = &look.kit;
+        let mut e = surface
+            .radius(look.round(RADIUS))
+            .border(1.0, kit.c.border_base);
+        if look.glow.on {
+            e = e.shadow(
+                0.0,
+                look.glow.radius,
+                look.glow.color.alpha(look.glow.opacity),
+            );
+        }
+        if depth == 0 {
+            e = e.label(self.name.to_owned());
+        }
+        let hands = Hands {
+            open: self.on_submenu.clone(),
+            close_to: self.close_to.clone(),
+            dismiss: self.on_dismiss.clone(),
+        };
+        let keyed = depth > 0 && self.keys_opened.get(depth - 1).copied().unwrap_or(false);
+        e = e.on_key(move |s: &mut S, ev: &KeyEvent, tx: &mut Tx| {
+            menu_key(s, ev, tx, depth, &rows, &hands)
+        });
+        if keyed {
+            // A submenu the keyboard opened holds it, as a modal of its own: the keyboard moves
+            // to its first row, and back to its row when it closes. A press outside it closes it.
+            let close = self.close_to.clone();
+            e = e.modal(true, move |s: &mut S| close(s, depth - 1));
+        }
+        e
+    }
+}
+
+/// What a surface's keys can ask of the menu.
+struct Hands<S> {
+    open: Submenu<S>,
+    close_to: CloseTo<S>,
+    dismiss: Dismiss<S>,
+}
+
+/// The surface `depth` levels in heard `ev`: Right, Enter and Space on a submenu's row open
+/// it with the keyboard in it; Left in a submenu closes it; Escape in a submenu closes the
+/// whole menu (the top level's Escape is its modal's); Ctrl+A stays in the menu.
+fn menu_key<S>(
+    s: &mut S,
+    ev: &KeyEvent,
+    tx: &mut Tx,
+    depth: usize,
+    rows: &[Row],
+    hands: &Hands<S>,
+) -> bool {
+    let m = ev.mods;
+    let plain = !(m.ctrl || m.cmd || m.alt || m.logo || m.shift);
+    if ev.is_command('a') {
+        return true;
+    }
+    if !plain {
+        return false;
+    }
+    let focused = tx.focused().and_then(|k| rows.iter().find(|r| r.key == k));
+    match &ev.key {
+        Key::Right | Key::Enter => {}
+        Key::Text(t) if t == " " => {}
+        Key::Left if depth > 0 => {
+            (hands.close_to)(s, depth - 1);
+            return true;
+        }
+        Key::Escape if depth > 0 => {
+            (hands.dismiss)(s);
+            return true;
+        }
+        _ => return false,
+    }
+    match focused {
+        Some(row) if row.submenu && row.path.len() == depth + 1 => {
+            (hands.open)(s, row.path.clone(), By::Keys);
+            true
+        }
+        _ => false,
+    }
+}
+
+/// `rows` with the top level's keys moved on by `shift` entries (the header and its
+/// separator). Submenu keys hang off their row's key, so they move with it.
+fn renumber(rows: Vec<Row>, key: &str, shift: usize) -> Vec<Row> {
+    if shift == 0 {
+        return rows;
+    }
+    let prefix = format!("{key}-item");
+    rows.into_iter()
+        .map(|mut r| {
+            let rest = &r.key[prefix.len()..];
+            let digits = rest.chars().take_while(char::is_ascii_digit).count();
+            let n: usize = rest[..digits].parse().unwrap_or(0);
+            r.key = format!("{prefix}{}{}", n + shift, &rest[digits..]);
+            r
+        })
+        .collect()
+}

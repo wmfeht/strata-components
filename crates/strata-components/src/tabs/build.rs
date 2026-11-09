@@ -205,6 +205,7 @@ impl<'a, S: 'static> BrowserTabs<'a, S> {
                     probe: self.state.probe.clone(),
                     scroll: scroll.clone(),
                     zone: drops::tab(&zones, tab.id, i, tab.accepts, active),
+                    key: super::tab_key(&key, tab.id),
                     dnd: self.dnd.clone(),
                 };
                 item.decorate(move |e, _| dress.apply(e))
@@ -248,9 +249,9 @@ impl<'a, S: 'static> BrowserTabs<'a, S> {
             None => strip.build(&look.kit),
         };
         let root = root.children(self.state.probe.root_markers());
-        let root = self
-            .dnd
-            .drop_zone(root, drops::opener(&zones, DropSite::Strip));
+        let root =
+            self.dnd
+                .drop_zone_keyed(root, key.clone(), drops::opener(&zones, DropSite::Strip));
         row()
             .key(format!("{key}-band"))
             .w_full()
@@ -365,6 +366,8 @@ struct Dress<S: 'static> {
     probe: Probe,
     scroll: String,
     zone: Option<crate::contract::dnd::DropZone<S>>,
+    /// The tab's key ([`super::tab_key`]), which rune-kit gave the element.
+    key: String,
     dnd: Dnd<S>,
 }
 
@@ -399,7 +402,7 @@ impl<S: 'static> Dress<S> {
         }
         tab = wheel::sideways::<S>(tab, &self.probe, self.scroll);
         match self.zone {
-            Some(zone) => self.dnd.drop_zone(tab, zone),
+            Some(zone) => self.dnd.drop_zone_keyed(tab, self.key, zone),
             None => tab,
         }
     }

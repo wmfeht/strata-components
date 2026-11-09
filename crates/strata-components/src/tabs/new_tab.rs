@@ -118,5 +118,9 @@ pub(super) fn button<S: 'static>(
         // Strata's `.tab-drop-hover`: the header action's radius, an accent ground.
         el = el.fill(slot::new_drop_fill(look)).radius(look.round(5.0));
     }
-    dnd.drop_zone(el, drops::opener(cx, DropSite::NewTab))
+    dnd.drop_zone_keyed(
+        el,
+        new_tab_key(state.key()),
+        drops::opener(cx, DropSite::NewTab),
+    )
 }

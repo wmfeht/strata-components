@@ -272,8 +272,9 @@
 //!   after it drew: a frame after the selection. Rune's reveal is only the fallback for a tab
 //!   that never draws, and a tab pressed to start a drag is left to rune-kit's. Any wheel over a
 //!   tab before the jump lands cancels it; in the frame the jump goes out, a sideways wheel jumps
-//!   too, from the strip as shown, so the user's scroll lands last (review 2). The active tab's
-//!   marker reports its first layout, which brings the tick a host's selection from a key
+//!   too, from the strip as shown, so the user's scroll lands last (review 2), and a gesture the
+//!   tab took scrolls to its end (review 3). The active tab's marker, keyed by its id and name,
+//!   reports its first layout, which brings the tick a host's selection or rename from a key
 //!   handler needs in a still window.
 //! - Reused: U-C1e-6 (no clock in `Tx`: [`BrowserTabsState::tick`]), U3 (a drag's paths only at
 //!   the drop: under Rune's binder a drag that opens tabs is told only then, and opens after the

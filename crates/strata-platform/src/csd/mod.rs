@@ -2,7 +2,7 @@
 //! that resizes from its edges where the platform allows, and whose window buttons reach the
 //! window manager.
 //!
-//! Rune lacks, at the pinned rev (`78d22ed`):
+//! Rune lacks, at the pinned rev (`5d421fd`):
 //!
 //! - **Interactive resize** of a borderless window. Rune doesn't reach winit's
 //!   `drag_resize_window`, and on Wayland the raw window handle (the `wl_surface`) can't start
@@ -128,8 +128,11 @@
 //!   test, still pending.
 //! - **A secondary click over the header's children.** The header's handler takes the
 //!   secondary click of every descendant without one of its own, as GTK's header bar does for
-//!   its buttons. A text field in the header needs its own `on_secondary_press`, or it opens the
-//!   window menu.
+//!   its buttons, except a text field: Rune routes a field's secondary click to its own field
+//!   menu, which Linux can't show (Rune's popup menus are macOS and Windows only, draft
+//!   [U14](https://github.com/wmfeht/strata-components/blob/main/docs/decisions/S5-upstream.md#u14)).
+//!   So a right-click on a header text field without its own `on_secondary_press` focuses it and
+//!   moves its caret, and shows nothing. Give the field its own `on_secondary_press`.
 //! - **Corners** show `Cursor::Move` until Rune has diagonal resize cursors (#145).
 //! - **Tiled state** (GTK's `tiled-*`, which drops the window's border) isn't reported:
 //!   neither Rune nor EWMH has it.

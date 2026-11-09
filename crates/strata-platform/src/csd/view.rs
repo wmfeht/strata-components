@@ -52,8 +52,9 @@ pub fn decorate<S: 'static>(content: El, csd: &Csd, access: fn(&mut S) -> &mut C
 /// window manager has a window menu ([`Csd::shows_window_menu`]), a secondary click opens it.
 ///
 /// Don't give `header` itself press, double-press or drag handlers: Rune then stops treating it
-/// as a drag region. Its buttons keep their presses. A child that needs its own secondary click
-/// (a text field's menu) sets `on_secondary_press`, or the window menu takes it.
+/// as a drag region. Its buttons keep their presses. A text field without its own
+/// `on_secondary_press` gets Rune's field menu instead, which Linux can't show, so a right-click
+/// there shows nothing: give a header field its own `on_secondary_press`.
 pub fn header<S: 'static>(header: El, csd: &Csd, access: fn(&mut S) -> &mut Csd) -> El {
     let header = header.window_drag();
     if !csd.shows_window_menu() {

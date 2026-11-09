@@ -33,12 +33,13 @@
 //!   with fontconfig for GTK. Rune takes the bytes, so nothing is written and the system's
 //!   fonts are untouched.
 //! - Strata's family list is `"JetBrains Mono", "JetBrainsMono Nerd Font", monospace`. Both
-//!   slots here are `JetBrains Mono` alone: Rune never loads an installed family by name, so
-//!   the Nerd Font entry could not resolve, and Rune's stand-in for the generic `monospace`
-//!   (`ui-monospace`) would load the system's monospace files, making drawn text depend on the
-//!   machine. A glyph JetBrains Mono lacks falls back to Rune's symbol and CJK families, as
-//!   before. A single name also keeps Rune treating the face as the slot's own font rather
-//!   than as a script fallback.
+//!   slots here are `JetBrains Mono` alone. Rune loads an installed family by name (since Rune
+//!   `99c123d`), so the Nerd Font entry would resolve only where it is installed, and Rune's
+//!   stand-in for the generic `monospace` (`ui-monospace`) would load the system's monospace
+//!   files: either way drawn text would depend on the machine. The single bundled family keeps
+//!   it the same everywhere. A glyph JetBrains Mono lacks falls back to Rune's symbol and CJK
+//!   families, as before. A single name also keeps Rune treating the face as the slot's own
+//!   font rather than as a script fallback.
 //! - Where Strata names the generic `monospace` (document code, the command entry, diagnostics,
 //!   job logs), the components use the mono slot, so those draw in JetBrains Mono, not the
 //!   system's monospace face.

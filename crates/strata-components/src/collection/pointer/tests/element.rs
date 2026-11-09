@@ -1,6 +1,7 @@
 //! The pointer controller on the collection element, in a headless runtime: what the seam
 //! routes to it, its settings from `Collection::settings`, what the host hears, and the presses
-//! with modifiers held, which Rune's scripts can't hold (`docs/testing.md`, Scripts).
+//! with modifiers held in process (Rune's scripts can hold them too since `4805095`:
+//! `docs/testing.md`, Scripts).
 //! Entries 1–3 are folders and 4–10 files; a row's key is `row-{id}`.
 
 use std::cell::RefCell;

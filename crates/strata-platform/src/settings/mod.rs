@@ -2,7 +2,7 @@
 //! Rune's loop: the text scale, the double-click interval, the drag threshold, the caret blink,
 //! the animations switches and whether to remember recent files.
 //!
-//! Rune lacks, at the pinned rev (`78d22ed`):
+//! Rune lacks, at the pinned rev (`5d421fd`):
 //!
 //! - **Settings portal keys beyond `color-scheme`.** Rune reads only `org.freedesktop.appearance`
 //!   `color-scheme` from `org.freedesktop.portal.Settings` (`platform/portal_appearance.rs`). It
@@ -18,7 +18,7 @@
 //!   `Drag::clicks` keep 0.5 s. Draft
 //!   [U13](https://github.com/wmfeht/strata-components/blob/main/docs/decisions/S5-upstream.md#u13),
 //!   not filed.
-//! - Rune's text caret doesn't blink at `78d22ed`, so the caret blink values have no consumer in
+//! - Rune's text caret doesn't blink at `5d421fd`, so the caret blink values have no consumer in
 //!   Rune; they are for an app that draws its own caret.
 //!
 //! Work package: P5, `docs/work/phase-1-leaves/P5-desktop-settings.md`. The findings behind it

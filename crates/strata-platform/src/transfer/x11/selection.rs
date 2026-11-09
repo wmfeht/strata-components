@@ -547,6 +547,7 @@ impl Actor {
                     .into_iter()
                     .filter(|a| *a != NONE && !meta.contains(a))
                     .filter_map(|a| self.name(a))
+                    .filter(|n| !super::super::mime::is_x11_meta(n))
                     .collect();
                 self.announce(selection, owner, mimes);
             }

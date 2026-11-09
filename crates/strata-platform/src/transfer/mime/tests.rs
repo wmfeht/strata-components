@@ -165,3 +165,19 @@ fn utf8_text_aliases_utf8_string() {
     assert_eq!(x11_aliases("text/plain"), ["STRING", "TEXT"]);
     assert!(x11_aliases(URI_LIST).is_empty());
 }
+
+#[test]
+fn requests_about_a_selection_are_no_data_types_and_pixmap_is_one() {
+    for name in [
+        "TARGETS",
+        "SAVE_TARGETS",
+        "DELETE",
+        "INSERT_SELECTION",
+        "INSERT_PROPERTY",
+    ] {
+        assert!(super::is_x11_meta(name), "{name}");
+    }
+    for name in ["PIXMAP", "UTF8_STRING", "text/plain", "targets"] {
+        assert!(!super::is_x11_meta(name), "{name}");
+    }
+}

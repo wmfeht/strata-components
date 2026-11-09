@@ -194,6 +194,7 @@
                                                   "role": "label"
                                                 }
                                               ],
+                                              "key": "wide",
                                               "role": "scroll-view",
                                               "states": [
                                                 "clips"
@@ -237,6 +238,7 @@
                                                   "role": "label"
                                                 }
                                               ],
+                                              "key": "wide",
                                               "role": "scroll-view",
                                               "states": [
                                                 "clips"
@@ -278,6 +280,7 @@
                                                   "role": "label"
                                                 }
                                               ],
+                                              "key": "wide",
                                               "role": "scroll-view",
                                               "states": [
                                                 "clips"

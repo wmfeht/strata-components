@@ -1,6 +1,5 @@
 {
   "bullets": [
-    "preview/preview-panel/documents: Turning wrap off while a rendered Markdown, HTML, or RTF document is open returns rows",
     "preview/preview-panel/documents: Turning wrap on while a rendered Markdown, HTML, or RTF document is open reflows"
   ],
   "scene": "c11-markdown-light",
@@ -11,7 +10,12 @@
       "key": "preview-wrap"
     },
     {
-      "t": 0.6,
+      "t": 0.5,
+      "type": "mark",
+      "name": "unwrapped"
+    },
+    {
+      "t": 0.9,
       "type": "tap",
       "key": "preview-wrap"
     }
@@ -22,6 +26,10 @@
       "states": [
         "checked"
       ]
+    },
+    {
+      "key": "wide",
+      "absent": true
     },
     {
       "key": "doc-u3",

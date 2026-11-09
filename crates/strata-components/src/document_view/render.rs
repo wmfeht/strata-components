@@ -385,7 +385,8 @@ fn styled_text<S: 'static>(
     if wrap {
         t.wrap().w_full()
     } else {
-        col().w_full().scroll_x().child(t)
+        // Keyed so a script can tell an unwrapped row from a wrapped one.
+        col().key("wide").w_full().scroll_x().child(t)
     }
 }
 
@@ -459,7 +460,8 @@ fn code<S: 'static>(
     let t = if wrap {
         t.wrap().w_full()
     } else {
-        col().w_full().scroll_x().child(t)
+        // Keyed so a script can tell an unwrapped row from a wrapped one.
+        col().key("wide").w_full().scroll_x().child(t)
     };
     let r = p.radius;
     let corners = [

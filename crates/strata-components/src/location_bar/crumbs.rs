@@ -219,7 +219,9 @@ fn ancestor<S: 'static>(cx: &Ctx<'_, S>, i: usize, crumb: &Crumb, n: usize) -> E
     if open_in_new {
         button = button.pointer_buttons([PointerButton::Middle]);
     }
-    let button = cx.dnd.drop_zone(button, drops::zone(cx, i, &id));
+    let button = cx
+        .dnd
+        .drop_zone_keyed(button, crumb_key(cx.key, i), drops::zone(cx, i, &id));
     el().key(format!("{}-item-{i}", cx.key))
         .role("listitem")
         .label(crumb.label.clone())

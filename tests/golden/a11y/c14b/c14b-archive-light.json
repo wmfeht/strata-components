@@ -172,6 +172,7 @@
                                           "actions": [
                                             "scroll-into-view"
                                           ],
+                                          "description": "1.2 kB",
                                           "key": "row-8000000010",
                                           "name": "build.rs",
                                           "position": 4,
@@ -181,6 +182,7 @@
                                           "actions": [
                                             "scroll-into-view"
                                           ],
+                                          "description": "880 B",
                                           "key": "row-8000000011",
                                           "name": "Cargo.toml",
                                           "position": 5,
@@ -190,6 +192,7 @@
                                           "actions": [
                                             "scroll-into-view"
                                           ],
+                                          "description": "1.1 kB",
                                           "key": "row-8000000012",
                                           "name": "LICENSE",
                                           "position": 6,
@@ -199,6 +202,7 @@
                                           "actions": [
                                             "scroll-into-view"
                                           ],
+                                          "description": "12.4 kB",
                                           "key": "row-8000000013",
                                           "name": "README.md",
                                           "position": 7,

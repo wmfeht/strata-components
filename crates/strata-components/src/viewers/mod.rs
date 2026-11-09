@@ -48,7 +48,6 @@
 //!   `on_leave`; with no `on_leave`, the key goes on as in Strata.
 //! - **The password error is announced, not described**: a polite live region, with the field
 //!   marked invalid (draft R-C14b-3).
-//! - **Archive file sizes aren't read** by assistive technology ([`archive`], a C1e follow-up).
 //!
 //! # Rune drafts (not filed)
 //!

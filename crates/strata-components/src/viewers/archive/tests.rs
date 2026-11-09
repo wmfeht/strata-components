@@ -412,16 +412,68 @@ mod element {
         }
     }
 
+    /// The description of the option named `name`, or none; panics with no such option.
+    fn description(rt: &Runtime<App>, name: &str) -> Option<String> {
+        let mut stack = vec![rt.accessibility_json()];
+        while let Some(v) = stack.pop() {
+            if v["role"] == "list-box-option" && v["name"] == name {
+                return v["description"].as_str().map(str::to_owned);
+            }
+            if let Some(c) = v["children"].as_array() {
+                stack.extend(c.iter().cloned());
+            }
+        }
+        panic!("no option {name}");
+    }
+
+    /// Strata's archive rows read a file's size after its name; a folder's name ends in "/"
+    /// and says no more.
+    #[test]
+    fn a_file_row_reads_its_size_after_its_name() {
+        let app = App {
+            archive: ArchiveState::new("archive", tree()),
+            look: Look::fallback(false),
+            leave: false,
+            letters: false,
+        };
+        let mut rt = Runtime::new(app, view, (420.0, 400.0), Env::new(false, 1.0));
+        for _ in 0..3 {
+            rt.frame(1.0 / 60.0);
+        }
+        assert_eq!(description(&rt, "README.md").as_deref(), Some("12.4 kB"));
+        assert_eq!(description(&rt, "docs/"), None);
+    }
+
     /// Left at the root goes to the host's `on_leave`; with none, it goes on past the tree to
     /// the window's keys, as Strata's 10xer `h` behaviour does, and so does `h` with the
     /// letters on. In a folder, Left goes up either way, and the host hears nothing.
     #[test]
     fn left_at_the_root_reaches_the_host() {
         let text = || Key::Text("h".into());
-        assert_eq!(left(At::Root, true, Key::Left), heard(0, 1), "taken: on_leave");
-        assert_eq!(left(At::Root, false, Key::Left), heard(1, 0), "passed to the window");
-        assert_eq!(left(At::Root, false, text()), heard(1, 0), "h passed to the window");
-        assert_eq!(left(At::Docs, false, Key::Left), heard(0, 0), "up, with no on_leave");
-        assert_eq!(left(At::Docs, true, Key::Left), heard(0, 0), "up, with on_leave");
+        assert_eq!(
+            left(At::Root, true, Key::Left),
+            heard(0, 1),
+            "taken: on_leave"
+        );
+        assert_eq!(
+            left(At::Root, false, Key::Left),
+            heard(1, 0),
+            "passed to the window"
+        );
+        assert_eq!(
+            left(At::Root, false, text()),
+            heard(1, 0),
+            "h passed to the window"
+        );
+        assert_eq!(
+            left(At::Docs, false, Key::Left),
+            heard(0, 0),
+            "up, with no on_leave"
+        );
+        assert_eq!(
+            left(At::Docs, true, Key::Left),
+            heard(0, 0),
+            "up, with on_leave"
+        );
     }
 }

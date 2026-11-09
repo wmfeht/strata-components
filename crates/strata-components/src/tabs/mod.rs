@@ -85,10 +85,13 @@
 //!   beside it keeps it open. Its drop is [`TabsIntent::OpenTabs`] at the gap, or at the end on
 //!   New tab. Both real binders report a zone's leave before its drop (W1's `Left`: left,
 //!   moved, or dropped), so a leave closes the gap at once, as a cancel needs, and keeps its
-//!   slot for the drop that may follow; the next accepting hover, or two ticks, drop it
-//!   (review 1). Only a strip whose host set [`BrowserTabs::opens_tabs`] follows drag moves:
-//!   following them asks for a frame on each motion. While such a drag runs anywhere in the window, the host says so with
-//!   [`BrowserTabsState::set_open_drag`] and New tab shows its tint.
+//!   slot for the drop that may follow. A zone reached next keeps that slot until its own gap
+//!   has built (rune-kit finds a gap's slot as the strip builds, so a drop in the same turn has
+//!   no other), and two ticks drop it, each asking for the next, so it expires in a window at
+//!   rest (reviews 1 and 2). Only a strip whose host set [`BrowserTabs::opens_tabs`] follows
+//!   drag moves: following them asks for a frame on each motion. While such a drag runs
+//!   anywhere in the window, the host says so with [`BrowserTabsState::set_open_drag`] and New
+//!   tab shows its tint.
 //!
 //! **The host keeps every tab's view mounted while a drag runs.** A spring shows another tab
 //! in the middle of a drag, and on Wayland P1 needs the drag's source to stay mounted at its
@@ -175,7 +178,7 @@
 //! | With Show close button off, the window-close button stays hidden… | **Strata**, X1 |
 //! | A 3 px accent underline slides to the selected tab, and jumps without sliding when animations are disabled | test `the_underline_slides_and_jumps_with_animations_off`; golden `c7-several` (PNG) |
 //! | When the strip is wider than the window, the wheel scrolls it horizontally and no scrollbar is shown | test `a_vertical_wheel_scrolls_an_overflowing_strip_sideways` (a workaround: `wheel.rs`, U-C7-2); golden `c7-overflow` (PNG) |
-//! | Selecting a tab scrolls it into view | tests `a_tab_selected_from_the_keyboard_scrolls_into_view`, `a_revealed_tab_is_clear_of_the_edge_fades` (a fade's width clear of either edge: `probe.rs`, U-C7-7) |
+//! | Selecting a tab scrolls it into view | tests `a_tab_selected_from_the_keyboard_scrolls_into_view`, `a_revealed_tab_is_clear_of_the_edge_fades` (a fade's width clear of either edge, in one jump: `probe.rs`, U-C7-7), `a_key_selection_reveals_and_retitles_in_a_still_window`, `a_wheel_right_after_a_selection_beats_its_reveal` |
 //! | Selecting the last tab also scrolls the New tab button into view | golden `c7-overflow` (PNG): New tab sits outside the scrolling, always shown |
 //! | Hovering an inactive tab accents its label; its X turns accent only while the pointer is over the X itself | **deliberate change**: rune-kit's hover wash and ghost close button (U-C7-3) |
 //! | Assistive technologies read the strip as a tab list named "Tabs", and each X as "Close tab". Each tab reads as its name, with the active one selected | golden `c7-several` (a11y) |
@@ -264,9 +267,14 @@
 //! - **U-C7-7 (draft, not filed)** rune-kit: a horizontal TabStrip's viewport has no scroll
 //!   margin (its vertical one has `scroll_margin(fade)`), so a tab revealed at an end, by a
 //!   press or `scroll_into_view_in`, lands under the edge fade, half hidden. Ask: the same
-//!   margin across. Here: the tick reveals a newly active tab a fade's width clear of either
-//!   edge with `scroll_to_instant`, from the offset its markers read (`probe.rs`), a frame after
-//!   it drew; a tab pressed to start a drag is left to rune-kit's reveal.
+//!   margin across. Here: a newly active tab is revealed a fade's width clear of either edge in
+//!   one jump (`scroll_to_instant`), from the offset its markers read (`probe.rs`), at the tick
+//!   after it drew: a frame after the selection. Rune's reveal is only the fallback for a tab
+//!   that never draws, and a tab pressed to start a drag is left to rune-kit's. Any wheel over a
+//!   tab before the jump lands cancels it; in the frame the jump goes out, a sideways wheel jumps
+//!   too, from the strip as shown, so the user's scroll lands last (review 2). The active tab's
+//!   marker reports its first layout, which brings the tick a host's selection from a key
+//!   handler needs in a still window.
 //! - Reused: U-C1e-6 (no clock in `Tx`: [`BrowserTabsState::tick`]), U3 (a drag's paths only at
 //!   the drop: under Rune's binder a drag that opens tabs is told only then, and opens after the
 //!   tab it dropped on), U-P1-1 (zones found by key), U-C6-5.

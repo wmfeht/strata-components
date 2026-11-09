@@ -77,34 +77,19 @@ mod c7 {
         rt.frame(FRAME);
     }
 
-    /// Steps a resting window for at most `limit` seconds: a frame each 1/60 s while something
-    /// animates (a window draws then), else only at each requested wake, none in between.
-    /// Returns the clock it stopped at. For what needs motion to land (a reveal's glide); a
-    /// timer's test steps with [`wake_until`], since a held file drag keeps `animating` true.
-    fn rest(rt: &mut Runtime<Gallery>, limit: f64) -> f64 {
-        steps(rt, limit, true, |_| false)
-    }
-
-    /// Steps only at the wakes the page asked for and for queued input (a layout report), as a
-    /// still window draws, none for motion, for at most `limit` seconds, stopping at the first
-    /// frame after which `done` holds: a timer that asks for no wake never fires (review 2).
+    /// Steps a still window for at most `limit` seconds: a frame only at each wake the page
+    /// asked for, or for queued input (a layout report), none in between and none for motion
+    /// (a held file drag keeps the runtime animating, which would hide a timer that asked for
+    /// no wake: review 2). Stops at the first frame after which `done` holds, and returns the
+    /// clock it stopped at.
     fn wake_until(rt: &mut Runtime<Gallery>, limit: f64, done: impl Fn(&Gallery) -> bool) -> f64 {
-        steps(rt, limit, false, done)
-    }
-
-    fn steps(
-        rt: &mut Runtime<Gallery>,
-        limit: f64,
-        motion: bool,
-        done: impl Fn(&Gallery) -> bool,
-    ) -> f64 {
         let start = rt.state.c7.now;
         for _ in 0..400 {
             let now = rt.state.c7.now;
             if now - start > limit || done(&rt.state) {
                 break;
             }
-            if (motion && rt.animating) || rt.has_pending_input() {
+            if rt.has_pending_input() {
                 rt.frame(FRAME);
                 continue;
             }

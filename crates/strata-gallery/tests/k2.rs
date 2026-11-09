@@ -1,6 +1,7 @@
 //! K2's page in process: what the accessibility tree doesn't show. The interface font
-//! reaches Rune's sans slot (`Runtime::font_families`), mono stays the app's, and Escape puts
-//! the app's families back. The scripts in `tests/scripts/k2/` check the rest.
+//! reaches Rune's sans slot (`Runtime::font_families`), mono stays the app's (the bundled
+//! JetBrains Mono, K6), and Default and Escape put the app's families back. The scripts in
+//! `tests/scripts/k2/` check the rest.
 
 mod k2 {
     use rune::{Env, Key, KeyEvent, Mods, Runtime};
@@ -52,11 +53,13 @@ mod k2 {
     }
 
     /// settings/themes/interface-font: a change applies at once; previews keep the
-    /// monospace font; an uninstalled family falls back to the app's own.
+    /// monospace font; an uninstalled family falls back to the app's own; Default restores
+    /// the bundled font.
     #[test]
     fn a_chosen_family_leads_the_sans_slot_and_mono_stays_the_apps() {
         let mut rt = mount("k2-defaults-light");
-        assert_eq!(families(&rt), app());
+        let bundled = ("JetBrains Mono".to_owned(), "JetBrains Mono".to_owned());
+        assert_eq!(families(&rt), bundled);
         pick(&mut rt, "k2-font-1");
         assert_eq!(
             families(&rt),
@@ -68,7 +71,7 @@ mod k2 {
             format!("'Other \"Quoted\" Sans', {}", APP_FAMILIES.0)
         );
         pick(&mut rt, "k2-font-default");
-        assert_eq!(families(&rt), app());
+        assert_eq!(families(&rt), bundled);
     }
 
     #[test]

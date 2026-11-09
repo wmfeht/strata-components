@@ -4,8 +4,10 @@
 //! something). Each page lives in `scenes/<id>.rs` with its scenes, its demo state and its
 //! view; `docs/testing.md` describes the layout and the goldens built from it.
 
+use rune::text::TextSystem;
 use rune::{AppSpec, Cx, El, Env, Key, KeyEvent, Runtime, Tx, Waker, col};
 use rune_kit::Kit;
+use strata_kit::fonts;
 use strata_kit::look::Look;
 
 pub mod scenes;
@@ -116,10 +118,13 @@ pub fn view(g: &Gallery, cx: &mut Cx<Gallery>) -> El {
 }
 
 /// The app: every scene, and the hooks that route keys and polls to the open page. The binary
-/// runs it, so `--snap` and `--script` runs go through the same hooks as a window.
+/// runs it, so `--snap` and `--script` runs go through the same hooks as a window. Text draws
+/// in the bundled JetBrains Mono, in both slots, as Strata's does (K6).
 pub fn spec(scenes: &'static [Scene]) -> AppSpec<Gallery> {
     AppSpec {
         scenes,
+        fonts: fonts::FONTS,
+        families: fonts::FAMILIES,
         setup: Some(setup),
         poll: Some(poll),
         on_key: Some(on_key),
@@ -128,9 +133,12 @@ pub fn spec(scenes: &'static [Scene]) -> AppSpec<Gallery> {
 }
 
 /// A headless runtime on `g`, wired as [`spec`] wires the app: the open page's `poll` runs on
-/// every `frame`, keys go through [`on_key`], and the waker is a no-op.
+/// every `frame`, keys go through [`on_key`], the waker is a no-op, and text shapes in
+/// [`spec`]'s fonts (`Runtime::new` would shape in Rune's built-in Inter), so accessibility
+/// goldens and page tests lay out as `--snap` and `--script` do.
 pub fn runtime(g: Gallery, env: Env) -> Runtime<Gallery> {
-    let mut rt = Runtime::new(g, view, SIZE, env);
+    let text = TextSystem::new(fonts::FONTS, fonts::FAMILIES);
+    let mut rt = Runtime::with_text(g, view, SIZE, env, text);
     rt.poll = Some(poll);
     rt.on_key = Some(on_key);
     setup(&mut rt.state, std::sync::Arc::new(|| {}));

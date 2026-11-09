@@ -127,8 +127,11 @@ pub fn run(options: Options) -> i32 {
         primary.release();
         return 2;
     };
+    // Windowless, but its fonts are the process's for `rune::text::measure` (K6).
     let app = App::new(AppSpec {
         poll: Some(poll),
+        fonts: strata_kit::fonts::FONTS,
+        families: strata_kit::fonts::FAMILIES,
         ..AppSpec::new("Strata shell", (100.0, 100.0), placeholder, view)
     })
     .windowless()

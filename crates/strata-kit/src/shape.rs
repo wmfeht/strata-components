@@ -40,7 +40,7 @@
 use rune_kit::Radius;
 
 use crate::look::{Families, Look};
-use crate::{density, typography};
+use crate::{density, fonts, typography};
 
 #[cfg(test)]
 mod tests;
@@ -125,7 +125,8 @@ pub struct LookParams {
     /// The chosen interface family, or `None` for the app's own.
     pub font: Option<String>,
     /// The app's own families (`AppSpec::families`): the fallback behind a chosen family,
-    /// and the mono slot, which a chosen family never changes.
+    /// and the mono slot, which a chosen family never changes. Defaults to the bundled
+    /// JetBrains Mono for both ([`fonts::FAMILIES`]); the host registers [`fonts::FONTS`].
     pub app_families: Families,
     /// Strata's "Element glow" setting: `glow.on`.
     pub element_glow: bool,
@@ -135,7 +136,7 @@ pub struct LookParams {
 }
 
 impl Default for LookParams {
-    /// Strata's defaults, on Rune's own families.
+    /// Strata's defaults, on the bundled JetBrains Mono ([`fonts::families`]).
     fn default() -> LookParams {
         LookParams {
             roundness: ROUNDNESS.default,
@@ -144,7 +145,7 @@ impl Default for LookParams {
             text_size: typography::TEXT_SIZE.default,
             text_scale: 1.0,
             font: None,
-            app_families: Families::new("Inter", "Inter"),
+            app_families: fonts::families(),
             element_glow: true,
             animations: true,
         }

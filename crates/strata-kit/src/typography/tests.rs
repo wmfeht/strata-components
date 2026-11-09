@@ -102,6 +102,24 @@ fn a_chosen_family_goes_before_the_apps_and_leaves_mono_alone() {
     assert_eq!(families(None, &app), None);
 }
 
+/// settings/themes/interface-font: by default a chosen family leads the bundled font, the
+/// previews' mono slot stays bundled, and Default leaves the app's (bundled) families.
+#[test]
+fn by_default_a_chosen_family_leads_the_bundled_font_and_mono_stays_bundled() {
+    let with = |font: Option<&str>| {
+        Look::fallback(false)
+            .with_params(&LookParams {
+                font: font.map(str::to_owned),
+                ..LookParams::default()
+            })
+            .font
+    };
+    let chosen = with(Some("Fira Sans")).expect("nameable");
+    assert_eq!(chosen.ui, "\"Fira Sans\", JetBrains Mono");
+    assert_eq!(chosen.mono, "JetBrains Mono");
+    assert_eq!(with(None), None);
+}
+
 #[test]
 fn a_name_with_one_kind_of_quote_takes_the_other() {
     assert_eq!(

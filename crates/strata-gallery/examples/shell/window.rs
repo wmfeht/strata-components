@@ -155,9 +155,12 @@ pub fn open(c: &mut Controller, location: String, token: Option<&str>) {
     // Strata's default window size (`app/window`: 1200×760). Each window is its own app,
     // started windowless (which implies keep_running) and shown by `activate` or `open`, as
     // strata-platform's `single-instance-demo` does: closing it runs `on_close`, which drops it
-    // from `WINDOWS` and quits the controller after the last one.
+    // from `WINDOWS` and quits the controller after the last one. Text draws in the bundled
+    // JetBrains Mono, in both slots, as Strata's does (K6).
     let app = App::new(AppSpec {
         poll: Some(poll),
+        fonts: strata_kit::fonts::FONTS,
+        families: strata_kit::fonts::FAMILIES,
         ..AppSpec::new("Strata shell", (1200.0, 760.0), placeholder, view)
     })
     .init(move || state)

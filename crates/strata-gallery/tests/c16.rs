@@ -432,6 +432,35 @@ mod c16 {
         assert_eq!(percent.as_deref(), Some(&*live.percent.get()));
     }
 
+    // Scrolling the dock moves every track, and on_layout reports each move: a counting card
+    // must not commit for one that didn't change its size (review 1, should-fix 2).
+    #[test]
+    fn scrolling_the_dock_past_counting_cards_commits_only_for_their_seconds() {
+        let mut rt = mount_with("c16-complete-light", |g| {
+            let mut tx = rune::Tx::default();
+            for _ in 0..6 {
+                let id = g.c16.copy();
+                g.c16.fakes.retain(|f| f.id != id);
+                g.c16.dock.complete(id, "Copy complete", &mut tx);
+            }
+        });
+        run(&mut rt, 0.3);
+        // In the dock's padding beside the cards, so no card is hovered as they slide by.
+        let r = rect(&rt, "c16-dock");
+        let (x, y) = (r[0] + r[2] - 4.0, r[1] + r[3] / 2.0);
+        rt.pointer_move(x, y);
+        run(&mut rt, 0.1);
+        let c0 = rune::commit_generation();
+        for i in 0..30 {
+            rt.wheel(x, y, if i < 15 { -20.0 } else { 20.0 });
+            rt.frame(FRAME);
+        }
+        let commits = rune::commit_generation() - c0;
+        // One for the countdowns' next second, and two Rune makes as the wheel gesture starts
+        // and turns (they stay with every card pinned). Before the fix: 29.
+        assert!(commits <= 3, "{commits} commits over 30 wheel frames");
+    }
+
     /// Perf: twenty cards whose byte counters move every frame. Prints the commit rate and the
     /// frame cost; asserts the commit rate stays at the throttle's.
     #[test]

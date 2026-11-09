@@ -711,6 +711,14 @@ impl Dock {
         let Some(op) = self.op_mut(id) else {
             return false;
         };
+        // A scroll moves the track without resizing it, and on_layout reports every move:
+        // only a new size changes the fill or a countdown bar.
+        if op
+            .track
+            .is_some_and(|[ow, oh]| (ow - w).abs() < 0.5 && (oh - h).abs() < 0.5)
+        {
+            return false;
+        }
         let first = op.track.is_none();
         op.track = Some([w, h]);
         op.publish_fill();

@@ -66,8 +66,9 @@ mod c21 {
     }
 
     // browser/context-menu: "Menu or Shift+F10 with Hyper or Meta held opens the menu as
-    // without them." Rune reports Super, Hyper and Meta alike as `logo`; the script
-    // `menu-key-super` holds Super through Rune's script hold, which this checks reaches the key.
+    // without them." Rune reports Super, Hyper and Meta alike as `logo`. The script
+    // `menu-key-super` sends the keys with `"logo": true`; a script's `{"hold": ..}` reaches
+    // pointer events only, not keys.
     #[test]
     fn menu_and_shift_f10_with_super_held_open_the_menu() {
         let logo = Mods {

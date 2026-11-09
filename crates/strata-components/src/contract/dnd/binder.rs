@@ -13,13 +13,73 @@ use super::{URI_LIST, file_uri, uri_list_only, uri_to_path};
 
 type DropBind<S> = Rc<dyn Fn(El, DropZone<S>) -> El>;
 type DragBind<S> = Rc<dyn Fn(El, DragSource<S>) -> El>;
+type KeyedDropBind<S> = Rc<dyn Fn(El, &ElementKey, DropZone<S>) -> El>;
+type KeyedDragBind<S> = Rc<dyn Fn(El, &ElementKey, DragSource<S>) -> El>;
+
+/// The key a component gave an element it attaches a zone or a source to, and, when that key
+/// is unique only inside another keyed element, that element's key (its scope).
+///
+/// A binder that finds its targets by key needs one it can tell apart from every other in
+/// the window: Rune lets no one read an element's key (Rune draft U-P1-1), so the component
+/// says it. Most keys are unique in the window on their own, given the host's keys for each
+/// component (a crumb, a tab, a sidebar row, a collection's background). A collection's rows
+/// are keyed by entry id, unique only inside the collection, so they carry the collection's
+/// key as their scope: two collections showing the same entries tell their rows apart by it.
+///
+/// Fields may be added: build one with [`ElementKey::new`].
+///
+/// Used by: C1e, C2, C6, C7, C8, X2.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ElementKey {
+    key: String,
+    scope: Option<String>,
+}
+
+impl ElementKey {
+    /// The element keyed `key`, unique in its window.
+    pub fn new(key: impl Into<String>) -> Self {
+        Self {
+            key: key.into(),
+            scope: None,
+        }
+    }
+
+    /// The same key, unique only inside the element keyed `scope` (an ancestor of it).
+    pub fn within(mut self, scope: impl Into<String>) -> Self {
+        self.scope = Some(scope.into());
+        self
+    }
+
+    /// The element's own key.
+    pub fn key(&self) -> &str {
+        &self.key
+    }
+
+    /// The key of the ancestor the element's key is unique inside, if it isn't unique in the
+    /// window on its own.
+    pub fn scope(&self) -> Option<&str> {
+        self.scope.as_deref()
+    }
+}
+
+impl From<&str> for ElementKey {
+    fn from(key: &str) -> Self {
+        Self::new(key)
+    }
+}
+
+impl From<String> for ElementKey {
+    fn from(key: String) -> Self {
+        Self::new(key)
+    }
+}
 
 /// Attaches [`DropZone`]s and [`DragSource`]s to elements. The host passes one to each
 /// component that has drop targets or drag sources, and the component calls it for each.
 ///
 /// Components never depend on the system drag-and-drop shim (work README, rule 1). This is
-/// how its handlers reach their elements anyway: X2 passes a [`Dnd::custom`] binder that wires
-/// the shim.
+/// how its handlers reach their elements anyway: X2 passes a [`Dnd::custom_keyed`] binder that
+/// wires the shim.
 ///
 /// - [`Dnd::rune`], the default, wires Rune's file drops (`on_drop_files` and its hover, move
 ///   and reject hooks) and `drag_out`. Rune takes file drags on X11 and macOS, and in headless
@@ -27,11 +87,19 @@ type DragBind<S> = Rc<dyn Fn(El, DragSource<S>) -> El>;
 ///   Wayland. Its `drag_out` starts system drags on macOS only, and elsewhere leaves the element
 ///   as it was.
 /// - [`Dnd::none`] attaches nothing, for a read-only collection (C14b's archive preview).
+/// - [`Dnd::custom`] and [`Dnd::custom_keyed`] are the host's own: the first sees only the
+///   element and the zone or source, the second also each element's [`ElementKey`].
 ///
-/// Used by: C1e, C6, C7, C8, C14b, X2.
+/// Components attach with [`Dnd::drop_zone_keyed`] and [`Dnd::drag_source_keyed`] where they
+/// key the element, which every binder takes; [`Dnd::drop_zone`] and [`Dnd::drag_source`]
+/// pass no key, so a keyed binder attaches nothing through them.
+///
+/// Used by: C1e, C2, C6, C7, C8, C9, C14b, X2.
 pub struct Dnd<S> {
     drop: DropBind<S>,
     drag: DragBind<S>,
+    keyed_drop: KeyedDropBind<S>,
+    keyed_drag: KeyedDragBind<S>,
 }
 
 impl<S> Clone for Dnd<S> {
@@ -39,6 +107,8 @@ impl<S> Clone for Dnd<S> {
         Self {
             drop: self.drop.clone(),
             drag: self.drag.clone(),
+            keyed_drop: self.keyed_drop.clone(),
+            keyed_drag: self.keyed_drag.clone(),
         }
     }
 }
@@ -71,25 +141,70 @@ impl<S: 'static> Dnd<S> {
         Self::custom(|el, _| el, |el, _| el)
     }
 
-    /// A binder of the host's own: `drop` attaches a zone to an element, `drag` a source.
+    /// A binder of the host's own: `drop` attaches a zone to an element, `drag` a source. It
+    /// hears keyed elements too, without their keys.
     pub fn custom(
         drop: impl Fn(El, DropZone<S>) -> El + 'static,
         drag: impl Fn(El, DragSource<S>) -> El + 'static,
     ) -> Self {
+        let drop: DropBind<S> = Rc::new(drop);
+        let drag: DragBind<S> = Rc::new(drag);
+        let (d, g) = (drop.clone(), drag.clone());
         Self {
-            drop: Rc::new(drop),
-            drag: Rc::new(drag),
+            drop,
+            drag,
+            keyed_drop: Rc::new(move |el, _, zone| d(el, zone)),
+            keyed_drag: Rc::new(move |el, _, source| g(el, source)),
         }
     }
 
-    /// `el`, as a drop target for `zone`.
+    /// A binder of the host's own that finds its targets by key (X2's, through the system
+    /// shim): `drop` attaches a zone to an element keyed as the [`ElementKey`] says, `drag` a
+    /// source. The element arrives keyed already. Elements attached without a key
+    /// ([`Dnd::drop_zone`], [`Dnd::drag_source`]) keep only their own handlers.
+    pub fn custom_keyed(
+        drop: impl Fn(El, &ElementKey, DropZone<S>) -> El + 'static,
+        drag: impl Fn(El, &ElementKey, DragSource<S>) -> El + 'static,
+    ) -> Self {
+        Self {
+            drop: Rc::new(|el, _| el),
+            drag: Rc::new(|el, _| el),
+            keyed_drop: Rc::new(drop),
+            keyed_drag: Rc::new(drag),
+        }
+    }
+
+    /// `el`, as a drop target for `zone`, with no key: a [`Dnd::custom_keyed`] binder attaches
+    /// nothing. Prefer [`Dnd::drop_zone_keyed`].
     pub fn drop_zone(&self, el: El, zone: DropZone<S>) -> El {
         (self.drop)(el, zone)
     }
 
-    /// `el`, as a drag source for `source`.
+    /// `el`, as a drag source for `source`, with no key: a [`Dnd::custom_keyed`] binder
+    /// attaches nothing. Prefer [`Dnd::drag_source_keyed`].
     pub fn drag_source(&self, el: El, source: DragSource<S>) -> El {
         (self.drag)(el, source)
+    }
+
+    /// `el`, keyed `key`, as a drop target for `zone`. Pass the key the element has (it is set
+    /// again, so the two can't differ), unique in the window or inside its scope.
+    pub fn drop_zone_keyed(&self, el: El, key: impl Into<ElementKey>, zone: DropZone<S>) -> El {
+        let key = key.into();
+        let el = el.key(key.key());
+        (self.keyed_drop)(el, &key, zone)
+    }
+
+    /// `el`, keyed `key`, as a drag source for `source`. Pass the key the element has (it is
+    /// set again, so the two can't differ), unique in the window or inside its scope.
+    pub fn drag_source_keyed(
+        &self,
+        el: El,
+        key: impl Into<ElementKey>,
+        source: DragSource<S>,
+    ) -> El {
+        let key = key.into();
+        let el = el.key(key.key());
+        (self.keyed_drag)(el, &key, source)
     }
 }
 

@@ -39,6 +39,22 @@ impl Phase {
     }
 }
 
+/// How the list scrolls when an answer lands: Strata's `restore_scroll`, keyed on whether the
+/// user has moved the highlight in this query (its `navigation_started`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Follow {
+    /// Nothing to do: no list was showing, or nothing moved.
+    Stay,
+    /// A new query: back to the top, where its highlighted first result is.
+    Top,
+    /// The same query, the highlight untouched: keep the list's pixel offset, so results a
+    /// batch puts above the first row show (Rune would keep the old first row in place).
+    Keep,
+    /// The same query, after the user moved the highlight: keep the highlighted row, at this
+    /// index now, in view.
+    Reveal(usize),
+}
+
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Model {
     generation: u64,
@@ -54,6 +70,9 @@ pub(crate) struct Model {
     /// Bumped by every answer that changes what shows: the rows' version.
     revision: u64,
     highlighted: Option<usize>,
+    /// The user moved the highlight since the query last changed (Strata's
+    /// `navigation_started`).
+    navigated: bool,
     partial: Option<String>,
     error: Option<String>,
     unavailable: Option<String>,
@@ -120,6 +139,7 @@ impl Model {
         self.answered = false;
         self.done = false;
         self.error = None;
+        self.navigated = false;
         self.announced = None;
         if text.trim().is_empty() {
             if Self::idle(text, mode) {
@@ -144,11 +164,11 @@ impl Model {
         self.partial = None;
     }
 
-    /// An answer landed. One for another generation, or while nothing can be searched, is
-    /// dropped (false).
-    pub fn arrive(&mut self, answer: Answer, mode: &PaletteMode) -> bool {
+    /// An answer landed, and how the list should scroll for it. One for another generation,
+    /// or while nothing can be searched, is dropped (`None`).
+    pub fn arrive(&mut self, answer: Answer, mode: &PaletteMode) -> Option<Follow> {
         if answer.generation != self.generation || self.unavailable.is_some() {
-            return false;
+            return None;
         }
         self.answered = true;
         self.done = answer.done;
@@ -156,8 +176,10 @@ impl Model {
         if Self::idle(&self.asked, mode) {
             // Strata renders no results for an empty search query; the answer only ends the
             // spinner.
-            return true;
+            return Some(Follow::Stay);
         }
+        let had_list = !self.shown.is_empty();
+        let old_highlight = self.highlighted();
         let trimmed = self.asked.trim().to_owned();
         let query_changed = self.shown_text.as_deref() != Some(trimmed.as_str());
         let highlight = if answer.items.is_empty() {
@@ -189,7 +211,20 @@ impl Model {
         if answer.done || (self.announced.is_none() && n > 0) {
             self.announced = Some(n);
         }
-        true
+        // A list that wasn't showing mounts afresh, at its top.
+        let follow = if !had_list || n == 0 {
+            Follow::Stay
+        } else if query_changed {
+            Follow::Top
+        } else if !self.navigated {
+            if changed { Follow::Keep } else { Follow::Stay }
+        } else {
+            match highlight {
+                Some(i) if Some(i) != old_highlight || changed => Follow::Reveal(i),
+                _ => Follow::Stay,
+            }
+        };
+        Some(follow)
     }
 
     /// The host failed the current query.
@@ -219,6 +254,7 @@ impl Model {
         if n == 0 {
             return false;
         }
+        self.navigated = true;
         let next = match self.highlighted() {
             Some(i) => (i as i64 + i64::from(delta)).clamp(0, n as i64 - 1) as usize,
             None => 0,

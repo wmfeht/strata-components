@@ -99,8 +99,8 @@ fn measure(n: usize) -> Figures {
     // The first answer, then the stream growing to the whole list.
     let first = all[..n / BATCHES].to_vec();
     let t = Instant::now();
-    rt.update(|h, _| {
-        let _ = h.palette.deliver(Answer::new(generation, first));
+    rt.update(|h, tx| {
+        let _ = h.palette.deliver(Answer::new(generation, first), tx);
     });
     rt.frame(FRAME);
     let deliver = ms(t);
@@ -111,8 +111,8 @@ fn measure(n: usize) -> Figures {
             answer = answer.done();
         }
         let t = Instant::now();
-        rt.update(|h, _| {
-            let _ = h.palette.deliver(answer);
+        rt.update(|h, tx| {
+            let _ = h.palette.deliver(answer, tx);
         });
         rt.frame(FRAME);
         batches.push(ms(t));

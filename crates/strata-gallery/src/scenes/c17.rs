@@ -294,8 +294,9 @@ impl Demo {
             .is_some_and(|m| m.kind == ResultKind::Folders)
     }
 
-    /// Queues the fake worker's answers to `q`.
-    fn schedule(&mut self, q: PaletteQuery) {
+    /// Answers `q`: the jump at once, as Strata's history search does, the index on the fake
+    /// worker.
+    fn schedule(&mut self, q: PaletteQuery, tx: &mut Tx) {
         let late = if self.slow { SLOW } else { 0.0 };
         let query = q.text.trim().to_owned();
         if self.is_jump() {
@@ -310,8 +311,12 @@ impl Demo {
                 let folders: Vec<String> = self.history.iter().map(|p| format!("{p}/")).collect();
                 rank(folders.iter(), &query)
             };
-            self.worker
-                .push((self.now + late, Answer::new(q.generation, items).done()));
+            let answer = Answer::new(q.generation, items).done();
+            if self.slow {
+                self.worker.push((self.now + late, answer));
+            } else {
+                let _ = self.palette.deliver(answer, tx);
+            }
             return;
         }
         if query.is_empty() {
@@ -339,12 +344,15 @@ impl Demo {
     }
 
     /// Routes the palette's intents as Strata's window would. True when state changed.
-    fn route(&mut self, polled: Polled) -> bool {
+    fn route(&mut self, polled: Polled, tx: &mut Tx) -> bool {
         let mut changed = polled.changed;
         for intent in polled.intents {
             changed = true;
             match intent {
-                PaletteIntent::Query(q) => self.schedule(q),
+                PaletteIntent::Query(q) => {
+                    self.schedule(q, tx);
+                    self.wake(tx);
+                }
                 PaletteIntent::Open { id, new_tab, .. } => {
                     self.log = if new_tab {
                         format!("Opened {id} in a new tab")
@@ -367,10 +375,24 @@ impl Demo {
         changed
     }
 
+    /// Asks for a wake at the fake workers' next due answer: a window at rest polls only at
+    /// the wakes it asked for.
+    fn wake(&self, tx: &mut Tx) {
+        let next = self
+            .worker
+            .iter()
+            .map(|(at, _)| *at)
+            .chain(self.jobs.iter().map(|(at, _)| *at))
+            .fold(f64::INFINITY, f64::min);
+        if next.is_finite() {
+            tx.wake_after(Duration::from_secs_f64((next - self.now).max(0.0)));
+        }
+    }
+
     /// Opens the palette in `mode`, as Ctrl+K or Ctrl+Shift+K does.
-    fn toggle(&mut self, mode: PaletteMode) -> bool {
+    fn toggle(&mut self, mode: PaletteMode, tx: &mut Tx) -> bool {
         let polled = self.palette.toggle(mode);
-        let changed = self.route(polled);
+        let changed = self.route(polled, tx);
         if self.palette.is_open() && self.unavailable && !self.is_jump() {
             self.palette
                 .unavailable("No local search locations available.");
@@ -453,11 +475,13 @@ pub fn search_mode() -> PaletteMode {
 
 /// Opens `mode` with `query` typed, its answers due from the clock's start.
 fn opened(g: &mut Gallery, mode: PaletteMode, query: &str) {
+    // A scene runs before the window does: nothing to scroll or wake yet.
+    let tx = &mut Tx::default();
     let d = demo(g);
-    d.toggle(mode);
+    d.toggle(mode, tx);
     if !query.is_empty() {
         let polled = d.palette.set_query(query);
-        d.route(polled);
+        d.route(polled, tx);
     }
 }
 
@@ -516,7 +540,7 @@ fn cleared(g: &mut Gallery, dark: bool) {
     opened(g, search_mode(), "notes");
     let d = demo(g);
     let polled = d.palette.set_query("");
-    d.route(polled);
+    d.route(polled, &mut Tx::default());
 }
 
 fn hundred(g: &mut Gallery, dark: bool) {
@@ -577,11 +601,14 @@ pub fn view(g: &Gallery, cx: &mut Cx<Gallery>) -> El {
     .on_visible(move |g: &mut Gallery, rows| g.c17.sync_thumbs(rows, step))
     .return_focus_on_open("c17-files")
     .reduced_motion(cx.is_reduced_motion())
-    .on_intent(|g: &mut Gallery, intent, _tx: &mut Tx| {
-        g.c17.route(Polled {
-            changed: true,
-            intents: vec![intent],
-        });
+    .on_intent(|g: &mut Gallery, intent, tx: &mut Tx| {
+        g.c17.route(
+            Polled {
+                changed: true,
+                intents: vec![intent],
+            },
+            tx,
+        );
     })
     .build(look, g, &mut layer);
     if let Some(menu) = result_menu(g, look) {
@@ -600,7 +627,7 @@ fn result_menu(g: &Gallery, look: &Look) -> Option<El> {
             let d = demo(g);
             d.menu = None;
             let polled = d.palette.reveal(&id, tx);
-            d.route(polled);
+            d.route(polled, tx);
         })
         .build(k)
         .key("c17-menu-reveal");
@@ -624,8 +651,8 @@ fn window(g: &Gallery, look: &Look) -> El {
     let k = &look.kit;
     let d = &g.c17;
     let search = header::action(look, IconName::Search, "Search (Ctrl+K)")
-        .on_press_tx(|g: &mut Gallery, _tx: &mut Tx| {
-            demo(g).toggle(search_mode());
+        .on_press_tx(|g: &mut Gallery, tx: &mut Tx| {
+            demo(g).toggle(search_mode(), tx);
         })
         .build(k)
         .key("c17-search");
@@ -691,11 +718,11 @@ fn window(g: &Gallery, look: &Look) -> El {
 pub fn on_key(g: &mut Gallery, key: &KeyEvent, tx: &mut Tx) -> bool {
     let chord = |c: &str| Chord::parse(c).is_ok_and(|c| c.matches_tx(key, tx));
     if chord("mod+k") {
-        demo(g).toggle(search_mode());
+        demo(g).toggle(search_mode(), tx);
         return true;
     }
     if chord("mod+shift+k") {
-        demo(g).toggle(PaletteMode::jump());
+        demo(g).toggle(PaletteMode::jump(), tx);
         return true;
     }
     // Escape with the palette or its menu open is theirs; it never goes back to the index.
@@ -708,24 +735,15 @@ pub fn poll(g: &mut Gallery, t: f64, tx: &mut Tx) -> bool {
     let d = &mut g.c17;
     d.now = t;
     let polled = d.palette.tick();
-    let mut changed = d.route(polled);
+    let mut changed = d.route(polled, tx);
     let (due, later): (Vec<_>, Vec<_>) = d.worker.drain(..).partition(|(at, _)| *at <= t);
     d.worker = later;
     for (_, answer) in due {
-        let polled = d.palette.deliver(answer);
-        changed |= d.route(polled);
+        let polled = d.palette.deliver(answer, tx);
+        changed |= d.route(polled, tx);
     }
     // Thumbnails landing fill their handles in place: no view change.
     d.work_thumbs(t);
-    let next = d
-        .worker
-        .iter()
-        .map(|(at, _)| *at)
-        .chain(d.jobs.iter().map(|(at, _)| *at))
-        .fold(f64::INFINITY, f64::min);
-    if next.is_finite() {
-        // A window at rest polls only at the wakes it asked for.
-        tx.wake_after(Duration::from_secs_f64((next - t).max(0.0)));
-    }
+    d.wake(tx);
     changed
 }

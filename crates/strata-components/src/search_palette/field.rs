@@ -98,8 +98,8 @@ pub(super) fn on_key(
         return (Polled::default(), false);
     }
     let m = ev.mods;
-    // Strata's ESCAPE_ANY ignores the shortcut modifiers.
-    if ev.key == Key::Escape && !m.shift {
+    // Strata's ESCAPE_ANY ignores the modifiers, so Shift+Escape closes too.
+    if ev.key == Key::Escape {
         if tx.key_repeat() {
             return (Polled::default(), true);
         }

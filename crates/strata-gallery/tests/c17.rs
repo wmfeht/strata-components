@@ -7,7 +7,7 @@
 mod c17 {
     use rune::{ElementInfo, Env, Ime, Key, KeyEvent, Mods, PointerButton, Runtime};
     use strata_components::contract::fuzzy;
-    use strata_components::search_palette::{Phase, option_key};
+    use strata_components::search_palette::{Answer, PaletteItem, Phase, option_key};
     use strata_gallery::scenes::c17::KEY;
     use strata_gallery::{Gallery, scenes};
 
@@ -303,11 +303,11 @@ mod c17 {
         let causes = "Some folders could not be read: ~/Private";
         assert_eq!(rt.help_tooltip().map(|(t, _)| t), Some(causes));
         // A rescan that completes: the same query's answer, complete.
-        rt.update(|g, _| {
+        rt.update(|g, tx| {
             let generation = g.c17.palette.generation();
             let items = g.c17.palette.items().to_vec();
             let answer = strata_components::search_palette::Answer::new(generation, items).done();
-            assert!(g.c17.palette.deliver(answer).changed);
+            assert!(g.c17.palette.deliver(answer, tx).changed);
         });
         run(&mut rt, 1.0);
         assert!(element(&rt, &partial).is_none());
@@ -371,5 +371,264 @@ mod c17 {
             "{:?}",
             d.thumbs.stats()
         );
+    }
+
+    /// Whether the row of result `id` is drawn wholly inside the list's viewport.
+    fn visible(rt: &Runtime<Gallery>, id: &str) -> bool {
+        let Some(vp) = element(rt, &format!("{KEY}-results")).map(|e| e.rect) else {
+            return false;
+        };
+        element(rt, &option_key(KEY, id)).is_some_and(|e| {
+            e.rect[1] >= vp[1] - 0.5 && e.rect[1] + e.rect[3] <= vp[1] + vp[3] + 0.5
+        })
+    }
+
+    fn item(id: &str) -> PaletteItem {
+        PaletteItem::new(id, id, format!("/x/{id}"))
+    }
+
+    fn named(prefix: &str, n: usize) -> Vec<PaletteItem> {
+        (0..n).map(|i| item(&format!("{prefix}{i:02}"))).collect()
+    }
+
+    /// A resting palette on a query whose answers the test delivers itself.
+    fn synthetic() -> Runtime<Gallery> {
+        let mut rt = resting("c17-closed-light");
+        press(&mut rt, Key::Command('k'), ctrl(false));
+        rt.update(|g, _| {
+            let _ = g.c17.palette.set_query("zz-probe");
+            g.c17.worker.clear();
+        });
+        rt.frame(FRAME);
+        rt
+    }
+
+    /// Delivers `items` for the current query, then steps the resting window frame by frame
+    /// until it rests, calling `each` after every frame, the first the batch's commit.
+    fn land(
+        rt: &mut Runtime<Gallery>,
+        items: Vec<PaletteItem>,
+        mut each: impl FnMut(&Runtime<Gallery>),
+    ) {
+        rt.update(move |g, tx| {
+            let generation = g.c17.palette.generation();
+            let _ = g.c17.palette.deliver(Answer::new(generation, items), tx);
+        });
+        for _ in 0..30 {
+            rt.frame(FRAME);
+            each(rt);
+        }
+    }
+
+    // browser/search: "While indexing adds results, the highlighted result stays selected by
+    // path…". Review round 1, B1: until the user moves the highlight, a batch keeps the list's
+    // pixel offset (Strata's restore_scroll with navigation_started false), so better results
+    // a batch puts above the first row show at the top; Rune's anchoring would keep the old
+    // first row there and hide them.
+    #[test]
+    fn a_batch_above_the_first_row_shows_at_the_top_until_the_user_moves() {
+        let mut rt = synthetic();
+        land(&mut rt, named("b", 30), |_| {});
+        assert!(visible(&rt, "b00"));
+        let mut more = vec![item("a0"), item("a1")];
+        more.extend(named("b", 30));
+        land(&mut rt, more, |rt| {
+            assert!(
+                visible(rt, "a0"),
+                "the new best result shows, in every frame"
+            );
+        });
+        assert_eq!(
+            rt.state
+                .c17
+                .palette
+                .highlighted_item()
+                .map(|i| i.id.as_str()),
+            Some("b00")
+        );
+    }
+
+    // The same, through the page's own streamed batches: type "rs" and let the walk finish;
+    // the first result shows in every frame.
+    #[test]
+    fn the_streamed_best_result_shows_in_every_frame() {
+        let mut rt = resting("c17-closed-light");
+        press(&mut rt, Key::Command('k'), ctrl(false));
+        typ(&mut rt, "rs");
+        rest_with(&mut rt, 1.5, |rt| {
+            if let Some(first) = rt.state.c17.palette.items().first() {
+                assert!(visible(rt, &first.id), "{} hidden above the list", first.id);
+            }
+        });
+        assert!(!rt.state.c17.palette.busy());
+    }
+
+    // browser/search: "When the first result is preselected…" with the review round 1 B2
+    // ruling: a new query scrolls to the top, so its highlighted first result shows, even after
+    // the user arrowed far down the old one.
+    #[test]
+    fn a_new_query_s_highlighted_first_result_shows_after_arrowing_down() {
+        let mut rt = resting("c17-closed-light");
+        press(&mut rt, Key::Command('k'), ctrl(false));
+        typ(&mut rt, "o");
+        rest_with(&mut rt, 1.0, |_| {});
+        for _ in 0..20 {
+            press(&mut rt, Key::Down, Mods::default());
+        }
+        rest_with(&mut rt, 0.5, |_| {});
+        typ(&mut rt, "t");
+        let asked = rt.state.c17.palette.generation();
+        rest_with(&mut rt, 1.5, |rt| {
+            let p = &rt.state.c17.palette;
+            if p.generation() == asked && p.highlighted() == Some(0) {
+                let id = &p.items()[0].id;
+                assert!(
+                    visible(rt, id),
+                    "the new query's first result {id} is hidden"
+                );
+            }
+        });
+        assert_eq!(rt.state.c17.palette.highlighted(), Some(0));
+        let first = rt.state.c17.palette.items()[0].id.clone();
+        assert!(visible(&rt, &first));
+    }
+
+    // Review round 1, SF1: once the user has moved the highlight, a batch that moves the
+    // highlighted row keeps it in view, so Enter never opens a row they can't see.
+    #[test]
+    fn a_moved_highlight_stays_in_view_when_a_batch_pushes_it_down() {
+        let mut rt = synthetic();
+        land(&mut rt, named("b", 30), |_| {});
+        for _ in 0..3 {
+            press(&mut rt, Key::Down, Mods::default());
+        }
+        rest_with(&mut rt, 0.5, |_| {});
+        assert_eq!(
+            rt.state
+                .c17
+                .palette
+                .highlighted_item()
+                .map(|i| i.id.as_str()),
+            Some("b03")
+        );
+        let base = named("b", 30);
+        let mut pushed = base[..3].to_vec();
+        pushed.extend(named("m", 12));
+        pushed.extend(base[3..].iter().cloned());
+        land(&mut rt, pushed, |rt| {
+            assert!(visible(rt, "b03"), "the highlighted row is out of view");
+        });
+        assert_eq!(
+            rt.state
+                .c17
+                .palette
+                .highlighted_item()
+                .map(|i| i.id.as_str()),
+            Some("b03")
+        );
+    }
+
+    // browser/search: "Up and Down move the highlight while the caret stays in the query
+    // field" (review round 1, SF2): the caret doesn't move.
+    #[test]
+    fn up_and_down_leave_the_caret_where_it_was() {
+        let mut rt = mount("c17-results-light");
+        run(&mut rt, 1.0);
+        press(&mut rt, Key::Left, Mods::default());
+        let caret = |rt: &Runtime<Gallery>| {
+            let e = &rt.state.c17.palette.edit;
+            (e.anchor, e.focus)
+        };
+        assert_eq!(caret(&rt), (1, 1));
+        for k in [Key::Down, Key::Down, Key::Up] {
+            let name = format!("{k:?}");
+            press(&mut rt, k, Mods::default());
+            assert_eq!(caret(&rt), (1, 1), "{name} moved the caret");
+        }
+        assert_eq!(rt.state.c17.palette.highlighted(), Some(1));
+    }
+
+    // No bullet (review round 1, SF3): a held Enter opens nothing, even one held from before
+    // the results landed; a fresh press then opens.
+    #[test]
+    fn a_held_enter_opens_nothing_even_through_loading() {
+        let mut rt = resting("c17-closed-light");
+        press(&mut rt, Key::Command('k'), ctrl(false));
+        typ(&mut rt, "notes");
+        press(&mut rt, Key::Enter, Mods::default());
+        assert!(
+            rt.state.c17.palette.items().is_empty(),
+            "pressed while loading"
+        );
+        for _ in 0..60 {
+            rt.repeat_key(KeyEvent {
+                key: Key::Enter,
+                mods: Mods::default(),
+            });
+            rt.frame(FRAME);
+        }
+        assert!(
+            !rt.state.c17.palette.items().is_empty(),
+            "results landed while held"
+        );
+        assert!(
+            rt.state.c17.palette.is_open(),
+            "a held Enter opened a result"
+        );
+        assert_eq!(rt.state.c17.log, "", "nothing opened");
+        press(&mut rt, Key::Enter, Mods::default());
+        assert!(rt.state.c17.log.starts_with("Opened "));
+    }
+
+    // Review round 1, SF4: a new query announces nothing until its first answer; the old
+    // list's size would be the wrong count.
+    #[test]
+    fn a_new_query_announces_no_count_until_its_first_answer() {
+        let mut rt = mount("c17-results-light");
+        run(&mut rt, 1.0);
+        assert!(status(&rt).is_some_and(|s| s.ends_with(" results")));
+        typ(&mut rt, "p");
+        assert!(
+            !rt.state.c17.palette.items().is_empty(),
+            "the old results stay"
+        );
+        let heard = status(&rt).unwrap_or_default();
+        assert!(heard.is_empty(), "announced {heard:?} for the stale list");
+        run(&mut rt, 0.5);
+        let n = rt
+            .state
+            .c17
+            .palette
+            .announced()
+            .expect("the new query's count");
+        assert_eq!(status(&rt), Some(format!("{n} results")));
+    }
+
+    // browser/search: "Escape, or a click outside the dialog panel, closes search." Strata's
+    // ESCAPE_ANY ignores the modifiers, so Shift+Escape closes too (review round 1, a nit).
+    #[test]
+    fn shift_escape_closes_as_escape_does() {
+        let mut rt = mount("c17-results-light");
+        run(&mut rt, 1.0);
+        press(
+            &mut rt,
+            Key::Escape,
+            Mods {
+                shift: true,
+                ..Mods::default()
+            },
+        );
+        assert!(!rt.state.c17.palette.is_open());
+        assert_eq!(rt.state.c17.log, "Closed (Escape)");
+    }
+
+    // Review round 1, a nit: the jump answers its query in the commit that opens it, as
+    // Strata's history search does, so it never shows "Searching…".
+    #[test]
+    fn the_jump_lists_its_history_in_the_frame_it_opens() {
+        let mut rt = resting("c17-closed-light");
+        press(&mut rt, Key::Command('k'), ctrl(true));
+        assert_eq!(rt.state.c17.palette.phase(), Some(Phase::Results));
+        assert_eq!(status(&rt), Some("10 results".into()));
     }
 }

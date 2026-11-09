@@ -64,7 +64,7 @@ fn an_empty_search_query_is_idle_with_the_first_words_then_the_cleared_ones() {
     let idle = mode.idle.clone().unwrap();
     assert_eq!(s.phase(), Some(Phase::Idle(idle.first.clone())));
     assert!(s.busy(), "the walk runs");
-    let _ = s.deliver(Answer::new(g, items(&["x"])).done());
+    let _ = s.deliver(Answer::new(g, items(&["x"])).done(), &mut Tx::default());
     assert_eq!(
         s.phase(),
         Some(Phase::Idle(idle.first.clone())),
@@ -72,7 +72,7 @@ fn an_empty_search_query_is_idle_with_the_first_words_then_the_cleared_ones() {
     );
     assert!(!s.busy());
     let g = query(&s.set_query("no")).generation;
-    let _ = s.deliver(Answer::new(g, items(&["notes"])).done());
+    let _ = s.deliver(Answer::new(g, items(&["notes"])).done(), &mut Tx::default());
     assert_eq!(s.phase(), Some(Phase::Results));
     let _ = s.set_query("");
     assert_eq!(s.phase(), Some(Phase::Idle(idle.cleared)));
@@ -86,13 +86,13 @@ fn an_empty_search_query_is_idle_with_the_first_words_then_the_cleared_ones() {
 fn a_query_loads_then_shows_results_or_no_results() {
     let (mut s, g) = typed("zz");
     assert_eq!(s.phase(), Some(Phase::Loading("Searching…".into())));
-    let _ = s.deliver(Answer::new(g, Vec::new()));
+    let _ = s.deliver(Answer::new(g, Vec::new()), &mut Tx::default());
     assert_eq!(
         s.phase(),
         Some(Phase::Loading("Searching…".into())),
         "an empty batch with more to come still searches"
     );
-    let _ = s.deliver(Answer::new(g, Vec::new()).done());
+    let _ = s.deliver(Answer::new(g, Vec::new()).done(), &mut Tx::default());
     assert_eq!(
         s.phase(),
         Some(Phase::NoResults("No matching files or folders".into()))
@@ -105,40 +105,50 @@ fn a_query_loads_then_shows_results_or_no_results() {
 fn the_jump_lists_its_empty_query_and_names_its_two_empty_states() {
     let mut s = PaletteState::new();
     let g = query(&s.open(PaletteMode::jump())).generation;
-    let _ = s.deliver(Answer::new(g, Vec::new()).done());
+    let _ = s.deliver(Answer::new(g, Vec::new()).done(), &mut Tx::default());
     assert_eq!(
         s.phase(),
         Some(Phase::NoResults("No folder history yet".into()))
     );
     let g = query(&s.set_query("zz")).generation;
-    let _ = s.deliver(Answer::new(g, Vec::new()).done());
+    let _ = s.deliver(Answer::new(g, Vec::new()).done(), &mut Tx::default());
     assert_eq!(
         s.phase(),
         Some(Phase::NoResults("No matching folders".into()))
     );
     let g = query(&s.set_query("")).generation;
-    let _ = s.deliver(Answer::new(g, items(&["a", "b"])).done());
+    let _ = s.deliver(
+        Answer::new(g, items(&["a", "b"])).done(),
+        &mut Tx::default(),
+    );
     assert_eq!(s.phase(), Some(Phase::Results), "an empty jump query lists");
 }
 
 #[test]
 fn an_answer_for_a_superseded_query_is_dropped_and_the_old_results_stay_until_the_new_land() {
     let (mut s, old) = typed("no");
-    let _ = s.deliver(Answer::new(old, items(&["notes"])));
+    let _ = s.deliver(Answer::new(old, items(&["notes"])), &mut Tx::default());
     let new = query(&s.set_query("not")).generation;
     assert_eq!(
         ids(&s),
         ["notes"],
         "the shown results stay while the new query runs"
     );
-    let late = s.deliver(Answer::new(old, items(&["noise", "nothing"])).done());
+    let late = s.deliver(
+        Answer::new(old, items(&["noise", "nothing"])).done(),
+        &mut Tx::default(),
+    );
     assert!(!late.changed, "a superseded answer changes nothing");
     assert_eq!(ids(&s), ["notes"]);
-    let _ = s.deliver(Answer::new(new, items(&["notes", "nothing"])));
+    let _ = s.deliver(
+        Answer::new(new, items(&["notes", "nothing"])),
+        &mut Tx::default(),
+    );
     assert_eq!(ids(&s), ["notes", "nothing"]);
     let _ = s.close();
     assert!(
-        !s.deliver(Answer::new(new, items(&["x"]))).changed,
+        !s.deliver(Answer::new(new, items(&["x"])), &mut Tx::default())
+            .changed,
         "closed"
     );
 }
@@ -148,7 +158,10 @@ fn an_answer_for_a_superseded_query_is_dropped_and_the_old_results_stay_until_th
 #[test]
 fn a_new_query_highlights_its_first_result_and_arrows_stop_at_the_ends() {
     let (mut s, g) = typed("a");
-    let _ = s.deliver(Answer::new(g, items(&["a", "b", "c"])).done());
+    let _ = s.deliver(
+        Answer::new(g, items(&["a", "b", "c"])).done(),
+        &mut Tx::default(),
+    );
     assert_eq!(s.highlighted(), Some(0));
     assert!(s.step(1));
     assert_eq!(s.highlighted(), Some(1));
@@ -165,25 +178,28 @@ fn a_new_query_highlights_its_first_result_and_arrows_stop_at_the_ends() {
 #[test]
 fn a_same_query_batch_keeps_the_highlight_on_its_result() {
     let (mut s, g) = typed("a");
-    let _ = s.deliver(Answer::new(g, items(&["a", "b", "c"])));
+    let _ = s.deliver(Answer::new(g, items(&["a", "b", "c"])), &mut Tx::default());
     assert!(s.step(1) && s.step(1));
     assert_eq!(s.highlighted_item().unwrap().id, "c");
-    let _ = s.deliver(Answer::new(g, items(&["new", "a", "b", "c"])));
+    let _ = s.deliver(
+        Answer::new(g, items(&["new", "a", "b", "c"])),
+        &mut Tx::default(),
+    );
     assert_eq!(
         s.highlighted_item().unwrap().id,
         "c",
         "by id, at its new place"
     );
-    let _ = s.deliver(Answer::new(g, items(&["new", "a"])));
+    let _ = s.deliver(Answer::new(g, items(&["new", "a"])), &mut Tx::default());
     assert_eq!(s.highlighted(), Some(1), "gone: its old place, clamped");
     // Strata compares the trimmed text: a trailing space is the same query.
     let g = query(&s.set_query("a ")).generation;
     assert!(s.step(-1));
-    let _ = s.deliver(Answer::new(g, items(&["new", "a"])));
+    let _ = s.deliver(Answer::new(g, items(&["new", "a"])), &mut Tx::default());
     assert_eq!(s.highlighted(), Some(0), "the same trimmed query keeps it");
     let g = query(&s.set_query("ab")).generation;
     assert!(s.step(1));
-    let _ = s.deliver(Answer::new(g, items(&["new", "a"])));
+    let _ = s.deliver(Answer::new(g, items(&["new", "a"])), &mut Tx::default());
     assert_eq!(
         s.highlighted(),
         Some(0),
@@ -194,7 +210,10 @@ fn a_same_query_batch_keeps_the_highlight_on_its_result() {
 #[test]
 fn enter_opens_the_highlighted_result_and_closes_with_a_leaving_frame() {
     let (mut s, g) = typed("a");
-    let _ = s.deliver(Answer::new(g, items(&["a", "b"])).done());
+    let _ = s.deliver(
+        Answer::new(g, items(&["a", "b"])).done(),
+        &mut Tx::default(),
+    );
     assert!(s.step(1));
     let mut tx = Tx::default();
     let p = s.open_highlighted(false, &mut tx);
@@ -273,7 +292,10 @@ fn an_unavailable_palette_drops_every_answer_until_it_closes() {
     let mut s = PaletteState::new();
     let g = query(&s.open(search())).generation;
     assert!(s.unavailable("No local search locations available."));
-    assert!(!s.deliver(Answer::new(g, items(&["a"])).done()).changed);
+    assert!(
+        !s.deliver(Answer::new(g, items(&["a"])).done(), &mut Tx::default())
+            .changed
+    );
     assert_eq!(
         s.phase(),
         Some(Phase::Unavailable(
@@ -291,13 +313,16 @@ fn an_unavailable_palette_drops_every_answer_until_it_closes() {
 #[test]
 fn the_count_is_announced_at_the_first_results_and_when_done() {
     let (mut s, g) = typed("a");
-    let _ = s.deliver(Answer::new(g, Vec::new()));
+    let _ = s.deliver(Answer::new(g, Vec::new()), &mut Tx::default());
     assert_eq!(s.announced(), None);
-    let _ = s.deliver(Answer::new(g, items(&["a", "b"])));
+    let _ = s.deliver(Answer::new(g, items(&["a", "b"])), &mut Tx::default());
     assert_eq!(s.announced(), Some(2));
-    let _ = s.deliver(Answer::new(g, items(&["a", "b", "c"])));
+    let _ = s.deliver(Answer::new(g, items(&["a", "b", "c"])), &mut Tx::default());
     assert_eq!(s.announced(), Some(2), "not every batch");
-    let _ = s.deliver(Answer::new(g, items(&["a", "b", "c", "d"])).done());
+    let _ = s.deliver(
+        Answer::new(g, items(&["a", "b", "c", "d"])).done(),
+        &mut Tx::default(),
+    );
     assert_eq!(s.announced(), Some(4));
     let _ = s.set_query("ab");
     assert_eq!(s.announced(), None, "a new query starts over");
@@ -310,16 +335,20 @@ fn partial_causes_follow_the_shown_answer() {
         Answer::new(g, items(&["a"]))
             .done()
             .partial("Unreadable: ~/x"),
+        &mut Tx::default(),
     );
     assert_eq!(s.partial(), Some("Unreadable: ~/x"));
-    let _ = s.deliver(Answer::new(g, items(&["a"])).done());
+    let _ = s.deliver(Answer::new(g, items(&["a"])).done(), &mut Tx::default());
     assert_eq!(s.partial(), None, "complete results clear it");
 }
 
 #[test]
 fn a_right_click_highlights_its_result_and_asks_for_the_menu() {
     let (mut s, g) = typed("a");
-    let _ = s.deliver(Answer::new(g, items(&["a", "b"])).done());
+    let _ = s.deliver(
+        Answer::new(g, items(&["a", "b"])).done(),
+        &mut Tx::default(),
+    );
     let p = s.menu("b", crate::contract::Point::new(3.0, 4.0));
     assert_eq!(s.highlighted(), Some(1));
     assert!(matches!(
@@ -378,15 +407,17 @@ fn rows_build_again_only_when_their_result_or_highlight_changes() {
     let mut rt = Runtime::new(host, host_view, (960.0, 640.0), Env::new(false, 1.0));
     rt.frame(0.0);
     let first = builds(&mut rt, |h| {
-        let _ = h
-            .palette
-            .deliver(Answer::new(g, items(&["a", "b", "c", "d"])));
+        let _ = h.palette.deliver(
+            Answer::new(g, items(&["a", "b", "c", "d"])),
+            &mut Tx::default(),
+        );
     });
     assert_eq!(first, 4);
     let grown = builds(&mut rt, |h| {
-        let _ = h
-            .palette
-            .deliver(Answer::new(g, items(&["new", "a", "b", "c", "d", "e"])));
+        let _ = h.palette.deliver(
+            Answer::new(g, items(&["new", "a", "b", "c", "d", "e"])),
+            &mut Tx::default(),
+        );
     });
     assert_eq!(
         grown, 2,
@@ -397,9 +428,53 @@ fn rows_build_again_only_when_their_result_or_highlight_changes() {
     let mut changed = items(&["new", "a", "b", "c", "d", "e"]);
     changed[3].matched = std::iter::once(0..1).collect();
     let restyled = builds(&mut rt, |h| {
-        let _ = h.palette.deliver(Answer::new(g, changed));
+        let _ = h
+            .palette
+            .deliver(Answer::new(g, changed), &mut Tx::default());
     });
     assert_eq!(restyled, 1, "a result whose match changed");
 }
 
 mod perf;
+
+// Review round 1 (B1, B2, SF1): how each answer scrolls the list, as Strata's restore_scroll
+// does with its navigation_started.
+#[test]
+fn answers_scroll_as_strata_restores_them() {
+    use super::model::{Follow, Model};
+    let mode = search();
+    let mut m = Model::default();
+    let g = m.request("a", &mode).generation;
+    let first = Answer::new(g, items(&["b0", "b1", "b2", "b3"]));
+    assert_eq!(
+        m.arrive(first, &mode),
+        Some(Follow::Stay),
+        "a new list mounts at its top"
+    );
+    let above = Answer::new(g, items(&["a0", "b0", "b1", "b2", "b3"]));
+    assert_eq!(
+        m.arrive(above.clone(), &mode),
+        Some(Follow::Keep),
+        "untouched: keep the offset"
+    );
+    assert_eq!(
+        m.arrive(above, &mode),
+        Some(Follow::Stay),
+        "nothing changed"
+    );
+    assert!(m.step(1) && m.step(1));
+    let pushed = Answer::new(g, items(&["a0", "a1", "a2", "b0", "b1", "b2", "b3"]));
+    assert_eq!(
+        m.arrive(pushed, &mode),
+        Some(Follow::Reveal(5)),
+        "moved: keep b2 in view"
+    );
+    let g = m.request("ab", &mode).generation;
+    let other = Answer::new(g, items(&["c0", "c1"]));
+    assert_eq!(
+        m.arrive(other, &mode),
+        Some(Follow::Top),
+        "a new query goes to the top"
+    );
+    assert_eq!(m.arrive(Answer::new(g + 1, Vec::new()), &mode), None);
+}

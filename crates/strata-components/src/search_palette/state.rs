@@ -10,9 +10,9 @@ use rune::{TextEdit, Tx};
 use super::data::{Answer, PaletteItem};
 use super::intent::{By, PaletteIntent, Via};
 use super::mode::PaletteMode;
-use super::model::{Model, Phase};
+use super::model::{Follow, Model, Phase};
 use crate::contract::Point;
-use crate::scroll::Bar;
+use crate::scroll::{Bar, ScrollFeed};
 
 /// What a call into the palette changed, and the intents it raised for the host to route as
 /// it routes the palette's own.
@@ -87,6 +87,10 @@ pub struct PaletteState {
     /// Intents raised where no `Tx` reaches (Rune's modal dismissal), for the next tick.
     queued: Vec<PaletteIntent>,
     pub(crate) bar: Bar,
+    /// The list's scroll position as it last reported it.
+    pub(crate) feed: ScrollFeed,
+    /// The palette's key as the latest view built it, for the scroll requests an answer makes.
+    pub(crate) key: RefCell<String>,
     pub(crate) handler: HandlerSlot,
 }
 
@@ -233,18 +237,40 @@ impl PaletteState {
 
     /// An answer to a [`PaletteIntent::Query`]. One for another generation, after the palette
     /// closed, or while nothing can be searched, is dropped.
-    pub fn deliver(&mut self, answer: Answer) -> Polled {
+    ///
+    /// `tx` scrolls the list in the commit that draws the answer, as Strata's `restore_scroll`
+    /// does: a new query goes back to the top; until the user moves the highlight, the list
+    /// keeps its offset, so better results a batch puts above the first row show; after,
+    /// the highlighted row stays in view. Call it from the host's poll (or any handler).
+    pub fn deliver(&mut self, answer: Answer, tx: &mut Tx) -> Polled {
         let Some(mode) = &self.mode else {
             return Polled::default();
         };
-        if self.model.arrive(answer, mode) {
-            Polled::changed()
-        } else {
-            Polled::default()
+        let Some(follow) = self.model.arrive(answer, mode) else {
+            return Polled::default();
+        };
+        let key = self.key.borrow();
+        let results = super::results_key(&key);
+        match follow {
+            // Not built yet: nothing to scroll.
+            _ if key.is_empty() => {}
+            Follow::Stay => {}
+            Follow::Top => tx.scroll_to_y(results, 0.0),
+            // Rune's virtual rows keep their first visible row where it is, at offset 0 too
+            // (Rune draft U-C17-3); a scroll in the same commit wins over that.
+            Follow::Keep => tx.scroll_to_y(results, self.feed.get().offset[1]),
+            Follow::Reveal(i) => {
+                if let Some(it) = self.items().get(i) {
+                    tx.scroll_into_view_in(results, super::option_key(&key, &it.id));
+                }
+            }
         }
+        Polled::changed()
     }
 
-    /// The query `generation` failed: the body says `message` until the next edit.
+    /// The query `generation` failed: the shown results go and the body says `message`, until
+    /// the next edit or a later answer for the same query. False for another generation, a
+    /// closed palette or one that can't search.
     pub fn fail(&mut self, generation: u64, message: impl Into<String>) -> bool {
         self.is_open() && self.model.fail(generation, message.into())
     }

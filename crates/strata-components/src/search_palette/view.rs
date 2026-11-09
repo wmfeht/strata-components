@@ -155,6 +155,9 @@ impl<S: 'static> SearchPalette<S> {
         }
         state.mark_built();
         state.handler.set(self.emit.clone());
+        if *state.key.borrow() != self.key {
+            state.key.replace(self.key.clone());
+        }
         let cx = Ctx {
             key: self.key.clone(),
             access: self.access,
@@ -274,12 +277,13 @@ fn body<S: 'static>(
     let status_key = format!("{}-status", cx.key);
     let Some(words) = phase.text() else {
         // The count assistive technology hears: hidden, as Strata shows none, and polite.
-        let n = state.announced().unwrap_or(state.items().len());
+        // Nothing until the query's first answer: the stale list's size isn't its count.
+        let heard = state.announced().map(mode.count).unwrap_or_default();
         let count = el()
             .key(status_key)
             .role("status")
             .live_region(LiveRegion::Polite)
-            .label((mode.count)(n))
+            .label(heard)
             .absolute(0.0, 0.0)
             .w(0.0)
             .h(0.0);
@@ -353,10 +357,10 @@ fn results<S: 'static>(
             move |s: &S, i| option_key(&key_rows.key, &get(s).items()[i].id).into(),
             move |s: &S, i| build_rows.row(s, i),
         )
-        .virtual_rows_version((cx.key.as_str(), state.revision()))
-        // A new highlight (an arrow, a new query's first result) scrolls into view; a batch
-        // that keeps it where it was leaves the rows where the reader has them.
-        .reveal_selected(true);
+        // How the list scrolls as answers land is `PaletteState::deliver`'s; arrows reveal
+        // their row from the field's key handler. (`reveal_selected` does nothing for rows
+        // built by index at the pin: Rune draft U-C17-4.)
+        .virtual_rows_version((cx.key.as_str(), state.revision()));
     if let Some(f) = on_visible {
         list = list.on_visible_rows(move |s: &mut S, r| f(s, r));
     }
@@ -370,7 +374,13 @@ fn results<S: 'static>(
         .scroll(ScrollSpec {
             stick_bottom: false,
         })
-        .on_scroll_offset(state.bar.watch())
+        .on_scroll_offset({
+            let (bar, feed) = (state.bar.watch(), state.feed.watch());
+            move |p| {
+                bar(p);
+                feed(p);
+            }
+        })
         // Rows keep the field's keyboard when pressed.
         .preserve_focus_on_press(true)
         .child(list);

@@ -2,10 +2,14 @@
 //! public popover parts. Not rune-kit's `PopupList`, whose rows can't draw matched ranges
 //! (Rune draft U-C6-4).
 
-use rune::{Color, El, GrowthSpec, ScrollSpec, Tx, col, icon, row, text};
-use rune_kit::{Placement, popover};
+use std::hash::{DefaultHasher, Hash, Hasher};
 
-use super::build::{Ctx, field_key, option_key, route};
+use rune::{Color, El, GrowthSpec, ScrollSpec, Tx, col, icon, memo, row, text};
+use rune_kit::{Placement, popover};
+use strata_kit::look::Look;
+
+use super::build::{Access, Ctx, Emit, field_key, option_key, route};
+use super::data::Candidate;
 use crate::contract::MatchedText;
 
 /// The most rows the list shows before it scrolls (Strata's 280 px over 32 px rows).
@@ -18,7 +22,11 @@ pub(super) fn view<S: 'static>(cx: &Ctx<'_, S>, width: f32, layer: &mut Vec<El>)
     let n = shown.len();
     let active = cx.state.highlighted();
     let row_h = look.row.list;
-    let access = cx.access;
+    // Rune builds every row's element on each commit; only the mounted ones lay out. A row is
+    // rebuilt only when its list, its highlight or the look changes, so an arrow step builds
+    // two rows, not the whole list.
+    let list = cx.state.suggestions_generation();
+    let look_key = look_key(look);
     let mut rows = col()
         .key("rows")
         .w_full()
@@ -27,51 +35,11 @@ pub(super) fn view<S: 'static>(cx: &Ctx<'_, S>, width: f32, layer: &mut Vec<El>)
         .reveal_selected(true);
     for (i, c) in shown.iter().enumerate() {
         let is_active = active == Some(i);
-        let emit = cx.emit.clone();
-        let label = MatchedText::new(c.label.clone(), c.matched.iter().cloned())
-            .font(k.ty.ui_compact)
-            .truncate(true)
-            .build(k);
-        rows = rows.child(
-            row()
-                .key(option_key(cx.key, i))
-                .role("option")
-                .label(c.label.clone())
-                .description(c.hint.clone())
-                .position_in_set(i + 1, n)
-                .focus_selected(is_active)
-                .w_full()
-                .h(row_h)
-                .px(look.space.sm)
-                .gap(look.space.sm)
-                .items_center()
-                .radius(k.radius.sm)
-                .fill(if is_active {
-                    k.c.hover
-                } else {
-                    Color::TRANSPARENT
-                })
-                .hover(k.c.hover)
-                .on_hover(move |s: &mut S| access(s).set_highlighted(Some(i)))
-                .on_press_tx(move |s: &mut S, tx: &mut Tx| {
-                    let polled = access(s).choose(i);
-                    route(&emit, s, polled, tx);
-                })
-                .child(
-                    icon(look.icon(c.icon), look.icon_size.md)
-                        .color(k.c.icon_muted)
-                        .a11y_hidden(),
-                )
-                .child(row().grow(1.0).min_w(0.0).a11y_hidden().child(label))
-                .child(
-                    text(c.hint.clone())
-                        .font(k.ty.small)
-                        .color(k.c.text_weak)
-                        .truncate()
-                        .shrink()
-                        .a11y_hidden(),
-                ),
-        );
+        rows = rows.child(memo(
+            option_key(cx.key, i),
+            (list, i, n, is_active, look_key),
+            || suggestion(look, c, i, n, is_active, cx.access, cx.emit),
+        ));
     }
     let viewport = col()
         .key(format!("{}-suggestions", cx.key))
@@ -105,4 +73,73 @@ pub(super) fn view<S: 'static>(cx: &Ctx<'_, S>, width: f32, layer: &mut Vec<El>)
         Placement::BottomStart,
         look.space.xs,
     ));
+}
+
+/// One suggestion: its icon, its label with the matched ranges in the accent, its parent.
+fn suggestion<S: 'static>(
+    look: &Look,
+    c: &Candidate,
+    i: usize,
+    n: usize,
+    active: bool,
+    access: Access<S>,
+    emit: &Emit<S>,
+) -> El {
+    let k = &look.kit;
+    let emit = emit.clone();
+    let label = MatchedText::new(c.label.clone(), c.matched.iter().cloned())
+        .font(k.ty.ui_compact)
+        .truncate(true)
+        .build(k);
+    row()
+        .role("option")
+        .label(c.label.clone())
+        .description(c.hint.clone())
+        .position_in_set(i + 1, n)
+        .focus_selected(active)
+        .w_full()
+        .h(look.row.list)
+        .px(look.space.sm)
+        .gap(look.space.sm)
+        .items_center()
+        .radius(k.radius.sm)
+        .fill(if active {
+            k.c.hover
+        } else {
+            Color::TRANSPARENT
+        })
+        .hover(k.c.hover)
+        .on_hover(move |s: &mut S| access(s).set_highlighted(Some(i)))
+        .on_press_tx(move |s: &mut S, tx: &mut Tx| {
+            let polled = access(s).choose(i);
+            route(&emit, s, polled, tx);
+        })
+        .child(
+            icon(look.icon(c.icon), look.icon_size.md)
+                .color(k.c.icon_muted)
+                .a11y_hidden(),
+        )
+        .child(row().grow(1.0).min_w(0.0).a11y_hidden().child(label))
+        .child(
+            text(c.hint.clone())
+                .font(k.ty.small)
+                .color(k.c.text_weak)
+                .truncate()
+                .shrink()
+                .a11y_hidden(),
+        )
+}
+
+/// Everything in the look a suggestion row reads, as a memo version.
+fn look_key(look: &Look) -> u64 {
+    let mut h = DefaultHasher::new();
+    look.kit.c.hash(&mut h);
+    look.kit.ty.hash(&mut h);
+    look.kit.radius.hash(&mut h);
+    look.space.hash(&mut h);
+    look.icon_size.hash(&mut h);
+    look.row.hash(&mut h);
+    look.icons.name.hash(&mut h);
+    (look.icons.icon as usize).hash(&mut h);
+    h.finish()
 }

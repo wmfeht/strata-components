@@ -59,6 +59,8 @@ struct Pending {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Completion {
     generation: u64,
+    /// The generation of the list shown.
+    shown_generation: u64,
     shown: Vec<Candidate>,
     highlighted: Option<usize>,
     open: bool,
@@ -68,6 +70,11 @@ pub(crate) struct Completion {
 impl Completion {
     pub fn shown(&self) -> &[Candidate] {
         &self.shown
+    }
+
+    /// The generation of the list shown: its rows' memo version.
+    pub fn shown_generation(&self) -> u64 {
+        self.shown_generation
     }
 
     pub fn highlighted(&self) -> Option<usize> {
@@ -143,6 +150,7 @@ impl Completion {
             return None;
         }
         self.show(candidates);
+        self.shown_generation = generation;
         let mut out = Out::default();
         let mut text = text.to_owned();
         let mut commands = pending.deferred.into_iter();

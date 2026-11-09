@@ -292,6 +292,65 @@ mod c6 {
         assert!(rt.state.c6.bar.suggestions_open(), "the fresh list landed");
     }
 
+    /// Steps a resting window: a frame only at each requested wake, none in between, for at
+    /// most `limit` seconds. Returns the clock it stopped at.
+    fn rest(rt: &mut Runtime<Gallery>, limit: f64) -> f64 {
+        let start = rt.state.c6.now;
+        for _ in 0..200 {
+            let Some(deadline) = rt.wake_deadline() else {
+                break;
+            };
+            let now = rt.state.c6.now;
+            if deadline - start > limit {
+                break;
+            }
+            // A deadline is due once the clock passes it: step at least a millisecond.
+            rt.frame((deadline - now).max(0.001));
+        }
+        rt.state.c6.now
+    }
+
+    // browser/navigation/location-bar: "The Copy path button is named "Copy path"; after a
+    // click it is named "Path copied", then "Copy path" again 2 s later." In a window at rest,
+    // which polls only at the wakes it asked for (C11's review: a timer stamped at the first
+    // poll after the press, with one wake asked from the press, never ended).
+    #[test]
+    fn the_copy_feedback_ends_in_a_resting_window() {
+        let mut rt = mount("c6-short-light");
+        run(&mut rt, 1.0);
+        let (x, y) = centre(&rt, &format!("{LOC}-copy"));
+        rt.pointer_move(x, y);
+        rt.pointer_down(x, y);
+        rt.pointer_up(x, y);
+        rt.frame(FRAME);
+        let pressed = rt.state.c6.now;
+        assert!(rt.state.c6.bar.copied());
+        let stopped = rest(&mut rt, 5.0);
+        assert!(!rt.state.c6.bar.copied(), "the feedback ended");
+        let took = stopped - pressed;
+        assert!((1.9..2.2).contains(&took), "after {took:.3} s");
+        assert_eq!(
+            element(&rt, &format!("{LOC}-copy")).and_then(|e| e.label),
+            Some("Copy path".into())
+        );
+    }
+
+    // browser/navigation/location-bar: "Holding a file drag over a parent breadcrumb for 750
+    // ms navigates there", in a window at rest, as above.
+    #[test]
+    fn the_spring_opens_in_a_resting_window() {
+        let mut rt = mount("c6-short-light");
+        run(&mut rt, 1.0);
+        let at = centre(&rt, &crumb(1));
+        rt.drag_files(vec!["/home/demo/report.pdf".into()], Some(at));
+        rt.frame(FRAME);
+        let arrived = rt.state.c6.now;
+        let stopped = rest(&mut rt, 3.0);
+        assert_eq!(rt.state.c6.log, "Spring open ~/Projects");
+        let took = stopped - arrived;
+        assert!((0.7..0.9).contains(&took), "after {took:.3} s");
+    }
+
     // A paste is an edit: it asks for suggestions like typing does.
     #[test]
     fn a_paste_lists_suggestions() {

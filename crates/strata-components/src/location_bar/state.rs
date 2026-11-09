@@ -135,6 +135,10 @@ impl LocationBarState {
         self.completion.shown()
     }
 
+    pub(crate) fn suggestions_generation(&self) -> u64 {
+        self.completion.shown_generation()
+    }
+
     /// Whether the suggestion list shows.
     pub fn suggestions_open(&self) -> bool {
         self.editing && self.window_focused && self.completion.is_open()
@@ -305,7 +309,7 @@ impl LocationBarState {
         if let Some(spring) = self.spring.as_mut() {
             let since = *spring.since.get_or_insert(now);
             let left = spring.delay - (now - since);
-            if left <= 0.0 {
+            if left <= 1e-6 {
                 let id = spring.id.clone();
                 self.spring = None;
                 out.push(LocationIntent::Open {
@@ -322,7 +326,7 @@ impl LocationBarState {
                 self.copied = Copied::Since(now);
                 tx.wake_after(Duration::from_secs_f64(COPIED_FOR));
             }
-            Copied::Since(t) if now - t >= COPIED_FOR => {
+            Copied::Since(t) if now - t >= COPIED_FOR - 1e-6 => {
                 self.copied = Copied::Rest;
                 out.changed = true;
             }

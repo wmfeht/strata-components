@@ -176,3 +176,5 @@ fn a_leave_from_another_crumb_keeps_the_hover() {
     s.set_drop_hover(2, DropHover::Left);
     assert_eq!(s.drop_hover(), None);
 }
+
+mod perf;

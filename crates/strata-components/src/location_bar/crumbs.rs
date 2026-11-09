@@ -1,6 +1,8 @@
 //! The crumb strip: ancestors as buttons, the current folder with its Copy path button, in a
 //! sideways scroll viewport with edge fades and an overflow bar in its own row underneath.
 
+use std::time::Duration;
+
 use rune::{
     El, Key, KeyEvent, PointerButton, PointerEvent, Tx, WheelEvent, col, el, icon, row, text,
 };
@@ -239,6 +241,9 @@ fn current<S: 'static>(cx: &Ctx<'_, S>, crumb: &Crumb, n: usize) -> El {
     .help(label)
     .on_press_tx(move |s: &mut S, tx: &mut Tx| {
         access(s).copy_pressed();
+        // The handler has no clock: the next poll stamps the press, then asks for the wake that
+        // ends the feedback. A window at rest polls only at the wakes it asked for.
+        tx.wake_after(Duration::ZERO);
         emit(s, LocationIntent::CopyPath, tx);
     })
     .build(k)

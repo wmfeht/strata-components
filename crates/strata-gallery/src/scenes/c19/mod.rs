@@ -77,6 +77,8 @@ pub struct Demo {
     pub compact_below: Option<f32>,
     /// The categories key is Ctrl+G.
     pub rebound: bool,
+    /// Every key that reached the page's key hook while the reference was open: none should.
+    pub leaks: Vec<String>,
 }
 
 impl Default for Demo {
@@ -102,6 +104,7 @@ impl Default for Demo {
             schedule: Vec::new(),
             compact_below: None,
             rebound: false,
+            leaks: Vec::new(),
         };
         d.refresh();
         d
@@ -654,6 +657,14 @@ fn ctrl(ev: &KeyEvent, c: char) -> bool {
 /// The page's dispatch, standing in for Strata's: keys no focused element took.
 pub fn on_key(g: &mut Gallery, ev: &KeyEvent, tx: &mut Tx) -> bool {
     let d = &mut g.c19;
+    // The reference takes every key it doesn't use: one that gets here is a leak. Logged, so a
+    // script that closes the reference after sees it, and taken.
+    if d.reference.is_open() {
+        let leak = format!("{:?} {:?}", ev.key, ev.mods);
+        d.log(&format!("Leaked {leak}"));
+        d.leaks.push(leak);
+        return true;
+    }
     if d.keys().toggles(ev, tx) {
         d.reference.toggle();
         return true;

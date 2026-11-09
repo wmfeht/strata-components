@@ -137,3 +137,14 @@ fn the_words_are_the_hosts() {
     };
     assert_eq!(summary(&listing(), &words).text, "5 entries");
 }
+
+#[test]
+fn the_english_words_group_digits() {
+    let l = Listing {
+        total: 1_234,
+        files: 1_234,
+        ..Listing::default()
+    };
+    assert_eq!(count(&l).text, "1,234 items");
+    assert_eq!(count(&l).description, "1,234 files, 0 folders");
+}

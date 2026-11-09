@@ -47,7 +47,6 @@ pub(super) fn panel<S: 'static>(r: &ShortcutReference<S>, s: &S, look: &Look) ->
     let route = Rc::new(Route {
         get_mut: r.get_mut,
         keys: r.keys.clone(),
-        search: r.search_key(),
         categories: format!("{key}-category-"),
         results: r.results_key(),
         line_key,
@@ -78,6 +77,7 @@ pub(super) fn panel<S: 'static>(r: &ShortcutReference<S>, s: &S, look: &Look) ->
     };
     let note = note(r, look);
     let on_key = route.clone();
+    let get_mut = r.get_mut;
     vec![
         col()
             .key(format!("{key}-content"))
@@ -87,6 +87,12 @@ pub(super) fn panel<S: 'static>(r: &ShortcutReference<S>, s: &S, look: &Look) ->
             .child(header)
             .child(body)
             .child(note)
+            .on_layout(move |s: &mut S, rect: [f32; 4]| {
+                let st = get_mut(s);
+                if st.height != Some(rect[3]) {
+                    st.height = Some(rect[3]);
+                }
+            })
             .on_key(move |s: &mut S, ev: &KeyEvent, tx: &mut Tx| on_key.panel_key(s, ev, tx))
             .fill(k.c.layer_01),
     ]
@@ -162,6 +168,10 @@ fn header<S: 'static>(
         .child(title.grow(if compact { 0.0 } else { 1.0 }))
         .child(frame)
 }
+
+/// The compact category pills' height limits (`src/ui/shortcut_footer/reference.rs`).
+const PILLS_MIN: f32 = 60.0;
+const PILLS_MAX: f32 = 160.0;
 
 /// The search field's narrowest width (`.shortcut-reference-search`'s `min-width: 150px`).
 const SEARCH_MIN_WIDTH: f32 = 150.0;
@@ -270,11 +280,26 @@ fn categories<S: 'static>(
         .focus_group()
         .children(tabs);
     if compact {
-        list.w_full()
-            .gap(look.space.md)
-            .px(look.space.lg)
-            .py(look.space.md + look.space.xxs)
+        // At most a quarter of the panel's height, 60 to 160 pt, scrolling past it (Strata's
+        // `max_sidebar_height`: a quarter of the window, 60 to 160 px).
+        let cap = (r.get)(s)
+            .height
+            .map_or(PILLS_MAX, |h| (h / 4.0).clamp(PILLS_MIN, PILLS_MAX));
+        col()
+            .w_full()
+            .max_h(cap)
+            .shrink()
+            .min_h(0.0)
             .border_sides([0.0, 0.0, 1.0, 0.0], k.c.border_base)
+            .scroll(ScrollSpec {
+                stick_bottom: false,
+            })
+            .child(
+                list.w_full()
+                    .gap(look.space.md)
+                    .px(look.space.lg)
+                    .py(look.space.md + look.space.xxs),
+            )
     } else {
         // A column of its own that scrolls when the categories outgrow it.
         col()
@@ -302,7 +327,6 @@ fn results<S: 'static>(
 ) -> El {
     let k = &look.kit;
     let state = (r.get)(s);
-    let get_mut = r.get_mut;
     let results_key = r.results_key();
     let (px, py) = if compact {
         (look.space.xl, look.space.lg)
@@ -322,23 +346,19 @@ fn results<S: 'static>(
         .h_full()
         .scroll(ScrollSpec {
             stick_bottom: false,
-        })
-        .on_layout_tx(move |s: &mut S, _: [f32; 4], tx: &mut Tx| {
-            // First layout after opening: start at the top, as Strata's reference opens.
-            let st = get_mut(s);
-            if st.rewind {
-                st.rewind = false;
-                tx.scroll_to_instant(results_key.clone(), 0.0, 0.0);
-            }
         });
+    // The announced count. Silent while the query is empty: the categories describe their own
+    // counts, so choosing one is heard once.
+    let quiet = state.query().trim().is_empty();
     let status = |words: String| {
-        el().key(format!("{}-status", r.key))
+        let e = el()
+            .key(format!("{}-status", r.key))
             .role("status")
             .live_region(LiveRegion::Polite)
-            .label(words)
             .absolute(0.0, 0.0)
             .w(0.0)
-            .h(0.0)
+            .h(0.0);
+        if quiet { e } else { e.label(words) }
     };
     if lines.matches == 0 {
         let empty = col().w_full().h_full().min_h(0.0).center().px(px).child(

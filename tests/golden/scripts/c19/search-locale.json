@@ -40,37 +40,55 @@
                     {
                       "children": [
                         {
+                          "actions": [
+                            "scroll-up",
+                            "scroll-down",
+                            "set-scroll-offset"
+                          ],
                           "children": [
                             {
                               "actions": [
-                                "click",
-                                "focus"
+                                "scroll-into-view"
                               ],
-                              "description": "4 shortcuts",
-                              "key": "c19-reference-category-0",
-                              "name": "All",
-                              "role": "tab",
-                              "states": [
-                                "selected"
-                              ]
-                            },
-                            {
-                              "actions": [
-                                "click",
-                                "focus"
+                              "children": [
+                                {
+                                  "actions": [
+                                    "click",
+                                    "focus",
+                                    "scroll-into-view"
+                                  ],
+                                  "description": "4 shortcuts",
+                                  "key": "c19-reference-category-0",
+                                  "name": "All",
+                                  "role": "tab",
+                                  "states": [
+                                    "selected"
+                                  ]
+                                },
+                                {
+                                  "actions": [
+                                    "click",
+                                    "focus",
+                                    "scroll-into-view"
+                                  ],
+                                  "description": "4 shortcuts",
+                                  "key": "c19-reference-category-1",
+                                  "name": "Dateien und Auswahl",
+                                  "role": "tab",
+                                  "states": [
+                                    "unselected"
+                                  ]
+                                }
                               ],
-                              "description": "4 shortcuts",
-                              "key": "c19-reference-category-1",
-                              "name": "Dateien und Auswahl",
-                              "role": "tab",
-                              "states": [
-                                "unselected"
-                              ]
+                              "key": "c19-reference-categories",
+                              "name": "Categories",
+                              "role": "tab-list"
                             }
                           ],
-                          "key": "c19-reference-categories",
-                          "name": "Categories",
-                          "role": "tab-list"
+                          "role": "scroll-view",
+                          "states": [
+                            "clips"
+                          ]
                         },
                         {
                           "actions": [

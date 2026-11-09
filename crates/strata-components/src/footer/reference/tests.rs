@@ -141,19 +141,17 @@ fn a_match_maps_back_onto_the_shown_text() {
 }
 
 #[test]
-fn the_state_keeps_its_query_and_category_across_closing_and_opens_at_the_top() {
+fn the_state_keeps_its_query_and_category_across_closing() {
     let mut s = ReferenceState::new();
     s.toggle();
-    assert!(s.is_open() && s.rewind);
-    s.rewind = false;
+    assert!(s.is_open());
     s.set_query("copy");
     s.set_category(Some("Search and tools".to_owned()));
     s.toggle();
     assert!(!s.is_open());
     s.open();
-    assert!(s.rewind, "each open starts at the top");
     assert_eq!(s.query(), "copy");
-    assert_eq!(s.category(), Some("Search and tools"));
+    assert_eq!(s.category().as_deref(), Some("Search and tools"));
     assert_eq!(s.section(&data()), Some(1));
     s.set_category(Some("Gone".to_owned()));
     assert_eq!(
@@ -227,7 +225,6 @@ fn the_search_field_keeps_its_editing_keys_and_takes_the_rest() {
         (Key::Backspace, ctrl()),
         (Key::Delete, Mods::default()),
         (Key::Tab, shift()),
-        (Key::Escape, Mods::default()),
     ] {
         assert!(edits(&key(k.clone(), m)), "{k:?} {m:?} edits");
     }
@@ -373,4 +370,53 @@ fn keys_read_as_text_with_steps_and_alternatives() {
     assert!(Keys::default().is_empty());
     let r = Shortcut::new("x", Keys::one("/")).context("`", "` in the preview");
     assert_eq!(r.key_text(), "`/` in the preview");
+}
+
+#[test]
+fn shift_is_an_editing_chord_only_with_z_and_alt_space_is_taken() {
+    let cs = Mods {
+        shift: true,
+        ..ctrl()
+    };
+    assert!(edits(&key(Key::Command('z'), cs)), "Ctrl+Shift+Z redoes");
+    for c in ['a', 'c', 'x', 'y', 'v'] {
+        assert!(!edits(&key(Key::Command(c), cs)), "Ctrl+Shift+{c} is taken");
+    }
+    let alt = Mods {
+        alt: true,
+        ..Mods::default()
+    };
+    assert!(
+        !edits(&key(Key::Text(" ".into()), alt)),
+        "Alt+Space is taken"
+    );
+}
+
+#[test]
+fn a_tilde_typed_without_shift_toggles_in_tenxer() {
+    // AltGr types `~` on German and French layouts: no Shift.
+    let keys = ReferenceKeys::tenxer();
+    assert!(keys.toggles_typed(&key(Key::Text("~".into()), Mods::default())));
+    assert!(keys.toggles_typed(&key(Key::Text("~".into()), shift())));
+    assert!(!keys.toggles_typed(&key(Key::Text("\u{401}".into()), shift())));
+    assert!(!ReferenceKeys::default().toggles_typed(&key(Key::Text("~".into()), Mods::default())));
+}
+
+#[test]
+fn a_category_the_data_lost_is_forgotten() {
+    let mut s = ReferenceState::new();
+    let mut d = data();
+    s.set_category(Some("Search and tools".to_owned()));
+    let gone = d.sections.pop().unwrap();
+    d.revision += 1;
+    let _ = s.lines(&d, 1);
+    assert_eq!(s.category(), None);
+    d.sections.push(gone);
+    d.revision += 1;
+    let _ = s.lines(&d, 1);
+    assert_eq!(
+        s.section(&d),
+        None,
+        "the section's return doesn't choose it again"
+    );
 }

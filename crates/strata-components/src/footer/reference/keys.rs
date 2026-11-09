@@ -19,7 +19,6 @@ use super::state::{ReferenceKeys, ReferenceState};
 pub(super) struct Route<S> {
     pub get_mut: fn(&mut S) -> &mut ReferenceState,
     pub keys: ReferenceKeys,
-    pub search: String,
     pub categories: String,
     pub results: String,
     pub line_key: Rc<dyn Fn(usize) -> String>,
@@ -39,10 +38,6 @@ fn any(chords: &[Chord], ev: &KeyEvent, tx: &Tx) -> bool {
     chords.iter().any(|c| c.matches_tx(ev, tx))
 }
 
-fn plain(m: Mods) -> bool {
-    !(m.shift || m.cmd || m.ctrl || m.alt || m.logo)
-}
-
 /// Sends `key` through the window's routing on the next frame: the focus moves Rune has no call
 /// for at the pinned rev (upstream #173).
 fn send(tx: &mut Tx, key: Key, shift: bool) {
@@ -56,9 +51,10 @@ fn send(tx: &mut Tx, key: Key, shift: bool) {
 }
 
 impl<S: 'static> Route<S> {
+    /// Where focus is, for the panel's handler: never the search field, whose keys go to
+    /// [`Route::field_key`] (probe P1).
     fn area(&self, tx: &Tx) -> Area {
         match tx.focused() {
-            Some(f) if f == self.search => Area::Search,
             Some(f) if f == self.results => Area::Results,
             Some(f) if f.starts_with(&self.categories) => Area::Categories,
             _ => Area::Other,
@@ -99,21 +95,25 @@ impl<S: 'static> Route<S> {
         true
     }
 
-    /// Scrolls the results for Up, Down, Page Up, Page Down, Home and End (and `j` and `k`
-    /// outside the field): true when `ev` is one of them. A line step reveals the next line out
-    /// of view (Rune has no line scroll: draft U-C19-1).
-    fn scroll(&self, s: &mut S, ev: &KeyEvent, tx: &mut Tx, letters: bool, ends: bool) -> bool {
-        if !plain(ev.mods) {
+    /// Scrolls the results for Up and Down (with Shift too, as Strata's `scroll_motion` ignores
+    /// it), Page Up and Page Down; from the results also `j`, `k`, Left, Right, Home and End
+    /// (`results`). True when `ev` is one of them. A line step reveals the next line out of view
+    /// (Rune has no line scroll: draft U-C19-1).
+    fn scroll(&self, s: &mut S, ev: &KeyEvent, tx: &mut Tx, results: bool) -> bool {
+        let m = ev.mods;
+        if m.cmd || m.ctrl || m.alt || m.logo {
             return false;
         }
         let visible = (self.get_mut)(s).visible.clone();
         let n = self.lines.lines.len();
-        let typed = |c: &str| letters && matches!(&ev.key, Key::Text(t) if t == c);
-        if ev.key == Key::Down || typed("j") {
+        let typed = |c: &str| results && !m.shift && matches!(&ev.key, Key::Text(t) if t == c);
+        let down = ev.key == Key::Down || (results && ev.key == Key::Right) || typed("j");
+        let up = ev.key == Key::Up || (results && ev.key == Key::Left) || typed("k");
+        if down {
             if visible.end < n {
                 tx.scroll_into_view((self.line_key)(visible.end));
             }
-        } else if ev.key == Key::Up || typed("k") {
+        } else if up {
             if visible.start > 0 {
                 tx.scroll_into_view((self.line_key)(visible.start - 1));
             }
@@ -121,9 +121,9 @@ impl<S: 'static> Route<S> {
             tx.scroll_page(self.results.clone(), 1);
         } else if ev.key == Key::PageUp {
             tx.scroll_page(self.results.clone(), -1);
-        } else if ends && ev.key == Key::Home {
+        } else if results && ev.key == Key::Home {
             tx.scroll_to_instant(self.results.clone(), 0.0, 0.0);
-        } else if ends && ev.key == Key::End {
+        } else if results && ev.key == Key::End {
             tx.scroll_to_bottom_instant(self.results.clone());
         } else {
             return false;
@@ -135,14 +135,14 @@ impl<S: 'static> Route<S> {
     /// navigation and modal) have the key; true takes it.
     pub fn field_key(&self, s: &mut S, ev: &KeyEvent, tx: &mut Tx) -> bool {
         // `~` typed closes; a key that reads as `~` only through the layout types itself.
-        if self.keys.toggles_typed(ev) {
+        if self.keys.toggles_typed(ev) || ev.key == Key::Escape {
             (self.get_mut)(s).close();
             return true;
         }
         if self.area_key(Area::Search, ev, tx) {
             return true;
         }
-        if self.scroll(s, ev, tx, false, false) {
+        if self.scroll(s, ev, tx, false) {
             return true;
         }
         !edits(ev)
@@ -150,7 +150,8 @@ impl<S: 'static> Route<S> {
 
     /// The categories' and the results' keys, before focus navigation.
     pub fn panel_key(&self, s: &mut S, ev: &KeyEvent, tx: &mut Tx) -> bool {
-        if self.keys.toggles(ev, tx) {
+        // Escape with any modifiers closes, as Strata's `ESCAPE_ANY`.
+        if self.keys.toggles(ev, tx) || ev.key == Key::Escape {
             (self.get_mut)(s).close();
             return true;
         }
@@ -158,66 +159,76 @@ impl<S: 'static> Route<S> {
         if self.area_key(area, ev, tx) {
             return true;
         }
-        if passes(ev) {
+        if tab(ev) {
             return false;
         }
         match area {
-            Area::Categories => {
-                if plain(ev.mods) {
-                    let arrow = match &ev.key {
-                        Key::Text(t) if t == "h" => Some(Key::Left),
-                        Key::Text(t) if t == "j" => Some(Key::Down),
-                        Key::Text(t) if t == "k" => Some(Key::Up),
-                        Key::Text(t) if t == "l" => Some(Key::Right),
-                        _ => None,
-                    };
-                    if let Some(arrow) = arrow {
-                        send(tx, arrow, false);
-                        return true;
-                    }
-                    // The focus group's arrows, Home and End; Space and Enter press.
-                    let group = matches!(
-                        ev.key,
-                        Key::Up | Key::Down | Key::Left | Key::Right | Key::Home | Key::End
-                    ) || ev.key == Key::Enter
-                        || matches!(&ev.key, Key::Text(t) if t == " ");
-                    if group {
-                        return false;
-                    }
-                }
-                true
-            }
+            Area::Categories => self.category_key(ev, tx),
             Area::Results => {
-                self.scroll(s, ev, tx, true, true);
+                self.scroll(s, ev, tx, true);
                 true
             }
-            Area::Search | Area::Other => true,
+            // Nothing in the panel focused: no key goes on to the window.
+            _ => true,
         }
+    }
+
+    /// The categories' keys: false leaves the focus group's arrows, Home and End and the
+    /// press keys (Space, Enter) to Rune; `h j k l`, and the arrows, Home and End with Shift
+    /// (Strata's `category_step` ignores Shift, Rune's focus group doesn't), go as the plain
+    /// arrows. Everything else is taken.
+    fn category_key(&self, ev: &KeyEvent, tx: &mut Tx) -> bool {
+        let m = ev.mods;
+        if m.cmd || m.ctrl || m.alt || m.logo {
+            return true;
+        }
+        let step = match &ev.key {
+            Key::Text(t) if !m.shift && t == "h" => Some(Key::Left),
+            Key::Text(t) if !m.shift && t == "j" => Some(Key::Down),
+            Key::Text(t) if !m.shift && t == "k" => Some(Key::Up),
+            Key::Text(t) if !m.shift && t == "l" => Some(Key::Right),
+            k @ (Key::Up | Key::Down | Key::Left | Key::Right | Key::Home | Key::End)
+                if m.shift =>
+            {
+                Some(k.clone())
+            }
+            _ => None,
+        };
+        if let Some(arrow) = step {
+            send(tx, arrow, false);
+            return true;
+        }
+        let group = matches!(
+            ev.key,
+            Key::Up | Key::Down | Key::Left | Key::Right | Key::Home | Key::End | Key::Enter
+        ) || matches!(&ev.key, Key::Text(t) if t == " ");
+        !(group && !m.shift)
     }
 }
 
-/// Keys Rune's modal and focus navigation handle: Tab, Shift+Tab and Escape.
-fn passes(ev: &KeyEvent) -> bool {
+/// Tab and Shift+Tab, which Rune's modal keeps inside the panel.
+fn tab(ev: &KeyEvent) -> bool {
     let m = ev.mods;
-    let bare = !(m.cmd || m.ctrl || m.alt || m.logo);
-    bare && matches!(ev.key, Key::Tab | Key::Escape)
+    ev.key == Key::Tab && !(m.cmd || m.ctrl || m.alt || m.logo)
 }
 
 /// Whether the search field's editor edits with `ev`: typing (AltGr's characters included), the
-/// copy, cut, undo, redo and select-all chords, and the caret and word keys. Everything else, an
-/// unused Ctrl, Alt or Super chord among them, is taken before it reaches the window
+/// copy, cut, undo, redo and select-all chords (Shift only with `z`: Rune's editor takes
+/// Ctrl+Shift+Z alone), and the caret and word keys. Everything else, an unused Ctrl, Alt or
+/// Super chord among them (Ctrl+Shift+A is Strata's Unselect all; Alt+Space the window menu's),
+/// is taken before it reaches the window
 /// (`app/shortcut-reference`: "…reaches nothing else: Ctrl+, opens no Settings"). Ctrl+V is
 /// taken too: Rune reads the clipboard into the focused field before it routes the key
 /// (`window/events.rs`, `runtime/input/physical.rs` at the pin), so a Ctrl+V that reaches the
 /// field is one no paste followed, and the editor has no use for it.
 pub(super) fn edits(ev: &KeyEvent) -> bool {
     let m = ev.mods;
-    if passes(ev) {
+    if tab(ev) {
         return true;
     }
     match &ev.key {
-        Key::Text(_) => !(m.cmd || m.ctrl || m.logo),
-        Key::Command(c) => !m.alt && !m.logo && "acxzy".contains(*c),
+        Key::Text(t) => !(m.cmd || m.ctrl || m.logo) && !(m.alt && t == " "),
+        Key::Command(c) => !m.alt && !m.logo && (*c == 'z' || (!m.shift && "acxy".contains(*c))),
         Key::Left | Key::Right | Key::Home | Key::End | Key::Backspace | Key::Delete => {
             !m.alt && !m.logo
         }

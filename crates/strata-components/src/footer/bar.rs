@@ -3,7 +3,7 @@
 use std::fmt;
 use std::rc::Rc;
 
-use rune::{El, LiveRegion, Tx, el, row, text};
+use rune::{El, Tx, el, row, text};
 use strata_kit::look::Look;
 
 use super::count::Count;
@@ -265,6 +265,7 @@ impl<S: 'static> Footer<S> {
             right.push(marks::range(look, format!("{key}-range"), words, name));
         }
         right.extend(self.flash);
+        // A status: polite already, so its changes are heard without interrupting.
         if let Some(count) = &self.count {
             right.push(
                 text(count.text.clone())
@@ -272,7 +273,6 @@ impl<S: 'static> Footer<S> {
                     .role("status")
                     .label(count.text.clone())
                     .description(count.description.clone())
-                    .live_region(LiveRegion::Polite)
                     .font(k.ty.small)
                     .color(k.c.text_base),
             );

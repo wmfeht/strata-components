@@ -11,9 +11,10 @@ use rune::{Chord, ChordKey, ChordMod, KeyEvent, TextEdit, Tx};
 use super::data::ShortcutData;
 use super::search::{Index, Lines, fold_query, lines};
 
-/// The shortcut reference's state. It outlives the panel: the query, the category and (while
-/// the window keeps the panel) the scroll position survive closing, reopening and the window
-/// losing focus, as Strata's do.
+/// The shortcut reference's state. It outlives the panel: the query and the category survive
+/// closing and reopening, and while it stays open, the window losing focus changes nothing (the
+/// scroll position included), as in Strata. Each open shows the results from the top: the panel
+/// mounts afresh.
 ///
 /// Used by: hosts, through [`ShortcutReference`](super::ShortcutReference) and the footer's
 /// F1 button.
@@ -21,10 +22,12 @@ pub struct ReferenceState {
     open: bool,
     /// The search field.
     pub search: TextEdit,
-    category: Option<String>,
-    pub(super) rewind: bool,
+    /// Interior: [`ReferenceState::lines`] forgets a title the data lost while building the view.
+    category: RefCell<Option<String>>,
     pub(super) visible: Range<usize>,
     pub(super) width: Option<f32>,
+    /// The panel's height as last laid out: the compact category pills take at most a quarter.
+    pub(super) height: Option<f32>,
     cache: RefCell<Cache>,
 }
 
@@ -53,7 +56,7 @@ impl fmt::Debug for ReferenceState {
         f.debug_struct("ReferenceState")
             .field("open", &self.open)
             .field("query", &self.search.text)
-            .field("category", &self.category)
+            .field("category", &self.category.borrow())
             .finish_non_exhaustive()
     }
 }
@@ -64,10 +67,10 @@ impl ReferenceState {
         Self {
             open: false,
             search: TextEdit::default(),
-            category: None,
-            rewind: false,
+            category: RefCell::new(None),
             visible: 0..0,
             width: None,
+            height: None,
             cache: RefCell::default(),
         }
     }
@@ -77,14 +80,11 @@ impl ReferenceState {
         self.open
     }
 
-    /// Opens it, its results scrolled to the top, with the query and category it had. Focus
-    /// goes to the search field (the panel's first focus stop). A host holding a footer prompt
-    /// open while the reference has the keyboard calls C18's `PromptState::hold_open(true)`.
+    /// Opens it with the query and category it had, its results from the top. Focus goes to
+    /// the search field (the panel's first focus stop). A host holding a footer prompt open
+    /// while the reference has the keyboard calls C18's `PromptState::hold_open(true)`.
     pub fn open(&mut self) {
-        if !self.open {
-            self.open = true;
-            self.rewind = true;
-        }
+        self.open = true;
     }
 
     /// Closes it. Rune's modal gives the keyboard back to what had it before it opened.
@@ -114,26 +114,32 @@ impl ReferenceState {
         self.search.focus = end;
     }
 
-    /// The chosen category's title, or `None` for All. A title the data no longer has shows
-    /// All.
-    pub fn category(&self) -> Option<&str> {
-        self.category.as_deref()
+    /// The chosen category's title, or `None` for All. A title the data loses is forgotten
+    /// once the panel shows the data without it, so the section coming back later isn't chosen
+    /// again behind the user's back.
+    pub fn category(&self) -> Option<String> {
+        self.category.borrow().clone()
     }
 
     /// Chooses a category by title, or All.
     pub fn set_category(&mut self, title: Option<String>) {
-        self.category = title;
+        *self.category.get_mut() = title;
     }
 
     /// The chosen category's section in `data`, if it still has it.
     pub(super) fn section(&self, data: &ShortcutData) -> Option<usize> {
-        let title = self.category.as_deref()?;
+        let category = self.category.borrow();
+        let title = category.as_deref()?;
         data.sections.iter().position(|s| s.title == title)
     }
 
     /// The results for the current query and category, `columns` rows to a line, from the
     /// cache while nothing they depend on changed.
     pub(super) fn lines(&self, data: &ShortcutData, columns: usize) -> Rc<Lines> {
+        if self.section(data).is_none() {
+            // Shown as All now: forget the title.
+            self.category.borrow_mut().take();
+        }
         let key = LinesKey {
             revision: data.revision,
             query: fold_query(&self.search.text),
@@ -191,10 +197,12 @@ impl Default for ReferenceKeys {
 }
 
 impl ReferenceKeys {
-    /// Strata's 10xer map: `~` toggles too.
+    /// Strata's 10xer map: `~` toggles too, typed with Shift (US) or without (AltGr on German
+    /// and French layouts).
     pub fn tenxer() -> Self {
         let mut keys = Self::default();
         keys.toggle.push(tilde());
+        keys.toggle.push(Chord::new(ChordKey::Char('~')));
         keys
     }
 

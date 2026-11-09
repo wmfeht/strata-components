@@ -163,7 +163,7 @@ mod c19 {
         let r = &rt.state.c19.reference;
         assert!(r.is_open());
         assert_eq!(r.query(), "i");
-        assert_eq!(r.category(), Some("Files and selection"));
+        assert_eq!(r.category().as_deref(), Some("Files and selection"));
         assert!(at > 0.0);
         assert_eq!(offset(&rt), at, "the scroll position stays");
     }
@@ -215,5 +215,217 @@ mod c19 {
         let clear = t.elapsed() / 3;
         println!("c19 perf: 5,000 rows, keystroke + frame {times:?}, backspace + frame {clear:?}");
         assert_eq!(rt.state.c19.reference.query(), "");
+    }
+
+    fn mods(shift: bool, ctrl: bool, alt: bool, logo: bool) -> Mods {
+        Mods {
+            shift,
+            cmd: ctrl,
+            ctrl,
+            alt,
+            logo,
+        }
+    }
+
+    /// The review's chords: browsing shortcuts, editing chords with and without Shift, Alt and
+    /// Super chords, function keys.
+    fn chords() -> Vec<(&'static str, Key, Mods)> {
+        let n = mods(false, false, false, false);
+        let c = mods(false, true, false, false);
+        let cs = mods(true, true, false, false);
+        let s = mods(true, false, false, false);
+        let a = mods(false, false, true, false);
+        let l = mods(false, false, false, true);
+        vec![
+            ("Ctrl+A", Key::Command('a'), c),
+            ("Ctrl+Z", Key::Command('z'), c),
+            ("Ctrl+Shift+Z", Key::Command('z'), cs),
+            ("Ctrl+Y", Key::Command('y'), c),
+            ("Ctrl+Shift+A", Key::Command('a'), cs),
+            ("Ctrl+Shift+C", Key::Command('c'), cs),
+            ("Ctrl+Shift+X", Key::Command('x'), cs),
+            ("Ctrl+Shift+Y", Key::Command('y'), cs),
+            ("Ctrl+Shift+V", Key::Command('v'), cs),
+            ("Ctrl+V", Key::Command('v'), c),
+            ("Ctrl+Backspace", Key::Backspace, c),
+            ("Ctrl+Delete", Key::Delete, c),
+            ("Delete", Key::Delete, n),
+            ("Shift+Delete", Key::Delete, s),
+            ("Shift+Backspace", Key::Backspace, s),
+            ("Ctrl+Shift+Delete", Key::Delete, cs),
+            ("Ctrl+,", Key::Command(','), c),
+            ("Ctrl+1", Key::Command('1'), c),
+            ("Ctrl+2", Key::Command('2'), c),
+            ("Ctrl+3", Key::Command('3'), c),
+            ("Alt+d", Key::Text("d".into()), a),
+            ("Alt+1", Key::Text("1".into()), a),
+            ("Super+e", Key::Text("e".into()), l),
+            ("Alt+Left", Key::Left, a),
+            ("Alt+Home", Key::Home, a),
+            ("Ctrl+Home", Key::Home, c),
+            ("Ctrl+Shift+End", Key::End, cs),
+            ("Shift+Left", Key::Left, s),
+            ("Shift+Home", Key::Home, s),
+            ("Enter", Key::Enter, n),
+            ("Shift+Enter", Key::Enter, s),
+            ("Ctrl+Enter", Key::Enter, c),
+            ("Alt+Enter", Key::Enter, a),
+            ("F2", Key::Function(2), n),
+            ("F5", Key::Function(5), n),
+            ("Insert", Key::Insert, n),
+            ("Shift+Insert", Key::Insert, s),
+            ("Ctrl+Insert", Key::Insert, c),
+            ("Menu", Key::ContextMenu, n),
+            ("Shift+F10", Key::Function(10), s),
+            ("Ctrl+Tab", Key::Tab, c),
+            ("Ctrl+Shift+Tab", Key::Tab, cs),
+            ("Ctrl+PageDown", Key::PageDown, c),
+            ("Shift+PageDown", Key::PageDown, s),
+            ("Shift+Down", Key::Down, s),
+            ("Ctrl+Up", Key::Up, c),
+            ("Alt+Up", Key::Up, a),
+            ("Ctrl+Space", Key::Text(" ".into()), c),
+            ("Alt+Space", Key::Text(" ".into()), a),
+            (
+                "Ctrl+Alt+c",
+                Key::Command('c'),
+                mods(false, true, true, false),
+            ),
+            ("Ctrl+K", Key::Command('k'), c),
+            ("Ctrl+Shift+K", Key::Command('k'), cs),
+            ("Ctrl+H", Key::Command('h'), c),
+            ("Ctrl+W", Key::Command('w'), c),
+            ("Ctrl+T", Key::Command('t'), c),
+            ("Ctrl+N", Key::Command('n'), c),
+            ("Ctrl+Shift+N", Key::Command('n'), cs),
+            ("Ctrl+=", Key::Command('='), c),
+            ("Ctrl+-", Key::Command('-'), c),
+            ("Ctrl+Shift+M", Key::Command('m'), cs),
+            ("Backspace", Key::Backspace, n),
+            ("Space", Key::Text(" ".into()), n),
+            ("x", Key::Text("x".into()), n),
+            ("Shift+X", Key::Text("X".into()), s),
+        ]
+    }
+
+    /// `app/shortcut-reference`: "While the reference is open, Delete, Ctrl+V, and other
+    /// browsing shortcuts do nothing to files" and "In the reference's search, a Ctrl, Alt, or
+    /// Super chord the field does not use reaches nothing else". Every chord, from the search
+    /// field, the results and the categories: none reaches the page's key hook (which logs any
+    /// that does) while the reference is open.
+    #[test]
+    fn no_key_reaches_the_window_while_the_reference_is_open() {
+        let mut leaks = Vec::new();
+        for (area, to) in [
+            ("search", None),
+            ("results", Some('l')),
+            ("categories", Some('b')),
+        ] {
+            for (name, key, m) in chords() {
+                let mut rt = mount("c19-reference-light");
+                rt.state.c19.reference.set_query("ab");
+                run(&mut rt, 0.1);
+                if let Some(c) = to {
+                    ctrl(&mut rt, c);
+                }
+                rt.key(KeyEvent { key, mods: m });
+                run(&mut rt, 0.2);
+                if !rt.state.c19.leaks.is_empty() {
+                    leaks.push(format!("{area}: {name} -> {:?}", rt.state.c19.leaks));
+                }
+            }
+        }
+        assert!(
+            leaks.is_empty(),
+            "keys reached the window:\n{}",
+            leaks.join("\n")
+        );
+    }
+
+    /// `app/shortcut-reference`: "With the search field focused, Up, Down, Page Up, and Page
+    /// Down scroll the results" with Shift held too, and in the results Left and Right scroll as
+    /// Up and Down do (Strata's `scroll_motion` and `search_scroll_key` ignore Shift).
+    #[test]
+    fn shifted_keys_and_left_and_right_scroll_the_results_as_strata_does() {
+        let shift = mods(true, false, false, false);
+        let mut rt = mount("c19-reference-light");
+        press(&mut rt, Key::Down, shift);
+        press(&mut rt, Key::Down, shift);
+        let stepped = offset(&rt);
+        assert!(stepped > 0.0, "Shift+Down in the search field scrolls");
+        press(&mut rt, Key::PageDown, shift);
+        assert!(
+            offset(&rt) > stepped,
+            "Shift+Page Down in the search field scrolls"
+        );
+        assert_eq!(focused(&rt).as_deref(), Some(SEARCH));
+
+        ctrl(&mut rt, 'l');
+        plain(&mut rt, Key::Home);
+        plain(&mut rt, Key::Right);
+        plain(&mut rt, Key::Right);
+        let right = offset(&rt);
+        assert!(right > 0.0, "Right in the results scrolls down");
+        plain(&mut rt, Key::Left);
+        assert!(offset(&rt) < right, "Left scrolls up");
+        press(&mut rt, Key::End, shift);
+        let end = offset(&rt);
+        assert!(end > right, "Shift+End reaches the bottom");
+        press(&mut rt, Key::Home, shift);
+        assert_eq!(offset(&rt), 0.0, "Shift+Home the top");
+    }
+
+    /// A category whose section goes (new data while open) shows All, and is forgotten: the
+    /// section coming back later doesn't choose it again.
+    #[test]
+    fn a_vanished_category_is_forgotten() {
+        let mut rt = mount("c19-reference-light");
+        rt.update(|g, _| g.c19.reference.set_category(Some("Preview media".into())));
+        run(&mut rt, 0.1);
+        rt.update(|g, _| {
+            g.c19.data.sections.pop();
+            g.c19.data.revision += 100;
+        });
+        run(&mut rt, 0.3);
+        assert_eq!(rt.state.c19.reference.category(), None);
+        rt.update(|g, _| g.c19.refresh());
+        run(&mut rt, 0.3);
+        assert_eq!(rt.state.c19.reference.category(), None, "not chosen again");
+        assert!(
+            rt.elements()
+                .iter()
+                .any(|e| e.key.as_deref() == Some("c19-reference-category-4"))
+        );
+    }
+
+    fn node(rt: &Runtime<Gallery>, key: &str) -> serde_json::Value {
+        fn find(n: &serde_json::Value, key: &str) -> Option<serde_json::Value> {
+            if n["key"] == key {
+                return Some(n.clone());
+            }
+            n["children"].as_array()?.iter().find_map(|c| find(c, key))
+        }
+        find(&rt.accessibility_json(), key).unwrap_or_else(|| panic!("no {key} in the tree"))
+    }
+
+    /// Choosing a category is announced once: the tab says its count, so the announced result
+    /// count stays silent until a query is typed.
+    #[test]
+    fn a_category_change_is_announced_once() {
+        let mut rt = mount("c19-reference-light");
+        ctrl(&mut rt, 'b');
+        plain(&mut rt, Key::Down);
+        assert_eq!(
+            node(&rt, "c19-reference-category-1")["description"],
+            "23 shortcuts"
+        );
+        let status = node(&rt, "c19-reference-status");
+        assert!(
+            status["name"].is_null(),
+            "the status says nothing: {status}"
+        );
+        ctrl(&mut rt, 'f');
+        plain(&mut rt, Key::Text("p".into()));
+        assert_eq!(node(&rt, "c19-reference-status")["name"], "14 shortcuts");
     }
 }

@@ -70,24 +70,32 @@
 //! - **Opening and closing.** [`ReferenceState::open`] (F1, `~` in 10xer, the button) shows the
 //!   panel over the blurred window (C15) with the search field focused and the results at the
 //!   top; the query and category stay from last time, and nothing closes it when the window
-//!   loses focus. F1 again, Escape or a click on the backdrop closes it; Rune's modal gives the
-//!   keyboard back to what had it. Inside the panel the toggle chords close it: in the search
-//!   field by the typed character alone, so a typed `~` closes while Russian ё, which reads as
-//!   `~` only through the layout fallback, types itself.
+//!   loses focus. F1 again, Escape (with any modifiers, Strata's `ESCAPE_ANY`) or a click on
+//!   the backdrop closes it; Rune's modal gives the keyboard back to what had it. Inside the panel the toggle chords close it: in the search
+//!   field by the typed character alone, so a typed `~` (with Shift on US layouts, without it
+//!   through AltGr on German and French ones) closes while Russian ё, which reads as `~` only
+//!   through the layout fallback, types itself.
 //! - **Keys.** Rune hands a focused field's keys to the field, then the window, never to its
 //!   ancestors (probe P1), so the search field routes its own and the content routes the
 //!   categories' and the results'. Ctrl+B, Ctrl+F and Ctrl+L move focus among the three stops
 //!   (search, the chosen category, the results) with one sent Tab or Shift+Tab (no `Tx::focus`
 //!   at the pin, #173; probe P2); Tab and Shift+Tab cycle them. In the categories the arrows,
-//!   Home and End choose (a tab list), `h j k l` as the arrows. In the results, the arrows,
-//!   `j`, `k`, Page Up, Page Down, Home and End scroll; in the search field Up, Down, Page Up
-//!   and Page Down scroll the results and focus stays. Every other key is taken, so no browsing
-//!   shortcut runs under the panel and the search field keeps only its editing keys.
+//!   Home and End choose (a tab list), `h j k l` as the arrows, and Shift changes nothing. In
+//!   the results, the arrows, `j`, `k`, Page Up, Page Down, Home and End scroll; in the search
+//!   field Up, Down, Page Up and Page Down scroll the results and focus stays; Shift held too
+//!   (Strata's `scroll_motion` ignores it). Every other key is taken, so no browsing shortcut
+//!   runs under the panel, and the search field keeps only its editing keys: typing, Ctrl+A, C,
+//!   X, Y and Z, Ctrl+Shift+Z, and the caret and word keys (not Ctrl+Shift+A, Strata's Unselect
+//!   all, nor Alt+Space). The gallery logs any key that reaches its window hook while the panel
+//!   is open, and a sweep of 66 chords from each focus stop finds none.
 //! - **Search**, as Strata's: a row stays when its action, its keys with their context or one
 //!   of its search terms contains the query, in lower case, with − and – read as `-`. The match
 //!   is drawn in the action and the context with W1's [`MatchedText`](crate::contract::MatchedText).
 //! - **Categories.** All, then each section, with its row count beside it; compact, wrapping
-//!   pills without counts. A category the data no longer has shows All.
+//!   pills without counts, at most a quarter of the panel's height (60 to 160 pt) before they
+//!   scroll. A category the data no longer has shows All, and is forgotten. Choosing one is
+//!   heard once: from the tab, which carries its count, while the announced result count stays
+//!   silent until a query is typed.
 //! - **Layout.** Below [`COMPACT_BELOW`](reference::COMPACT_BELOW) of panel width the header
 //!   stacks, the categories wrap above the results and the results take one column; otherwise
 //!   the categories sit in a 225 pt column and the results take two.
@@ -118,35 +126,35 @@
 //! | --- | --- |
 //! | F1 opens the "Keyboard shortcuts" panel…; F1 again closes it | scripts `f1-opens`, `f1-toggles`; goldens `c19-reference` |
 //! | F1 with Ctrl, Alt, Super, or Shift held does not toggle | script `f1-modifiers`; unit `toggle_chords_match_exactly_and_tilde_only_where_typed` |
-//! | In 10xer mode, `~` also toggles…; in the default map `~` does not | scripts `tilde-tenxer`, `tilde-default` (which keys toggle is the host's: [`ReferenceKeys::tenxer`]) |
+//! | In 10xer mode, `~` also toggles…; in the default map `~` does not | scripts `tilde-tenxer`, `tilde-altgr` (no Shift: AltGr), `tilde-default`; unit `a_tilde_typed_without_shift_toggles_in_tenxer` (which keys toggle is the host's: [`ReferenceKeys::tenxer`]) |
 //! | In 10xer mode, `~` in a focused footer prompt or text field… types | script `tilde-in-field` |
 //! | F1 still opens the reference from a footer prompt or text field | scripts `f1-from-field`, `f1-from-prompt` (C18's prompt is a stand-in until C18 merges) |
-//! | In 10xer mode, `~` typed in the open reference's search closes | script `tilde-in-search` |
+//! | In 10xer mode, `~` typed in the open reference's search closes | scripts `tilde-in-search`, `tilde-altgr-closes` |
 //! | In 10xer mode with Russian active and a text field focused, Shift and the ё key type Ё | scripts `yo-closes-nothing`, `yo-russian` (probe P5: a script's `code` event) |
 //! | In 10xer mode, Russian ё reads as `~` only through the layout fallback… | script `yo-russian` |
 //! | The footer's "F1 Shortcuts" button toggles… shows as pressed | **partial**: script `button-toggles` (opens; Escape closes and the button, unpressed, has focus back). The pressed state is drawn (golden `c19-reference`, behind the backdrop) but hidden from the tree under the modal, and a second press can't reach the inert button: it lands on the backdrop, which closes too |
-//! | Escape or a click on the backdrop closes the reference | scripts `escape-closes`, `backdrop-closes` (a tap by position: the backdrop has no spot of its own) |
+//! | Escape or a click on the backdrop closes the reference | scripts `escape-closes`, `escape-modified`, `escape-modified-results` (Ctrl+ and Alt+Escape: Strata's `ESCAPE_ANY`), `backdrop-closes` (a tap by position: the backdrop has no spot of its own) |
 //! | Focusing another application window leaves the reference open… | test `the_window_losing_focus_leaves_the_reference_as_it_was` |
 //! | Closing the reference returns focus to the widget that had it… | scripts `f1-toggles`, `f1-from-field`, `button-toggles`, `trapped` |
-//! | While the reference is open, Delete, Ctrl+V, and other browsing shortcuts do nothing… | scripts `trapped`, `unused-chords-nothing`; `tab-cycle` (focus stays) |
-//! | In the reference's search field, typing, Delete, and Ctrl+A, Ctrl+C, Ctrl+V, and Ctrl+X edit the query | scripts `search-edit`, `search-cut` (headless runs have no clipboard: the paste is a script `paste` event; Ctrl+C is the editor's) |
+//! | While the reference is open, Delete, Ctrl+V, and other browsing shortcuts do nothing… | test `no_key_reaches_the_window_while_the_reference_is_open` (66 chords from the search, the results and the categories; the page logs any leak); scripts `trapped`, `unused-chords-nothing`, `no-leaks`; `tab-cycle` (focus stays) |
+//! | In the reference's search field, typing, Delete, and Ctrl+A, Ctrl+C, Ctrl+V, and Ctrl+X edit the query | scripts `search-edit`, `search-cut` (headless runs have no clipboard: the paste is a script `paste` event, and what Ctrl+C copies isn't checked); unit `the_search_field_keeps_its_editing_keys_and_takes_the_rest` |
 //! | In the reference's search field, Ctrl+Z undoes and Ctrl+Y or Ctrl+Shift+Z redoes | script `search-undo` |
 //! | …holding `open tab`, Ctrl+Left then typing `new `…; Ctrl+Backspace deletes a word | script `search-words` |
 //! | With fcitx5…, Ctrl+Space… switches the input method, and Chinese can be typed there | **partial**: test `an_input_method_types_into_the_search`; the switch key is the input method's |
-//! | In the reference's search, a Ctrl, Alt, or Super chord the field does not use reaches nothing else | scripts `unused-chords`, `unused-chords-nothing`; unit `the_search_field_keeps_its_editing_keys_and_takes_the_rest` |
-//! | Opening the reference focuses "Search actions or keys…" and scrolls the list to the top | script `open-focus`; test `reopening_scrolls_the_results_to_the_top_and_keeps_the_query` |
+//! | In the reference's search, a Ctrl, Alt, or Super chord the field does not use reaches nothing else | test `no_key_reaches_the_window_while_the_reference_is_open`; scripts `unused-chords`, `unused-chords-nothing`, `no-leaks`; units `the_search_field_keeps_its_editing_keys_and_takes_the_rest`, `shift_is_an_editing_chord_only_with_z_and_alt_space_is_taken`. Alt with a letter types the letter (Rune's editor: draft U-C19-2) |
+//! | Opening the reference focuses "Search actions or keys…" and scrolls the list to the top | script `open-focus`; test `reopening_scrolls_the_results_to_the_top_and_keeps_the_query` (the panel mounts afresh at the top) |
 //! | The reference's search field is named "Search actions or keys…" | script `open-focus`; a11y goldens |
-//! | Reopening the reference keeps the previous search text and selected category | script `reopen-keeps`; unit `the_state_keeps_its_query_and_category_across_closing_and_opens_at_the_top` |
+//! | Reopening the reference keeps the previous search text and selected category | script `reopen-keeps`; unit `the_state_keeps_its_query_and_category_across_closing` |
 //! | Typing keeps rows whose keys, key context, or action contain the text…; no match shows "No matching shortcuts" | scripts `search-narrows`, `search-context`, `search-none`; unit `a_row_stays_when_its_action_keys_context_or_terms_contain_the_query_in_any_case` (translations are Strata's) |
 //! | With no match, "No matching shortcuts" wraps and sits centered | script `search-none`; golden `c19-reference-empty` (PNG) |
 //! | Key names match in English and in the interface language… | script `search-locale` (the German words and English terms are data) |
 //! | Searching `ctrl+0` finds the "Ctrl++ / − / 0" row, and `1-9` finds… | scripts `search-ranges`, `search-digits`; unit `minus_and_en_dash_read_as_a_typed_hyphen` |
-//! | The category list shows All and each section with its row count… | script `categories-filter`; golden `c19-reference-category` |
+//! | The category list shows All and each section with its row count… | script `categories-filter`; test `a_category_change_is_announced_once`; golden `c19-reference-category` |
 //! | Tab cycles search, the selected category, and the results… | scripts `tab-cycle`, `tab-cycle-back` |
 //! | Ctrl+B focuses the categories, Ctrl+F the search field, and Ctrl+L the results | scripts `area-keys`, `area-keys-search` |
-//! | In the categories, arrows and h/j/k/l select…, and Home and End… | scripts `category-keys`, `category-home` |
-//! | In the results, arrows, j/k, Page Up, Page Down, Home, and End scroll the list | test `the_results_keys_scroll_the_list_and_the_search_field_scrolls_it_in_place` (scroll offsets aren't in script trees) |
-//! | With the search field focused, Up, Down, Page Up, and Page Down scroll the results without moving focus | script `search-scrolls-results`; the same test |
+//! | In the categories, arrows and h/j/k/l select…, and Home and End… | scripts `category-keys` (its end depends on each of `h j k l`), `category-end`, `category-home` |
+//! | In the results, arrows, j/k, Page Up, Page Down, Home, and End scroll the list | tests `the_results_keys_scroll_the_list_and_the_search_field_scrolls_it_in_place`, `shifted_keys_and_left_and_right_scroll_the_results_as_strata_does` (scroll offsets aren't in script trees) |
+//! | With the search field focused, Up, Down, Page Up, and Page Down scroll the results without moving focus | script `search-scrolls-results`; the same tests (Shift held too) |
 //! | In windows narrower than 1480 px, the header stacks, categories become wrapping pills… | **partial** (deviation: the panel's width): goldens (compact at 960); review scene `c19-reference-wide` |
 //! | A note at the bottom reads "Ctrl+B categories · …"; The note wraps only after a "·" | goldens (a11y name, PNG); unit `the_note_names_the_bound_keys` |
 //! | After the reference's category, search, or list key is rebound, the note names the new key | script `note-rebound` |
@@ -239,6 +247,15 @@
 //!   20 pt rows; press Down; `--tree` shows the viewport's `scroll` offset still 0. A fix:
 //!   `Tx::scroll_by`, or arrows scrolling the focused viewport that overflows, as Page Down does.
 //!   Searched upstream ("scroll_by", "arrow keys scroll", "scroll line"): none.
+//! - **U-C19-2 (draft): Alt with a letter types into a text field on Linux.** Rune's editor
+//!   inserts any `Key::Text`, Alt held or not (`edit/input.rs:92` at the pin), so Alt+d types
+//!   "d" in a focused field, where GTK types nothing and leaves the chord to the window's
+//!   accelerators; an app can't tell an Alt+letter chord from a character Alt (or AltGr)
+//!   produced. Repro, headless: a focused single-line `text_input`; `Runtime::key` with
+//!   `Key::Text("d")` and `Mods { alt: true, .. }`; the field's text is "d". A fix: insert only
+//!   text the platform produced with Alt spent on it (#250's `consumed_mods` would tell), and
+//!   leave an Alt chord whose text is the unmodified key to the app. Searched upstream ("alt
+//!   letter", "Alt+", "alt typing", "mnemonic", "option key text field"): #250 is the nearest.
 //! - Reused: #173 (`Tx::focus`, fixed past the pin), U-C18-1, #328, U-X1-1, U-C6-7, and #203
 //!   (a count change in `virtual_rows` reads every row's key; with 5,000 rows a keystroke and
 //!   its frame took 1.5 to 3 ms in a release build, test
@@ -257,7 +274,7 @@ pub use bar::{
 };
 pub use count::{
     Count, CountWords, DETAILED_SELECTION, FilterCounts, ListWords, Listing, Plural, Selected,
-    SelectionDetails, Template, Template2, decimal_size, summary,
+    SelectionDetails, Template, Template2, decimal_size, grouped, summary,
 };
 pub use marks::{FilterMark, PILL_BORDER_ALPHA, PILL_FILL_ALPHA, pill};
 pub use reference::{ReferenceKeys, ReferenceLabels, ReferenceState, ShortcutReference};

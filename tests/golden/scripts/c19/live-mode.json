@@ -37,77 +37,98 @@
                     {
                       "children": [
                         {
+                          "actions": [
+                            "scroll-up",
+                            "scroll-down",
+                            "set-scroll-offset"
+                          ],
                           "children": [
                             {
                               "actions": [
-                                "click",
-                                "focus"
+                                "scroll-into-view"
                               ],
-                              "description": "34 shortcuts",
-                              "key": "c19-reference-category-0",
-                              "name": "All",
-                              "role": "tab",
-                              "states": [
-                                "selected"
-                              ]
-                            },
-                            {
-                              "actions": [
-                                "click",
-                                "focus"
+                              "children": [
+                                {
+                                  "actions": [
+                                    "click",
+                                    "focus",
+                                    "scroll-into-view"
+                                  ],
+                                  "description": "34 shortcuts",
+                                  "key": "c19-reference-category-0",
+                                  "name": "All",
+                                  "role": "tab",
+                                  "states": [
+                                    "selected"
+                                  ]
+                                },
+                                {
+                                  "actions": [
+                                    "click",
+                                    "focus",
+                                    "scroll-into-view"
+                                  ],
+                                  "description": "17 shortcuts",
+                                  "key": "c19-reference-category-1",
+                                  "name": "List navigation",
+                                  "role": "tab",
+                                  "states": [
+                                    "unselected"
+                                  ]
+                                },
+                                {
+                                  "actions": [
+                                    "click",
+                                    "focus",
+                                    "scroll-into-view"
+                                  ],
+                                  "description": "9 shortcuts",
+                                  "key": "c19-reference-category-2",
+                                  "name": "Files and selection",
+                                  "role": "tab",
+                                  "states": [
+                                    "unselected"
+                                  ]
+                                },
+                                {
+                                  "actions": [
+                                    "click",
+                                    "focus",
+                                    "scroll-into-view"
+                                  ],
+                                  "description": "4 shortcuts",
+                                  "key": "c19-reference-category-3",
+                                  "name": "Places",
+                                  "role": "tab",
+                                  "states": [
+                                    "focused",
+                                    "unselected"
+                                  ]
+                                },
+                                {
+                                  "actions": [
+                                    "click",
+                                    "focus",
+                                    "scroll-into-view"
+                                  ],
+                                  "description": "4 shortcuts",
+                                  "key": "c19-reference-category-4",
+                                  "name": "10xer mode",
+                                  "role": "tab",
+                                  "states": [
+                                    "unselected"
+                                  ]
+                                }
                               ],
-                              "description": "17 shortcuts",
-                              "key": "c19-reference-category-1",
-                              "name": "List navigation",
-                              "role": "tab",
-                              "states": [
-                                "unselected"
-                              ]
-                            },
-                            {
-                              "actions": [
-                                "click",
-                                "focus"
-                              ],
-                              "description": "9 shortcuts",
-                              "key": "c19-reference-category-2",
-                              "name": "Files and selection",
-                              "role": "tab",
-                              "states": [
-                                "unselected"
-                              ]
-                            },
-                            {
-                              "actions": [
-                                "click",
-                                "focus"
-                              ],
-                              "description": "4 shortcuts",
-                              "key": "c19-reference-category-3",
-                              "name": "Places",
-                              "role": "tab",
-                              "states": [
-                                "focused",
-                                "unselected"
-                              ]
-                            },
-                            {
-                              "actions": [
-                                "click",
-                                "focus"
-                              ],
-                              "description": "4 shortcuts",
-                              "key": "c19-reference-category-4",
-                              "name": "10xer mode",
-                              "role": "tab",
-                              "states": [
-                                "unselected"
-                              ]
+                              "key": "c19-reference-categories",
+                              "name": "Categories",
+                              "role": "tab-list"
                             }
                           ],
-                          "key": "c19-reference-categories",
-                          "name": "Categories",
-                          "role": "tab-list"
+                          "role": "scroll-view",
+                          "states": [
+                            "clips"
+                          ]
                         },
                         {
                           "actions": [
@@ -839,7 +860,6 @@
                         },
                         {
                           "key": "c19-reference-status",
-                          "name": "34 shortcuts",
                           "role": "status",
                           "states": [
                             "live-polite"

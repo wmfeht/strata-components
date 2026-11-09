@@ -113,9 +113,22 @@ fn english(one: &'static str, many: &'static str) -> Plural {
         if n == 1 {
             format!("1 {one}")
         } else {
-            format!("{n} {many}")
+            format!("{} {many}", grouped(n))
         }
     })
+}
+
+/// `n` with its digits in groups of three, as Strata's English writes counts ("1,234").
+pub fn grouped(n: usize) -> String {
+    let digits = n.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
 }
 
 impl Default for CountWords {
@@ -128,10 +141,11 @@ impl Default for CountWords {
             selected: Rc::new(|items| format!("{items} selected")),
             breakdown: Rc::new(|files, folders| format!("{files}, {folders}")),
             selected_of: Rc::new(|selected, total| {
+                let selected = grouped(selected);
                 if total == 1 {
                     format!("{selected} of 1 item selected.")
                 } else {
-                    format!("{selected} of {total} items selected.")
+                    format!("{selected} of {} items selected.", grouped(total))
                 }
             }),
             selection_description: Rc::new(|selection| {

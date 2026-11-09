@@ -203,8 +203,12 @@ such event carries only its own flags (`script_mods` in Rune's `tooling/key_name
 Super, and `cmd` is Ctrl off macOS. A pointer event (`tap`, `down`, `drag`) ignores them. To hold
 a modifier through pointer events, use Rune's `{"t": 0.3, "hold": "ctrl"}` event (any of
 `shift`, `ctrl`, `alt`, `super`, `cmd`, joined with `+`), and `{"hold": ""}` to let go (Rune
-`4805095`). It sets the window's held modifiers (what `tx.mods()` reads in a pointer handler),
-not a key's or a wheel's: a key or wheel event sent while one is held has only its own flags.
+`4805095`). It sets the window's held modifiers, not a key's or a wheel's: a key or wheel event
+sent while one is held has only its own flags (`KeyEvent::mods`, the wheel's `mods`), though
+`tx.mods()` reads the held modifiers in any handler, a key's included (every `Tx` starts with
+them, `runtime/frame.rs`). A key with a `"code"`, or a `{"physical": …}` chord, is a physical
+key, which replaces the held modifiers with its own (`runtime/input/physical.rs`): it ends a
+`hold`. A `{"physical": …}` chord then lets its modifiers go.
 
 | Key | Rule |
 | --- | --- |

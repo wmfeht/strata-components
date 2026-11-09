@@ -1,6 +1,7 @@
 //! [`BrowserTabs`]: rune-kit's `TabStrip`, with Strata's look and what a file manager adds,
 //! set over each built tab through `TabItem::decorate`.
 
+use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 use rune::{Color, Cx, El, Mods, Tx, el, row, text};
@@ -369,7 +370,7 @@ struct Dress<S: 'static> {
 
 impl<S: 'static> Dress<S> {
     fn apply(self, tab: El) -> El {
-        let mut tab = tab.label(self.name);
+        let mut tab = tab.label(self.name.clone());
         if let Some(tint) = self.tint {
             tab = tab.fill(tint).radius(PILL_RADIUS);
         }
@@ -380,13 +381,19 @@ impl<S: 'static> Dress<S> {
             tab = tab.child(self.probe.first_marker());
         }
         if let Some(id) = self.active {
-            // A host that changed the active tab from a handler did it after that frame's poll,
-            // and a window at rest may draw no other. The marker's first layout is reported as
-            // queued input, which brings the frame whose tick reveals the tab and retitles the
-            // window (review 2); the report itself changes nothing the view reads.
+            // A host that changed the active tab, or renamed it, from a handler did it after
+            // that frame's poll, and a window at rest may draw no other. The marker is keyed by
+            // the tab's name too, so either mounts a fresh one, whose first layout is reported
+            // as queued input, which brings the frame whose tick reveals the tab and retitles
+            // the window (reviews 2 and 3); the report itself changes nothing the view reads.
+            let version = {
+                let mut h = std::collections::hash_map::DefaultHasher::new();
+                self.name.hash(&mut h);
+                h.finish()
+            };
             let marker = self
                 .probe
-                .active_marker(id)
+                .active_marker(id, version)
                 .on_layout_tx(|_: &mut S, _, tx: &mut rune::Tx| tx.live_only());
             tab = tab.child(marker);
         }

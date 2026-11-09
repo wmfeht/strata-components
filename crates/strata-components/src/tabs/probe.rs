@@ -46,6 +46,12 @@ pub(super) struct Probe {
     wheeled: Rc<Cell<bool>>,
     /// A reveal's jump went out in this frame's tick, so the screen doesn't show it yet.
     revealing: Rc<Cell<bool>>,
+    /// A tab's wheel handler took the current gesture, so Rune hands it every delta of it,
+    /// sideways ones included (`wheel.rs`).
+    owning: Rc<Cell<bool>>,
+    /// Where the wheel's jumps in this frame left the viewport, which the markers report only
+    /// at the next frame.
+    pending: Rc<Cell<Option<f32>>>,
 }
 
 impl Default for Probe {
@@ -60,6 +66,8 @@ impl Default for Probe {
             trailing: Rc::new(Cell::new(0.0)),
             wheeled: Rc::new(Cell::new(false)),
             revealing: Rc::new(Cell::new(false)),
+            owning: Rc::new(Cell::new(false)),
+            pending: Rc::new(Cell::new(None)),
         }
     }
 }
@@ -88,10 +96,11 @@ impl Probe {
             .drawn_rect_into(&self.first)
     }
 
-    /// The marker for the active tab `id`'s slot, which fills it.
-    pub(super) fn active_marker(&self, id: TabId) -> El {
+    /// The marker for the active tab `id`'s slot, which fills it. Its key carries `version`
+    /// (the tab's name, hashed), so a renamed tab mounts a fresh marker.
+    pub(super) fn active_marker(&self, id: TabId, version: u64) -> El {
         self.active_id.set(Some(id));
-        el().key("probe-active")
+        el().key(format!("probe-active-{version:x}"))
             .pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
             .a11y_hidden()
             .drawn_rect_into(&self.active)
@@ -116,9 +125,30 @@ impl Probe {
         self.wheeled.replace(false)
     }
 
-    /// A tick begins a frame: the last frame's jump, if any, now shows.
+    /// A tick begins a frame: the last frame's jumps, if any, now show.
     pub(super) fn frame_begins(&self) {
         self.revealing.set(false);
+        self.pending.set(None);
+    }
+
+    /// Whether a tab's wheel handler holds the current gesture.
+    pub(super) fn owning(&self) -> bool {
+        self.owning.get()
+    }
+
+    pub(super) fn set_owning(&self, on: bool) {
+        self.owning.set(on);
+    }
+
+    /// Where the wheel's next jump starts: where this frame's last one left the viewport, else
+    /// the offset the markers read.
+    pub(super) fn wheel_base(&self) -> f32 {
+        self.pending.get().unwrap_or_else(|| self.offset())
+    }
+
+    /// The wheel jumped the viewport to `to` in this frame.
+    pub(super) fn wheel_jumped(&self, to: f32) {
+        self.pending.set(Some(to));
     }
 
     /// A reveal's jump went out in this frame's tick.

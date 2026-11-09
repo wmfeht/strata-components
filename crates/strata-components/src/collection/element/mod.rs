@@ -441,6 +441,10 @@ impl<S: 'static> Collection<S> {
 
     /// Takes drops: on a folder-like row (`Some(id)`) or the background (`None`, the folder
     /// shown). Folder rows draw the drop highlight while a drag hovers them.
+    ///
+    /// The zones reach the binder ([`Collection::dnd`]) by key (W1's `Dnd::drop_zone_keyed`):
+    /// the background by the collection's key, and a folder row by [`row_key`] with the
+    /// collection's key as its scope, since row keys are unique only inside one collection.
     pub fn on_drop(
         mut self,
         f: impl Fn(&mut S, Option<EntryId>, Dropped, &mut Tx) + 'static,

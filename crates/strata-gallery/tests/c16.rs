@@ -355,6 +355,58 @@ mod c16 {
         );
     }
 
+    // operations/progress/jobs: "Dismiss removes one finished job; Clear finished removes every
+    // finished job": clearing a list of finished jobs leaves it open on "No background jobs.",
+    // closing it sends focus to the host's fallback (the cursor row: the button goes with
+    // the last job), and a later job doesn't pop the list open (review 1, should-fix 1).
+    #[test]
+    fn clearing_every_job_leaves_a_note_then_focus_on_the_fallback_and_the_list_shut() {
+        let mut rt = mount_with("c16-jobs-light", |g| {
+            g.c16.jobs.retain(|r| r.status.is_finished());
+        });
+        tap(&mut rt, "c16-jobs-clear");
+        run(&mut rt, 0.2);
+        assert!(rt.state.c16.jobs.is_empty());
+        // Clear finished went with the rows; Rune hands focus to the list's next control.
+        let focused = rt
+            .elements()
+            .into_iter()
+            .find(|e| e.focused)
+            .and_then(|e| e.key);
+        assert_eq!(focused.as_deref(), Some("c16-jobs-minimize"));
+        let note = element(&rt, "c16-jobs-note").and_then(|e| e.text);
+        assert_eq!(note.as_deref(), Some("No background jobs."));
+        rt.key(KeyEvent {
+            key: Key::Escape,
+            mods: Mods::default(),
+        });
+        run(&mut rt, 0.2);
+        assert!(!rt.state.c16.jobs_ui.is_open());
+        assert!(element(&rt, "c16-jobs").is_none(), "no jobs: no button");
+        let focused = rt
+            .elements()
+            .into_iter()
+            .find(|e| e.focused)
+            .and_then(|e| e.key);
+        assert_eq!(focused.as_deref(), Some("c16-cursor"));
+        rt.state
+            .c16
+            .jobs
+            .push(strata_components::progress_dock::jobs::JobRow::new(
+                9,
+                "Resize images",
+                strata_components::progress_dock::jobs::JobStatus::Running,
+                rt.state.c16.now,
+            ));
+        rt.update(|_, _| {});
+        run(&mut rt, 0.2);
+        assert!(element(&rt, "c16-jobs").is_some());
+        assert!(
+            element(&rt, "c16-jobs-list").is_none(),
+            "a later job doesn't open the list"
+        );
+    }
+
     // operations/progress: "During a copy or move with a known byte total, the bar advances
     // as bytes are written, not only after each item.": the fill and the labels follow every
     // sample through Live values, with no commit between the throttled ones.

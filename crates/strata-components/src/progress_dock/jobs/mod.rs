@@ -163,7 +163,8 @@ impl JobsState {
         tx.wake_after(Duration::ZERO);
     }
 
-    /// Hides the list; no job is cancelled.
+    /// Hides the list; no job is cancelled. A list closed with no jobs stays closed when a
+    /// job comes later.
     pub fn close(&mut self) {
         self.open = false;
         self.due = None;
@@ -240,6 +241,7 @@ pub struct Jobs<S> {
     get_mut: fn(&mut S) -> &mut JobsState,
     rows: fn(&S) -> &[JobRow],
     on_intent: Intent<S>,
+    fallback: Option<String>,
 }
 
 impl<S: 'static> Jobs<S> {
@@ -255,11 +257,20 @@ impl<S: 'static> Jobs<S> {
             get_mut,
             rows,
             on_intent: Rc::new(|_, _, _| {}),
+            fallback: None,
         }
     }
 
     pub fn on_intent(mut self, f: impl Fn(&mut S, JobsIntent, &mut Tx) + 'static) -> Self {
         self.on_intent = Rc::new(f);
+        self
+    }
+
+    /// Where focus goes when the list closes with no jobs left: the button goes with the last
+    /// job, so it can't take focus back. Strata's window falls back to the file list's cursor
+    /// row; pass its key. Without it Rune leaves nothing focused.
+    pub fn return_focus(mut self, key: impl Into<String>) -> Self {
+        self.fallback = Some(key.into());
         self
     }
 
@@ -271,7 +282,9 @@ impl<S: 'static> Jobs<S> {
         let state = (self.get)(s);
         let rows = (self.rows)(s);
         let words = &state.words;
-        let label = indicator(rows, words)?;
+        // While the list is open the button stays, so the list keeps its anchor: emptied by
+        // Clear finished, it reads "No background jobs." until it is closed.
+        let label = indicator(rows, words).or_else(|| state.open.then(|| words.title.clone()))?;
         let k = &look.kit;
         let accent = k.c.text_accent;
         let open = state.open;
@@ -421,7 +434,12 @@ impl<S: 'static> Jobs<S> {
             .max_w(LIST_WIDTH)
             .max_h(LIST_MAX_HEIGHT)
             .min_h(0.0)
-            .focus_return(key.clone())
+            // With no jobs left the button goes once the list closes: focus goes to the host's
+            // fallback instead.
+            .focus_return(match (&self.fallback, rows.is_empty()) {
+                (Some(f), true) => f.clone(),
+                _ => key.clone(),
+            })
             // Escape and a press outside hide it, as Minimize does; no job is cancelled.
             .modal(true, move |s: &mut S| get_mut(s).close())
             .child(header)

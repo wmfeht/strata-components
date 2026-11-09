@@ -546,6 +546,7 @@ pub fn view(g: &Gallery, _cx: &mut Cx<Gallery>) -> El {
         |g: &Gallery| &g.c16.jobs,
     )
     .on_intent(|g: &mut Gallery, intent, _tx: &mut Tx| g.c16.hear_jobs(intent))
+    .return_focus("c16-cursor")
     .build(g, look, &mut layer);
     let base = window(g, look, jobs);
     DockView::new("c16-dock", dock, dock_mut)

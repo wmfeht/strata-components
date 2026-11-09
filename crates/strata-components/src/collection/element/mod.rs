@@ -189,7 +189,7 @@ pub use keys::{
 };
 use lines::LineMap;
 pub use lines::{Group, GroupStyle, GroupedRows, Groups, Lines, OnePerLine};
-pub use row::{ContentSlot, RowCx, RowMarks, RowState, Slot};
+pub use row::{ContentSlot, Describe, RowCx, RowMarks, RowState, Slot};
 pub use seam::{
     Activation, Controllers, Ctx, Effect, Flow, Hit, Intent, KeyController, KeyInput,
     MarqueeController, PointerController, PointerInput, PointerPhase, Region, Settings,
@@ -241,6 +241,7 @@ pub(crate) struct Config<S> {
     icon: Option<Slot<S>>,
     label: Option<Slot<S>>,
     content: Option<ContentSlot<S>>,
+    describe: Option<Describe<S>>,
     rename: Option<RenameFn<S>>,
     marks: Option<MarksFn<S>>,
     regions: Option<RegionFn<S>>,
@@ -316,6 +317,7 @@ impl<S: 'static> Collection<S> {
                 icon: None,
                 label: None,
                 content: None,
+                describe: None,
                 rename: None,
                 marks: None,
                 regions: None,
@@ -422,6 +424,12 @@ impl<S: 'static> Collection<S> {
     /// the label.
     pub fn content(mut self, slot: ContentSlot<S>) -> Self {
         self.cfg.content = Some(slot);
+        self
+    }
+
+    /// Each row's accessible description, read after its name. By default, none.
+    pub fn describe(mut self, describe: Describe<S>) -> Self {
+        self.cfg.describe = Some(describe);
         self
     }
 

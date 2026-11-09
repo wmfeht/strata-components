@@ -2,6 +2,7 @@
 //! controllers, effects and intents, what the host hears, memoized rows, virtualization,
 //! position restore and what assistive technology reads.
 
+mod describe;
 mod fixture;
 mod perf;
 

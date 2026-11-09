@@ -82,6 +82,7 @@ pub struct RowCx<'a> {
 type BuildFn<S> = Rc<dyn Fn(&S, &RowCx<'_>) -> El>;
 type ContentFn<S> = Rc<dyn Fn(&S, &RowCx<'_>, El, El) -> El>;
 type VersionFn<S> = Rc<dyn Fn(&S, &RowCx<'_>) -> u64>;
+type DescribeFn<S> = Rc<dyn Fn(&S, &RowCx<'_>) -> Option<String>>;
 
 /// A row part the host or the view builds: an icon or thumbnail (C25), a label (matched
 /// text), or a rename editor (C5).
@@ -175,6 +176,47 @@ impl<S: 'static> ContentSlot<S> {
     }
 }
 
+/// A row's accessible description, read after its name (the entry's): what a slot shows that
+/// assistive technology doesn't hear, such as the archive preview's file sizes (C14b). `None`
+/// gives the row none. Versioned as a [`Slot`] is.
+///
+/// Used by: C14b.
+pub struct Describe<S> {
+    pub(super) build: DescribeFn<S>,
+    pub(super) version: Option<VersionFn<S>>,
+}
+
+impl<S> Clone for Describe<S> {
+    fn clone(&self) -> Self {
+        Self {
+            build: self.build.clone(),
+            version: self.version.clone(),
+        }
+    }
+}
+
+impl<S: 'static> Describe<S> {
+    /// A description from `build`, built again whenever `version` changes (see [`Slot`] on
+    /// versions).
+    pub fn new(
+        version: impl Fn(&S, &RowCx<'_>) -> u64 + 'static,
+        build: impl Fn(&S, &RowCx<'_>) -> Option<String> + 'static,
+    ) -> Self {
+        Self {
+            build: Rc::new(build),
+            version: Some(Rc::new(version)),
+        }
+    }
+
+    /// A description from the row's [`RowCx`] alone.
+    pub fn pure(build: impl Fn(&S, &RowCx<'_>) -> Option<String> + 'static) -> Self {
+        Self {
+            build: Rc::new(build),
+            version: None,
+        }
+    }
+}
+
 /// The width of a row's outline (the cursor, a drop target, the Enter target): a hairline,
 /// as Strata draws them (`outline: 1px`, `src/style.css`). No look token sizes outlines.
 const OUTLINE: f32 = 1.0;
@@ -232,6 +274,7 @@ pub(super) fn config_key<S>(cfg: &Config<S>) -> u64 {
     cfg.icon.is_some().hash(&mut h);
     cfg.label.is_some().hash(&mut h);
     cfg.content.is_some().hash(&mut h);
+    cfg.describe.is_some().hash(&mut h);
     h.finish()
 }
 
@@ -310,6 +353,10 @@ fn build_item<S: 'static>(cfg: &Rc<Config<S>>, frame: &Frame, s: &S, index: usiz
             .and_then(|v| v.version.as_ref())
             .map(|f| f(s, &rcx)),
         cfg.content
+            .as_ref()
+            .and_then(|v| v.version.as_ref())
+            .map(|f| f(s, &rcx)),
+        cfg.describe
             .as_ref()
             .and_then(|v| v.version.as_ref())
             .map(|f| f(s, &rcx)),
@@ -402,6 +449,9 @@ fn item<S: 'static>(cfg: &Rc<Config<S>>, frame: &Frame, s: &S, rcx: &RowCx<'_>) 
     };
     if frame.per_line > 1 || frame.grouped {
         outer = outer.position_in_set(rcx.index + 1, frame.len);
+    }
+    if let Some(description) = cfg.describe.as_ref().and_then(|d| (d.build)(s, rcx)) {
+        outer = outer.description(description);
     }
     if cfg.read_only {
         return outer;

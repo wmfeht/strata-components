@@ -4,6 +4,9 @@
 use std::rc::Rc;
 
 use strata_kit::icons::IconName;
+use strata_kit::look::Look;
+
+use super::view::{height, width};
 
 /// An action's id, chosen by the host: what [`super::MenuIntent::Activate`] hands back.
 pub type ActionId = Rc<str>;
@@ -173,8 +176,10 @@ impl Item {
 /// menus stay inside the window (U14).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ChooserMinimum {
-    /// Wide enough that a submenu has room beside its menu wherever the menu opens:
-    /// `3 × width + 16`. Required.
+    /// Wide enough that each submenu has room beside its menu wherever the menu opens: the
+    /// menu's width plus twice the submenu's, plus 16 pt, for the widest such pair (the menu
+    /// slides to stay in, and the submenu needs its width free on one side of it). With no
+    /// submenus, the widest menu plus 16 pt. Required.
     pub width: f32,
     /// The tallest submenu plus 16 pt: submenus never shrink or scroll. Required.
     pub height: f32,
@@ -183,52 +188,45 @@ pub struct ChooserMinimum {
     pub unscrolled_height: f32,
 }
 
-/// rune-kit's compact menu at the pinned rev (`menu.rs`): 28 pt rows and labels, a 1 pt
-/// separator with 2 pt either side, 2 pt of padding top and bottom.
-const ROW: f32 = 28.0;
-const SEPARATOR: f32 = 5.0;
-const PADDING: f32 = 4.0;
 /// What a menu keeps from the window's edges, twice (`runtime/anchor.rs`).
 const MARGINS: f32 = 16.0;
 
-/// The chooser's minimum size for `menus`, the menus it can open, at `width`: the widest
-/// menu that has a submenu, as drawn (rune-kit's compact menus are 160 pt at least).
+/// The chooser's minimum size for `menus`, the menus it can open, each menu and submenu
+/// measured as [`super::ContextMenu`] draws it in `look`.
 ///
-/// The rule is S1's (Q5, `docs/decisions/S1-linux-window.md`). Tiling compositors ignore a
-/// window's minimum size, so a tiled chooser can still be smaller.
-pub fn chooser_minimum(menus: &[MenuModel], width: f32) -> ChooserMinimum {
-    let mut submenu: f32 = 0.0;
-    let mut menu: f32 = 0.0;
+/// The rule is S1's (Q5, `docs/decisions/S1-linux-window.md`), for menus of different
+/// widths. Tiling compositors ignore a window's minimum size, so a tiled chooser can still be
+/// smaller.
+pub fn chooser_minimum(menus: &[MenuModel], look: &Look) -> ChooserMinimum {
+    let mut need = Need::default();
     for m in menus {
-        menu = menu.max(height(&m.header, &m.sections));
-        for item in items(&m.sections) {
-            submenu = submenu.max(submenu_height(item));
-        }
+        let w = width(look, &m.header, &m.sections);
+        need.width = need.width.max(w + MARGINS);
+        need.menu = need.menu.max(height(look, &m.header, &m.sections));
+        need.submenus(look, w, &m.sections);
     }
     ChooserMinimum {
-        width: 3.0 * width + MARGINS,
-        height: submenu + MARGINS,
-        unscrolled_height: menu + MARGINS,
+        width: need.width,
+        height: need.submenu + MARGINS,
+        unscrolled_height: need.menu + MARGINS,
     }
 }
 
-fn submenu_height(item: &Item) -> f32 {
-    let Some(sections) = &item.submenu else {
-        return 0.0;
-    };
-    items(sections).fold(height(&[], sections), |h, i| h.max(submenu_height(i)))
+#[derive(Default)]
+struct Need {
+    width: f32,
+    menu: f32,
+    submenu: f32,
 }
 
-/// A menu's drawn height: what `super::view` lays out for it.
-fn height(header: &[String], sections: &[Section]) -> f32 {
-    let mut h = PADDING + ROW * header.len() as f32;
-    let mut first = header.is_empty();
-    for s in sections.iter().filter(|s| !s.items.is_empty()) {
-        if !first {
-            h += SEPARATOR;
+impl Need {
+    /// The submenus of a menu `parent` wide, and theirs.
+    fn submenus(&mut self, look: &Look, parent: f32, sections: &[Section]) {
+        for sub in items(sections).filter_map(|i| i.submenu.as_deref()) {
+            let w = width(look, &[], sub);
+            self.width = self.width.max(parent + 2.0 * w + MARGINS);
+            self.submenu = self.submenu.max(height(look, &[], sub));
+            self.submenus(look, w, sub);
         }
-        first = false;
-        h += ROW * (s.items.len() + usize::from(s.label.is_some())) as f32;
     }
-    h
 }

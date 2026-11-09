@@ -26,6 +26,8 @@ struct Host {
     undo: bool,
     /// Field 0 has gone (its entry was deleted mid-rename, say).
     gone: bool,
+    /// The window's Ctrl+A ran: the view's Select All, as Strata binds it.
+    selected_all: bool,
 }
 
 impl Host {
@@ -42,6 +44,7 @@ impl Host {
             closed: 0,
             undo: false,
             gone: false,
+            selected_all: false,
         }
     }
 }
@@ -131,9 +134,19 @@ fn poll(s: &mut Host, _: f64, _: &mut rune::Tx) -> bool {
     fields(s).check(s)
 }
 
+/// The window's keys: Ctrl+A selects everything in the view, as Strata's binding does.
+fn app_key(s: &mut Host, ev: &KeyEvent, _: &mut rune::Tx) -> bool {
+    if ev.is_command('a') {
+        s.selected_all = true;
+        return true;
+    }
+    false
+}
+
 fn runtime() -> Runtime<Host> {
     let mut rt = Runtime::new(Host::new(), view, (W, H), Env::new(false, 1.0));
     rt.poll = Some(poll);
+    rt.on_key = Some(app_key);
     rt.frame(0.0);
     rt.frame(1.0 / 60.0);
     rt
@@ -279,15 +292,6 @@ fn an_empty_section_draws_no_separator_or_label() {
     );
 }
 
-#[test]
-fn the_chooser_minimum_fits_three_menus_across_and_the_tallest_submenu() {
-    let m = chooser_minimum(&[model()], 160.0);
-    assert_eq!(m.width, 496.0, "S1's 3 × 160 + 16");
-    assert_eq!(m.height, 2.0 * 28.0 + 4.0 + 16.0, "the two-row submenu");
-    // Two header lines, then 2 + 2 + 3 rows (a label among them), three separators.
-    assert_eq!(m.unscrolled_height, 4.0 + 28.0 * 9.0 + 5.0 * 3.0 + 16.0);
-}
-
 // --- State ---
 
 #[test]
@@ -384,6 +388,10 @@ fn ctrl_a_leaves_the_menu_open() {
     );
     assert!(rt.state.menu.is_open());
     assert_eq!(focused(&rt).as_deref(), Some("m-item3"));
+    assert!(
+        !rt.state.selected_all,
+        "the window's Select All didn't run under the menu"
+    );
 }
 
 #[test]
@@ -866,4 +874,143 @@ fn with_a_keyboard_opened_submenu_a_press_outside_both_closes_the_whole_menu() {
     step(&mut rt);
     assert!(!rt.state.menu.is_open(), "the whole menu closed");
     assert_eq!(rt.state.dismissed, 1);
+}
+
+/// A parent about 200 pt wide whose submenu is wider, about 300 pt, with described rows.
+fn wide_submenu() -> MenuModel {
+    MenuModel::new().section(Section::new([
+        Item::new("open", "Open the selected file"),
+        Item::new("with", "Open With…").description("Looking for apps…"),
+        Item::submenu(
+            "send",
+            "Send to",
+            [Section::new([
+                Item::new("a", "A compressed archive in the same folder as it"),
+                Item::new("b", "Bluetooth device").description("Pair a device first, in Settings"),
+            ])],
+        ),
+    ]))
+}
+
+fn open_wide(rt: &mut Runtime<Host>) -> (ElementInfo, ElementInfo) {
+    rt.update(|s, _| {
+        s.menu.open(
+            MenuTarget::Background,
+            Point::new(20.0, 20.0),
+            wide_submenu(),
+        );
+        s.menu.open_submenu(&[2]);
+    });
+    step(rt);
+    let top = live(rt, "m-menu").expect("the menu");
+    let sub = live(rt, "m-item2-sub-menu").expect("the submenu");
+    (top, sub)
+}
+
+#[test]
+fn the_chooser_minimum_leaves_room_for_a_wider_submenu_on_either_side() {
+    let mut rt = runtime();
+    let (top, sub) = open_wide(&mut rt);
+    let (tw, sw) = (top.rect[2], sub.rect[2]);
+    assert!(sw > tw + 50.0, "the submenu is the wider: {tw} {sw}");
+    let m = chooser_minimum(&[wide_submenu()], &rt.state.look);
+    // The menu slides to stay in; the submenu needs its width free on one side of it.
+    assert_eq!(m.width, tw + 2.0 * sw + 16.0);
+}
+
+#[test]
+fn the_chooser_minimum_counts_described_rows_at_their_height() {
+    let mut rt = runtime();
+    let (top, sub) = open_wide(&mut rt);
+    let m = chooser_minimum(&[wide_submenu()], &rt.state.look);
+    assert_eq!(m.unscrolled_height, top.rect[3] + 16.0);
+    assert_eq!(m.height, sub.rect[3] + 16.0);
+}
+
+#[test]
+fn an_empty_fields_menu_has_select_all_insensitive() {
+    let (mut rt, _) = with_clipboard(None);
+    rt.update(|s, _| s.edit = TextEdit::new(""));
+    step(&mut rt);
+    secondary(&mut rt, "field");
+    assert_eq!(enabled(&rt)[4], ("Select All".to_owned(), false));
+}
+
+#[test]
+fn an_anchor_past_the_viewports_side_is_held_inside_it() {
+    // Rows wider than the viewport (a scrolled List): the right edge is off to the side, so
+    // the menu opens at the viewport's edge instead.
+    let src = listing(20);
+    let rows = UniformRows::new(20, 30.0, 500.0);
+    let visible = Rect::new(0.0, 0.0, 300.0, 200.0);
+    let mut sel = Selection::new();
+    sel.select_only(&src, 1);
+    let a = keyboard_anchor(
+        &src,
+        &sel,
+        &rows,
+        visible,
+        Point::new(10.0, 0.0),
+        AnchorEdge::Right,
+    );
+    assert_eq!(a.at, Point::new(310.0, 45.0));
+}
+
+#[test]
+fn paste_into_a_field_rune_never_edited_keeps_one_line() {
+    // The field was never focused or typed in. Rune's focus sync gives every mounted field its
+    // line mode when the menu takes the keyboard, so `TextEdit::paste` drops the line break.
+    let (mut rt, _) = with_clipboard(Some("two\nlines"));
+    secondary(&mut rt, "field");
+    tap(&mut rt, "f-item2");
+    step(&mut rt);
+    assert_eq!(rt.state.edit.text, "hello worldtwolines");
+}
+
+#[test]
+fn a_held_menu_key_opens_one_menu() {
+    // The menu takes the keyboard on the first press, so repeats reach it, not the collection;
+    // but a host whose policy opens no menu for a target leaves the keyboard on the collection,
+    // where a held key would ask again on every repeat.
+    use crate::collection::element::{Ctx, Effect, KeyController, KeyInput};
+    let src = listing(5);
+    let rows = UniformRows::new(5, 30.0, 300.0);
+    let mut sel = Selection::new();
+    sel.select_only(&src, 1);
+    let mut keys = MenuKeys::alone(AnchorEdge::Center);
+    let ev = KeyEvent {
+        key: Key::ContextMenu,
+        mods: Mods::default(),
+    };
+    let asks = |repeat: bool, keys: &mut MenuKeys, sel: &mut Selection| {
+        let mut input = KeyInput::new(&ev);
+        input.repeat = repeat;
+        let mut cx = Ctx::new(&src, &rows, Rect::new(0.0, 0.0, 300.0, 150.0), 0.0, sel);
+        keys.key(&input, &mut cx);
+        cx.effects()
+            .iter()
+            .filter(|e| matches!(e, Effect::Intent(_)))
+            .count()
+    };
+    assert_eq!(asks(false, &mut keys, &mut sel), 1);
+    assert_eq!(
+        asks(true, &mut keys, &mut sel),
+        0,
+        "a repeat asks for nothing"
+    );
+}
+
+#[test]
+fn a_paste_lands_only_in_the_edit_it_was_asked_for() {
+    // The field changed (a new rename in the same slot, say) while the clipboard read was out.
+    let (mut rt, _) = with_clipboard(Some("pasted"));
+    secondary(&mut rt, "field");
+    let [x, y, w, h] = live(&rt, "f-item2").unwrap().rect;
+    rt.pointer_down(x + w / 2.0, y + h / 2.0);
+    rt.frame(1.0 / 60.0);
+    rt.pointer_up(x + w / 2.0, y + h / 2.0);
+    rt.frame(1.0 / 60.0);
+    rt.update(|s, _| s.edit = TextEdit::new("another name"));
+    step(&mut rt);
+    assert_eq!(rt.state.edit.text, "another name");
 }

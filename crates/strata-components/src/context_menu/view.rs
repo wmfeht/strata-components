@@ -348,7 +348,7 @@ fn renumber(rows: Vec<Row>, key: &str, shift: usize) -> Vec<Row> {
 
 /// How wide a compact rune-kit menu must be to show `header` and `sections` whole: each
 /// row's parts as `MenuItem::build` lays them out (5d421fd), plus the list's padding.
-fn width(look: &Look, header: &[String], sections: &[Section]) -> f32 {
+pub(super) fn width(look: &Look, header: &[String], sections: &[Section]) -> f32 {
     use rune::TextStyle;
     let k = &look.kit;
     let measure = |t: &str, style: TextStyle| rune::text::measure(t, &[], style, None).0.ceil();
@@ -385,3 +385,31 @@ fn width(look: &Look, header: &[String], sections: &[Section]) -> f32 {
     // The list's 2 pt padding either side.
     (w + 4.0).clamp(MIN_WIDTH, MAX_WIDTH)
 }
+
+/// How tall a compact rune-kit menu of `header` and `sections` is, as `Menu` and
+/// `MenuItem::build` lay it out (5d421fd): 28 pt rows and labels, a described row as tall as
+/// its two lines and 6 pt above and below them, a 1 pt separator with 2 pt either side, and
+/// 2 pt of padding top and bottom.
+pub(super) fn height(look: &Look, header: &[String], sections: &[Section]) -> f32 {
+    let ty = &look.kit.ty;
+    let described = (12.0 + ty.ui_compact.line_px() + 2.0 + ty.small.line_px()).max(ROW);
+    let sections: Vec<&Section> = sections.iter().filter(|s| !s.items.is_empty()).collect();
+    let separators =
+        sections.len().saturating_sub(1) + usize::from(!header.is_empty() && !sections.is_empty());
+    let labels = header.len() + sections.iter().filter(|s| s.label.is_some()).count();
+    let rows: f32 = sections
+        .iter()
+        .flat_map(|s| s.items.iter())
+        .map(|i| {
+            if i.description.is_some() {
+                described
+            } else {
+                ROW
+            }
+        })
+        .sum();
+    4.0 + ROW * labels as f32 + rows + 5.0 * separators as f32
+}
+
+/// A compact row's height, and a group label's.
+const ROW: f32 = 28.0;

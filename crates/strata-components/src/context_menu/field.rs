@@ -110,6 +110,9 @@ struct Open<F> {
     field: F,
     at: Point,
     clipboard: Clipboard,
+    /// Whether the field had a step to undo and one to redo when the menu opened. Nothing
+    /// edits it while the menu holds the keyboard.
+    history: (bool, bool),
 }
 
 impl<F> Default for FieldMenuState<F> {
@@ -149,18 +152,20 @@ impl<F: Copy + PartialEq> FieldMenuState<F> {
         self.open.take().map(|o| o.field)
     }
 
-    /// Opens field `field`'s menu at window point `at` without reading the clipboard, so
-    /// Paste stays sensitive until [`Self::clipboard_known`]. [`FieldMenu::open`] reads it.
+    /// Opens field `field`'s menu at window point `at` without reading the clipboard or the
+    /// field's history, so Paste stays sensitive until [`Self::clipboard_known`] and Undo and
+    /// Redo are insensitive. [`FieldMenu::open`] reads both.
     pub fn open(&mut self, field: F, at: Point) {
-        self.open_serial(field, at);
+        self.open_serial(field, at, (false, false));
     }
 
-    fn open_serial(&mut self, field: F, at: Point) -> u64 {
+    fn open_serial(&mut self, field: F, at: Point, history: (bool, bool)) -> u64 {
         self.serial += 1;
         self.open = Some(Open {
             field,
             at,
             clipboard: Clipboard::Unknown,
+            history,
         });
         self.serial
     }
@@ -223,7 +228,6 @@ pub struct FieldMenu<S, F> {
     edit_mut: EditMut<S, F>,
     edit: EditRef<S, F>,
     labels: FieldLabels,
-    single_line: bool,
     editable: bool,
     undo: bool,
     changed: Option<Changed<S, F>>,
@@ -248,7 +252,6 @@ impl<S: 'static, F: Copy + PartialEq + 'static> FieldMenu<S, F> {
             edit_mut,
             edit,
             labels: FieldLabels::default(),
-            single_line: true,
             editable: true,
             undo: false,
             changed: None,
@@ -260,13 +263,6 @@ impl<S: 'static, F: Copy + PartialEq + 'static> FieldMenu<S, F> {
     /// The menu's words.
     pub fn labels(mut self, labels: FieldLabels) -> Self {
         self.labels = labels;
-        self
-    }
-
-    /// A multi-line field: pasted line breaks stay. Single-line fields (the default) drop
-    /// control characters from a paste, as Rune's own single-line paste does.
-    pub fn multi_line(mut self) -> Self {
-        self.single_line = false;
         self
     }
 
@@ -289,9 +285,10 @@ impl<S: 'static, F: Copy + PartialEq + 'static> FieldMenu<S, F> {
         self
     }
 
-    /// Pastes `text` (the clipboard's, control characters dropped for a single-line field)
-    /// itself, in place of `TextEdit::paste` and [`FieldMenu::on_change`]: for a field whose
-    /// own paste filters text, as C5's editor does.
+    /// Pastes `text` (the clipboard's) itself, in place of `TextEdit::paste` and
+    /// [`FieldMenu::on_change`]: for a field whose own paste filters text, as C5's editor does.
+    /// `TextEdit::paste` keeps a single-line field on one line: Rune gives every mounted field
+    /// its line mode when the menu takes the keyboard.
     pub fn on_paste(mut self, f: impl Fn(&mut S, F, &str, &mut Tx) + 'static) -> Self {
         self.pasted = Some(Rc::new(f));
         self
@@ -326,10 +323,15 @@ impl<S: 'static, F: Copy + PartialEq + 'static> FieldMenu<S, F> {
     /// `RenameIntent::FieldMenu { id, at }`. A field that isn't there opens nothing.
     pub fn open(&self, s: &mut S, field: F, at: Point, tx: &mut Tx) {
         self.check(s);
-        if (self.edit)(s, field).is_none() {
+        let Some(e) = (self.edit)(s, field) else {
             return;
-        }
-        let serial = (self.get_mut)(s).open_serial(field, at);
+        };
+        let history = if self.undo {
+            history(e)
+        } else {
+            (false, false)
+        };
+        let serial = (self.get_mut)(s).open_serial(field, at, history);
         let get_mut = self.get_mut;
         tx.read_clipboard(move |s: &mut S, content, _| {
             get_mut(s).clipboard_read(serial, !content.text().is_empty());
@@ -352,7 +354,7 @@ impl<S: 'static, F: Copy + PartialEq + 'static> FieldMenu<S, F> {
         let Some(edit) = (self.edit)(s, open.field) else {
             return el().absolute(0.0, 0.0);
         };
-        let commands = self.commands(edit, open.clipboard);
+        let commands = self.commands(edit, open.clipboard, open.history);
         let sections = sections(&commands, &self.labels);
         let me = Rc::new(self);
         let (select, dismiss) = (me.clone(), me.clone());
@@ -380,13 +382,17 @@ impl<S: 'static, F: Copy + PartialEq + 'static> FieldMenu<S, F> {
     }
 
     /// The items, in order, each with whether it is sensitive.
-    fn commands(&self, e: &TextEdit, clipboard: Clipboard) -> Vec<(FieldCommand, bool)> {
+    fn commands(
+        &self,
+        e: &TextEdit,
+        clipboard: Clipboard,
+        (undo, redo): (bool, bool),
+    ) -> Vec<(FieldCommand, bool)> {
         let (a, b) = e.range();
         let selected = a != b;
         let secure = e.is_secure();
         let mut out = Vec::new();
         if self.undo {
-            let (undo, redo) = history(e);
             out.push((FieldCommand::Undo, self.editable && undo));
             out.push((FieldCommand::Redo, self.editable && redo));
         }
@@ -405,7 +411,6 @@ impl<S: 'static, F: Copy + PartialEq + 'static> FieldMenu<S, F> {
 
     /// Runs `command` on `field`, then closes the menu with the keyboard back on the field.
     fn run(&self, s: &mut S, field: F, command: FieldCommand, tx: &mut Tx) {
-        let single_line = self.single_line;
         let Some(e) = (self.edit_mut)(s, field) else {
             self.finish(s, field);
             return;
@@ -439,15 +444,19 @@ impl<S: 'static, F: Copy + PartialEq + 'static> FieldMenu<S, F> {
             FieldCommand::Paste => {
                 let (edit_mut, changed, pasted) =
                     (self.edit_mut, self.changed.clone(), self.pasted.clone());
+                let asked = generation(e);
                 tx.read_clipboard(move |s: &mut S, content, tx| {
-                    let text = clean(content.text(), single_line);
-                    if text.is_empty() {
+                    let text = content.text();
+                    // Only into the edit it was asked for: not a field that changed while the
+                    // read was out (another rename in the same slot, say).
+                    let same = edit_mut(s, field).is_some_and(|e| generation(e) == asked);
+                    if text.is_empty() || !same {
                         return;
                     }
                     if let Some(f) = &pasted {
-                        f(s, field, &text, tx);
+                        f(s, field, text, tx);
                     } else if let Some(e) = edit_mut(s, field) {
-                        e.paste(&text);
+                        e.paste(text);
                         if let Some(f) = &changed {
                             f(s, field, tx);
                         }
@@ -496,7 +505,7 @@ fn sections(commands: &[(FieldCommand, bool)], labels: &FieldLabels) -> Vec<Sect
 
 /// Whether `e` has a step to undo and one to redo. Rune exposes neither (draft U-C21-3), so
 /// this undoes and redoes a copy and sees whether the text or selection moved. It copies the
-/// history once, when the menu draws.
+/// field once, when its menu opens.
 fn history(e: &TextEdit) -> (bool, bool) {
     let moved = |f: fn(&mut TextEdit)| {
         let mut c = e.clone();
@@ -506,16 +515,12 @@ fn history(e: &TextEdit) -> (bool, bool) {
     (moved(TextEdit::undo), moved(TextEdit::redo))
 }
 
-/// `text` as a single-line field takes it: control characters (tabs, line breaks) and the
-/// line and paragraph separators dropped, as Rune's single-line paste drops them
-/// (`TextEdit::sanitize`). A field's `TextEdit` knows it is single-line only once Rune has
-/// edited it, so the menu doesn't leave it to `paste`.
-fn clean(text: &str, single_line: bool) -> String {
-    if single_line {
-        text.chars()
-            .filter(|c| !c.is_control() && !matches!(c, '\u{2028}' | '\u{2029}'))
-            .collect()
-    } else {
-        text.to_owned()
-    }
+/// What a field holds, as a number: its text and selection. A paste lands only if this is
+/// unchanged since Paste was chosen. Hashed, so a secret isn't kept while the read is out.
+fn generation(e: &TextEdit) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    e.text.hash(&mut h);
+    e.range().hash(&mut h);
+    h.finish()
 }

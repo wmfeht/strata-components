@@ -198,10 +198,13 @@ with a header the runner checks:
 }
 ```
 
-Modifier flags (`shift`, `ctrl`, `alt`, `cmd`) reach key and wheel events only: a pointer event
-(`tap`, `down`, `drag`) ignores them. To hold a modifier through pointer events, use Rune's
-`{"t": 0.3, "hold": "ctrl"}` event (any of `shift`, `ctrl`, `alt`, `super`, `cmd`, joined with
-`+`), and `{"hold": ""}` to let go (Rune `4805095`).
+Modifier flags (`shift`, `ctrl`, `alt`, `cmd`, `logo`) reach key and wheel events only, and each
+such event carries only its own flags (`script_mods` in Rune's `tooling/key_names.rs`): `logo` is
+Super, and `cmd` is Ctrl off macOS. A pointer event (`tap`, `down`, `drag`) ignores them. To hold
+a modifier through pointer events, use Rune's `{"t": 0.3, "hold": "ctrl"}` event (any of
+`shift`, `ctrl`, `alt`, `super`, `cmd`, joined with `+`), and `{"hold": ""}` to let go (Rune
+`4805095`). It sets the window's held modifiers (what `tx.mods()` reads in a pointer handler),
+not a key's or a wheel's: a key or wheel event sent while one is held has only its own flags.
 
 | Key | Rule |
 | --- | --- |

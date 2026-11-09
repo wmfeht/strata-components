@@ -146,10 +146,11 @@ mod tests;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use rune::{Color, Cx, El, GrowthSpec, Key, KeyEvent, ScrollSpec, Tx, col, text};
+use rune::{Cx, El, GrowthSpec, Key, KeyEvent, ScrollSpec, Tx, col, text};
 use strata_kit::look::Look;
 
 use crate::code_view::highlight::CodeBlocks;
+use crate::dialog::FOCUS_RING_WIDTH;
 use crate::scroll::{BarLook, overlay};
 
 pub use find::{Match, Point};
@@ -278,7 +279,8 @@ impl<S: 'static> DocumentView<S> {
             .h_full()
             .min_h(0.0)
             .focusable(true)
-            .focus_ring(0.0, 0.0, Color::TRANSPARENT)
+            // Keyboard focus shows inside the edge: the drawer's slot clips anything outside.
+            .focus_ring(FOCUS_RING_WIDTH, -FOCUS_RING_WIDTH, look.kit.c.border_focus)
             .on_key(move |s: &mut S, ev: &KeyEvent, tx: &mut Tx| {
                 key_in(s, ev, tx, get_mut, &intent)
             });

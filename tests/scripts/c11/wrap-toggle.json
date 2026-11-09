@@ -10,11 +10,6 @@
       "key": "preview-wrap"
     },
     {
-      "t": 0.5,
-      "type": "mark",
-      "name": "unwrapped"
-    },
-    {
       "t": 0.9,
       "type": "tap",
       "key": "preview-wrap"

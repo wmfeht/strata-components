@@ -65,7 +65,8 @@
 //!
 //! **A margin image never evicts one some viewer still wants**: it lands only if it fits once
 //! the images nobody wants are evicted, and is otherwise dropped ([`Why::Budget`]) with nothing
-//! evicted, and not asked for again until the next sync. `pop` asks for a margin key only while
+//! evicted, and not asked for again until room may have appeared (a sync to another viewport, a
+//! larger budget, a viewer going, a relocation). `pop` asks for a margin key only while
 //! the images viewers want, plus the margin requests out (each counted at its step's largest),
 //! leave room for it. Without both, a margin that overflows the budget would load, evict
 //! another margin image, ask for it again and never settle (review round 1, B1: a C3 grid at
@@ -80,9 +81,11 @@
 //!
 //! A viewer's keys rank in three tiers: the viewport in reading order, then the margin the viewer
 //! is scrolling toward, nearest line first, then the margin behind it, nearest first ([`Tier`]).
-//! `pop` walks a ranked list and builds it again only when something it skipped may have changed (a
-//! sync, a result that frees room, an eviction, a failure's wait ending), so an idle `pop` costs
-//! nothing and draining a queue is one pass. Margins are whole lines, [`Settings`]' `margin` of the
+//! `pop` walks a ranked list and builds it again only when something it skipped may have changed:
+//! a sync, a viewer going, new settings, a relocation, a requeue, the switch, a margin request
+//! ending while another waited for room, a wanted image evicted, a failure's wait ending, or a
+//! result landing at a step no longer wanted. So an idle `pop` costs nothing and draining a queue
+//! is one pass. Margins are whole lines, [`Settings`]' `margin` of the
 //! viewport per side. Within a tier, keys never loaded go before keys held at another step; every
 //! viewer's viewport goes before any margin. Keys past every viewer's margin are never asked for,
 //! and requests out for them are cancelled. A result for a cancelled request is dropped, as Strata
@@ -154,8 +157,12 @@
 //!   `on_visible` reaches the store: call [`ThumbnailStore::set_step`] from the zoom's handler.
 //!   A change of display scale alone reaches no handler at all (C14a's draft), so the step
 //!   follows on the next commit that does.
-//! - A zoom waits on old renders: re-steps rank after every first load in their tier, so a
+//! - A zoom waits on old renders: requests already out at the old step finish there, and their
+//!   images show until each is asked for again at the new step (review round 2 fixed these
+//!   being left at the old step); and re-steps rank after every first load in their tier, so a
 //!   grid half loaded at the old step finishes those first.
+//! - After a scroll, the rows the previous sync showed stay protected (for U-C1f-5) until the
+//!   viewport changes again: a view that stands still after one scroll protects both screens.
 //! - No class covers tiles over 128 pt at scale 2: the look's largest class is 256 px, drawn
 //!   larger (W2d may add classes).
 //! - [`Viewport::per_line`] from C3's own count; `sync` from `on_visible` (returning its

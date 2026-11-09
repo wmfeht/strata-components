@@ -134,13 +134,66 @@ fn an_evicted_image_empties_its_handle_in_place_and_shows_the_icon() {
     assert_eq!(before.icon_alpha().get(), 1.0);
 }
 
-#[test]
-fn the_budget_is_never_exceeded_unless_rows_on_screen_alone_exceed_it() {
-    // A fixed pseudo-random run of syncs on two viewers, pops, results of every kind, step
-    // changes, relocations, toggles and budget cuts. After each, the bytes add up, stay in
-    // budget unless the protected images alone are over it, and no image that was protected
-    // before the operation and still is was evicted by it.
-    let mut rng = 0x9e37_79b9_7f4a_7c15_u64;
+/// Checks the store's own bookkeeping against a count from scratch.
+fn check_counts(st: &ThumbnailStore, op: usize) {
+    let inner = st.inner.borrow();
+    let held = |k: &ThumbKey| {
+        inner
+            .entries
+            .get(k)
+            .and_then(|e| e.held)
+            .map_or(0, |h| h.bytes())
+    };
+    let sum: usize = inner
+        .entries
+        .values()
+        .filter_map(|e| e.held)
+        .map(|h| h.bytes())
+        .sum();
+    assert_eq!(sum, inner.bytes, "op {op}: bytes add up");
+    assert_eq!(
+        inner.lru.len(),
+        inner.entries.values().filter(|e| e.held.is_some()).count()
+    );
+    let mut pinned: std::collections::HashSet<ThumbKey> = inner.wanted.keys().copied().collect();
+    pinned.extend(inner.protected.iter().copied());
+    assert_eq!(
+        pinned.iter().map(held).sum::<usize>(),
+        inner.pinned,
+        "op {op}: pinned bytes"
+    );
+    let out: usize = inner.margin_out.values().sum();
+    assert_eq!(out, inner.margin_out_bytes, "op {op}: margin bytes out");
+    for k in inner.margin_out.keys() {
+        assert!(
+            inner.in_flight.contains(k),
+            "op {op}: margin room for no request"
+        );
+    }
+    for k in &inner.in_flight {
+        assert!(
+            matches!(inner.entries[k].job, store::Job::Requested { .. }),
+            "op {op}: in flight with no request"
+        );
+    }
+    let protected = inner.protected_bytes();
+    assert!(
+        inner.bytes <= inner.settings.budget_bytes || inner.bytes == protected,
+        "op {op}: {} bytes over a {} budget with {protected} protected",
+        inner.bytes,
+        inner.settings.budget_bytes
+    );
+}
+
+/// A fixed pseudo-random run of `ops` operations from `seed`: syncs on two viewers, pops,
+/// results of every kind, new steps, relocations, toggles, requeues and new budgets. After
+/// each, the bookkeeping matches a count from scratch, the bytes stay in budget unless the
+/// protected images alone are over it, and no image protected before the operation and still
+/// is was evicted by it. Every 97 operations the view stands still: everything out comes back,
+/// the queue drains in a bounded number of requests, and every wanted key is held at the step
+/// it is wanted at.
+fn fuzz(seed: u64, ops: usize) {
+    let mut rng = seed;
     let mut next = |m: u64| {
         rng ^= rng << 13;
         rng ^= rng >> 7;
@@ -152,7 +205,7 @@ fn the_budget_is_never_exceeded_unless_rows_on_screen_alone_exceed_it() {
     let viewers = [st.viewer(), st.viewer()];
     let mut out: Vec<Ticket> = Vec::new();
     let mut now = 0.0;
-    for step in 0..6000 {
+    for op in 0..ops {
         now += 0.05;
         let protected_before: Vec<ThumbKey> = {
             let inner = st.inner.borrow();
@@ -163,19 +216,15 @@ fn the_budget_is_never_exceeded_unless_rows_on_screen_alone_exceed_it() {
                 .filter(|k| ready(&st, index(*k)))
                 .collect()
         };
-        let op = next(10);
         let mut relocated = false;
-        match op {
+        match next(10) {
             0..=2 => {
                 let v = viewers[next(2) as usize];
                 let start = next(380) as usize;
                 let len = 1 + next(30) as usize;
                 let s = if next(4) == 0 { S8 } else { S4 };
-                st.sync(
-                    v,
-                    &src,
-                    Viewport::new(start..start + len, s).per_line(1 + next(3) as usize),
-                );
+                let view = Viewport::new(start..start + len, s).per_line(1 + next(3) as usize);
+                st.sync(v, &src, view);
             }
             3..=4 => out.extend(st.pop(now).map(|r| r.ticket)),
             5..=6 if !out.is_empty() => {
@@ -195,7 +244,7 @@ fn the_budget_is_never_exceeded_unless_rows_on_screen_alone_exceed_it() {
             7 => {
                 let _ = st.thumb(key(next(400) as usize));
             }
-            8 => match next(4) {
+            8 => match next(6) {
                 0 => {
                     st.set_enabled(next(2) == 0);
                 }
@@ -205,69 +254,88 @@ fn the_budget_is_never_exceeded_unless_rows_on_screen_alone_exceed_it() {
                     relocated = st.relocate(key(next(400) as usize), key(next(500) as usize));
                 }
                 2 => st.requeue_stopped(),
+                3 => {
+                    let v = viewers[next(2) as usize];
+                    st.set_step(v, &src, if next(2) == 0 { S8 } else { S4 });
+                }
+                4 => {
+                    let margin = [0.0, 0.25, 0.5, 1.0][next(4) as usize];
+                    let settings = st.settings().margin(margin);
+                    st.set_settings(settings);
+                }
                 _ => {
                     let budget = (8 + next(60) as usize) * 64;
-                    st.set_settings(Settings {
-                        budget_bytes: budget,
-                        ..st.settings()
-                    });
+                    let settings = st.settings().budget(budget);
+                    st.set_settings(settings);
                 }
             },
             _ => {
                 let _ = st.take_cancelled();
             }
         }
-        let inner = st.inner.borrow();
-        let sum: usize = inner
-            .entries
-            .values()
-            .filter_map(|e| e.held)
-            .map(|h| h.bytes())
-            .sum();
-        assert_eq!(sum, inner.bytes, "op {step}: bytes add up");
-        assert_eq!(
-            inner.lru.len(),
-            inner.entries.values().filter(|e| e.held.is_some()).count()
-        );
-        let protected = inner.protected_bytes();
-        assert!(
-            inner.bytes <= inner.settings.budget_bytes || inner.bytes == protected,
-            "op {step}: {} bytes over a {} budget with {protected} protected",
-            inner.bytes,
-            inner.settings.budget_bytes
-        );
-        drop(inner);
-        if step % 500 == 499 {
-            // The view stands still: what is wanted loads, and the queue drains. A key is asked
-            // for at most twice (a first load and a new step), whatever the budget.
+        check_counts(&st, op);
+        if !relocated {
+            for k in protected_before {
+                let still = st.inner.borrow().protected.contains(&k);
+                let there = st.inner.borrow().entries.contains_key(&k);
+                if still && there {
+                    assert!(ready(&st, index(k)), "op {op}: protected {k:?} evicted");
+                }
+            }
+        }
+        if op % 97 == 96 {
+            // Still: thumbnails on, stops lifted, room for everything; a poll takes work
+            // before the old results come back, then everything is served past any wait.
             st.set_enabled(true);
+            st.requeue_stopped();
+            let budget = st.settings().budget_bytes;
+            let roomy = st.settings().budget(1 << 30);
+            st.set_settings(roomy);
+            out.extend(std::iter::from_fn(|| st.pop(now)).map(|r| r.ticket));
+            for t in out.drain(..) {
+                st.complete(t, image(t.step()), now);
+            }
+            now += 31.0;
             let wanted = st.inner.borrow().wanted.len();
             let mut requests = 0;
             while let Some(r) = st.pop(now) {
                 requests += 1;
                 assert!(
                     requests <= 2 * wanted + 1,
-                    "op {step}: the queue never drains ({wanted} wanted)"
+                    "op {op}: the queue never drains ({wanted} wanted)"
                 );
                 st.complete(r.ticket, image(r.step), now);
             }
-            for t in out.drain(..) {
-                st.complete(t, image(t.step()), now);
-            }
+            check_counts(&st, op);
+            let inner = st.inner.borrow();
+            let stuck: Vec<String> = inner
+                .wanted
+                .iter()
+                .filter(|(k, want)| !inner.entries[k].held.is_some_and(|h| h.step == **want))
+                .map(|(k, want)| {
+                    let e = &inner.entries[k];
+                    format!("{k:?} wanted at {want:?}: held {:?}, {:?}", e.held, e.job)
+                })
+                .collect();
+            assert!(
+                stuck.is_empty(),
+                "seed {seed:x} op {op}: stuck keys {stuck:?}"
+            );
+            drop(inner);
+            let tight = st.settings().budget(budget);
+            st.set_settings(tight);
         }
-        if relocated {
-            continue;
-        }
-        for k in protected_before {
-            let still = st.inner.borrow().protected.contains(&k);
-            let there = st.inner.borrow().entries.contains_key(&k);
-            if still && there {
-                assert!(
-                    ready(&st, index(k)),
-                    "op {step} ({op}): protected {k:?} evicted"
-                );
-            }
-        }
+    }
+}
+
+#[test]
+fn the_budget_holds_and_a_still_view_loads_every_wanted_key() {
+    for seed in [
+        0x9e37_79b9_7f4a_7c15_u64,
+        0x1234_5678_9abc_def1,
+        0xdead_beef_cafe_f00d,
+    ] {
+        fuzz(seed, 6000);
     }
 }
 
@@ -458,6 +526,11 @@ fn a_failed_render_is_not_asked_for_again_for_thirty_seconds() {
         1.0,
         "it keeps its icon"
     );
+    // Scrolled away and back inside the wait: the ranking runs again, and still skips it.
+    st.sync(v, &src, view(5..6));
+    st.sync(v, &src, view(0..1));
+    let nothing: Vec<usize> = drain(&mut st, 10.0).iter().map(|r| index(r.key)).collect();
+    assert!(!nothing.contains(&0), "asked again inside the wait");
     let nothing: Vec<usize> = drain(&mut st, 30.9).iter().map(|r| index(r.key)).collect();
     assert!(!nothing.contains(&0));
     assert_eq!(
@@ -889,4 +962,132 @@ fn a_4k_grid_at_the_default_budget_drains_its_queue() {
     let stats = st.stats();
     assert!(stats.bytes <= stats.budget);
     assert!(st.pop(0.0).is_none(), "and stays drained");
+}
+
+// Review round 2.
+
+#[test]
+fn a_request_out_at_an_old_step_is_asked_again_at_the_new_one() {
+    let mut st = ThumbnailStore::new(Settings::default().margin(0.0));
+    let src = source(10, &[]);
+    let v = st.viewer();
+    st.sync(v, &src, view(0..4));
+    let out = drain(&mut st, 0.0);
+    assert_eq!(out.len(), 4);
+    st.set_step(v, &src, S8);
+    // The host polls while the 4 px requests are still out: nothing new to ask yet.
+    let mut again = drain(&mut st, 0.05);
+    assert!(again.is_empty());
+    for r in &out {
+        st.complete(r.ticket, image(r.step), 0.1);
+    }
+    // The 4 px images show meanwhile; then each is asked for at 8 px.
+    assert!((0..4).all(|i| st.thumb(key(i)).pixels().size() == (4, 4)));
+    again.extend(drain(&mut st, 60.0));
+    let asked: Vec<usize> = again.iter().map(|r| index(r.key)).collect();
+    assert_eq!(asked, vec![0, 1, 2, 3]);
+    assert!(again.iter().all(|r| r.step == S8));
+}
+
+#[test]
+fn a_second_viewer_at_a_larger_step_gets_it_after_the_first_viewers_results_land() {
+    let mut st = ThumbnailStore::new(Settings::default().margin(0.0));
+    let src = source(10, &[]);
+    let (a, b) = (st.viewer(), st.viewer());
+    st.sync(a, &src, view(0..4));
+    let out = drain(&mut st, 0.0);
+    st.sync(b, &src, Viewport::new(0..4, S8));
+    let mut asked: Vec<Request> = drain(&mut st, 0.0);
+    for r in &out {
+        st.complete(r.ticket, image(r.step), 0.1);
+    }
+    asked.extend(drain(&mut st, 0.1));
+    let at8: Vec<usize> = asked
+        .iter()
+        .filter(|r| r.step == S8)
+        .map(|r| index(r.key))
+        .collect();
+    assert_eq!(at8, vec![0, 1, 2, 3], "b's 8 px images asked for");
+}
+
+#[test]
+fn after_new_settings_every_viewer_keeps_its_step() {
+    let mut st = store(1 << 20);
+    let src = source(200, &[]);
+    let (a, b) = (st.viewer(), st.viewer());
+    st.sync(a, &src, Viewport::new(0..4, S8));
+    st.sync(b, &src, Viewport::new(100..104, S8));
+    serve(&mut st, 0.0);
+    let settings = st.settings().budget(2 << 20);
+    st.set_settings(settings);
+    // Another viewer scrolls before a syncs again: a's keys stay wanted at 8 px.
+    st.sync(b, &src, Viewport::new(101..105, S8));
+    let asked = drain(&mut st, 0.0);
+    assert!(
+        asked.iter().all(|r| r.step == S8),
+        "{:?}",
+        asked.iter().map(|r| r.step).collect::<Vec<_>>()
+    );
+    assert!((0..4).all(|i| matches!(st.state(key(i)), State::Ready { step: S8, .. })));
+}
+
+#[test]
+fn a_resync_after_new_settings_still_cancels_what_left() {
+    let mut st = store(1 << 20);
+    let mut src = source(200, &[]);
+    let v = st.viewer();
+    st.sync(v, &src, Viewport::new(0..4, S8));
+    let out = drain(&mut st, 0.0);
+    let settings = st.settings().budget(2 << 20);
+    st.set_settings(settings);
+    src.retain(|e| e.id.get() % 2 == 0);
+    st.resync(v, &src, 2);
+    let cancelled = st.take_cancelled().len();
+    assert!(
+        cancelled > 0 && cancelled < out.len(),
+        "{cancelled} of {} cancelled",
+        out.len()
+    );
+}
+
+/// A margin result dropped for the budget while another viewer fills it.
+fn deferred_margin() -> (ThumbnailStore, ListSource, ViewerId, ViewerId) {
+    let mut st = ThumbnailStore::new(Settings::default().budget(256).margin(1.0));
+    let src = source(100, &[]);
+    let a = st.viewer();
+    st.sync(a, &src, view(10..11));
+    let a_out = drain(&mut st, 0.0);
+    let b = st.viewer();
+    st.sync(b, &src, view(50..54));
+    for r in drain(&mut st, 0.0) {
+        st.complete(r.ticket, image(r.step), 0.0);
+    }
+    let landed: Vec<Landed> = a_out
+        .iter()
+        .map(|r| st.complete(r.ticket, image(r.step), 0.0))
+        .collect();
+    assert!(landed.contains(&Landed::Dropped(Why::Budget)), "{landed:?}");
+    (st, src, a, b)
+}
+
+#[test]
+fn a_deferred_margin_loads_once_the_viewer_filling_the_budget_goes() {
+    let (mut st, src, a, b) = deferred_margin();
+    st.drop_viewer(b);
+    // a stands still: its sync from poll returns at once.
+    st.sync(a, &src, view(10..11));
+    serve(&mut st, 1.0);
+    assert!(ready(&st, 9) && ready(&st, 11), "a's margin loaded");
+}
+
+#[test]
+fn a_deferred_margin_loads_once_the_budget_grows() {
+    let (mut st, _src, _a, _b) = deferred_margin();
+    let settings = st.settings().budget(1 << 20);
+    st.set_settings(settings);
+    serve(&mut st, 1.0);
+    assert!(
+        ready(&st, 9) && ready(&st, 11),
+        "a's margin loaded with no sync"
+    );
 }

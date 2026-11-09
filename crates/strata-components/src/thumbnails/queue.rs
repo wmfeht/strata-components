@@ -110,8 +110,10 @@ pub(crate) struct Queued {
 
 #[derive(Default)]
 pub(crate) struct Viewer {
-    /// The viewport last synced, for the early-out.
+    /// The viewport last synced, for the early-out (and the step its keys are wanted at).
     view: Option<Viewport>,
+    /// The next sync recomputes the lists even for an unchanged viewport (new settings).
+    stale: bool,
     /// The viewport before that one's direction was judged against.
     last: Option<Viewport>,
     direction: Direction,
@@ -122,9 +124,10 @@ pub(crate) struct Viewer {
 }
 
 impl Viewer {
-    /// Forgets the last viewport, so the next sync recomputes it even when it is unchanged.
+    /// Makes the next sync recompute the lists even for an unchanged viewport. The viewport
+    /// itself stays: its keys are still wanted at its step, and a resync still has it.
     pub(crate) fn stale(&mut self) {
-        self.view = None;
+        self.stale = true;
     }
 
     /// Shows `to` wherever this viewer showed `from` (a relocated key), until its next sync.
@@ -168,6 +171,8 @@ impl ThumbnailStore {
         }
         inner.rewant();
         inner.enforce();
+        // What it wanted no longer holds room: margins the budget dropped may fit now.
+        inner.deferred.clear();
     }
 
     /// The direction viewer `v` last scrolled.
@@ -244,9 +249,10 @@ impl ThumbnailStore {
         let Some(Some(w)) = inner.viewers.get_mut(v.0 as usize) else {
             return false;
         };
-        if !force && w.view.as_ref() == Some(&view) {
+        if !force && !w.stale && w.view.as_ref() == Some(&view) {
             return false;
         }
+        w.stale = false;
         if let Some(last) = &w.last
             && last.listing == view.listing
             && last.per_line == view.per_line
@@ -430,6 +436,18 @@ impl Inner {
             .collect();
         for k in stale {
             self.cancel(k);
+        }
+        // A margin key now on screen needs no margin room.
+        let shown: Vec<ThumbKey> = self
+            .margin_out
+            .keys()
+            .copied()
+            .filter(|k| self.protected.contains(k))
+            .collect();
+        for k in shown {
+            if let Some(b) = self.margin_out.remove(&k) {
+                self.margin_out_bytes -= b;
+            }
         }
         self.repin();
         self.dirty = true;

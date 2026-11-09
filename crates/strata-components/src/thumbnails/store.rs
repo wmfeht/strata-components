@@ -197,7 +197,10 @@ pub enum Why {
     /// The image doesn't match its size, is empty, or is larger than the ticket's step: the
     /// key is recorded as failed.
     Invalid,
-    /// The budget is full of rows on screen: the key is asked again after the next sync.
+    /// It wouldn't fit: rows on screen fill the budget, or a margin image could only land by
+    /// evicting an image some viewer still wants. The key isn't asked for again until room may
+    /// have appeared: a sync to another viewport, a larger budget, a viewer going or a
+    /// relocation.
     Budget,
 }
 
@@ -361,6 +364,8 @@ impl ThumbnailStore {
             w.stale();
         }
         inner.enforce();
+        // A larger budget may fit margins it dropped.
+        inner.deferred.clear();
         inner.dirty = true;
     }
 
@@ -507,6 +512,15 @@ impl ThumbnailStore {
         entry.thumb.pixels.set(width, height, rgba);
         entry.thumb.icon_alpha.set(0.0);
         inner.touch(ticket.key);
+        if inner
+            .wanted
+            .get(&ticket.key)
+            .is_some_and(|w| *w != ticket.step)
+        {
+            // Landed at a step no longer wanted (a zoom, or a viewer at another step, while it
+            // was out): it shows until the image at the wanted step lands, so ask for that.
+            inner.dirty = true;
+        }
         if protected {
             Landed::Visible
         } else {
@@ -556,6 +570,8 @@ impl ThumbnailStore {
         }
         inner.rewant();
         inner.enforce();
+        // `to`'s old image (if any) went: margins the budget dropped may fit now.
+        inner.deferred.clear();
         true
     }
 

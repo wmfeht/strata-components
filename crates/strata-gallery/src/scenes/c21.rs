@@ -4,7 +4,7 @@
 //! Work package: `docs/work/phase-1-leaves/C21-context-menus.md`.
 //!
 //! The page is a stand-in pane over a fake Documents folder (40 entries), with a search field
-//! and a rename field over it. The page plays Strata's part: it builds each menu's model from
+//! over it. The page plays Strata's part: it builds each menu's model from
 //! the target (an item, a multi-selection, the background), as Strata's policy would, and
 //! writes what it heard to the status line (`c21-status`).
 //!
@@ -12,17 +12,19 @@
 //! - Menu or Shift+F10 in the list opens it at the cursor's entry (C21's `MenuKeys` around
 //!   C1c's keyboard), or the background menu with the cursor unselected.
 //! - The search field has C21's text menu through its own `on_secondary_press`.
-//! - The rename field stands in for C5's editor until C5 lands: its secondary press sends the
-//!   shape C5's `RenameIntent::FieldMenu { id, at }` has, and the page answers it as a host
-//!   answers C5 (`menu_opened`, then `menu_closed` from the menu's `on_close`).
+//! - F2 (or a slow second click) opens C5's rename editor on the cursor's entry. Its own
+//!   secondary press sends `RenameIntent::FieldMenu { id, at }`, and the page answers it as a
+//!   host does: `RenameState::menu_opened` and the field menu, `menu_closed` from the menu's
+//!   `on_close`, and `FieldMenu::check` from the poll, so a menu whose edit ended closes.
 
-use rune::{Cx, El, KeyEvent, PointerPress, TextEdit, Tx, col, row, text, text_input};
+use rune::{Cx, El, Key, KeyEvent, TextEdit, Tx, col, row, text, text_input};
 use strata_components::collection::element::{Collection, CollectionState, Controllers, Intent};
 use strata_components::context_menu::{
     AnchorEdge, ContextMenu, ContextMenuState, FieldMenu, FieldMenuState, Item, MenuIntent,
     MenuKeys, MenuModel, MenuTarget, Section, keyboard_anchor,
 };
 use strata_components::contract::{EntryId, EntryKind, EntrySource, ListEntry, ListSource, Point};
+use strata_components::rename::{Initial, RenameEditor, RenameIntent, RenameState};
 use strata_kit::icons::IconName;
 
 use crate::{Gallery, Scene};
@@ -38,15 +40,8 @@ pub const FIELD_MENU: &str = "c21-field-menu";
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Field {
     Search,
-    /// The stand-in for C5's rename editor.
+    /// C5's rename editor, while an edit is open.
     Rename,
-}
-
-/// What C5's editor sends for its field menu (`RenameIntent::FieldMenu { id, at }`), as the
-/// stand-in field sends it.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum StandIn {
-    FieldMenu { id: EntryId, at: Point },
 }
 
 /// C21's demo state, held in `Gallery::c21`.
@@ -57,10 +52,8 @@ pub struct Demo {
     pub menu: ContextMenuState,
     pub fields: FieldMenuState<Field>,
     pub search: TextEdit,
-    pub rename: TextEdit,
-    /// The stand-in's `menu_opened` flag: the field losing the keyboard to its menu ends
-    /// nothing while it is set.
-    pub rename_menu: bool,
+    /// C5's editor's state.
+    pub rename: RenameState,
     /// What the page heard last.
     pub status: String,
     /// A keyboard open the scene asks for, run once the list is laid out.
@@ -80,8 +73,7 @@ impl Default for Demo {
             menu: ContextMenuState::new(),
             fields: FieldMenuState::new(),
             search: TextEdit::new(""),
-            rename: TextEdit::new("Notes.md"),
-            rename_menu: false,
+            rename: RenameState::new(),
             status: String::new(),
             open_by_keys: false,
             opens: 0,
@@ -256,12 +248,25 @@ impl Demo {
         );
     }
 
-    /// The stand-in field asked for its menu: what a host does for C5's `FieldMenu` intent,
-    /// besides opening the menu (`RenameState::menu_opened`).
-    fn stand_in(&mut self, intent: StandIn) {
-        let StandIn::FieldMenu { id, .. } = intent;
-        self.rename_menu = true;
-        self.status = format!("Field menu on the rename of {}", self.name_of(id));
+    /// Opens C5's editor on entry `id` and reveals its row.
+    fn begin_rename(&mut self, id: EntryId, tx: &mut Tx) {
+        let Some(index) = self.listing.index_of(id) else {
+            return;
+        };
+        let (name, kind) = (self.name_of(id), self.listing.entry(index).kind);
+        let polled = self.rename.begin(SCOPE, id, &name, kind, Initial::Stem);
+        self.coll.reveal(SCOPE, &self.listing, index, tx);
+        let _ = polled.intents;
+    }
+
+    /// What C5's editor asked, but its field menu: the status line says.
+    fn renamed(&mut self, intent: &RenameIntent) {
+        let old = self.name_of(intent.id());
+        self.status = match intent {
+            RenameIntent::Rename { name, .. } => format!("Rename {old} to {name}"),
+            RenameIntent::Keep { .. } => format!("Kept {old}"),
+            _ => format!("Rename of {old} ended"),
+        };
     }
 }
 
@@ -446,7 +451,30 @@ fn collection() -> Collection<Gallery> {
     )
     .name("Documents")
     .clock(|g: &Gallery| g.c21.clock)
-    .on_intent(|g: &mut Gallery, intent, _| g.c21.heard(intent))
+    .on_intent(|g: &mut Gallery, intent, tx| match intent {
+        Intent::BeginRename { id } => g.c21.begin_rename(id, tx),
+        intent => g.c21.heard(intent),
+    })
+    .rename(
+        |g: &Gallery| g.c21.rename.renaming_in(SCOPE),
+        rename_editor().slot(),
+    )
+}
+
+/// C5's editor. Its field menu is C21's: the host opens it for `RenameIntent::FieldMenu`.
+fn rename_editor() -> RenameEditor<Gallery> {
+    RenameEditor::new(
+        |g: &Gallery| &g.c21.rename,
+        |g: &mut Gallery| &mut g.c21.rename,
+    )
+    .on_intent(|g: &mut Gallery, intent, tx| match intent {
+        RenameIntent::FieldMenu { id, at } => {
+            g.c21.rename.menu_opened();
+            g.c21.status = format!("Field menu on the rename of {}", g.c21.name_of(id));
+            field_menu().open(g, Field::Rename, at, tx);
+        }
+        intent => g.c21.renamed(&intent),
+    })
 }
 
 fn context_menu() -> ContextMenu<Gallery> {
@@ -462,14 +490,16 @@ fn context_menu() -> ContextMenu<Gallery> {
 fn edit_mut(g: &mut Gallery, f: Field) -> Option<&mut TextEdit> {
     Some(match f {
         Field::Search => &mut g.c21.search,
-        Field::Rename => &mut g.c21.rename,
+        Field::Rename if g.c21.rename.is_open() => &mut g.c21.rename.edit,
+        Field::Rename => return None,
     })
 }
 
 fn edit(g: &Gallery, f: Field) -> Option<&TextEdit> {
     Some(match f {
         Field::Search => &g.c21.search,
-        Field::Rename => &g.c21.rename,
+        Field::Rename if g.c21.rename.is_open() => &g.c21.rename.edit,
+        Field::Rename => return None,
     })
 }
 
@@ -486,9 +516,9 @@ fn field_menu() -> FieldMenu<Gallery, Field> {
         g.c21.status = format!("{f:?} now reads \"{text}\"");
     })
     .on_close(|g: &mut Gallery, f| {
-        // C5's `menu_closed`: the stand-in's menu flag drops.
+        // C5's `menu_closed`: the field losing the keyboard ends the edit again.
         if f == Field::Rename {
-            g.c21.rename_menu = false;
+            let _ = g.c21.rename.menu_closed();
             g.c21.status = "The rename's field menu closed".to_owned();
         }
     })
@@ -518,23 +548,6 @@ pub fn view(g: &Gallery, cx: &mut Cx<Gallery>) -> El {
         .color(kit.c.text_base)
         .on_edit(|g: &mut Gallery| &mut g.c21.search)
         .on_secondary_press(field_menu().hook(Field::Search));
-    let rename = text_input(&d.rename, ty)
-        .single_line()
-        .key("c21-rename")
-        .label("Rename (C5 stand-in)")
-        .color(kit.c.text_base)
-        .on_edit(|g: &mut Gallery| &mut g.c21.rename)
-        .on_secondary_press(|g: &mut Gallery, p: PointerPress, tx: &mut Tx| {
-            // The editor's own press sends its intent; the host answers it.
-            let id = EntryId::new(5);
-            let intent = StandIn::FieldMenu {
-                id,
-                at: Point::new(p.x, p.y),
-            };
-            g.c21.stand_in(intent);
-            let StandIn::FieldMenu { at, .. } = intent;
-            field_menu().open(g, Field::Rename, at, tx);
-        });
     let header = row()
         .w_full()
         .h(look.frame.bar)
@@ -548,7 +561,6 @@ pub fn view(g: &Gallery, cx: &mut Cx<Gallery>) -> El {
                 .color(kit.c.text_base),
         )
         .child(field_box(search))
-        .child(field_box(rename))
         .child(
             text(d.status.clone())
                 .key("c21-status")
@@ -558,6 +570,7 @@ pub fn view(g: &Gallery, cx: &mut Cx<Gallery>) -> El {
     let mut layer = Vec::new();
     let menu = context_menu().build(g, look, &mut layer);
     let fmenu = field_menu().build(g, look, &mut layer);
+    layer.extend(rename_editor().message(g, look));
     let page = col()
         .key("c21-page")
         .w_full()
@@ -576,14 +589,31 @@ pub fn view(g: &Gallery, cx: &mut Cx<Gallery>) -> El {
     rune_kit::root(page, layer)
 }
 
-pub fn on_key(_g: &mut Gallery, _key: &KeyEvent, _tx: &mut Tx) -> bool {
-    false
+/// F2: C5's editor on the cursor's entry, as Strata binds it (the field takes F2 itself
+/// while it has the keyboard).
+pub fn on_key(g: &mut Gallery, key: &KeyEvent, tx: &mut Tx) -> bool {
+    let m = key.mods;
+    let plain = !(m.ctrl || m.alt || m.shift || m.logo || m.cmd);
+    if key.key != Key::Function(2) || !plain || g.c21.rename.has_keyboard() {
+        return false;
+    }
+    if let Some(id) = g.c21.coll.selection.cursor() {
+        g.c21.begin_rename(id, tx);
+    }
+    true
 }
 
 pub fn poll(g: &mut Gallery, t: f64, tx: &mut Tx) -> bool {
     g.c21.clock = t;
-    // A field menu whose field went closes (the page's fields never go; C5's editor does).
-    let mut changed = field_menu().check(g);
+    // C5's poll: the edit ends on a blur, or its row leaving the view or the listing.
+    let polled = g.c21.rename.tick(SCOPE, &g.c21.listing, &g.c21.coll);
+    let mut changed = polled.changed;
+    for intent in &polled.intents {
+        g.c21.renamed(intent);
+        changed = true;
+    }
+    // A field menu whose field went (the edit ended) closes, and tells C5's `menu_closed`.
+    changed |= field_menu().check(g);
     // The keyboard-anchor scene opens as MenuKeys opens, once the list has laid out.
     let vp = g.c21.coll.viewport();
     if g.c21.open_by_keys && vp.h > 0.0 {

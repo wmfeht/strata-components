@@ -144,7 +144,7 @@
 //! | A keyboard-opened background menu is not held inside the window… | **Not met** (U14) |
 //! | Menu rows are frameless on the theme surface, framed by a 1 px border, 9 px corners, and an accent glow… | goldens (the 1 px edge is rune-kit's elevation ring; C21's border under it changes nothing visible). **Partial**: rune-kit's elevation shadow stays under the glow |
 //! | Right-click menus in text inputs use the same surface… as file menus… | script `field-edit`; goldens `c21-field`, `c21-field-empty`; unit `a_right_click_on_a_field_…` |
-//! | Text-input menu styling covers the filter and search fields, location entry, inline rename… | script `field-stand-in` (C5's intent's shape). **Partial**: rune-kit's text inputs get none until U-C21-2 (C6's entry, C17, C18, C20); text previews are selectable text, whose menu is Rune's (macOS only) |
+//! | Text-input menu styling covers the filter and search fields, location entry, inline rename… | script `field-rename` and tests `c5s_field_menu_holds_the_edit_open_…`, `an_entry_deleted_under_its_rename_field_menu_…` (C5's real editor on the gallery page). **Partial**: rune-kit's text inputs get none until U-C21-2 (C6's entry, C17, C18, C20); text previews are selectable text, whose menu is Rune's (macOS only) |
 //!
 //! Strata's, not C21's: which items each menu has and in what order (the creation rows, the
 //! opening, clipboard, custom action, compress, customize, removal and Trash groups; Open

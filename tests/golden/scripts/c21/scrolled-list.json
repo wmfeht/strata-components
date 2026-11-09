@@ -26,20 +26,6 @@
                   "value": ""
                 },
                 {
-                  "actions": [
-                    "click",
-                    "focus",
-                    "context-menu",
-                    "set-value",
-                    "replace-selected-text",
-                    "set-text-selection"
-                  ],
-                  "key": "c21-rename",
-                  "name": "Rename (C5 stand-in)",
-                  "role": "text-input",
-                  "value": "Notes.md"
-                },
-                {
                   "key": "c21-status",
                   "name": "Dismissed menu 1 on scan-36.pdf",
                   "role": "label"

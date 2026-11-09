@@ -26,23 +26,6 @@
                   "value": ""
                 },
                 {
-                  "actions": [
-                    "click",
-                    "focus",
-                    "context-menu",
-                    "set-value",
-                    "replace-selected-text",
-                    "set-text-selection"
-                  ],
-                  "key": "c21-rename",
-                  "name": "Rename (C5 stand-in)",
-                  "role": "text-input",
-                  "states": [
-                    "focused"
-                  ],
-                  "value": "Notes.md"
-                },
-                {
                   "key": "c21-status",
                   "name": "The rename's field menu closed",
                   "role": "label"
@@ -105,6 +88,36 @@
                             {
                               "actions": [
                                 "scroll-into-view"
+                              ],
+                              "children": [
+                                {
+                                  "actions": [
+                                    "context-menu",
+                                    "scroll-into-view"
+                                  ],
+                                  "children": [
+                                    {
+                                      "actions": [
+                                        "click",
+                                        "focus",
+                                        "context-menu",
+                                        "set-value",
+                                        "replace-selected-text",
+                                        "set-text-selection",
+                                        "scroll-into-view"
+                                      ],
+                                      "key": "rename-field",
+                                      "name": "Rename",
+                                      "role": "text-input",
+                                      "states": [
+                                        "focused"
+                                      ],
+                                      "value": "Notes.md"
+                                    }
+                                  ],
+                                  "key": "rename",
+                                  "role": "group"
+                                }
                               ],
                               "key": "row-5",
                               "name": "Notes.md",

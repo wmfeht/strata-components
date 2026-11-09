@@ -15,11 +15,6 @@
       "name": "Tab"
     },
     {
-      "t": 0.4,
-      "type": "key",
-      "name": "Tab"
-    },
-    {
       "t": 0.6,
       "type": "key",
       "name": "ContextMenu"

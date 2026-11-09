@@ -67,8 +67,9 @@ mod c21 {
         rt.state.c21.status.clone()
     }
 
+    /// Tab past the search field into the list.
     fn tab_into_the_list(rt: &mut Runtime<Gallery>) {
-        for _ in 0..3 {
+        for _ in 0..2 {
             press(rt, Key::Tab);
         }
     }
@@ -132,21 +133,72 @@ mod c21 {
         assert_eq!(focused(&rt).as_deref(), Some("c21-menu-item4"));
     }
 
-    // The stand-in for C5's editor: its menu flag is set while the field menu is open, and
-    // the menu's close drops it, as `menu_opened` and `menu_closed` would.
-    #[test]
-    fn the_rename_stand_ins_menu_flag_follows_the_field_menu() {
+    /// F2 on Notes.md, then a right-click on C5's field: its field menu is open.
+    fn rename_menu_open() -> Runtime<Gallery> {
         let mut rt = mount("c21-start-light");
-        let [x, y, w, h] = element(&rt, "c21-rename").unwrap().rect;
-        rt.secondary_down(x + w / 2.0, y + h / 2.0);
-        rt.frame(FRAME);
-        rt.secondary_up(x + w / 2.0, y + h / 2.0);
-        run(&mut rt, 0.2);
-        assert!(rt.state.c21.rename_menu);
-        assert!(element(&rt, "c21-field-menu-menu").is_some());
+        tab_into_the_list(&mut rt);
+        press(&mut rt, Key::Function(2));
+        assert!(rt.state.c21.rename.is_open(), "F2 opened C5's editor");
+        let [x, y, w, h] = element(&rt, "rename-field").expect("the field").rect;
+        right_click(&mut rt, x + w / 2.0, y + h / 2.0);
+        assert!(
+            element(&rt, "c21-field-menu-menu").is_some(),
+            "the field menu"
+        );
+        assert_eq!(status(&rt), "Field menu on the rename of Notes.md");
+        rt
+    }
+
+    // C5's editor sends `RenameIntent::FieldMenu`; the host opens C21's field menu and calls
+    // `menu_opened`, so the field losing the keyboard to the menu doesn't end the edit, and
+    // `menu_closed` from the menu's `on_close`.
+    #[test]
+    fn c5s_field_menu_holds_the_edit_open_and_gives_the_keyboard_back() {
+        let mut rt = rename_menu_open();
+        run(&mut rt, 0.3);
+        assert!(
+            rt.state.c21.rename.is_open(),
+            "the menu taking the keyboard isn't a blur"
+        );
         press(&mut rt, Key::Escape);
-        assert!(!rt.state.c21.rename_menu);
-        assert_eq!(focused(&rt).as_deref(), Some("c21-rename"));
+        assert!(element(&rt, "c21-field-menu-menu").is_none());
+        assert!(
+            rt.state.c21.rename.is_open(),
+            "Escape closed the menu, not the edit"
+        );
+        assert_eq!(focused(&rt).as_deref(), Some("rename-field"));
+        assert_eq!(status(&rt), "The rename's field menu closed");
+    }
+
+    // B1 with C5: the entry deleted while its field menu is open ends the edit, and the
+    // page's poll (`FieldMenu::check`) closes the menu and tells `menu_closed`, so it can't
+    // come back over the next rename.
+    #[test]
+    fn an_entry_deleted_under_its_rename_field_menu_closes_the_menu() {
+        use strata_components::collection::selection::{CursorGone, SyncRule};
+        use strata_components::contract::EntryId;
+        let mut rt = rename_menu_open();
+        rt.update(|g, tx| {
+            let d = &mut g.c21;
+            d.listing.retain(|e| e.id != EntryId::new(5));
+            d.coll.sync(
+                strata_gallery::scenes::c21::SCOPE,
+                &d.listing,
+                SyncRule::complete(CursorGone::Neighbor),
+                tx,
+            );
+        });
+        run(&mut rt, 0.3);
+        assert!(
+            !rt.state.c21.rename.is_open(),
+            "the edit ended with its entry"
+        );
+        assert!(!rt.state.c21.fields.is_open(), "and its field menu closed");
+        assert_eq!(status(&rt), "The rename's field menu closed");
+        // The next rename, the same field: no stale menu comes back.
+        press(&mut rt, Key::Function(2));
+        assert!(rt.state.c21.rename.is_open());
+        assert!(element(&rt, "c21-field-menu-menu").is_none());
     }
 
     // browser/context-menu: "Right-clicking an entry anywhere in a long, scrolled list shows

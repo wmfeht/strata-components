@@ -117,7 +117,7 @@ pub struct DocumentState {
     pending: Vec<Request>,
     pub(crate) visible: Range<usize>,
     /// The code block (or diagram, equation) whose Copy button was pressed, and when.
-    pub(crate) copied: Option<(usize, Option<f64>)>,
+    pub(crate) copied: Option<(usize, f64)>,
     pub(crate) bar: Bar,
     colourable: Vec<bool>,
     /// Ctrl+A asked Rune to select everything from a selection that didn't hold it, and the
@@ -305,22 +305,21 @@ impl DocumentState {
     }
 
     /// Runs the host's clock: Copy code goes back to its icon [`COPIED_FOR`] after a press.
-    /// Call it from the host's poll with the poll's clock; true when the view changed. While
-    /// a button shows its check, it asks `tx` for a wake when the check is due to go, so a
-    /// window at rest turns it back too.
-    pub fn tick(&mut self, now: f64, tx: &mut Tx) -> bool {
+    /// Call it from the host's poll with the poll's clock; true when the view changed.
+    ///
+    /// A press stamps the clock of the poll its frame ran (Rune polls before input) and asks
+    /// for a wake [`COPIED_FOR`] later, so that wake's poll finds the time up, on a window at
+    /// rest too; a second press stamps afresh and asks for its own.
+    pub fn tick(&mut self, now: f64) -> bool {
         self.now = now;
-        let Some((_, at)) = &mut self.copied else {
+        let Some((_, at)) = self.copied else {
             return false;
         };
-        let at = *at.get_or_insert(now);
-        let left = COPIED_FOR.as_secs_f64() - (now - at);
         // Within a millisecond counts as due: a wake can land a hair early.
-        if left <= 1e-3 {
+        if COPIED_FOR.as_secs_f64() - (now - at) <= 1e-3 {
             self.copied = None;
             return true;
         }
-        tx.wake_after(std::time::Duration::from_secs_f64(left));
         false
     }
 
@@ -343,7 +342,7 @@ impl DocumentState {
 
     /// A Copy button on `unit` was pressed: it shows its check from the host's last poll.
     pub(crate) fn mark_copied(&mut self, unit: usize) {
-        self.copied = Some((unit, Some(self.now)));
+        self.copied = Some((unit, self.now));
     }
 
     /// Applies the selections and scrolls find has asked for. [`HostedPreview::find`] gets no

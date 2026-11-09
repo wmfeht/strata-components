@@ -522,10 +522,10 @@ fn copy_code_copies_the_block_then_turns_back_after_two_seconds() {
         Some("let a = 1;\nlet b = 2;")
     );
     assert_eq!(label(&rt).as_deref(), Some("Code copied"));
-    rt.update(|h, tx| {
+    rt.update(|h, _| {
         // The press stamped the check with the last poll's clock (none ran here: 0).
-        assert!(!h.doc.tick(1.9, tx), "still copied before 2 s");
-        assert!(h.doc.tick(2.0, tx));
+        assert!(!h.doc.tick(1.9), "still copied before 2 s");
+        assert!(h.doc.tick(2.0));
     });
     settle(&mut rt);
     assert_eq!(label(&rt).as_deref(), Some("Copy code"));
@@ -653,7 +653,7 @@ fn find_maps_folded_matches_back_through_characters_that_change_length() {
 
 /// The host's poll, as Strata's: the document's clock and its queued requests.
 fn host_poll(h: &mut Host, t: f64, tx: &mut Tx) -> bool {
-    let a = h.doc.tick(t, tx);
+    let a = h.doc.tick(t);
     let b = h.doc.flush(tx);
     a | b
 }
@@ -1029,5 +1029,50 @@ fn past_runes_cap_a_shift_click_after_ctrl_a_copies_the_click_not_the_document()
     assert!(
         got.starts_with("unit 0\nunit 1\nunit 2\n") && got.len() < 40,
         "{got:?}"
+    );
+}
+
+#[test]
+fn a_second_copy_press_keeps_the_check_two_seconds_from_itself() {
+    // Each press asks for its own wake: the first one's comes while the second's check still
+    // has time left, and the second's turns it back, on a window at rest.
+    let mut rt = runtime(vec![Unit::new(
+        UnitKind::Code {
+            list_depth: None,
+            language: None,
+        },
+        "let a = 1;",
+    )]);
+    rt.poll = Some(host_poll);
+    settle(&mut rt);
+    let label = |rt: &Runtime<Host>| {
+        rt.elements()
+            .into_iter()
+            .find(|e| is(&e.path, "doc-u0/copy"))
+            .and_then(|e| e.label)
+    };
+    let b = rect(&rt, "doc-u0/copy");
+    let at = (b[0] + b[2] / 2.0, b[1] + b[3] / 2.0);
+    click(&mut rt, at);
+    shell(&mut rt);
+    rt.frame(1.5);
+    shell(&mut rt);
+    click(&mut rt, at);
+    shell(&mut rt);
+    let second = rt.clock;
+    let mut back = None;
+    for _ in 0..10 {
+        let Some(due) = rt.wake_deadline() else { break };
+        rt.frame((due - rt.clock).max(1.0 / 60.0));
+        shell(&mut rt);
+        if label(&rt).as_deref() == Some("Copy code") {
+            back = Some(rt.clock - second);
+            break;
+        }
+    }
+    let back = back.expect("the check turned back on its own");
+    assert!(
+        back >= 1.95,
+        "turned back {back:.3} s after the second press"
     );
 }

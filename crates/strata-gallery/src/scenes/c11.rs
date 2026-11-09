@@ -644,7 +644,7 @@ pub fn poll(g: &mut Gallery, t: f64, tx: &mut Tx) -> bool {
         live.dark = g.dark;
     }
     changed |= live.blocks.poll();
-    changed |= d.doc.tick(t, tx);
+    changed |= d.doc.tick(t);
     changed |= d.doc.flush(tx);
     let selection = tx
         .text_selection()

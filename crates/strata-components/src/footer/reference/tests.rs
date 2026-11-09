@@ -420,3 +420,32 @@ fn a_category_the_data_lost_is_forgotten() {
         "the section's return doesn't choose it again"
     );
 }
+
+/// The panel takes every key it doesn't use wherever focus is in it, an element other than the
+/// categories and the results included (none is focusable today: a press on the header or the
+/// note leaves the search field focused), so nothing reaches the window.
+#[test]
+fn the_panel_takes_keys_with_focus_elsewhere_in_it() {
+    let route = super::keys::Route::<ReferenceState> {
+        get_mut: |s| s,
+        keys: ReferenceKeys::default(),
+        categories: "r-category-".to_owned(),
+        results: "r-results".to_owned(),
+        line_key: Rc::new(|i| format!("r-line-{i}")),
+        lines: Rc::default(),
+    };
+    let mut s = ReferenceState::new();
+    s.open();
+    let mut tx = rune::Tx::default();
+    for ev in [
+        key(Key::Delete, Mods::default()),
+        key(Key::Text("x".into()), Mods::default()),
+        key(Key::Command('v'), ctrl()),
+    ] {
+        assert!(route.panel_key(&mut s, &ev, &mut tx), "{ev:?} is taken");
+    }
+    assert!(!route.panel_key(&mut s, &key(Key::Tab, shift()), &mut tx), "Tab is Rune's");
+    assert!(s.is_open());
+    assert!(route.panel_key(&mut s, &key(Key::Escape, ctrl()), &mut tx));
+    assert!(!s.is_open(), "Escape with a modifier closes");
+}

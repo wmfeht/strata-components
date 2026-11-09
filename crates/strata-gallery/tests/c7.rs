@@ -403,8 +403,10 @@ mod c7 {
     #[test]
     fn a_drag_that_opens_tabs_places_a_gap_and_opens_there() {
         let mut rt = mount_host(host(5));
-        let t4 = rect(&rt, "t-tabs-4");
-        let (x, y) = (t4[0] + t4[2] * 0.75, t4[1] + t4[3] / 2.0);
+        // A quarter into tab 1: before its middle (even once the gap shrinks the tabs), so it
+        // opens at 0, not after the tab it dropped on.
+        let t1 = rect(&rt, "t-tabs-1");
+        let (x, y) = (t1[0] + t1[2] * 0.25, t1[1] + t1[3] / 2.0);
         let zone = zone_at(x, y);
         let offer = local_folders();
         rt.update(|h, tx| {
@@ -412,7 +414,7 @@ mod c7 {
             zone.moved(h, point(x, y), tx);
         });
         run(&mut rt, 1.0);
-        assert_eq!(rt.state.tabs_state.drag.incoming_slot(), Some(4));
+        assert_eq!(rt.state.tabs_state.drag.incoming_slot(), Some(0));
         assert!(
             element(&rt, "tabs-list-incoming").is_some(),
             "the gap shows"
@@ -424,9 +426,14 @@ mod c7 {
             DropData::files(&["/srv/a/".into()]),
             Mods::default(),
         );
-        rt.update(|h, tx| zone.deliver(h, dropped, tx));
+        // Both real binders report the zone's leave before they deliver its drop (Rune's
+        // `runtime/input/drop.rs`, P1's `dnd/window.rs`): W1's `Left` is "left, moved, or dropped".
+        rt.update(|h, tx| {
+            zone.hover(h, DropHover::Left, &offer, tx);
+            zone.deliver(h, dropped, tx);
+        });
         run(&mut rt, 0.5);
-        assert_eq!(opened(&rt.state), [4]);
+        assert_eq!(opened(&rt.state), [0]);
         assert!(
             !rt.state
                 .heard
@@ -439,8 +446,35 @@ mod c7 {
         );
     }
 
+    // The same over the strip's own zone, between two tabs (review 1, B1: the drop's leave
+    // closed the gap, and the drop opened at the end).
+    #[test]
+    fn a_drop_in_the_gap_between_tabs_opens_there_after_its_leave() {
+        let mut rt = mount_host(host(5));
+        let t2 = rect(&rt, "t-tabs-2");
+        let gap = (t2[0] + t2[2] + 2.0, t2[1] + t2[3] / 2.0);
+        let strip = zone_at(gap.0, gap.1);
+        rt.update(|h, tx| {
+            strip.hover(h, DropHover::Accepting, &local_folders(), tx);
+            strip.moved(h, point(gap.0, gap.1), tx);
+        });
+        run(&mut rt, 0.5);
+        assert_eq!(rt.state.tabs_state.drag.incoming_slot(), Some(2));
+        let dropped = Dropped::new(
+            local_folders(),
+            DropData::files(&["/srv/a/".into()]),
+            Mods::default(),
+        );
+        rt.update(|h, tx| {
+            strip.hover(h, DropHover::Left, &local_folders(), tx);
+            strip.deliver(h, dropped, tx);
+        });
+        run(&mut rt, 0.2);
+        assert_eq!(opened(&rt.state), [2]);
+    }
+
     // browser/tabs: "After an Escape-cancelled drag, the strip shows no insertion line": the
-    // binder reports a cancelled drag as a leave.
+    // binder reports a cancelled drag, or one that left the strip, as a leave with no drop.
     #[test]
     fn a_leave_closes_the_gap() {
         let mut rt = mount_host(host(5));
@@ -453,9 +487,24 @@ mod c7 {
         run(&mut rt, 0.3);
         assert!(element(&rt, "tabs-list-incoming").is_some());
         rt.update(|h, tx| zone.hover(h, DropHover::Left, &local_folders(), tx));
+        rt.frame(FRAME);
+        assert!(
+            element(&rt, "tabs-list-incoming").is_none(),
+            "it closes at once"
+        );
         run(&mut rt, 0.5);
-        assert!(element(&rt, "tabs-list-incoming").is_none());
         assert_eq!(rt.state.tabs_state.drag.incoming_slot(), None);
+        // The slot the leave kept for a drop expired: a later drop with no hover of its own
+        // (only headless runs send one) opens at the end, not in the old gap.
+        let t1 = rect(&rt, "t-tabs-1");
+        let strip = zone_at(t1[0] + t1[2] + 2.0, t1[1] + t1[3] / 2.0);
+        let dropped = Dropped::new(
+            local_folders(),
+            DropData::files(&["/srv/a/".into()]),
+            Mods::default(),
+        );
+        rt.update(|h, tx| strip.deliver(h, dropped, tx));
+        assert_eq!(opened(&rt.state), [5]);
     }
 
     // Moving from a tab to the strip's gap beside it: the binder may report the strip's arrival

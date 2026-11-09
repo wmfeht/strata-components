@@ -24,6 +24,21 @@ struct Spring {
     since: Option<f64>,
 }
 
+/// The gap's slot after the zone holding it left. Both real binders report a zone's leave
+/// before they deliver its drop (Rune's `runtime/input/drop.rs`, P1's `dnd/window.rs`): W1's
+/// `Left` means "left, moved, or dropped". So the gap closes at once, as a cancel or a drag
+/// leaving the strip needs, and its slot waits here for the drop that may follow in the same
+/// turn: the drop takes it, the next accepting hover drops it, and so do the ticks after.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct LeftLanding {
+    slot: usize,
+    /// Ticks seen since the leave.
+    ticks: u8,
+}
+
+/// How many ticks a left gap's slot outlives its leave: a frame or two.
+const LEFT_LANDING_TICKS: u8 = 2;
+
 /// Where tab 0 and the strip drew, for the wheel's sideways mapping (`wheel.rs`).
 #[derive(Clone)]
 pub(super) struct WheelProbe {
@@ -63,6 +78,7 @@ pub struct BrowserTabsState {
     open_drag: bool,
     /// The zone whose moves place the incoming gap for a drag that opens tabs.
     incoming_from: Option<DropSite>,
+    left_landing: Option<LeftLanding>,
     spring: Option<Spring>,
     title: Option<String>,
     active: Option<TabId>,
@@ -85,6 +101,7 @@ impl BrowserTabsState {
             drop: None,
             open_drag: false,
             incoming_from: None,
+            left_landing: None,
             spring: None,
             title: None,
             active: None,
@@ -139,6 +156,12 @@ impl BrowserTabsState {
     /// became active (a click, the keyboard, a reopen, a restore).
     pub fn tick(&mut self, now: f64, data: &TabsData<'_>, tx: &mut Tx) -> Polled {
         let mut out = Polled::default();
+        if let Some(left) = self.left_landing.as_mut() {
+            left.ticks += 1;
+            if left.ticks > LEFT_LANDING_TICKS {
+                self.left_landing = None;
+            }
+        }
         if let Some(spring) = self.spring.as_mut() {
             if data.get(spring.id).is_none() || data.active == Some(spring.id) {
                 self.spring = None;
@@ -207,7 +230,12 @@ impl BrowserTabsState {
     pub(super) fn follow_open(&mut self, site: DropSite, over: bool) {
         if over {
             self.incoming_from = Some(site);
+            self.left_landing = None;
         } else if self.incoming_from == Some(site) {
+            self.left_landing = self
+                .drag
+                .incoming_slot()
+                .map(|slot| LeftLanding { slot, ticks: 0 });
             self.incoming_from = None;
             self.drag.set_incoming(None);
         }
@@ -220,9 +248,12 @@ impl BrowserTabsState {
         }
     }
 
-    /// Where a drag that opens tabs lands if it drops now.
+    /// Where a drag that opens tabs lands if it drops now: the open gap, or the one its zone
+    /// just left (see [`LeftLanding`]).
     pub(super) fn landing(&self) -> Option<usize> {
-        self.drag.incoming_slot()
+        self.drag
+            .incoming_slot()
+            .or(self.left_landing.map(|l| l.slot))
     }
 
     /// The drag dropped or was refused: nothing springs, nothing is hovered, the gap closes.
@@ -230,6 +261,7 @@ impl BrowserTabsState {
         self.spring = None;
         self.drop = None;
         self.incoming_from = None;
+        self.left_landing = None;
         self.drag.set_incoming(None);
     }
 }

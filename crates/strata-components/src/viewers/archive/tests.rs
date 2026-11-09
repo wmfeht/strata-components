@@ -312,6 +312,7 @@ mod element {
         archive: ArchiveState,
         look: Look,
         leave: bool,
+        letters: bool,
     }
 
     fn view(s: &App, _cx: &mut Cx<App>) -> El {
@@ -319,7 +320,8 @@ mod element {
             |s: &App| &s.archive,
             |s: &mut App| &mut s.archive,
             |s: &App| &s.look,
-        );
+        )
+        .letters(s.letters);
         if s.leave {
             v = v.on_leave(|_: &mut App, _: &mut Tx| LEFT.with(|l| l.set(l.get() + 1)));
         }
@@ -331,26 +333,31 @@ mod element {
         true
     }
 
-    /// Left at the root, with the tree focused: (keys the window heard, `on_leave` calls).
-    fn left_at_root(leave: bool) -> (u32, u32) {
-        PASSED.with(|p| p.set(0));
-        LEFT.with(|l| l.set(0));
-        let app = App {
-            archive: ArchiveState::new("archive", tree()),
-            look: Look::fallback(false),
-            leave,
-        };
-        let mut rt = Runtime::new(app, view, (420.0, 400.0), Env::new(false, 1.0));
-        rt.on_key = Some(on_key);
-        for _ in 0..20 {
-            rt.frame(1.0 / 60.0);
-        }
-        // Click README.md (a file, so nothing opens) to focus the tree.
+    /// Where Left is pressed.
+    #[derive(Clone, Copy, PartialEq)]
+    enum At {
+        Root,
+        /// In `docs/`.
+        Docs,
+    }
+
+    /// What one Left did.
+    #[derive(Debug, PartialEq)]
+    struct Heard {
+        /// Keys the window heard.
+        passed: u32,
+        /// `on_leave` calls.
+        left: u32,
+        /// At the root afterwards.
+        root: bool,
+    }
+
+    fn click(rt: &mut Runtime<App>, label: &str) {
         let r = rt
             .elements()
             .into_iter()
-            .find(|e| e.label.as_deref() == Some("README.md"))
-            .expect("README.md")
+            .find(|e| e.label.as_deref() == Some(label))
+            .unwrap_or_else(|| panic!("{label}"))
             .rect;
         let (x, y) = (r[0] + r[2] / 2.0, r[1] + r[3] / 2.0);
         rt.pointer_move(x, y);
@@ -358,20 +365,63 @@ mod element {
         rt.frame(1.0 / 60.0);
         rt.pointer_up(x, y);
         rt.frame(1.0 / 60.0);
+    }
+
+    /// `key` (Left, or `h` with the letters on) at `at`, with the tree focused by a click on a
+    /// file, with an `on_leave` when `leave`.
+    fn left(at: At, leave: bool, key: Key) -> Heard {
+        PASSED.with(|p| p.set(0));
+        LEFT.with(|l| l.set(0));
+        let app = App {
+            archive: ArchiveState::new("archive", tree()),
+            look: Look::fallback(false),
+            leave,
+            letters: matches!(key, Key::Text(_)),
+        };
+        let mut rt = Runtime::new(app, view, (420.0, 400.0), Env::new(false, 1.0));
+        rt.on_key = Some(on_key);
+        for _ in 0..20 {
+            rt.frame(1.0 / 60.0);
+        }
+        if at == At::Docs {
+            // A click on a folder opens it.
+            click(&mut rt, "docs/");
+            rt.frame(1.0 / 60.0);
+            assert_eq!(rt.state.archive.listing().crumbs(), ["docs"]);
+            click(&mut rt, "guide.md");
+        } else {
+            click(&mut rt, "README.md");
+        }
         rt.key(KeyEvent {
-            key: Key::Left,
+            key,
             mods: Mods::default(),
         });
         rt.frame(1.0 / 60.0);
-        assert!(rt.state.archive.at_root());
-        (PASSED.with(Cell::get), LEFT.with(Cell::get))
+        Heard {
+            passed: PASSED.with(Cell::get),
+            left: LEFT.with(Cell::get),
+            root: rt.state.archive.at_root(),
+        }
+    }
+
+    fn heard(passed: u32, left: u32) -> Heard {
+        Heard {
+            passed,
+            left,
+            root: true,
+        }
     }
 
     /// Left at the root goes to the host's `on_leave`; with none, it goes on past the tree to
-    /// the window's keys, as Strata's 10xer `h` behaviour does.
+    /// the window's keys, as Strata's 10xer `h` behaviour does, and so does `h` with the
+    /// letters on. In a folder, Left goes up either way, and the host hears nothing.
     #[test]
     fn left_at_the_root_reaches_the_host() {
-        assert_eq!(left_at_root(true), (0, 1), "taken, and on_leave heard it");
-        assert_eq!(left_at_root(false), (1, 0), "passed on to the window");
+        let text = || Key::Text("h".into());
+        assert_eq!(left(At::Root, true, Key::Left), heard(0, 1), "taken: on_leave");
+        assert_eq!(left(At::Root, false, Key::Left), heard(1, 0), "passed to the window");
+        assert_eq!(left(At::Root, false, text()), heard(1, 0), "h passed to the window");
+        assert_eq!(left(At::Docs, false, Key::Left), heard(0, 0), "up, with no on_leave");
+        assert_eq!(left(At::Docs, true, Key::Left), heard(0, 0), "up, with on_leave");
     }
 }

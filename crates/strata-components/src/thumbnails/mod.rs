@@ -63,15 +63,16 @@
 //! within the budget unless the protected images alone exceed it**, and then only protected images
 //! are held and no margin is asked for.
 //!
-//! **A margin image never evicts one some viewer still wants**: it lands only if it fits once
-//! the images nobody wants are evicted, and is otherwise dropped ([`Why::Budget`]) with nothing
-//! evicted, and not asked for again until room may have appeared (a sync to another viewport, a
-//! larger budget, a viewer going, a relocation). `pop` asks for a margin key only while
-//! the images viewers want, plus the margin requests out (each counted at its step's largest),
-//! leave room for it. Without both, a margin that overflows the budget would load, evict
-//! another margin image, ask for it again and never settle (review round 1, B1: a C3 grid at
-//! the default budget on a 4K screen at scale 2 did). A row on screen still evicts margin
-//! images: they are asked for again only once there is room.
+//! **A margin image never evicts one some viewer still wants**: it lands only if it fits once the
+//! images nobody wants are evicted, and is otherwise dropped ([`Why::Budget`]) with nothing
+//! evicted, and not asked for again until room may have appeared: a sync to another viewport, new
+//! settings, a viewer going, a relocation, a wanted image evicted or replaced by a smaller one (a
+//! zoom out), or a margin request ending. `pop` asks for a margin key only while the images viewers
+//! want, plus the margin requests out (each counted at its step's largest), leave room for it.
+//! Without both, a margin that overflows the budget would load, evict another margin image, ask for
+//! it again and never settle (review round 1, B1: a C3 grid at the default budget on a 4K screen at
+//! scale 2 did). A row on screen still evicts margin images: they are asked for again only once
+//! there is room.
 //!
 //! Evicting empties the handle in place, so a row that still draws it shows its
 //! icon again, with no commit. The budget doesn't count Rune's own copy of the images drawn
@@ -81,15 +82,15 @@
 //!
 //! A viewer's keys rank in three tiers: the viewport in reading order, then the margin the viewer
 //! is scrolling toward, nearest line first, then the margin behind it, nearest first ([`Tier`]).
-//! `pop` walks a ranked list and builds it again only when something it skipped may have changed:
-//! a sync, a viewer going, new settings, a relocation, a requeue, the switch, a margin request
-//! ending while another waited for room, a wanted image evicted, a failure's wait ending, or a
-//! result landing at a step no longer wanted. So an idle `pop` costs nothing and draining a queue
-//! is one pass. Margins are whole lines, [`Settings`]' `margin` of the
-//! viewport per side. Within a tier, keys never loaded go before keys held at another step; every
-//! viewer's viewport goes before any margin. Keys past every viewer's margin are never asked for,
-//! and requests out for them are cancelled. A result for a cancelled request is dropped, as Strata
-//! drops it.
+//! `pop` walks a ranked list and builds it again only when something it skipped may have changed: a
+//! sync, a viewer going, new settings, a relocation, a requeue, the switch, a wanted image evicted,
+//! a failure's wait ending, a result landing at a step no longer wanted, and, while a key waits for
+//! room, a wanted image replaced by a smaller one or a margin request ending. So an idle `pop`
+//! costs nothing and draining a queue is one pass. Margins are whole lines, [`Settings`]' `margin`
+//! of the viewport per side (an absurd margin is the whole listing). Within a tier, keys never
+//! loaded go before keys held at another step; every viewer's viewport goes before any margin. Keys
+//! past every viewer's margin are never asked for, and requests out for them are cancelled. A
+//! result for a cancelled request is dropped, as Strata drops it.
 //!
 //! # Handles live while a viewer is near
 //!

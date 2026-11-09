@@ -189,7 +189,7 @@ fn check_counts(st: &ThumbnailStore, op: usize) {
 /// results of every kind, new steps, relocations, toggles, requeues and new budgets. After
 /// each, the bookkeeping matches a count from scratch, the bytes stay in budget unless the
 /// protected images alone are over it, and no image protected before the operation and still
-/// is was evicted by it. Every 97 operations the view stands still: everything out comes back,
+/// is was evicted by it. Every 50 operations the view stands still: everything out comes back,
 /// the queue drains in a bounded number of requests, and every wanted key is held at the step
 /// it is wanted at.
 fn fuzz(seed: u64, ops: usize) {
@@ -222,7 +222,7 @@ fn fuzz(seed: u64, ops: usize) {
                 let v = viewers[next(2) as usize];
                 let start = next(380) as usize;
                 let len = 1 + next(30) as usize;
-                let s = if next(4) == 0 { S8 } else { S4 };
+                let s = [S4, S4, S8, S16][next(4) as usize];
                 let view = Viewport::new(start..start + len, s).per_line(1 + next(3) as usize);
                 st.sync(v, &src, view);
             }
@@ -237,6 +237,15 @@ fn fuzz(seed: u64, ops: usize) {
                         height: 3,
                         rgba: vec![0; 5],
                     },
+                    3 => {
+                        // Smaller than the step, and not square.
+                        let w = (t.step().px() / 2).max(1);
+                        Outcome::Ready {
+                            width: w,
+                            height: 1,
+                            rgba: vec![0; w as usize * 4],
+                        }
+                    }
                     _ => image(t.step()),
                 };
                 st.complete(t, outcome, now);
@@ -256,7 +265,7 @@ fn fuzz(seed: u64, ops: usize) {
                 2 => st.requeue_stopped(),
                 3 => {
                     let v = viewers[next(2) as usize];
-                    st.set_step(v, &src, if next(2) == 0 { S8 } else { S4 });
+                    st.set_step(v, &src, [S4, S8, S16][next(3) as usize]);
                 }
                 4 => {
                     let margin = [0.0, 0.25, 0.5, 1.0][next(4) as usize];
@@ -264,7 +273,7 @@ fn fuzz(seed: u64, ops: usize) {
                     st.set_settings(settings);
                 }
                 _ => {
-                    let budget = (8 + next(60) as usize) * 64;
+                    let budget = (8 + next(200) as usize) * 64;
                     let settings = st.settings().budget(budget);
                     st.set_settings(settings);
                 }
@@ -283,9 +292,49 @@ fn fuzz(seed: u64, ops: usize) {
                 }
             }
         }
-        if op % 97 == 96 {
-            // Still: thumbnails on, stops lifted, room for everything; a poll takes work
-            // before the old results come back, then everything is served past any wait.
+        if op % 50 == 49 {
+            // Still, at the real budget and the same time: a poll takes work before the old
+            // results come back, then the queue drains. Ranking again from scratch (and with
+            // the budget's deferrals forgotten) must then find nothing that would land: a key
+            // that would is one the still view never asks for.
+            st.set_enabled(true);
+            out.extend(std::iter::from_fn(|| st.pop(now)).map(|r| r.ticket));
+            for t in out.drain(..) {
+                st.complete(t, image(t.step()), now);
+            }
+            let mut requests = 0;
+            while let Some(r) = st.pop(now) {
+                requests += 1;
+                assert!(
+                    requests <= 10_000,
+                    "seed {seed:x} op {op}: the queue never drains"
+                );
+                st.complete(r.ticket, image(r.step), now);
+            }
+            for forget_deferrals in [false, true] {
+                {
+                    let mut inner = st.inner.borrow_mut();
+                    inner.dirty = true;
+                    if forget_deferrals {
+                        inner.deferred.clear();
+                    }
+                }
+                let mut stalled = Vec::new();
+                while let Some(r) = st.pop(now) {
+                    let landed = st.complete(r.ticket, image(r.step), now);
+                    if landed != Landed::Dropped(Why::Budget) {
+                        stalled.push((index(r.key), r.step, r.tier, landed));
+                    }
+                    assert!(stalled.len() < 50);
+                }
+                assert!(
+                    stalled.is_empty(),
+                    "seed {seed:x} op {op}: a still view never asks for {stalled:?} \
+                     (deferrals forgotten: {forget_deferrals})"
+                );
+            }
+            check_counts(&st, op);
+            // Then thumbnails on, stops lifted, room for everything, past any wait.
             st.set_enabled(true);
             st.requeue_stopped();
             let budget = st.settings().budget_bytes;
@@ -1090,4 +1139,187 @@ fn a_deferred_margin_loads_once_the_budget_grows() {
         ready(&st, 9) && ready(&st, 11),
         "a's margin loaded with no sync"
     );
+}
+
+// Review round 3.
+
+const S16: Step = Step::new(16);
+
+#[test]
+fn a_still_view_loads_its_margin_after_a_zoom_out() {
+    // The screen at 16 px (1 KiB each) fills the budget, so the margin waits; at 4 px it fits.
+    let mut st = ThumbnailStore::new(Settings::default().budget(8 * 1024 + 32));
+    let src = source(100, &[]);
+    let v = st.viewer();
+    st.sync(v, &src, Viewport::new(40..48, S16));
+    serve(&mut st, 0.0);
+    st.set_step(v, &src, S4);
+    // A pool of 16 takes the screen's 4 px requests (and passes the margin, still gated by the
+    // 16 px images) before any lands; the view stands still.
+    let mut out: Vec<Request> = Vec::new();
+    for frame in 0..200 {
+        let now = 1.0 + f64::from(frame) * 0.016;
+        for r in std::mem::take(&mut out) {
+            st.complete(r.ticket, image(r.step), now);
+        }
+        while out.len() < 16 {
+            let Some(r) = st.pop(now) else { break };
+            out.push(r);
+        }
+        st.sync(v, &src, Viewport::new(40..48, S4));
+    }
+    let missing: Vec<usize> = [38, 39, 48, 49]
+        .into_iter()
+        .filter(|&i| !ready(&st, i))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "margin rows {missing:?} never asked for"
+    );
+}
+
+#[test]
+fn a_deferred_margin_loads_once_a_wanted_image_shrinks() {
+    let mut st = ThumbnailStore::new(Settings::default().budget(8 * 1024 + 32));
+    let src = source(100, &[]);
+    let v = st.viewer();
+    st.sync(v, &src, Viewport::new(40..48, S16));
+    // Everything asked for before anything lands: the margin's results are dropped.
+    let out = drain(&mut st, 0.0);
+    let landed: Vec<Landed> = out
+        .iter()
+        .map(|r| st.complete(r.ticket, image(r.step), 0.0))
+        .collect();
+    assert!(landed.contains(&Landed::Dropped(Why::Budget)), "{landed:?}");
+    st.set_step(v, &src, S4);
+    // The screen's 4 px requests out before any lands; then they land, with no new viewport.
+    let shrink = drain(&mut st, 1.0);
+    for r in &shrink {
+        st.complete(r.ticket, image(r.step), 1.0);
+    }
+    serve(&mut st, 1.0);
+    let missing: Vec<usize> = [38, 39, 48, 49]
+        .into_iter()
+        .filter(|&i| !ready(&st, i))
+        .collect();
+    assert!(missing.is_empty(), "margin rows {missing:?} left deferred");
+}
+
+#[test]
+fn a_margin_request_ending_lets_the_next_margin_key_in() {
+    // Room for the screen and one margin image.
+    let mut st = ThumbnailStore::new(Settings::default().budget(128).margin(1.0));
+    let src = source(100, &[]);
+    let v = st.viewer();
+    st.sync(v, &src, view(10..11));
+    let shown = st.pop(0.0).expect("row 10");
+    st.complete(shown.ticket, image(S4), 0.0);
+    let first = st.pop(0.0).expect("row 11, the margin ahead");
+    assert_eq!(index(first.key), 11);
+    assert!(st.pop(0.0).is_none(), "row 9 waits for room");
+    // Row 11's render fails: its room is free again.
+    st.complete(first.ticket, Outcome::Failed, 0.0);
+    assert_eq!(st.pop(0.0).map(|r| index(r.key)), Some(9));
+}
+
+#[test]
+fn a_margin_key_scrolled_on_screen_gives_back_its_margin_room() {
+    let mut st = ThumbnailStore::new(Settings::default().budget(191).margin(1.0));
+    let src = source(100, &[]);
+    let v = st.viewer();
+    st.sync(v, &src, view(10..11));
+    let shown = st.pop(0.0).expect("row 10");
+    st.complete(shown.ticket, image(S4), 0.0);
+    let _margin = st.pop(0.0).expect("row 11, the margin ahead");
+    assert!(st.pop(0.0).is_none(), "row 9 waits for room");
+    // Row 11 scrolls on screen while its request is out: it is no longer margin, and row 12
+    // (the new margin) fits beside it.
+    st.sync(v, &src, view(11..12));
+    assert_eq!(st.pop(0.0).map(|r| index(r.key)), Some(12));
+}
+
+#[test]
+fn a_relocation_that_frees_room_lets_a_deferred_margin_in() {
+    let mut st = ThumbnailStore::new(Settings::default().budget(384).margin(1.0));
+    let src = source(100, &[]);
+    // Viewer a at 4 px: row 10 and its margin, 9 and 11, all asked for first.
+    let a = st.viewer();
+    st.sync(a, &src, view(10..11));
+    let a_out = drain(&mut st, 0.0);
+    // Viewer b at 8 px fills the budget with rows 50 and 51.
+    let b = st.viewer();
+    st.sync(b, &src, Viewport::new(50..52, S8));
+    for r in drain(&mut st, 0.0) {
+        st.complete(r.ticket, image(r.step), 0.0);
+    }
+    let landed: Vec<Landed> = a_out
+        .iter()
+        .map(|r| st.complete(r.ticket, image(r.step), 0.0))
+        .collect();
+    assert_eq!(
+        landed
+            .iter()
+            .filter(|l| **l == Landed::Dropped(Why::Budget))
+            .count(),
+        2
+    );
+    // b's row 50 is renamed onto 51: 51's 8 px image goes, room for one of a's margin images.
+    assert!(st.relocate(key(50), key(51)));
+    // a stands still (its sync from poll returns at once).
+    st.sync(a, &src, view(10..11));
+    serve(&mut st, 1.0);
+    assert!(
+        ready(&st, 9) || ready(&st, 11),
+        "a's margin loaded once there was room"
+    );
+}
+
+#[test]
+fn a_wanted_margin_image_evicted_for_the_screen_is_asked_again_once_room_appears() {
+    // Keys 49 to 52 have no thumbnails, so viewer b has no margin of its own.
+    let mut st = ThumbnailStore::new(Settings::default().budget(2175).margin(1.0));
+    let src = source(100, &[49, 51]);
+    let a = st.viewer();
+    // a's row 10 and its margin (9, 11) at 4 px.
+    st.sync(a, &src, view(10..11));
+    serve(&mut st, 0.0);
+    // Zoomed in: only row 10 is asked for at 16 px.
+    st.set_step(a, &src, S16);
+    let big = st.pop(0.0).expect("row 10 at 16 px");
+    assert_eq!(index(big.key), 10);
+    st.complete(big.ticket, image(S16), 0.0);
+    // Zoomed out again: row 10's 4 px request goes out; the margin is already at 4 px.
+    st.set_step(a, &src, S4);
+    let small = st.pop(0.0).expect("row 10 at 4 px");
+    assert_eq!(index(small.key), 10);
+    // Another view shows row 50 at 16 px: it lands and evicts one of a's margin images.
+    let b = st.viewer();
+    st.sync(b, &src, Viewport::new(50..51, S16));
+    let other = st.pop(0.0).expect("row 50");
+    assert_eq!(index(other.key), 50);
+    st.complete(other.ticket, image(S16), 0.0);
+    assert!(
+        !(ready(&st, 9) && ready(&st, 11)),
+        "a margin image went for the screen"
+    );
+    // Row 10 lands at 4 px: room for the margin image again.
+    st.complete(small.ticket, image(S4), 0.0);
+    serve(&mut st, 0.0);
+    assert!(ready(&st, 9) && ready(&st, 11), "a's margin loaded again");
+}
+
+#[test]
+fn absurd_margins_and_steps_neither_panic_nor_overflow() {
+    for margin in [f32::INFINITY, f32::NAN, -1.0, 1e30] {
+        let mut st = ThumbnailStore::new(Settings::default().margin(margin));
+        let src = source(10, &[]);
+        let v = st.viewer();
+        st.sync(v, &src, Viewport::new(0..4, S4).per_line(3));
+        assert!(serve(&mut st, 0.0).len() <= 10);
+    }
+    let mut st = ThumbnailStore::default();
+    let src = source(100, &[]);
+    let v = st.viewer();
+    st.sync(v, &src, Viewport::new(10..14, Step::new(u32::MAX)));
+    let _ = drain(&mut st, 0.0);
 }

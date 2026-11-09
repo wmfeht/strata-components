@@ -199,8 +199,8 @@ pub enum Why {
     Invalid,
     /// It wouldn't fit: rows on screen fill the budget, or a margin image could only land by
     /// evicting an image some viewer still wants. The key isn't asked for again until room may
-    /// have appeared: a sync to another viewport, a larger budget, a viewer going or a
-    /// relocation.
+    /// have appeared: a sync to another viewport, new settings, a viewer going, a relocation, a
+    /// wanted image evicted or replaced by a smaller one, or a margin request ending.
     Budget,
 }
 
@@ -506,6 +506,10 @@ impl ThumbnailStore {
         inner.bytes = inner.bytes - old + new.bytes();
         if pinned {
             inner.pinned = inner.pinned - old + new.bytes();
+            if new.bytes() < old {
+                // A wanted image replaced by a smaller one (a zoom out) frees room.
+                inner.room_freed();
+            }
         }
         let entry = inner.entries.get_mut(&ticket.key).expect("checked above");
         entry.held = Some(new);
@@ -683,6 +687,7 @@ impl Inner {
         e.thumb.icon_alpha.set(1.0);
         if pinned {
             self.pinned -= held.bytes();
+            self.room_freed();
         }
         if wanted {
             // Wanted and empty again: the queue asks for it.
@@ -731,10 +736,18 @@ impl Inner {
     pub fn unmargin(&mut self, key: ThumbKey) {
         if let Some(b) = self.margin_out.remove(&key) {
             self.margin_out_bytes -= b;
-            if self.gated {
-                // A margin key waited for room: look again.
-                self.dirty = true;
-            }
+            self.room_freed();
+        }
+    }
+
+    /// Room may have appeared (the pinned bytes or the margin room out dropped): keys the
+    /// budget deferred may fit now, and margin keys `pop` passed for want of room may too. If
+    /// any wait, `pop` ranks again. Anything else that frees room (a sync, a viewer going, new
+    /// settings, a relocation) forgets the deferrals and ranks again itself.
+    pub fn room_freed(&mut self) {
+        if self.gated || !self.deferred.is_empty() {
+            self.deferred.clear();
+            self.dirty = true;
         }
     }
 

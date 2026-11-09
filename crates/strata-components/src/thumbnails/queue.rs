@@ -333,6 +333,7 @@ impl ThumbnailStore {
             };
             match e.job {
                 Job::Requested { .. } | Job::Stopped => continue,
+                // Checked again here (the ranking checked it too): the wait may have begun since.
                 Job::Failed { until } if now < until => {
                     inner.next_expiry = inner.next_expiry.min(until);
                     continue;
@@ -343,7 +344,11 @@ impl ThumbnailStore {
                 continue;
             }
             let room = step.max_bytes();
-            if tier != Tier::Visible && inner.pinned + inner.margin_out_bytes + room > budget {
+            let needs = inner
+                .pinned
+                .saturating_add(inner.margin_out_bytes)
+                .saturating_add(room);
+            if tier != Tier::Visible && needs > budget {
                 // A margin image could only land by evicting a key some viewer wants: wait
                 // until a request ends, a wanted image goes, or the viewport moves.
                 inner.gated = true;
@@ -482,7 +487,10 @@ fn spans(view: &Viewport, len: usize, margin: f32) -> (Range<usize>, Range<usize
     let end = view.visible.end.min(len).max(start);
     let per = view.per_line.max(1);
     let lines = (end - start).div_ceil(per);
-    let m = ((lines as f32 * margin.max(0.0)).ceil() as usize) * per;
+    // `as` saturates (and takes NaN to 0), so an absurd margin is the whole listing.
+    let m = ((lines as f32 * margin.max(0.0)).ceil() as usize)
+        .saturating_mul(per)
+        .min(len);
     let above = start.saturating_sub(m)..start;
     let below = end..(end + m).min(len);
     (start..end, above, below)

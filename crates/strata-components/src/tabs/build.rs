@@ -2,6 +2,7 @@
 //! set over each built tab through `TabItem::decorate`.
 
 use std::rc::Rc;
+use std::time::Duration;
 
 use rune::{Color, Cx, El, Mods, Tx, el, row, text};
 use rune_kit::shell::{TabDragState, TabItem, TabOrientation, TabOverflow, TabStrip, TearOutSpec};
@@ -202,6 +203,7 @@ impl<'a, S: 'static> BrowserTabs<'a, S> {
                     first: i == 0,
                     active: active.then_some(tab.id),
                     probe: self.state.probe.clone(),
+                    access: self.access,
                     scroll: scroll.clone(),
                     zone: drops::tab(&zones, tab.id, i, tab.accepts, active),
                     dnd: self.dnd.clone(),
@@ -362,6 +364,7 @@ struct Dress<S: 'static> {
     first: bool,
     active: Option<TabId>,
     probe: Probe,
+    access: Access<S>,
     scroll: String,
     zone: Option<crate::contract::dnd::DropZone<S>>,
     dnd: Dnd<S>,
@@ -380,7 +383,20 @@ impl<S: 'static> Dress<S> {
             tab = tab.child(self.probe.first_marker());
         }
         if let Some(id) = self.active {
-            tab = tab.child(self.probe.active_marker(id));
+            let access = self.access;
+            // A host that changed the active tab from a handler did it after that frame's poll,
+            // and a window at rest may draw no other: the marker's first layout asks for the
+            // tick that reveals the tab and retitles the window (review 2).
+            let marker = self
+                .probe
+                .active_marker(id)
+                .on_layout_tx(move |s: &mut S, _, tx| {
+                    if access(s).seen_active() != Some(id) {
+                        tx.wake_after(Duration::ZERO);
+                    }
+                    tx.live_only();
+                });
+            tab = tab.child(marker);
         }
         tab = wheel::sideways::<S>(tab, &self.probe, self.scroll);
         match self.zone {

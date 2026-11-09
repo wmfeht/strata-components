@@ -85,9 +85,9 @@ mod c7 {
         steps(rt, limit, true, |_| false)
     }
 
-    /// Steps only at the wakes the page asked for, none in between and none for motion, for at
-    /// most `limit` seconds, stopping at the first frame after which `done` holds: a timer that
-    /// asks for no wake never fires (review 2).
+    /// Steps only at the wakes the page asked for and for queued input (a layout report), as a
+    /// still window draws, none for motion, for at most `limit` seconds, stopping at the first
+    /// frame after which `done` holds: a timer that asks for no wake never fires (review 2).
     fn wake_until(rt: &mut Runtime<Gallery>, limit: f64, done: impl Fn(&Gallery) -> bool) -> f64 {
         steps(rt, limit, false, done)
     }
@@ -104,7 +104,7 @@ mod c7 {
             if now - start > limit || done(&rt.state) {
                 break;
             }
-            if motion && rt.animating {
+            if (motion && rt.animating) || rt.has_pending_input() {
                 rt.frame(FRAME);
                 continue;
             }
@@ -275,6 +275,34 @@ mod c7 {
         // shift by the fade's width a frame later (review 2).
         let moved = xs.iter().find(|&&x| (x - start).abs() > 0.5).copied();
         assert_eq!(moved, Some(t[0]), "frames: {xs:?}");
+    }
+
+    // A host that changes the active tab from a key handler does so after that frame's poll.
+    // In a window at rest with nothing moving, the strip asks for the tick that follows it, so
+    // the tab is revealed and the window retitled with no other frame coming (review 2).
+    #[test]
+    fn a_key_selection_reveals_and_retitles_in_a_still_window() {
+        let mut rt = mount_with("c7-overflow-light", |g| g.look.animations = false);
+        let fade = strata_kit::slots::tabs::fade_width(&rt.state.look);
+        let mods = Mods {
+            ctrl: true,
+            shift: true,
+            ..Mods::default()
+        };
+        rt.key(KeyEvent {
+            key: Key::Command('0'),
+            mods,
+        });
+        // The frame the key brings, then only wakes: no frames for motion.
+        rt.frame(FRAME);
+        wake_until(&mut rt, 2.0, |_| false);
+        let viewport = rect(&rt, "c7-scroll");
+        let t = rect(&rt, &tab(10));
+        assert!(
+            t[0] >= viewport[0] + fade - 0.5,
+            "tab 10 {t:?} in {viewport:?}"
+        );
+        assert_eq!(rt.state.c7.title, "Folder 10 — Strata");
     }
 
     // The user's wheel, vertical or sideways, right after a selection wins over its reveal

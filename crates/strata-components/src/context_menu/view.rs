@@ -104,14 +104,13 @@ impl<S: 'static> Render<'_, S> {
             layer.len() > surfaces + self.open.len(),
             "rune-kit's layer order changed"
         );
-        for depth in 0..=self.open.len() {
+        // One surface per level: the menu, then each open submenu.
+        for (depth, &width) in widths.iter().enumerate() {
             let Some(slot) = layer.get_mut(surfaces + depth) else {
                 break;
             };
             let surface = std::mem::replace(slot, el());
-            *slot = self
-                .adjust(surface, depth, rows.clone())
-                .min_w(widths[depth]);
+            *slot = self.adjust(surface, depth, rows.clone()).min_w(width);
         }
         anchor
     }

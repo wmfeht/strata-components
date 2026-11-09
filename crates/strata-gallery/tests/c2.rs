@@ -77,6 +77,14 @@ mod c2 {
         press(rt, k, Mods::default());
     }
 
+    /// A key press and nothing else: no frames.
+    fn key_down(rt: &mut Runtime<Gallery>, key: Key) {
+        rt.key(KeyEvent {
+            key,
+            mods: Mods::default(),
+        });
+    }
+
     fn ctrl() -> Mods {
         Mods {
             ctrl: true,
@@ -1471,5 +1479,315 @@ mod c2 {
             "it slides from the left: {}",
             shell.rect[0]
         );
+    }
+
+    /// The strip's offset after each of `frames` frames.
+    fn offsets(rt: &mut Runtime<Gallery>, frames: usize) -> Vec<f32> {
+        (0..frames)
+            .map(|_| {
+                rt.frame(DT);
+                strip_offset(rt)
+            })
+            .collect()
+    }
+
+    /// `v` moves in one motion: once it starts, it moves every frame until it is within a
+    /// point of where it ends, never stalling (a glide restarted from rest stands still a frame).
+    fn moves_without_stalls(v: &[f32]) {
+        let (first, last) = (v[0], v[v.len() - 1]);
+        let start = v
+            .iter()
+            .position(|o| (o - first).abs() > 0.5)
+            .unwrap_or(v.len());
+        let stop = v
+            .iter()
+            .position(|o| (o - last).abs() < 1.0)
+            .unwrap_or(v.len());
+        for i in start.max(1)..stop {
+            assert!((v[i] - v[i - 1]).abs() > 0.25, "stalls at frame {i}: {v:?}");
+        }
+    }
+
+    /// The overflow scene with its deepest column active and the strip scrolled back to the
+    /// start, so that column is fully clipped.
+    fn deepest_clipped() -> (Runtime<Gallery>, f32) {
+        let mut rt = scene("c2-overflow-light");
+        tap(&mut rt, &keys::title("c2-col-7"));
+        settle(&mut rt, 30);
+        let end = strip_offset(&rt);
+        rt.update(|_, tx| tx.scroll_to_instant(keys::strip("c2"), 0.0, 0.0));
+        settle(&mut rt, 5);
+        assert_eq!(strip_offset(&rt), 0.0);
+        (rt, end)
+    }
+
+    #[test]
+    fn holding_down_glides_the_strip_in_one_motion() {
+        // browser/view-modes/columns: A keyboard move reveals a column clipped by up to 4 px
+        // fully (and key repeat keeps the reveal's glide going rather than restarting it).
+        let (mut rt, end) = deepest_clipped();
+        key_down(&mut rt, Key::Down);
+        let single = offsets(&mut rt, 30);
+        let (mut rt, _) = deepest_clipped();
+        let repeat: Vec<f32> = (0..30)
+            .map(|f| {
+                if f % 2 == 0 && f < 20 {
+                    key_down(&mut rt, Key::Down);
+                }
+                rt.frame(DT);
+                strip_offset(&rt)
+            })
+            .collect();
+        moves_without_stalls(&repeat);
+        for (f, (a, b)) in single.iter().zip(&repeat).enumerate() {
+            assert!(
+                (a - b).abs() < 2.0,
+                "frame {f}: one key {a}, held {b}\n{single:?}\n{repeat:?}"
+            );
+        }
+        assert!((repeat[29] - end).abs() < 0.5, "{repeat:?}");
+    }
+
+    #[test]
+    fn holding_left_glides_the_strip_back_in_one_motion() {
+        // browser/view-modes/columns: A keyboard move reveals a column clipped ... fully, Left
+        // held from the deepest column back to the first.
+        for period in [2, 3] {
+            let mut rt = scene("c2-overflow-light");
+            tap(&mut rt, &keys::title("c2-col-7"));
+            settle(&mut rt, 30);
+            let v: Vec<f32> = (0..60)
+                .map(|f| {
+                    if f % period == 0 && f < 12 * period {
+                        key_down(&mut rt, Key::Left);
+                    }
+                    rt.frame(DT);
+                    strip_offset(&rt)
+                })
+                .collect();
+            assert_eq!(rt.state.c2.columns.active(), 0);
+            assert!(
+                v.windows(2).all(|w| w[1] <= w[0] + 0.25),
+                "back only: {v:?}"
+            );
+            moves_without_stalls(&v);
+            assert_eq!(v[59], 0.0);
+        }
+    }
+
+    /// Right into folder `name` of Home, opened with its first entry, on a 500 pt strip whose
+    /// second column is clipped: the strip's offsets as the new column is revealed, with Slow's
+    /// listing arriving after `delay` seconds.
+    fn right_into(name: &str, delay: f64) -> (Runtime<Gallery>, Vec<f32>) {
+        let mut rt = scene("c2-home-light");
+        rt.state.c2.width = Some(500.0);
+        settle(&mut rt, 5);
+        tap(&mut rt, &keys::title("c2-col-1"));
+        let folder = id_in("Home", name);
+        rt.update(|g, _| {
+            let d = &mut g.c2;
+            let src = &d.listings.0[0].source;
+            let c = &mut d.columns.column_mut(0).expect("Home").collection;
+            let i = src.index_of(folder).expect("folder");
+            let _ = c.selection.select_only(src, i);
+            c.note_selection(src);
+        });
+        settle(&mut rt, 5);
+        assert_eq!(strip_offset(&rt), 0.0);
+        key_down(&mut rt, Key::Right);
+        rt.frame(DT);
+        rt.update(move |g, _| {
+            let now = g.c2.clock;
+            if let Some(l) = g.c2.listings.0.get_mut(1)
+                && l.due.is_some()
+            {
+                l.due = Some(now + delay);
+            }
+        });
+        let v = offsets(&mut rt, 30);
+        (rt, v)
+    }
+
+    #[test]
+    fn a_late_listing_in_the_active_column_leaves_the_strips_glide_alone() {
+        // browser/view-modes/columns: If that column is still loading, the cursor lands when it
+        // finishes (in the column, without moving the strip: the reveal's glide goes on as if
+        // the listing had not come).
+        let (rt, late) = right_into("Slow", 0.05);
+        assert_eq!(
+            cursor(&rt, 1),
+            Some(id("Slow", "late-0001.txt")),
+            "the cursor landed"
+        );
+        let (rt, never) = right_into("Slow", 100.0);
+        assert_eq!(cursor(&rt, 1), None);
+        for (f, (a, b)) in late.iter().zip(&never).enumerate() {
+            assert!(
+                (a - b).abs() < 0.5,
+                "frame {f}: {a} vs {b}\n{late:?}\n{never:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn right_into_a_clipped_new_column_glides_the_strip() {
+        // browser/view-modes/columns: A keyboard move reveals a column clipped ... fully, on the
+        // reveal's glide: Right into a folder opened with the cursor on its first entry.
+        let (rt, v) = right_into("Documents", 0.0);
+        assert_eq!(cursor(&rt, 1), Some(id("Documents", "Reports")));
+        assert!(v[0] < 60.0, "gliding, not jumping: {v:?}");
+        moves_without_stalls(&v);
+        assert!((v[29] - 100.0).abs() < 0.5, "{v:?}");
+    }
+
+    #[test]
+    fn back_to_a_clipped_ancestor_glides_the_strip() {
+        // browser/view-modes/columns: Back, Forward, or Alt+Up to an ancestor selects the folder
+        // you came from ... scrolled into view (the strip glides to the ancestor's column).
+        let (mut rt, _) = deepest_clipped();
+        rt.update(|g, tx| {
+            let look = g.look.clone();
+            let d = &mut g.c2;
+            let came_from = strata_components::columns::ColumnSources::open_child(&d.listings, 4);
+            d.listings.0.truncate(5);
+            d.columns.return_to(4, &d.listings, came_from, &look, tx);
+        });
+        let v = offsets(&mut rt, 40);
+        assert!(v[0] < 300.0, "gliding, not jumping: {v:?}");
+        moves_without_stalls(&v);
+        assert!((v[39] - 540.0).abs() < 0.5, "{v:?}");
+    }
+
+    #[test]
+    fn a_wheel_during_the_reveals_recheck_wins() {
+        // browser/view-modes/columns: Horizontal touchpad gestures scroll the strip (and a reveal
+        // worked out again while the drawer opens doesn't take the strip back from them).
+        let mut rt = scene("c2-overflow-light");
+        rt.update(|g, _| g.c2.drawer = Some(strata_components::preview_drawer::DrawerState::new()));
+        settle(&mut rt, 20);
+        rt.update(|g, tx| {
+            let look = g.look.clone();
+            g.c2.listings.0.truncate(6);
+            g.c2.columns.truncate(6, &look, tx);
+            g.c2.drawer.as_mut().expect("drawer").open(&look, tx);
+        });
+        settle(&mut rt, 6);
+        let (x, y) = at(&rt, "c2-slot-1");
+        rt.wheel_xy(x, y, 400.0, 0.0);
+        rt.frame(DT);
+        let wheeled = strip_offset(&rt);
+        let v = offsets(&mut rt, 40);
+        assert!(
+            v.iter().all(|o| (o - wheeled).abs() < 1.0),
+            "from {wheeled}: {v:?}"
+        );
+    }
+
+    #[test]
+    fn a_wheel_in_the_same_frame_as_a_key_wins() {
+        // browser/view-modes/columns: Horizontal touchpad gestures scroll the strip, even one
+        // that lands with a key that reveals a column.
+        let (mut rt, _) = deepest_clipped();
+        rt.update(|_, tx| tx.scroll_to_instant(keys::strip("c2"), 600.0, 0.0));
+        settle(&mut rt, 5);
+        assert_eq!(strip_offset(&rt), 600.0);
+        let (x, y) = at(&rt, "c2-slot-3");
+        key_down(&mut rt, Key::Down);
+        rt.wheel_xy(x, y, 200.0, 0.0);
+        let v = offsets(&mut rt, 40);
+        // The key's glide shares the wheel's frame (Rune applies requests after the wheel), and
+        // is stopped at the next tick: one step on from the wheel's 400 at most.
+        assert!(v[0] < 500.0, "the wheel took it back from 600: {v:?}");
+        assert!(
+            v.iter().all(|o| (o - v[0]).abs() < 0.5),
+            "and it stays: {v:?}"
+        );
+    }
+
+    #[test]
+    fn a_reveal_follows_the_strips_width_for_half_a_second_only() {
+        // browser/view-modes/columns: A keyboard move reveals a column ... fully, worked out again
+        // while the strip's width moves within half a second of the move, and no longer: a
+        // window resized on and on after it isn't held to that column.
+        let mut rt = scene("c2-overflow-light");
+        tap(&mut rt, &keys::title("c2-col-7"));
+        settle(&mut rt, 40);
+        key_down(&mut rt, Key::Down);
+        let mut width = 960.0;
+        let mut whole_early = true;
+        for f in 0..90 {
+            if f % 3 == 0 {
+                width -= 4.0;
+                rt.update(move |g, _| g.c2.width = Some(width));
+            }
+            rt.frame(DT);
+            if f == 24 {
+                // A glide chasing a moving width trails it by a fraction of a point.
+                let (w, shown) = shown(&rt, 6);
+                whole_early = shown > w - 2.0;
+            }
+        }
+        assert!(whole_early, "followed within half a second");
+        let (w, shown) = shown(&rt, 6);
+        assert!(shown < w - 20.0, "not after it: {shown} of {w}");
+    }
+
+    #[test]
+    fn a_column_opened_with_its_first_entry_glides_into_view() {
+        // browser/view-modes/columns: A keyboard move reveals a column clipped ... fully: here a
+        // host opens a folder in a new column with the cursor on its first entry (Return, an
+        // intent), outside the strip's keys.
+        let mut rt = scene("c2-home-light");
+        rt.state.c2.width = Some(500.0);
+        settle(&mut rt, 5);
+        rt.update(|g, tx| {
+            let look = g.look.clone();
+            let d = &mut g.c2;
+            d.listings.0.truncate(1);
+            d.listings.0.push(strata_gallery::scenes::c2::Listed {
+                name: "Music".into(),
+                source: strata_gallery::scenes::c2::listing_of("Music"),
+                version: 1,
+                due: None,
+                from: Some(id_in("Home", "Music")),
+            });
+            d.columns.truncate(1, &look, tx);
+            d.columns.push(
+                strata_components::columns::Opening::new(
+                    &d.listings.0[1].source,
+                    strata_components::collection::selection::Listing::Complete,
+                ),
+                strata_components::columns::Focus::FirstEntry,
+                &look,
+                tx,
+            );
+        });
+        let v = offsets(&mut rt, 30);
+        assert_eq!(rt.state.c2.columns.active(), 1);
+        assert!(v[0] < 60.0, "gliding, not jumping: {v:?}");
+        assert!((v[29] - 100.0).abs() < 0.5, "{v:?}");
+    }
+
+    #[test]
+    fn forward_to_a_deeper_open_column_glides_the_strip_to_it() {
+        // browser/view-modes/columns: Back, Forward, or Alt+Up to an ancestor selects the folder
+        // you came from ... (an ancestor deeper than the column holding the keys: the strip
+        // glides to it).
+        let (mut rt, _) = deepest_clipped();
+        tap(&mut rt, &keys::title("c2-col-1"));
+        settle(&mut rt, 20);
+        assert_eq!(rt.state.c2.columns.active(), 0);
+        assert_eq!(strip_offset(&rt), 0.0);
+        rt.update(|g, tx| {
+            let look = g.look.clone();
+            let d = &mut g.c2;
+            let came_from = strata_components::columns::ColumnSources::open_child(&d.listings, 4);
+            d.listings.0.truncate(5);
+            d.columns.return_to(4, &d.listings, came_from, &look, tx);
+        });
+        let v = offsets(&mut rt, 40);
+        assert_eq!(rt.state.c2.columns.active(), 4);
+        assert!(v[0] < 300.0, "gliding, not jumping: {v:?}");
+        assert!((v[39] - 540.0).abs() < 0.5, "{v:?}");
     }
 }

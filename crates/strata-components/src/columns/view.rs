@@ -642,7 +642,7 @@ pub(super) fn strip_key<S: 'static>(
     };
     if collection(sh, s, serial).key(s, event, tx) {
         let p = (sh.parts_mut)(s);
-        p.state.reveal_after_rows(p.look, tx);
+        p.state.reveal(p.look, tx);
         return true;
     }
     let m = event.mods;

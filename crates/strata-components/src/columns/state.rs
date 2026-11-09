@@ -476,6 +476,10 @@ impl ColumnsState {
     /// Replaces every column with fresh ones for `sources` (another location, a rebuilt strip,
     /// a switch back to Columns), with no motion, and `active` holding the cursor. Each column
     /// restores the position `position` gives it.
+    ///
+    /// It makes the whole transaction instant (`Tx::instant`), so the old columns go and the new
+    /// ones come in the same frame: anything else the host changes in that handler lands at once
+    /// too. Call it from a handler of its own when other changes should animate.
     pub fn replace(
         &mut self,
         sources: &dyn ColumnSources,

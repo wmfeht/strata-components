@@ -1,5 +1,5 @@
 //! The `columns.*` slot tokens that ColumnsView (C2) reads: its column headers, the line
-//! between columns, and the wash over the column a file drag would drop into.
+//! between columns, its width caption, and the wash over the column a file drag would drop into.
 //!
 //! Work package: C2, `docs/work/phase-3-views/C2-columns-view.md`. C2 owns this file: add
 //! tokens beside these, following `slots/mod.rs`. Keep their names, since slot names are API.
@@ -28,6 +28,7 @@ pub struct Columns {
     pub edge_opacity: Option<f32>,
     pub drop_opacity: Option<f32>,
     pub drop_ring: Option<f32>,
+    pub caption_border: Option<f32>,
 }
 
 /// A column header's height: `columns.header.height`, else 41 (Strata's 31 pt minimum, its
@@ -83,6 +84,12 @@ pub fn drop_ring(look: &Look) -> f32 {
     look.slots.columns.drop_ring.unwrap_or(2.0)
 }
 
+/// The border of the "Column width" caption over a column's edge: `columns.caption.border`,
+/// else 1 (as C9's divider caption draws).
+pub fn caption_border(look: &Look) -> f32 {
+    look.slots.columns.caption_border.unwrap_or(1.0)
+}
+
 /// `c` at `x` of its own opacity, so a translucent theme colour stays translucent.
 pub fn fade(look: &Look, c: Color, x: f32) -> Color {
     look.kit.alpha(c, c.a * x)
@@ -120,5 +127,8 @@ pub const TOKENS: &[Token] = &[
     }),
     Token::length("columns.drop.ring", drop_ring, |l, v| {
         l.slots.columns.drop_ring = Some(v)
+    }),
+    Token::length("columns.caption.border", caption_border, |l, v| {
+        l.slots.columns.caption_border = Some(v)
     }),
 ];

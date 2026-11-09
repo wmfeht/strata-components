@@ -96,7 +96,7 @@ pub(super) fn shell<S: 'static>(sh: &Rc<Shared<S>>, s: &S, depth: usize) -> El {
                 .py(look.space.xxs)
                 .radius(look.round(look.kit.radius.sm))
                 .fill(look.kit.c.surface_float)
-                .border(1.0, look.kit.c.border_muted)
+                .border(tokens::caption_border(look), look.kit.c.border_muted)
                 .pin(
                     None,
                     Some(tokens::header_height(look) + look.space.sm),

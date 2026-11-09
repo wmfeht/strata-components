@@ -1,6 +1,6 @@
 {
   "bullets": [
-    "browser/scrolling: Page Up and Page Down, including the keypad keys, move the focus and selection by one page"
+    "browser/scrolling: Page Up and Page Down"
   ],
   "scene": "c2-three-columns-light",
   "events": [

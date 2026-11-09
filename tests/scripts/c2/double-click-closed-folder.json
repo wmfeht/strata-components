@@ -7,8 +7,7 @@
     {
       "t": 0.2,
       "type": "double-click",
-      "x": 45,
-      "y": 108
+      "key": "row-1000002/label"
     },
     {
       "t": 1.5,

@@ -195,8 +195,6 @@ mod c2 {
                 .any(|e| e.key.as_deref() == Some("c2-slot-2")),
             "then it's gone"
         );
-        let _ = ctrl();
-        let _ = PhysicalInput::Modifiers(Mods::default());
     }
 
     #[test]
@@ -279,9 +277,7 @@ mod c2 {
         // selection in every column and closes deeper columns.
         let mut rt = scene("c2-three-columns-light");
         assert!(!selected(&rt, 0).is_empty());
-        let [x, y, w, h] = info(&rt, "c2-slot-2").expect("Documents").visible;
         // Below Documents' 27 rows there is no blank space at this size: use Reports.
-        let _ = (x, y, w, h);
         tap_name(&mut rt, &row("Reports", "report-q0001.pdf"));
         let [x, y, w, h] = info(&rt, "c2-slot-3").expect("Reports").visible;
         click_at(&mut rt, x + w / 2.0, y + h - 20.0);
@@ -794,12 +790,12 @@ mod c2 {
         assert!(listing_offset(&rt, 1) != listing);
     }
 
-    /// Drags column `serial`'s edge by `dx`, with `cancel` pressing Escape before the release.
+    /// Presses column `serial`'s edge `from` points right of its line and moves `dx` in four
+    /// steps, holding the button: the caller releases (or presses Escape first).
     fn drag_edge(rt: &mut Runtime<Gallery>, serial: u64, dx: f32, from: f32) {
-        let [x, y, w, h] = info(rt, &keys::edge(&format!("c2-col-{serial}")))
+        let [x, y, _, h] = info(rt, &keys::edge(&format!("c2-col-{serial}")))
             .expect("edge")
             .visible;
-        let _ = w;
         let (x, y) = (x + 6.0 + from, y + h / 2.0);
         rt.pointer_move(x, y);
         rt.pointer_down(x, y);
@@ -810,12 +806,12 @@ mod c2 {
         }
     }
 
+    /// Column `depth`'s drawn width (its shell keyed by its slot, the depth plus one in these
+    /// scenes).
     fn width(rt: &Runtime<Gallery>, depth: usize) -> f32 {
-        let c = &rt.state.c2.columns.column(depth).expect("column");
         let [_, _, w, _] = info(rt, &format!("c2-slot-{}", depth + 1))
             .expect("shell")
             .rect;
-        let _ = c;
         w
     }
 
@@ -1435,7 +1431,6 @@ mod c2 {
             let look = g.look.clone();
             let d = &mut g.c2;
             d.listings.0.truncate(1);
-            let _ = home;
             let listed = strata_gallery::scenes::c2::Listed {
                 name: "Pictures".into(),
                 source: strata_gallery::scenes::c2::listing_of("Pictures"),

@@ -113,6 +113,23 @@ pub(super) struct Shared<S> {
     pub(super) labels: ColumnsLabels,
 }
 
+impl<S> Clone for Shared<S> {
+    fn clone(&self) -> Self {
+        Self {
+            parts: self.parts.clone(),
+            parts_mut: self.parts_mut.clone(),
+            collection: self.collection.clone(),
+            actions: self.actions.clone(),
+            marks: self.marks.clone(),
+            pointer: self.pointer.clone(),
+            escape_closes: self.escape_closes.clone(),
+            dnd: self.dnd.clone(),
+            on_intent: self.on_intent.clone(),
+            labels: self.labels.clone(),
+        }
+    }
+}
+
 impl<S> Shared<S> {
     pub(super) fn emit(&self, s: &mut S, intent: ColumnsIntent, tx: &mut Tx) {
         if let Some(f) = &self.on_intent {
@@ -179,8 +196,9 @@ impl<S: 'static> ColumnsView<S> {
         }
     }
 
+    /// Changes the configuration: a view cloned before keeps what it had.
     fn with(mut self, f: impl FnOnce(&mut Shared<S>)) -> Self {
-        f(Rc::get_mut(&mut self.sh).expect("configured before it is shared"));
+        f(Rc::make_mut(&mut self.sh));
         self
     }
 
@@ -302,7 +320,10 @@ impl<S: 'static> ColumnsView<S> {
         Some((depth, row))
     }
 
-    /// The strip: one Tab stop, whose keys go to the active column.
+    /// The strip: one Tab stop, whose keys go to the active column. Build it on every view;
+    /// don't memoise it (`memo`), since the strip reads the state the handlers change between
+    /// commits (the active and targeted column, a resize's live width), and each column's
+    /// collection memoises its own rows.
     pub fn build(&self, s: &S) -> El {
         super::strip::build(&self.sh, s)
     }

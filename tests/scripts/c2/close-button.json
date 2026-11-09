@@ -1,7 +1,6 @@
 {
   "bullets": [
-    "browser/view-modes/columns: Each column after the first has a \"Close this pane\" X button that closes it.",
-    "browser/view-modes/columns: That close animation covers its X button, Escape, Backspace, and a file click in a parent."
+    "browser/view-modes/columns: Each column after the first has a \"Close this pane\" X button that closes it."
   ],
   "scene": "c2-three-columns-light",
   "events": [

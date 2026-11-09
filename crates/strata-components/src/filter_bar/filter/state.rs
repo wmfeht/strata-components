@@ -258,6 +258,13 @@ impl FilterState {
         }
     }
 
+    /// Treats the next shown query as new, after the host dropped the results it showed (a
+    /// scope or a search limit changed, Strata's `EnterTarget::restart`): the next
+    /// [`FilterState::shown`] drops the pick even for the same text.
+    pub fn restart(&mut self) {
+        self.tracker.query = None;
+    }
+
     /// A press, wheel, touch or drag hover on the results: they stop keeping the top result
     /// in view until the next query edit.
     pub fn results_scrolled(&mut self) {
@@ -273,6 +280,20 @@ impl FilterState {
             return None;
         }
         self.tracker.target(r, self.tenxer)
+    }
+
+    /// Where Down from the field lands: the top result while Enter opens it, else the results'
+    /// cursor (Strata's search results, `inline_search.rs`), else the top result. `None` with
+    /// no results.
+    pub fn landing(&self, r: Results<'_>) -> Option<EntryId> {
+        if r.source.is_empty() {
+            return None;
+        }
+        let top = self
+            .tracker
+            .offers_top(true, !r.selection.is_empty(), self.tenxer);
+        let cursor = r.selection.cursor_index(r.source).filter(|_| !top);
+        Some(r.source.id_at(cursor.unwrap_or(0)))
     }
 
     /// The result to outline (C1e's `RowMarks::enter_target`): the top result while Enter

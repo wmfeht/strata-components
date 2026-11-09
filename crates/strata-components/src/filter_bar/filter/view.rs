@@ -63,6 +63,7 @@ pub struct FilterBar<S> {
     previews: Option<PreviewsFn<S>>,
     on_intent: Option<IntentFn<S>>,
     tab_to_results: bool,
+    focus_return: Option<String>,
 }
 
 impl<S> Clone for FilterBar<S> {
@@ -76,6 +77,7 @@ impl<S> Clone for FilterBar<S> {
             previews: self.previews.clone(),
             on_intent: self.on_intent.clone(),
             tab_to_results: self.tab_to_results,
+            focus_return: self.focus_return.clone(),
         }
     }
 }
@@ -96,6 +98,7 @@ impl<S: 'static> FilterBar<S> {
             previews: None,
             on_intent: None,
             tab_to_results: true,
+            focus_return: None,
         }
     }
 
@@ -128,10 +131,20 @@ impl<S: 'static> FilterBar<S> {
     }
 
     /// Whether Down in the field sends it a Tab after [`FilterIntent::FocusResults`], so the
-    /// next focus stop (the results) takes the keyboard. On by default; a host whose results
-    /// aren't the next stop turns it off and moves the keyboard itself.
+    /// next focus stop (the results) takes the keyboard. On by default. Off, the keyboard
+    /// stays in the field: at Rune 5d421fd a host can't move it to the results itself (no
+    /// `Tx::focus`, upstream #173), so turn it off only where the results aren't the next stop
+    /// and staying in the field is what the host wants.
     pub fn tab_to_results(mut self, on: bool) -> Self {
         self.tab_to_results = on;
+        self
+    }
+
+    /// Where the keyboard goes when the bar closes with it (Escape in the field): the
+    /// results' focus stop, the listing's cursor row. Rune has no `Tx::focus` (upstream #173),
+    /// so the bar carries `El::focus_return`. Without it, nothing has the keyboard after.
+    pub fn focus_return(mut self, key: impl Into<String>) -> Self {
+        self.focus_return = Some(key.into());
         self
     }
 
@@ -174,20 +187,22 @@ impl<S: 'static> FilterBar<S> {
                     .a11y_hidden(),
             )
             .child(input);
-        Some(
-            row()
-                .key(self.key.clone())
-                .w_full()
-                .px(look.space.sm)
-                .py(look.space.xs)
-                .child(field::frame(
-                    look,
-                    inner,
-                    st.edit.focused,
-                    false,
-                    &handlers.menu,
-                )),
-        )
+        let mut bar = row()
+            .key(self.key.clone())
+            .w_full()
+            .px(look.space.sm)
+            .py(look.space.xs)
+            .child(field::frame(
+                look,
+                inner,
+                st.edit.focused,
+                false,
+                &handlers.menu,
+            ));
+        if let Some(to) = &self.focus_return {
+            bar = bar.focus_return(to.clone());
+        }
+        Some(bar)
     }
 }
 
@@ -279,8 +294,10 @@ fn key<S: 'static>(bar: &FilterBar<S>, s: &mut S, ev: &KeyEvent, tx: &mut Tx) ->
             if r.source.is_empty() || st.text().trim().is_empty() {
                 return false;
             }
-            // The outlined top result, or the result picked since the query changed.
-            let id = st.target(r).unwrap_or_else(|| r.source.id_at(0));
+            // The outlined top result, or the results' cursor after a pick.
+            let Some(id) = st.landing(r) else {
+                return false;
+            };
             (bar.get_mut)(s).pick();
             let mut polled = Polled::default();
             polled.push(FilterIntent::FocusResults { id });

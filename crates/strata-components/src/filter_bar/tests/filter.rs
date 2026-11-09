@@ -239,3 +239,44 @@ fn tick_reports_the_field_gaining_and_losing_the_keyboard() {
     st.focus_field();
     assert!(st.edit.focused);
 }
+
+// Review round 1: Strata's `EnterTarget::restart`. After the host dropped the results (a
+// scope or a search limit changed), the same text shown again is a new query: the pick goes.
+#[test]
+fn a_restart_makes_the_same_query_new() {
+    let mut st = FilterState::new();
+    let _ = typed(&mut st, "duck");
+    st.pick();
+    st.restart();
+    assert!(st.shown("duck"), "the results' selection goes");
+    assert!(!st.tracker.picked);
+}
+
+// Down lands on the results' cursor after a pick, as Strata's search results do
+// (`inline_search.rs`), not on the first selected result; on the top result while it is
+// offered.
+#[test]
+fn down_lands_on_the_cursor_after_a_pick_and_on_the_top_result_before() {
+    let src = source(&["a", "b", "c", "d"]);
+    let mut sel = Selection::new();
+    let mut st = FilterState::new();
+    let _ = typed(&mut st, "x");
+    let _ = sel.select_only(&src, 1);
+    let _ = sel.toggle(&src, 3);
+    assert_eq!(
+        st.landing(r(&src, &sel)),
+        Some(id(1)),
+        "no pick: the top result"
+    );
+    st.pick();
+    assert_eq!(
+        st.landing(r(&src, &sel)),
+        Some(id(4)),
+        "the cursor, not the first selected"
+    );
+    assert_eq!(
+        st.target(r(&src, &sel)),
+        Some(id(2)),
+        "Enter keeps Strata's in-place rule"
+    );
+}

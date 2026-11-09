@@ -7,6 +7,12 @@ use strata_kit::look::Look;
 use super::state::ChordState;
 use crate::filter_bar::keycap::keycap;
 
+/// The pill's fill and border: the accent at these opacities, as Strata's
+/// `.shortcut-footer-chord-pill` draws them (`src/style.css`: `alpha(@strata_accent, 0.14)`
+/// and a 1 px `alpha(@strata_accent, 0.4)` border). No Kit or strata-kit token holds them.
+const PILL_FILL_ALPHA: f32 = 0.14;
+const PILL_BORDER_ALPHA: f32 = 0.4;
+
 /// The pill's key under `key`.
 pub fn pill_key(key: &str) -> String {
     format!("{key}-pill")
@@ -39,8 +45,8 @@ pub fn pill<A: Clone>(look: &Look, key: &str, state: &ChordState<A>) -> Option<E
             .px(look.space.sm)
             .center()
             .radius(look.frame.control)
-            .fill(k.alpha(accent, 0.14))
-            .border(1.0, k.alpha(accent, 0.4))
+            .fill(k.alpha(accent, PILL_FILL_ALPHA))
+            .border(1.0, k.alpha(accent, PILL_BORDER_ALPHA))
             .child(
                 text(map.mark.clone())
                     .font(k.ty.small_medium)

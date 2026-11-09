@@ -16,7 +16,13 @@
 //! | --- | --- | --- |
 //! | [`Route::DataDevice`] | `wl_data_device` on winit's display | libwayland ≥ 1.23; focus to hear, a fresh input serial to write |
 //! | [`Route::DataControl`] | ext or wlr data control, on winit's display or a connection of our own | a compositor with data control (not mutter) |
-//! | [`Route::X11`] | `CLIPBOARD` and `PRIMARY` on a second X connection | an X11 window |
+//! | [`Route::X11`] | `CLIPBOARD` and `PRIMARY` on a second X connection | an X11 window, or a Wayland window with no Wayland route (below) |
+//!
+//! A Wayland window with neither winit's display (libwayland < 1.23) nor data control on a
+//! connection of its own (mutter has none) has no Wayland route at all: Ubuntu 24.04's GNOME
+//! session. There the selections go through Xwayland instead ([`Status::x11`]): X11
+//! selections on a connection of our own, which the compositor bridges to Wayland clients,
+//! as arboard falls back (the owner's choice, option a of S2's first question).
 //!
 //! Drags into a Wayland window arrive as [`Event::DragEnter`] and the events after it, on
 //! winit's display. X11 drag and drop, and every drag out, are P1's.
@@ -109,6 +115,9 @@ pub struct Wants {
     pub shared: bool,
     pub data_control: DataControl,
     pub prefer: Prefer,
+    /// Wayland: when no Wayland route is left, take X11 selections through Xwayland (where
+    /// `DISPLAY` names one).
+    pub x11_fallback: bool,
     /// A test switch: behave as on libwayland < 1.23, whose missing `wl_proxy_get_display`
     /// puts winit's display out of reach, so the fallback runs on any host. Only
     /// strata-platform's own tests set it.
@@ -122,6 +131,7 @@ impl Default for Wants {
             shared: true,
             data_control: DataControl::default(),
             prefer: Prefer::default(),
+            x11_fallback: true,
             as_if_libwayland_below_1_23: false,
         }
     }
@@ -140,12 +150,16 @@ pub struct Status {
     pub data_control: Option<&'static str>,
     /// Why winit's display couldn't be used, when it was wanted.
     pub unsupported: Option<Unsupported>,
+    /// Wayland with no Wayland route: X11 selections through Xwayland ([`Route::X11`]).
+    pub x11: bool,
 }
 
 enum Backend {
     Wayland {
         shared: Option<Arc<wayland::Conn>>,
         own: Option<Arc<wayland::Conn>>,
+        /// X11 selections through Xwayland, when neither of the others is bound.
+        x11: Option<x11::X11>,
     },
     X11(x11::X11),
 }
@@ -216,6 +230,7 @@ impl Transfer {
                     own: false,
                     data_control: None,
                     unsupported: None,
+                    x11: false,
                 },
             ),
         };
@@ -274,9 +289,9 @@ impl Transfer {
     /// connection, to check how the X11 side's failure is reported. False without one.
     #[doc(hidden)]
     pub fn provoke_x11_connection_failure(&self) -> bool {
-        match &self.0.backend {
-            Backend::X11(x) => x.provoke_connection_failure(),
-            Backend::Wayland { .. } => false,
+        match self.selections_x11() {
+            Some(x) => x.provoke_connection_failure(),
+            None => false,
         }
     }
 
@@ -290,6 +305,14 @@ impl Transfer {
         self.shared().and_then(|c| c.serials().1)
     }
 
+    /// The X11 selections: on X11, or through Xwayland.
+    fn selections_x11(&self) -> Option<&x11::X11> {
+        match &self.0.backend {
+            Backend::X11(x) => Some(x),
+            Backend::Wayland { x11, .. } => x11.as_ref(),
+        }
+    }
+
     fn shared(&self) -> Option<&Arc<wayland::Conn>> {
         match &self.0.backend {
             Backend::Wayland { shared, .. } => shared.as_ref(),
@@ -300,7 +323,7 @@ impl Transfer {
     /// The connection data control is bound on.
     fn control(&self) -> Option<&Arc<wayland::Conn>> {
         match &self.0.backend {
-            Backend::Wayland { shared, own } => own
+            Backend::Wayland { shared, own, .. } => own
                 .as_ref()
                 .or(shared.as_ref())
                 .filter(|c| c.data_control().is_some()),
@@ -317,7 +340,10 @@ impl Transfer {
         spec: SourceSpec,
     ) -> Result<SourceId, Error> {
         match (&self.0.backend, route) {
-            (Backend::X11(x), Route::X11) => x.set_selection(selection, spec),
+            (_, Route::X11) => self
+                .selections_x11()
+                .ok_or(Error::NoRoute("X11"))?
+                .set_selection(selection, spec),
             (Backend::Wayland { .. }, Route::DataDevice) => self
                 .shared()
                 .filter(|c| c.has_device())
@@ -327,7 +353,6 @@ impl Transfer {
                 .control()
                 .ok_or(Error::NoRoute("data control"))?
                 .set_selection(selection, route, spec),
-            (_, Route::X11) => Err(Error::NoRoute("X11")),
             (Backend::X11(_), _) => Err(Error::NoRoute("Wayland")),
         }
     }
@@ -335,7 +360,7 @@ impl Transfer {
     /// The current offer on a route, as last heard.
     pub fn selection(&self, selection: Selection, route: Route) -> Option<SelectionOffer> {
         match (&self.0.backend, route) {
-            (Backend::X11(x), Route::X11) => x.selection(selection),
+            (_, Route::X11) => self.selections_x11()?.selection(selection),
             (Backend::Wayland { .. }, Route::DataDevice) => {
                 self.shared()?.selection(selection, route)
             }
@@ -350,8 +375,9 @@ impl Transfer {
     pub fn owns(&self, source: SourceId) -> bool {
         match &self.0.backend {
             Backend::X11(x) => x.owns(source),
-            Backend::Wayland { shared, own } => {
+            Backend::Wayland { shared, own, x11 } => {
                 [shared, own].into_iter().flatten().any(|c| c.owns(source))
+                    || x11.as_ref().is_some_and(|x| x.owns(source))
             }
         }
     }
@@ -362,13 +388,16 @@ impl Transfer {
     pub fn clear_selection(&self, source: SourceId) -> Result<bool, Error> {
         match &self.0.backend {
             Backend::X11(x) => x.clear_selection(source),
-            Backend::Wayland { shared, own } => {
+            Backend::Wayland { shared, own, x11 } => {
                 for c in [shared, own].into_iter().flatten() {
                     if c.owns(source) {
                         return c.clear_selection(source);
                     }
                 }
-                Ok(false)
+                match x11 {
+                    Some(x) => x.clear_selection(source),
+                    None => Ok(false),
+                }
             }
         }
     }
@@ -376,11 +405,12 @@ impl Transfer {
     /// Hands the clipboard this process holds on X11 to a running clipboard manager, every
     /// type of it, so it outlives the process: call it just before [`Transfer::shutdown`].
     /// Blocks the caller until the manager answers, at most about `timeout`. On Wayland
-    /// there is no such protocol: [`HandOff::NoManager`].
+    /// there is no such protocol ([`HandOff::NoManager`]), except through Xwayland
+    /// ([`Status::x11`]).
     pub fn hand_off_clipboard(&self, timeout: std::time::Duration) -> HandOff {
-        match &self.0.backend {
-            Backend::X11(x) => x.hand_off(timeout),
-            Backend::Wayland { .. } => HandOff::NoManager,
+        match self.selections_x11() {
+            Some(x) => x.hand_off(timeout),
+            None => HandOff::NoManager,
         }
     }
 
@@ -412,9 +442,12 @@ impl Transfer {
             }
         }
         match &hub.backend {
-            Backend::Wayland { shared, own } => {
+            Backend::Wayland { shared, own, x11 } => {
                 for c in [shared, own].into_iter().flatten() {
                     c.shutdown();
+                }
+                if let Some(x) = x11 {
+                    x.shutdown();
                 }
             }
             Backend::X11(x) => x.shutdown(),
@@ -501,8 +534,27 @@ fn wayland_backend(
         None
     };
     if shared.is_none() && own.is_none() {
-        return Err(Error::Unsupported(
-            unsupported.unwrap_or(Unsupported::NothingWanted),
+        let why = unsupported.unwrap_or(Unsupported::NothingWanted);
+        let display = std::env::var_os("DISPLAY").is_some_and(|d| !d.is_empty());
+        if !(wants.x11_fallback && display) {
+            return Err(Error::Unsupported(why));
+        }
+        let x11 = x11::X11::start(subs.clone())?;
+        let status = Status {
+            backend: "wayland",
+            shared: false,
+            own: false,
+            data_control: None,
+            unsupported: Some(why),
+            x11: true,
+        };
+        return Ok((
+            Backend::Wayland {
+                shared: None,
+                own: None,
+                x11: Some(x11),
+            },
+            status,
         ));
     }
     let status = Status {
@@ -514,6 +566,14 @@ fn wayland_backend(
             .and_then(|c| c.data_control())
             .or(shared_control),
         unsupported,
+        x11: false,
     };
-    Ok((Backend::Wayland { shared, own }, status))
+    Ok((
+        Backend::Wayland {
+            shared,
+            own,
+            x11: None,
+        },
+        status,
+    ))
 }

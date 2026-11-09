@@ -87,7 +87,16 @@ struct Probe {
 
 impl Probe {
     fn start(s: &Session, display: Display, args: &[&str]) -> Probe {
+        Probe::start_with(s, display, args, &[])
+    }
+
+    /// As [`Probe::start`], with more of the session's environment (`DISPLAY` beside
+    /// `WAYLAND_DISPLAY`, say).
+    fn start_with(s: &Session, display: Display, args: &[&str], also: &[Display]) -> Probe {
         let mut cmd = s.command(example("transfer-probe"), display);
+        for d in also {
+            cmd.envs(s.env(*d));
+        }
         cmd.args(["--title", "p0 probe"]).args(args);
         let app = s.spawn("probe", cmd);
         let attached = app.wait_json("attach", |v| {
@@ -443,7 +452,9 @@ fn a_data_device_write_the_compositor_drops_is_reported_cancelled() {
     let (_, v) = probe.wait(at2, "owns", |v| v["ev"] == "owns");
     assert_eq!(v["owns"], true, "{v}");
     assert!(
-        !probe.app.lines()[at..].iter().any(|l| l.contains("\"cancelled\"")),
+        !probe.app.lines()[at..]
+            .iter()
+            .any(|l| l.contains("\"cancelled\"")),
         "a write that took was reported cancelled"
     );
     probe.no_errors();
@@ -488,6 +499,86 @@ fn without_winits_display_a_wayland_window_falls_back_to_its_own_data_control() 
     let at = probe.app.line_count();
     peer.set_selection(Selection::Clipboard, Via::DataControl, &three());
     peer_offers_three(&probe, at, Via::DataControl, Selection::Clipboard);
+}
+
+/// libwayland < 1.23 and no data control (mutter's case, Ubuntu 24.04's GNOME), simulated:
+/// no Wayland route is left, so the selections go through Xwayland. The window's X11 copy
+/// reaches an X11 peer, and a Wayland peer through the compositor's bridge, and the window
+/// reads the Wayland peer's copy back the same way. wlroots bridges the clipboard only while
+/// an Xwayland window has keyboard focus (its xwm denies both directions otherwise), so the
+/// X11 peer's window has it here. wlroots compositors have data control and never take this
+/// route; mutter's bridge, the one it is for, is a hand test.
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn without_any_wayland_route_a_wayland_window_takes_x11_selections_through_xwayland() {
+    let s = Session::start();
+    let x_peer = s.peer(Display::X11);
+    let probe = Probe::start_with(
+        &s,
+        Display::Wayland,
+        &["--as-if-libwayland-1-22", "--no-data-control"],
+        &[Display::X11],
+    );
+    let a = &probe.attached;
+    assert_eq!(a["backend"], "wayland", "{a}");
+    assert_eq!(
+        (
+            a["shared"].as_bool(),
+            a["own"].as_bool(),
+            a["x11"].as_bool()
+        ),
+        (Some(false), Some(false), Some(true)),
+        "{a}"
+    );
+    x_peer.map("p0 x11 peer");
+    let windows = s.wait_windows(&[probe.app.pid(), x_peer.pid()]);
+    let x_window = windows
+        .iter()
+        .find(|w| w.pid == x_peer.pid())
+        .expect("the X11 peer's window");
+    s.focus(x_window);
+    x_peer.wait_event("focus", |e| matches!(e, Event::Focus { focused: true }));
+    let wl_peer = s.peer(Display::Wayland);
+    let offers = three();
+    probe.own(Via::X11, Selection::Clipboard, &offers);
+    wait_targets(&x_peer, Selection::Clipboard, Via::X11, &mimes(&offers));
+    wait_targets(
+        &wl_peer,
+        Selection::Clipboard,
+        Via::DataControl,
+        &mimes(&offers),
+    );
+    for o in &offers {
+        assert_eq!(
+            x_peer.read(Selection::Clipboard, Via::X11, &o.mime).fnv1a64,
+            fnv(o)
+        );
+        assert_eq!(
+            wl_peer
+                .read(Selection::Clipboard, Via::DataControl, &o.mime)
+                .fnv1a64,
+            fnv(o),
+            "{} through the bridge",
+            o.mime
+        );
+    }
+    let at = probe.app.line_count();
+    wl_peer.set_selection(
+        Selection::Clipboard,
+        Via::DataControl,
+        &[Offer::text(UTF8, "the Wayland peer's")],
+    );
+    // The bridge names UTF-8 text by its X11 target.
+    probe.wait(at, "the Wayland peer's copy, through Xwayland", |v| {
+        v["ev"] == "selection"
+            && v["via"] == "x11"
+            && v["mimes"]
+                .as_array()
+                .is_some_and(|m| m.iter().any(|m| m == "UTF8_STRING"))
+    });
+    let got = probe.read(Via::X11, Selection::Clipboard, "UTF8_STRING");
+    assert_eq!(got["text"], "the Wayland peer's");
+    probe.no_errors();
 }
 
 // ---- Wayland: the peer offers ----

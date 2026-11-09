@@ -821,6 +821,35 @@ fn wayland_data_control_a_clear_racing_another_apps_copy_leaves_that_copy() {
     demo.no_errors();
 }
 
+/// On X11 a copy waits a round trip for its timestamp: a clear meanwhile cancels the take, so
+/// the copy never holds and nobody is left offering it.
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn x11_a_clear_before_the_copy_holds_cancels_it() {
+    let s = Session::start();
+    let demo = Demo::start(&s, B::X).expect("X11");
+    let peer = s.peer(Display::X11);
+    let at = demo.send(json!({
+        "cmd": "copy-then-clear", "selection": Selection::Clipboard,
+        "offers": [Offer::text(UTF8, "never held")],
+    }));
+    let cleared = demo.wait(at, "the clear", |v| v["ev"] == "cleared");
+    assert_eq!(cleared["ok"], true, "{cleared}");
+    let copied = demo.wait(at, "the copy", |v| v["ev"] == "copied");
+    let copy = copied["copy"].as_u64().expect("a copy id");
+    assert_eq!(demo.change(at, "lost", Some(copy))["why"], "cleared");
+    // A take still on its way would hold by now: a later round trip shows nobody owns it.
+    demo.read(Selection::Clipboard, &[UTF8], None);
+    wait_targets(&peer, Selection::Clipboard, Via::X11, None);
+    assert!(
+        !demo.app.lines()[at..]
+            .iter()
+            .any(|l| l.contains("\"holding\"")),
+        "the cleared copy held"
+    );
+    demo.no_errors();
+}
+
 // ---- 7. The data device's serials ----
 
 /// A write with a serial older than the current selection's is dropped by the compositor:

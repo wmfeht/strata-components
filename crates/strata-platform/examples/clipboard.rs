@@ -10,7 +10,7 @@
 //!   absent: the default);
 //! - `{"cmd":"arm","offers":[Offer]}`: what Ctrl+C in the window copies;
 //! - `{"cmd":"copy-then-read","selection":…,"offers":[Offer],"mimes":[…]}`: a copy, then a read,
-//!   in one handler;
+//!   in one handler; `{"cmd":"copy-then-clear",…}`: a copy and its clear, in one handler;
 //! - `{"cmd":"copy-files","uris":[…],"cut":bool,"text":"…"|null}`;
 //! - `{"cmd":"clear","copy":n}`, `{"cmd":"state","copy":n}`, `{"cmd":"offered","selection":…}`;
 //! - `{"cmd":"clear-later","copy":n,"ms":n}`: holds the UI thread `ms`, then clears;
@@ -177,6 +177,19 @@ mod demo {
                 if let Err(e) = r {
                     log("read-error", json!({ "error": format!("{e:?}") }));
                 }
+            }
+            // A copy, then its clear in the same handler: on X11, while it waits for its
+            // timestamp.
+            "copy-then-clear" => {
+                let offers: Vec<Offer> =
+                    serde_json::from_value(field("offers")).unwrap_or_default();
+                let copy = s.clip.copy(sel, content(offers));
+                let cleared = copy.as_ref().ok().map(|c| s.clip.clear(*c));
+                copied(copy);
+                log(
+                    "cleared",
+                    json!({ "ok": cleared.as_ref().and_then(|r| r.as_ref().ok()) }),
+                );
             }
             "arm" => {
                 s.armed = serde_json::from_value(field("offers")).unwrap_or_default();

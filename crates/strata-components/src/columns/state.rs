@@ -570,12 +570,17 @@ impl ColumnsState {
         self.held = depth.filter(|d| *d < self.columns.len());
     }
 
-    /// The active column without a reveal: only it shows the cursor.
+    /// The active column without a reveal: only it shows the cursor. A column the keyboard
+    /// leaves drops a cursor it was waiting to place (Strata's restore gives up once focus
+    /// leaves the list, `cursor.rs` `list_keeps_focus`): a late listing there moves nothing.
     pub(super) fn set_active_quiet(&mut self, depth: usize) {
         self.active = depth;
         self.targeted = Some(depth);
         for (i, c) in self.columns.iter_mut().enumerate() {
             c.collection.set_active(i == depth);
+            if i != depth {
+                c.pending = Pending::None;
+            }
         }
     }
 

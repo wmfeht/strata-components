@@ -6,6 +6,7 @@ mod c2 {
     use rune::{ElementInfo, Env, Key, KeyEvent, Mods, PhysicalInput, Runtime};
     use serde_json::Value;
     use strata_components::columns::keys;
+    use strata_components::contract::EntrySource;
     use strata_gallery::Gallery;
     use strata_gallery::scenes::{self, c2::id_in};
 
@@ -1088,5 +1089,43 @@ mod c2 {
         tap(&mut rt, "c2-refresh-0");
         assert_eq!(rt.state.c2.intent, "Refreshed column 0");
         assert_eq!(focused(&rt), ["c2"]);
+    }
+
+    #[test]
+    fn a_late_listing_in_a_column_left_behind_places_no_cursor_and_moves_no_strip() {
+        // browser/view-modes/columns: If that column is still loading, the cursor lands when it
+        // finishes (while the column holds the keyboard; one the person has left places none,
+        // as Strata's restore gives up once focus leaves the list).
+        let mut rt = scene("c2-home-light");
+        rt.state.c2.width = Some(500.0);
+        settle(&mut rt, 5);
+        tap(&mut rt, &keys::title("c2-col-1"));
+        rt.update(|g, _| {
+            let d = &mut g.c2;
+            let src = &d.listings.0[0].source;
+            let c = &mut d.columns.column_mut(0).unwrap().collection;
+            let i = src.index_of(id_in("Home", "Slow")).unwrap();
+            let _ = c.selection.select_only(src, i);
+            c.note_selection(src);
+        });
+        key(&mut rt, Key::Right);
+        settle(&mut rt, 20);
+        assert_eq!(path(&rt), "Home/Slow");
+        assert_eq!(rt.state.c2.columns.active(), 1);
+        key(&mut rt, Key::Left);
+        settle(&mut rt, 20);
+        assert_eq!(rt.state.c2.columns.active(), 0);
+        let offset = strip_offset(&rt);
+        settle(&mut rt, 130);
+        assert_eq!(
+            cursor(&rt, 1),
+            None,
+            "no cursor lands in the column left behind"
+        );
+        assert_eq!(
+            strip_offset(&rt),
+            offset,
+            "the strip stays on the active column"
+        );
     }
 }

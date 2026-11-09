@@ -377,6 +377,8 @@ fn ctrl_a_then_ctrl_c_copies_the_whole_document_past_runes_row_cap() {
         .collect();
     let want: String = units.iter().map(|u| u.copy_text.as_str()).collect();
     let mut rt = runtime(units);
+    // The host polls, as Strata's does: select-all's change comes before its next poll.
+    rt.poll = Some(host_poll);
     let clip = clipboard::memory();
     rt.use_clipboard(&clip);
     let t = rect(&rt, "doc-u0/t");
@@ -792,4 +794,46 @@ fn a_find_queued_before_a_document_swap_selects_nothing_in_the_new_one() {
             })
         )
     });
+}
+
+#[test]
+fn ctrl_a_over_a_full_selection_does_not_make_a_later_shift_click_copy_everything() {
+    // Review 1: with everything already selected, Ctrl+A changes no selection, so its pending
+    // flag waited for the next change, and a Shift-click that narrowed the selection then
+    // copied the whole document.
+    let mut rt = runtime(vec![
+        Unit::new(UnitKind::Paragraph, "Alpha beta"),
+        Unit::new(UnitKind::Paragraph, "Gamma delta"),
+    ]);
+    rt.poll = Some(host_poll);
+    let clip = clipboard::memory();
+    rt.use_clipboard(&clip);
+    let a = rect(&rt, "doc-u0/t");
+    let b = rect(&rt, "doc-u1/t");
+    drag(
+        &mut rt,
+        (a[0] + 0.5, a[1] + a[3] / 2.0),
+        (b[0] + b[2] - 1.0, b[1] + b[3] / 2.0),
+    );
+    assert_eq!(
+        rt.selected_text().as_deref(),
+        Some("Alpha beta\nGamma delta")
+    );
+    command(&mut rt, 'a');
+    rt.frame(1.0);
+    settle(&mut rt);
+    rt.physical_input(PhysicalInput::Modifiers(Mods {
+        shift: true,
+        ..Mods::default()
+    }));
+    click(&mut rt, (b[0] + 20.0, b[1] + b[3] / 2.0));
+    rt.physical_input(PhysicalInput::Modifiers(Mods::default()));
+    settle(&mut rt);
+    let narrowed = rt.selected_text().expect("a selection");
+    assert!(
+        narrowed.len() < "Alpha beta\nGamma delta".len(),
+        "{narrowed:?}"
+    );
+    command(&mut rt, 'c');
+    assert_eq!(clip.text().as_deref(), Some(&narrowed));
 }

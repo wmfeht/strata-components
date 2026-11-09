@@ -17,6 +17,10 @@ use super::shown::{Insert, Shown, math_inserts};
 use crate::preview_drawer::{DocumentView, FindStatus, HostedPreview};
 use crate::scroll::Bar;
 
+/// How many host polls Ctrl+A waits for the selection change its select-all makes: Rune
+/// applies it after the key's frame, and reports it in the next (after that frame's poll).
+const ALL_PENDING_POLLS: u8 = 2;
+
 /// The double-click time until the host sets the desktop's: Rune's fixed 0.5 s on Linux.
 pub const DOUBLE_CLICK: f64 = 0.5;
 
@@ -120,8 +124,9 @@ pub struct DocumentState {
     pub(crate) copied: Option<(usize, Option<f64>)>,
     pub(crate) bar: Bar,
     colourable: Vec<bool>,
-    /// Ctrl+A asked Rune to select everything, and its selection change hasn't come yet.
-    all_pending: bool,
+    /// Ctrl+A asked Rune to select everything, and its selection change hasn't come yet: the
+    /// host polls left before it is taken not to come.
+    all_pending: u8,
     /// The host's clock at its last poll ([`DocumentState::tick`]).
     now: f64,
     /// The last link opened (its text and number) and when, and the double-click time.
@@ -154,7 +159,7 @@ impl DocumentState {
             copied: None,
             bar: Bar::new(),
             colourable: Vec::new(),
-            all_pending: false,
+            all_pending: 0,
             now: 0.0,
             last_link: None,
             double_click: DOUBLE_CLICK,
@@ -276,7 +281,7 @@ impl DocumentState {
     /// selected, Rune's selection doesn't change, and the copy-everything holds.)
     pub(crate) fn select_all(&mut self) {
         if !self.content.all.get() {
-            self.all_pending = true;
+            self.all_pending = ALL_PENDING_POLLS;
         }
     }
 
@@ -294,7 +299,7 @@ impl DocumentState {
     /// any other ends it. (Rune reports a selection over unbuilt rows without all of them,
     /// so the change itself can't say it is the whole document.)
     pub(crate) fn selection_changed(&mut self, sel: Option<&TextSelection>) {
-        let all = std::mem::take(&mut self.all_pending) && sel.is_some();
+        let all = std::mem::take(&mut self.all_pending) > 0 && sel.is_some();
         self.content.all.set(all);
     }
 
@@ -344,6 +349,11 @@ impl DocumentState {
     /// `Tx`, so they wait here: call this from the host's poll (which has one). True when it
     /// asked for anything.
     pub fn flush(&mut self, tx: &mut Tx) -> bool {
+        // Ctrl+A's select-all changes the selection by the second poll after the key, if it
+        // changes it at all: over a selection that already holds everything it doesn't, and
+        // a later change (a Shift-click narrowing it, whose frame polls first) mustn't be
+        // taken for it.
+        self.all_pending = self.all_pending.saturating_sub(1);
         let any = !self.pending.is_empty();
         for r in self.pending.drain(..) {
             match r {

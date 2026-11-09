@@ -433,9 +433,19 @@ fn main() { rune::run(AppSpec::new("u5", (320.0, 200.0), S::default, view)); }
   copy written together.
 - A typed read with the list of offered types.
 - A callback when the app loses the clipboard.
+- On X11, every form of the app's last copy handed to the clipboard manager at exit
+  (`SAVE_TARGETS`), as arboard already does for Rune's text: today only what Rune wrote
+  survives the app, and a shim's copy can be handed over only by the shim's own connection.
+- A way to learn that a write was dropped. On Wayland's `wl_data_device` a write whose serial
+  is older than the current selection's is ignored without an error (wlroots; S2 Q5), and
+  `Tx::copy` says nothing either way: a write result, or the loss callback firing for it.
 
 **Meanwhile** we write the selection over data-control on our own connection, or over
 `wl_data_device` on winit's display (U9's link), and use X11 selections on a second connection.
+P2 (`strata-platform::clipboard`) detects a dropped data-device write by the missing echo
+before a `wl_display.sync`, and hands its own X11 copy to the clipboard manager at shutdown.
+Upstream was searched again at `dev` `5d421fd` (2026-11-08): no commit touches
+`crates/rune/src/clipboard*` since the pin, and no issue asks for any of this.
 
 ### U6
 

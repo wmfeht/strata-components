@@ -41,8 +41,11 @@ pub struct CollectionState {
     pub(super) visible: Range<usize>,
     pub(super) drop: Option<DropOver>,
     pub(super) hover_live: bool,
-    /// A press ended since the pointer last moved: rest reports wait for it to move.
-    pub(super) rest_held: bool,
+    /// The entry under the pointer at its last move over the collection (the rest hook's).
+    pub(super) rest_under: Option<EntryId>,
+    /// The entry the pointer last arrived on by moving, unless a press ended or the host held
+    /// rest reports since: the only row whose rest report counts.
+    pub(super) rest_entered: Option<EntryId>,
     pub(super) keyboard: bool,
     pub(super) active: bool,
     pub(super) layout: u64,
@@ -97,7 +100,8 @@ impl Default for CollectionState {
             visible: 0..0,
             drop: None,
             hover_live: true,
-            rest_held: false,
+            rest_under: None,
+            rest_entered: None,
             keyboard: false,
             active: true,
             layout: 0,
@@ -270,6 +274,15 @@ impl CollectionState {
     /// shows it (C2).
     pub fn set_active(&mut self, active: bool) {
         self.active = active;
+    }
+
+    /// Holds rest reports ([`Collection::rest`](super::Collection::rest)) until the pointer
+    /// next arrives on a row: call it when a drag that didn't start in this collection ends
+    /// (a sidebar row, a tab, another pane, a system drag from P1 or X2). A drag dropped on a
+    /// folder then never peeks it. The collection does this itself when one of its own
+    /// presses ends.
+    pub fn hold_rest(&mut self) {
+        self.rest_entered = None;
     }
 
     /// Records keyboard navigation that moved the cursor from outside the element's own key

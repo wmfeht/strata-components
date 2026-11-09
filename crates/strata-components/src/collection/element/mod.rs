@@ -206,7 +206,7 @@ pub use keys::{
 };
 use lines::LineMap;
 pub use lines::{Group, GroupStyle, GroupedRows, Groups, Lines, OnePerLine};
-pub use row::{ContentSlot, Describe, Rest, RestReport, RowCx, RowMarks, RowState, Slot};
+pub use row::{ContentSlot, Describe, Rest, RestReport, RestView, RowCx, RowMarks, RowState, Slot};
 pub use seam::{
     Activation, Controllers, Ctx, Effect, Flow, Hit, Intent, KeyController, KeyInput,
     MarqueeController, PointerController, PointerInput, PointerPhase, Region, Settings,
@@ -839,8 +839,8 @@ impl<S: 'static> Collection<S> {
             .on_secondary_press_local(move |s: &mut S, e, tx| {
                 route::on_secondary(&secondary_cfg, s, e, tx)
             })
-            .on_pointer_move_local(move |s: &mut S, _, tx| {
-                route::on_pointer_move(&move_cfg, s, tx)
+            .on_pointer_move_local(move |s: &mut S, p, tx| {
+                route::on_pointer_move(&move_cfg, s, p, tx)
             });
         if !cfg.keys_by_host {
             root = root

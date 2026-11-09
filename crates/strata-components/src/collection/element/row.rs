@@ -225,6 +225,7 @@ impl<S: 'static> Describe<S> {
 type DelaysFn<S> = Rc<dyn Fn(&S, &RowCx<'_>) -> Option<(Duration, Duration)>>;
 type ReportFn<S> = Rc<dyn Fn(&mut S, RestReport, &mut Tx)>;
 type PartFn<S> = Rc<dyn Fn(&S, &RowCx<'_>) -> Option<El>>;
+type ViewFn<S> = Rc<dyn Fn(&mut S, RestView) -> bool>;
 
 /// Rows that report the pointer resting on them, through Rune's `El::hover_delays`: C22's
 /// folder peek. Set with [`Collection::rest`](super::Collection::rest).
@@ -232,10 +233,19 @@ type PartFn<S> = Rc<dyn Fn(&S, &RowCx<'_>) -> Option<El>>;
 /// Each row `delays` gives `Some((enter, leave))` for reports `true` once the pointer has
 /// rested on it for `enter`, and `false` once it has stayed off it for `leave`; a pass shorter
 /// than the delay reports nothing, and a press cancels a wait (Rune). A row that leaves the
-/// tree (scrolled out, a listing change, another view) reports its leave at once. While row
-/// hover is off after keyboard navigation ([`CollectionState::row_hover`]), and after a press
-/// ends (a drag dropped or let go on a row), a `true` report is dropped until the pointer
-/// moves: a row that moves under a parked pointer, or one a drag ended on, reports nothing.
+/// tree (scrolled out, a listing change, another view) reports its leave at once.
+///
+/// A `true` report counts only on the row the pointer last arrived on by moving over the
+/// collection, as Strata's peek starts only from a motion enter: a row a scroll carries under
+/// a parked pointer, the row a press of the collection's own ended on, and the row a drag from
+/// elsewhere ended on (once the host calls [`CollectionState::hold_rest`]) report nothing
+/// until the pointer leaves and comes back; moving inside the row doesn't count. None counts
+/// while row hover is off after keyboard navigation ([`CollectionState::row_hover`]).
+///
+/// Rune counts a row under an overlay (a card, a menu, a scrim) as hovered too (Rune draft
+/// U-C22-1): the hook's owner decides what an overlay hides.
+///
+/// [`CollectionState::hold_rest`]: super::CollectionState::hold_rest
 ///
 /// The delays and the part are part of the row's memo version, so they may read anything; a
 /// part that reads the state beyond its [`RowCx`] gives a `version` that changes with it.
@@ -247,6 +257,7 @@ pub struct Rest<S> {
     pub(super) delays: DelaysFn<S>,
     pub(super) report: ReportFn<S>,
     pub(super) part: Option<(VersionFn<S>, PartFn<S>)>,
+    pub(super) view: Option<ViewFn<S>>,
 }
 
 impl<S> Clone for Rest<S> {
@@ -255,6 +266,7 @@ impl<S> Clone for Rest<S> {
             delays: self.delays.clone(),
             report: self.report.clone(),
             part: self.part.clone(),
+            view: self.view.clone(),
         }
     }
 }
@@ -269,6 +281,7 @@ impl<S: 'static> Rest<S> {
             delays: Rc::new(delays),
             report: Rc::new(report),
             part: None,
+            view: None,
         }
     }
 
@@ -284,6 +297,14 @@ impl<S: 'static> Rest<S> {
         self
     }
 
+    /// Hears which entries the viewport shows whenever that changes (a scroll, a listing
+    /// change): C22 closes a peek whose folder left the view. Return true when it changed what
+    /// the view reads. Rune's `on_visible_rows` gives no transaction.
+    pub fn on_view(mut self, f: impl Fn(&mut S, RestView) -> bool + 'static) -> Self {
+        self.view = Some(Rc::new(f));
+        self
+    }
+
     /// The memo version of what this hook adds to a row.
     fn version(&self, s: &S, rcx: &RowCx<'_>) -> u64 {
         let mut h = std::hash::DefaultHasher::new();
@@ -293,6 +314,20 @@ impl<S: 'static> Rest<S> {
         }
         h.finish()
     }
+}
+
+/// What the viewport shows, for [`Rest::on_view`].
+///
+/// Fields may be added.
+///
+/// Used by: C22.
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct RestView {
+    /// The collection's key.
+    pub collection: Rc<str>,
+    /// The entries the viewport shows, in order.
+    pub visible: Vec<EntryId>,
 }
 
 /// A row's rest report: the pointer came to rest on it, or left it.

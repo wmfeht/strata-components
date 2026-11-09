@@ -327,7 +327,7 @@ pub(super) fn on_drag<S: 'static>(cfg: &Rc<Config<S>>, s: &mut S, d: &mut Drag, 
         Phase::Up => PointerPhase::Up,
     };
     if phase == PointerPhase::Up && cfg.rest.is_some() {
-        (cfg.get_mut)(s).1.rest_held = true;
+        (cfg.get_mut)(s).1.hold_rest();
     }
     let st = (cfg.get)(s).1;
     let press = st.gesture;
@@ -553,8 +553,9 @@ pub(super) fn on_key<S: 'static>(
 }
 
 /// A rest row's `on_hover_change` (after its delays): the hook hears it, with the row's and the
-/// viewport's window rects. An arrival while row hover is off (after keyboard navigation), or
-/// after a press ended (a drag dropped on the row), is dropped until the pointer moves.
+/// viewport's window rects. A rest counts only on the row the pointer last arrived on by
+/// moving (not one carried under it by a scroll, nor the row a press or a held drag ended on),
+/// and not while row hover is off after keyboard navigation.
 pub(super) fn on_rest<S: 'static>(
     cfg: &Rc<Config<S>>,
     s: &mut S,
@@ -567,7 +568,7 @@ pub(super) fn on_rest<S: 'static>(
         return;
     };
     let (src, st) = (cfg.get)(s);
-    if inside && (!st.hover_live || st.rest_held) {
+    if inside && (!st.hover_live || st.rest_entered != Some(id)) {
         tx.live_only();
         return;
     }
@@ -589,10 +590,34 @@ pub(super) fn on_rest<S: 'static>(
     (rest.report)(s, report, tx);
 }
 
-/// `on_pointer_move_local` on the container: hover comes back once the pointer moves.
-pub(super) fn on_pointer_move<S: 'static>(cfg: &Rc<Config<S>>, s: &mut S, tx: &mut Tx) {
+/// `on_pointer_move_local` on the container: hover comes back once the pointer moves, and with
+/// the rest hook, the row the pointer arrives on is the one whose rest counts.
+pub(super) fn on_pointer_move<S: 'static>(
+    cfg: &Rc<Config<S>>,
+    s: &mut S,
+    p: rune::PointerEvent,
+    tx: &mut Tx,
+) {
+    if cfg.rest.is_some() {
+        let window = Point::new(p.window_x, p.window_y);
+        let under = {
+            let (src, st) = (cfg.get)(s);
+            if st.viewport.contains(window) {
+                geometry(cfg, s)
+                    .index_at(st.content_point(window))
+                    .filter(|&i| i < src.len())
+                    .map(|i| src.id_at(i))
+            } else {
+                None
+            }
+        };
+        let st = (cfg.get_mut)(s).1;
+        if under != st.rest_under {
+            st.rest_under = under;
+            st.rest_entered = under;
+        }
+    }
     let st = (cfg.get_mut)(s).1;
-    st.rest_held = false;
     if st.hover_live {
         tx.live_only();
     } else {
@@ -654,11 +679,22 @@ pub(super) fn on_visible<S: 'static>(
     if st.pending.is_some() && (st.scroll.get() - st.pending_offset).abs() > 0.5 {
         st.pending = None;
     }
+    let rest = match cfg.rest.as_ref().and_then(|r| r.view.as_ref()) {
+        Some(f) => {
+            let visible = range.clone().map(|i| src.id_at(i)).collect();
+            let view = super::RestView {
+                collection: cfg.key.clone(),
+                visible,
+            };
+            f(s, view)
+        }
+        None => false,
+    };
     let host = match &cfg.on_visible {
         Some(f) => f(s, range),
         None => false,
     };
-    host || restick
+    host || restick || rest
 }
 
 /// The controllers' timeouts and queued commands, from the host's poll.

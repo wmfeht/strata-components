@@ -65,6 +65,7 @@ struct Host {
     rest: bool,
     anchor: Option<EntryId>,
     rests: Vec<RestReport>,
+    views: Vec<RestView>,
     /// The runtime's clock, from its poll ([`rest_runtime`]).
     t: f64,
 }
@@ -97,6 +98,7 @@ impl Host {
             rest: false,
             anchor: None,
             rests: Vec::new(),
+            views: Vec::new(),
             t: 0.0,
         }
     }
@@ -244,6 +246,10 @@ fn collection(s: &Host) -> Collection<Host> {
                 },
                 |s: &mut Host, report, _| s.rests.push(report),
             )
+            .on_view(|s: &mut Host, view| {
+                s.views.push(view);
+                false
+            })
             .part(
                 |s: &Host, rcx| u64::from(s.anchor == Some(rcx.entry.id)),
                 |s: &Host, rcx| {
@@ -3290,4 +3296,80 @@ fn a_row_a_drag_ends_on_reports_resting_only_once_the_pointer_moves() {
         .map(|r| r.id)
         .collect();
     assert_eq!(inside, [id(0)]);
+}
+
+#[test]
+fn a_row_a_scroll_carries_under_a_parked_pointer_reports_nothing() {
+    let mut rt = rest_runtime(300);
+    settle(&mut rt);
+    // Parked on file row 5; a scroll of five rows carries folder row 10 under it.
+    let (x, y) = centre_of(&rt, "row-5");
+    rt.pointer_move(x, y);
+    rt.frame(1.0 / 60.0);
+    let h = element(&rt, "row-5").unwrap().rect[3];
+    rt.update(|_, tx| tx.scroll_to_instant(viewport_path(SCOPE), 0.0, 5.0 * h));
+    rt.frame(1.0 / 60.0);
+    rt.frame(1.0 / 60.0);
+    let under = element(&rt, "row-10").unwrap().visible;
+    assert!(
+        under[1] <= y && y < under[1] + under[3],
+        "row 10 is under the pointer"
+    );
+    wake_until(&mut rt, 1.5, |_| false);
+    assert!(
+        !rt.state.rests.iter().any(|r| r.inside),
+        "{:?}",
+        rt.state.rests
+    );
+}
+
+#[test]
+fn a_held_collection_drops_the_rest_of_the_row_a_drag_from_elsewhere_ended_on() {
+    let mut rt = rest_runtime(30);
+    settle(&mut rt);
+    // The pointer arrives on folder row 10 (a drag from elsewhere passing over), the host's
+    // drag ends there and holds.
+    let (x, y) = centre_of(&rt, "row-10");
+    rt.pointer_move(x, y);
+    rt.frame(1.0 / 60.0);
+    rt.update(|s, _| s.coll.hold_rest());
+    wake_until(&mut rt, 1.0, |_| false);
+    assert!(!rt.state.rests.iter().any(|r| r.inside), "dropped");
+    // A move inside it is no arrival.
+    rt.pointer_move(x + 5.0, y);
+    rt.frame(1.0 / 60.0);
+    wake_until(&mut rt, 1.0, |_| false);
+    assert!(!rt.state.rests.iter().any(|r| r.inside), "still dropped");
+    // Leaving and coming back is.
+    let (fx, fy) = centre_of(&rt, "row-11");
+    rt.pointer_move(fx, fy);
+    rt.frame(1.0 / 60.0);
+    wake_until(&mut rt, 0.3, |_| false);
+    rt.pointer_move(x, y);
+    rt.frame(1.0 / 60.0);
+    wake_until(&mut rt, 1.0, |s| s.rests.iter().any(|r| r.inside));
+    let inside: Vec<_> = rt
+        .state
+        .rests
+        .iter()
+        .filter(|r| r.inside)
+        .map(|r| r.id)
+        .collect();
+    assert_eq!(inside, [id(10)]);
+}
+
+#[test]
+fn the_rest_hook_hears_the_entries_the_viewport_shows() {
+    let mut rt = rest_runtime(300);
+    settle(&mut rt);
+    let first = rt.state.views.last().expect("a first view").clone();
+    assert_eq!(&*first.collection, SCOPE);
+    assert_eq!(first.visible.first(), Some(&id(0)));
+    let h = element(&rt, "row-5").unwrap().rect[3];
+    rt.update(|_, tx| tx.scroll_to_instant(viewport_path(SCOPE), 0.0, 100.0 * h));
+    rt.frame(1.0 / 60.0);
+    rt.frame(1.0 / 60.0);
+    let last = rt.state.views.last().unwrap();
+    assert_eq!(last.visible.first(), Some(&id(100)));
+    assert!(!last.visible.contains(&id(0)));
 }

@@ -98,11 +98,60 @@ struct Entry {
     used: u64,
 }
 
+/// The cache's entries by key. Every scan of them (`values`, `iter`) goes through here, and
+/// in tests each entry a scan yields counts as a visit, so a test can bound the work misses
+/// and trims do on the UI thread however a scan is written.
+#[derive(Default)]
+struct Entries {
+    map: HashMap<u64, Entry>,
+    #[cfg(test)]
+    visits: std::cell::Cell<u64>,
+}
+
+impl Entries {
+    fn get(&self, key: &u64) -> Option<&Entry> {
+        self.map.get(key)
+    }
+
+    fn get_mut(&mut self, key: &u64) -> Option<&mut Entry> {
+        self.map.get_mut(key)
+    }
+
+    fn insert(&mut self, key: u64, entry: Entry) {
+        self.map.insert(key, entry);
+    }
+
+    fn remove(&mut self, key: &u64) -> Option<Entry> {
+        self.map.remove(key)
+    }
+
+    fn values(&self) -> impl Iterator<Item = &Entry> {
+        self.map.values().inspect(|_| self.visit())
+    }
+
+    fn iter(&self) -> impl Iterator<Item = (&u64, &Entry)> {
+        self.map.iter().inspect(|_| self.visit())
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.map.len()
+    }
+
+    #[cfg(test)]
+    fn visit(&self) {
+        self.visits.set(self.visits.get() + 1);
+    }
+
+    #[cfg(not(test))]
+    fn visit(&self) {}
+}
+
 struct Blocks {
     id: u64,
     tx: Option<Sender<Request>>,
     rx: Receiver<Reply>,
-    entries: HashMap<u64, Entry>,
+    entries: Entries,
     bytes: usize,
     /// The bytes of the blocks asked for since the last bump, kept as they are asked.
     current: usize,
@@ -120,9 +169,6 @@ struct Blocks {
     /// Tests force keys (to collide them) with this.
     #[cfg(test)]
     key_fn: Option<fn(&str, &str) -> u64>,
-    /// Entries looked at by misses and trims, for tests of their cost.
-    #[cfg(test)]
-    visits: u64,
 }
 
 impl CodeBlocks {
@@ -137,7 +183,7 @@ impl CodeBlocks {
                 id,
                 tx,
                 rx,
-                entries: HashMap::new(),
+                entries: Entries::default(),
                 bytes: 0,
                 current: 0,
                 tick: 0,
@@ -149,8 +195,6 @@ impl CodeBlocks {
                 hasher: RandomState::new(),
                 #[cfg(test)]
                 key_fn: None,
-                #[cfg(test)]
-                visits: 0,
             })),
         }
     }
@@ -192,7 +236,7 @@ impl CodeBlocks {
     /// Entries the cache's misses and trims have looked at so far.
     #[cfg(test)]
     pub(crate) fn visits(&self) -> u64 {
-        self.state.borrow().visits
+        self.state.borrow().entries.visits.get()
     }
 
     /// The key this pool gives a block.
@@ -207,6 +251,7 @@ impl CodeBlocks {
         let s = self.state.borrow();
         let counted = s
             .entries
+            .map
             .values()
             .filter(|e| e.used > s.build_start)
             .map(|e| cost(&e.code))
@@ -230,6 +275,7 @@ impl CodeBlocks {
         let s = self.state.borrow();
         let code = &code[..coloured_len(code)];
         s.entries
+            .map
             .get(&s.key(lang, code))
             .is_some_and(|e| *e.code == *code && e.tokens.is_some())
     }
@@ -239,6 +285,7 @@ impl CodeBlocks {
     pub(crate) fn pending_keys(&self) -> Vec<u64> {
         let s = self.state.borrow();
         s.entries
+            .map
             .iter()
             .filter(|(_, e)| e.tokens.is_none())
             .map(|(&k, _)| k)
@@ -453,10 +500,6 @@ impl Blocks {
     fn evict(&mut self, limit: usize, extra: usize, target: usize, spare_after: u64) {
         if self.bytes + extra <= limit {
             return;
-        }
-        #[cfg(test)]
-        {
-            self.visits += self.entries.len() as u64;
         }
         let mut old: Vec<(u64, u64)> = self
             .entries

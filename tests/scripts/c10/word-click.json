@@ -7,18 +7,13 @@
     {
       "t": 0.2,
       "type": "double-click",
-      "key": "code-l6/t"
-    },
-    {
-      "t": 0.9,
-      "type": "triple-click",
-      "key": "code-l13/t"
+      "key": "code-l12/t"
     }
   ],
   "expect": [
     {
       "key": "c10-selection",
-      "name": "    let mut out = Vec::new();"
+      "name": "Entry"
     }
   ]
 }

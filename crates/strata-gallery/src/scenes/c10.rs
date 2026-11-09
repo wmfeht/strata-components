@@ -44,7 +44,7 @@ pub enum Fixture {
     WrapOff,
     /// Plain text with no grammar, cut at Strata's limit.
     Plain,
-    /// A 5 KiB line among short ones, split into 2 KiB rows.
+    /// A 5 KiB line among short ones, split into 2 KiB rows, wrap off.
     LongLine,
     /// 50,000 generated lines.
     Large,
@@ -155,6 +155,8 @@ const MARKDOWN: &str = "# Notes\n\nSome **bold** text and a [link](https://examp
 
 fn wrap_off() -> String {
     let mut s = String::from("// Wide lines: wrap is off, so they scroll sideways.\n");
+    // Wide characters draw wider than their count: the list is measured for them.
+    let _ = writeln!(s, "let names = [\"{}\", \"😀🎉\"];", "漢字かな".repeat(12));
     for i in 0..30 {
         let _ = writeln!(
             s,
@@ -228,7 +230,8 @@ pub fn setup(g: &mut Gallery, dark: bool, fixture: Fixture, wait: bool) {
         Fixture::MarkdownSource => (MARKDOWN.into(), Some("notes.md"), None),
     };
     let mut code = CodeState::new(text).highlighter(&live.highlighter, file, syntax);
-    code.set_wrap(fixture != Fixture::WrapOff);
+    // The long line unwrapped shows its 2 KiB rows one under another, their gutters "↳".
+    code.set_wrap(!matches!(fixture, Fixture::WrapOff | Fixture::LongLine));
     if fixture == Fixture::Plain {
         code.set_notices(vec!["Preview limited to the first 1 MB".into()]);
     }
@@ -390,6 +393,13 @@ fn editor_page(g: &Gallery, look: &Look) -> El {
                 .color(k.c.text_muted),
         )
         .child(col().w_full().grow(1.0).min_h(0.0).child(editor))
+        // The Script tab's next stop, as Strata's Library button is.
+        .child(
+            rune_kit::Button::new("Library")
+                .on_press(|g: &mut Gallery| g.c10.last = "Library".into())
+                .build(k)
+                .key("c10-library"),
+        )
         .child(menu);
     rune_kit::root(page, layer)
 }

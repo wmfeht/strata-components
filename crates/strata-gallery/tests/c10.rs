@@ -9,8 +9,9 @@ mod c10 {
     use rune::accesskit::{Action, ActionData};
     use rune::{Env, Key, KeyEvent, Mods, Runtime, clipboard};
     use serde_json::Value;
-    use strata_components::code_view::CodeState;
+    use strata_components::code_view::{CodeState, EditorState};
     use strata_components::preview_drawer::HostedPreview;
+    use strata_components::scroll::BarLook;
     use strata_gallery::{Gallery, scenes};
 
     const DT: f64 = 1.0 / 60.0;
@@ -213,6 +214,43 @@ mod c10 {
         assert_eq!(after, y, "the top row stays put");
     }
 
+    /// With wrap off the list is as wide as its widest row before that row scrolls into
+    /// view, so it neither widens nor narrows as rows mount (review 1's repro: a CJK row and
+    /// an emoji row, each shorter in characters than the six longest rows, draw wider).
+    #[test]
+    fn the_unwrapped_width_holds_while_scrolling() {
+        use std::fmt::Write as _;
+        let mut rt = scene("c10-wrap-off-light");
+        rt.update(|g, _| {
+            let mut text = String::new();
+            for _ in 0..6 {
+                let _ = writeln!(text, "{}", "a".repeat(200));
+            }
+            for i in 6..406 {
+                let _ = writeln!(text, "line {i}");
+            }
+            let _ = writeln!(text, "{}", "漢".repeat(150));
+            let _ = writeln!(text, "{}", "😀".repeat(150));
+            for i in 408..800 {
+                let _ = writeln!(text, "line {i}");
+            }
+            let mut st = CodeState::new(text);
+            st.set_wrap(false);
+            g.c10.code = st;
+        });
+        settle(&mut rt, 60);
+        let width = |rt: &Runtime<Gallery>| info(rt, "code-rows").expect("the list").rect[2];
+        let first = width(&rt);
+        let mut seen = vec![first];
+        for _ in 0..60 {
+            wheel(&mut rt, -400.0);
+            seen.push(width(&rt));
+        }
+        assert!(offset(&rt) > 407.0 * 18.0, "scrolled past the wide rows");
+        seen.dedup();
+        assert_eq!(seen, [first], "the list's width moved while scrolling");
+    }
+
     /// preview/preview-panel/documents/scrollbar: "Wheel or touchpad scrolling forward over
     /// the content never moves the thumb backward; scrolling backward never moves it forward;
     /// stopping leaves it still."
@@ -410,12 +448,23 @@ mod c10 {
         let (top, len) = thumb(&rt);
         press(&mut rt, b[0] + b[2] / 2.0, top + len / 2.0);
         drag_to(&mut rt, b[0] + b[2] / 2.0, top + len / 2.0 + 40.0);
+        let look = BarLook::app(&rt.state.look);
+        let trough =
+            |rt: &Runtime<Gallery>| at_path(rt, "code-position/trough").expect("a trough").fill;
+        settle(&mut rt, 30);
+        assert_eq!(
+            trough(&rt),
+            look.trough_hover,
+            "a held thumb tints the trough"
+        );
+        rt.pointer_move(10.0, 10.0);
         rt.update(|g, _| g.c10.drawer = Default::default());
         settle(&mut rt, 30);
         assert!(info(&rt, "code-position").is_none(), "closed");
-        rt.pointer_up(10.0, 10.0);
         rt.update(|g, _| g.c10.drawer.open_at_once());
         settle(&mut rt, 30);
+        // Rune sends the gone bar no Up: the drag ended with it, so the trough is at rest.
+        assert_eq!(trough(&rt), look.trough, "the drag ended with the preview");
         let t = thumb(&rt).0;
         for _ in 0..10 {
             wheel(&mut rt, -400.0);
@@ -542,6 +591,41 @@ mod c10 {
         assert!(script(&rt).contains("\n    count=0"));
     }
 
+    fn focused_key(rt: &Runtime<Gallery>) -> Option<String> {
+        rt.elements()
+            .into_iter()
+            .find(|e| e.focused)
+            .and_then(|e| e.key)
+    }
+
+    /// Ctrl+Tab and Ctrl+Shift+Tab leave the editor, as they leave a GtkTextView, whose Tab
+    /// types: the text stays as it was.
+    #[test]
+    fn ctrl_tab_leaves_the_editor() {
+        let mut rt = editor();
+        let before = script(&rt);
+        key_with(&mut rt, Key::Tab, ctrl());
+        assert_eq!(focused_key(&rt).as_deref(), Some("c10-library"));
+        assert!(rt.accessibility_action("field", Action::Focus, None));
+        settle(&mut rt, 2);
+        key_with(
+            &mut rt,
+            Key::Tab,
+            Mods {
+                shift: true,
+                ..ctrl()
+            },
+        );
+        assert_eq!(focused_key(&rt).as_deref(), Some("c10-library"));
+        assert_eq!(script(&rt), before, "nothing typed");
+        // Plain Tab still types.
+        assert!(rt.accessibility_action("field", Action::Focus, None));
+        settle(&mut rt, 2);
+        key(&mut rt, Key::Tab);
+        assert_eq!(focused_key(&rt).as_deref(), Some("field"));
+        assert_ne!(script(&rt), before);
+    }
+
     /// Typing re-highlights the edited line: its colours change from a comment's to code's.
     #[test]
     fn an_edit_recolours_its_line() {
@@ -571,6 +655,72 @@ mod c10 {
             !ed.is_provisional(line) && spans(g) != before
         });
         assert!(script(&rt).contains("\n Rename"));
+    }
+
+    /// The editor colours the lines it shows wherever it is scrolled: its span window moves
+    /// with the viewport.
+    #[test]
+    fn the_editor_colours_the_lines_in_view_as_it_scrolls() {
+        use std::fmt::Write as _;
+        let mut rt = editor();
+        rt.update(|g, _| {
+            let mut text = String::from("#!/usr/bin/env bash\n");
+            for i in 1..3000 {
+                let _ = writeln!(text, "echo \"line {i}\" # note {i}");
+            }
+            let hl = g
+                .c10
+                .live
+                .as_ref()
+                .expect("a highlighter")
+                .highlighter
+                .clone();
+            g.c10.editor = Some(EditorState::new(text, &hl, Some("long.sh"), None));
+        });
+        settle(&mut rt, 4);
+        // Whether every line in view has a colour span starting in it.
+        let coloured = |g: &Gallery| {
+            let ed = g.c10.editor.as_ref().expect("an editor");
+            let lines = ed.shown_lines();
+            if lines.is_empty() {
+                return false;
+            }
+            let starts: Vec<usize> = std::iter::once(0)
+                .chain(ed.text().match_indices('\n').map(|(i, _)| i + 1))
+                .collect();
+            let spans = ed.spans();
+            lines.clone().all(|l| {
+                let (a, b) = (starts[l], starts.get(l + 1).copied().unwrap_or(usize::MAX));
+                // The empty line after the last line break has nothing to colour.
+                a == ed.text().len() || spans.iter().any(|s| (a..b).contains(&(s.start as usize)))
+            })
+        };
+        let vp = info(&rt, "script-scroll")
+            .expect("the editor's viewport")
+            .rect;
+        let mut tops = Vec::new();
+        for _ in 0..4 {
+            for _ in 0..12 {
+                rt.wheel(vp[0] + vp[2] / 2.0, vp[1] + vp[3] / 2.0, -600.0);
+                rt.frame(DT);
+            }
+            settle(&mut rt, 30);
+            until(&mut rt, |g| coloured(g));
+            tops.push(
+                rt.state
+                    .c10
+                    .editor
+                    .as_ref()
+                    .expect("an editor")
+                    .shown_lines()
+                    .start,
+            );
+        }
+        assert!(
+            tops.windows(2).all(|w| w[1] > w[0]),
+            "scrolled down each time: {tops:?}"
+        );
+        assert!(tops[3] > 1000, "far from the start: {tops:?}");
     }
 
     /// The field's right-click opens C21's field menu (Rune's own is empty on Linux).

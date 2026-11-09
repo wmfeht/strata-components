@@ -123,7 +123,7 @@
                           "name": "Toggle word wrap",
                           "role": "button",
                           "states": [
-                            "checked"
+                            "unchecked"
                           ]
                         },
                         {
@@ -150,6 +150,7 @@
                               "actions": [
                                 "scroll-up",
                                 "scroll-down",
+                                "scroll-left",
                                 "set-scroll-offset"
                               ],
                               "children": [
@@ -229,6 +230,24 @@
                                       "key": "code-l3",
                                       "position": 4,
                                       "role": "group"
+                                    },
+                                    {
+                                      "actions": [
+                                        "scroll-into-view"
+                                      ],
+                                      "children": [
+                                        {
+                                          "actions": [
+                                            "scroll-into-view"
+                                          ],
+                                          "key": "t",
+                                          "name": "after",
+                                          "role": "label"
+                                        }
+                                      ],
+                                      "key": "code-l4",
+                                      "position": 5,
+                                      "role": "group"
                                     }
                                   ],
                                   "key": "code-rows",
@@ -241,36 +260,6 @@
                               "states": [
                                 "clips"
                               ]
-                            },
-                            {
-                              "actions": [
-                                "focus",
-                                "increment",
-                                "decrement",
-                                "set-value"
-                              ],
-                              "children": [
-                                {
-                                  "children": [
-                                    {
-                                      "key": "thumb",
-                                      "role": "group"
-                                    }
-                                  ],
-                                  "key": "trough",
-                                  "role": "group"
-                                }
-                              ],
-                              "key": "code-position",
-                              "name": "Document position",
-                              "range": [
-                                0.0,
-                                0.0,
-                                3.0,
-                                1.0
-                              ],
-                              "role": "slider",
-                              "value": "Line 1 of 3"
                             }
                           ],
                           "key": "code",

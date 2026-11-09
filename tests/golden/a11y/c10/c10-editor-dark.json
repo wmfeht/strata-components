@@ -48,6 +48,15 @@
                   ],
                   "key": "script",
                   "role": "group"
+                },
+                {
+                  "actions": [
+                    "click",
+                    "focus"
+                  ],
+                  "key": "c10-library",
+                  "name": "Library",
+                  "role": "button"
                 }
               ],
               "key": "c10-editor-page",

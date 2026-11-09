@@ -251,7 +251,6 @@
                                         {
                                           "actions": [
                                             "click",
-                                            "focus",
                                             "scroll-into-view"
                                           ],
                                           "key": "c2-refresh-1",
@@ -261,7 +260,6 @@
                                         {
                                           "actions": [
                                             "click",
-                                            "focus",
                                             "scroll-into-view"
                                           ],
                                           "key": "c2-col-2-close",
@@ -680,14 +678,6 @@
                           ],
                           "key": "c2-slot-2",
                           "role": "group"
-                        },
-                        {
-                          "actions": [
-                            "click",
-                            "scroll-into-view"
-                          ],
-                          "key": "c2-blank",
-                          "role": "button"
                         }
                       ],
                       "key": "columns",

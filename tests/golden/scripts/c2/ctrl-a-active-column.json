@@ -57,7 +57,6 @@
                                         {
                                           "actions": [
                                             "click",
-                                            "focus",
                                             "scroll-into-view"
                                           ],
                                           "key": "c2-refresh-0",
@@ -736,14 +735,6 @@
                           ],
                           "key": "c2-slot-3",
                           "role": "group"
-                        },
-                        {
-                          "actions": [
-                            "click",
-                            "scroll-into-view"
-                          ],
-                          "key": "c2-blank",
-                          "role": "button"
                         }
                       ],
                       "key": "columns",

@@ -1,5 +1,7 @@
 //! Unit tests of the pure parts: the reveal rule, the width rules and the drawer fit.
 
+mod perf;
+
 use strata_kit::look::Look;
 
 use super::reveal::ColumnSpan;

@@ -426,20 +426,18 @@ fn item<S: 'static>(cfg: &Rc<Config<S>>, frame: &Frame, s: &S, rcx: &RowCx<'_>) 
         opacity = opacity.min(tokens::drag_opacity(look));
     }
     if cfg.bare_items {
-        // The content slot draws the item: no box of the row's own around it.
-        let body = if opacity < 1.0 {
-            content.opacity(opacity)
-        } else {
-            content
-        };
-        let outer = row()
+        // The content slot's element is the item: no box of the row's own around it (a grid
+        // mounts a line of these in one frame, and each element costs).
+        let mut item = content
             .key(row_key(id))
             .role(cfg.roles.item)
             .label(entry.name)
             .focus_selected(state.selected)
-            .h(frame.row_height)
-            .child(body);
-        return finish_item(cfg, frame, s, rcx, outer);
+            .h(frame.row_height);
+        if opacity < 1.0 {
+            item = item.opacity(opacity);
+        }
+        return finish_item(cfg, frame, s, rcx, item);
     }
     let mut inner = row()
         .w_full()

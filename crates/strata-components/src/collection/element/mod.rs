@@ -424,9 +424,10 @@ impl<S: 'static> Collection<S> {
     }
 
     /// Items draw none of the row's own chrome: no selection fill, hover, outline, corner
-    /// radius or side inset, only the host's opacity marks (cut, dragging). The content slot
-    /// draws the item's state itself from [`RowCx::state`] and [`RowCx::hover_live`], as C3's
-    /// tiles light their frame and caption, not the whole cell.
+    /// radius or side inset, only the host's opacity marks (cut, dragging). The content slot's
+    /// element is the item itself (keyed, named and sized by the element), and draws the
+    /// item's state from [`RowCx::state`] and [`RowCx::hover_live`], as C3's tiles light their
+    /// frame and caption, not the whole cell.
     pub fn bare_items(mut self) -> Self {
         self.cfg.bare_items = true;
         self

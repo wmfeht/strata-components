@@ -57,7 +57,9 @@
 //!   layout, `Cx::layout_with`), shrinking them in proportion down to a floor, then scroll
 //!   sideways.
 //! - **Links** are keyed `link-{n}` within their text (a URI's slashes would read as a key
-//!   path) and open through [`DocumentIntent::OpenLink`].
+//!   path) and open through [`DocumentIntent::OpenLink`] on a plain click: not on Shift, and
+//!   once for a double-click, timed by the host's clock against
+//!   [`DocumentState::set_double_click_interval`].
 //! - **Accessibility.** The root is a `document`; headings carry their level, list items are
 //!   `listitem`s, quotes `blockquote`s, code `code`, images `img` named by their alt text,
 //!   tables `table`, `row`, `columnheader` and `cell`. Rune exposes the mounted rows only.
@@ -79,7 +81,10 @@
 //!   viewport's width inside a sideways viewport, so one scroll for the whole document can't
 //!   reach the widest row (probe P1).
 //! - **D8** Find skips image alt text and rules, which Strata's find reads.
-//! - **D9** A double-click or Shift-click on a link opens it (R6); a drag over one selects.
+//! - **D9** A double-click or a Shift-click on a link selects nothing (R6). The link opens as
+//!   Strata's does: on a plain click, once for a double-click (a second click within the
+//!   double-click time doesn't open it again), never on a Shift-click. A drag over a link
+//!   selects.
 //! - **D10** With wrap off, Copy code stays over the visible start of a first line wider
 //!   than the pane; the line's own end, where its room is, is clear once scrolled to.
 //!
@@ -106,9 +111,10 @@
 //!   says it was cut (probe P3: 10,057 of 12,000 texts).
 //! - **R5** (draft, not filed) Rune's README says a virtual row scrolling out drops the
 //!   selection it holds; the runtime pins both ends instead, and keeps it.
-//! - **R6** (draft, not filed) A link inside selectable text opens on the first click of a
-//!   double-click and again on the second, and on a Shift-click, instead of selecting; `Tx`
-//!   carries no modifiers, so an `on_link` handler can't tell (probe P2).
+//! - **R6** (draft, not filed) A press on a link inside selectable text is the link's: a
+//!   double-click on it selects no word, and a Shift-click on it doesn't extend the selection
+//!   (probe P2 and review 1). The handler hears the modifiers (`Tx::mods`), so an app can at
+//!   least keep the link shut, as C11 does.
 
 mod copy;
 mod find;
@@ -136,7 +142,7 @@ pub use model::{
     Cell, Document, ListChildKind, Media, Span, SpanStyle, Unit, UnitKind, char_spans,
 };
 pub use render::{DocumentLabels, HEADING_SCALE};
-pub use state::{COPIED_FOR, DocumentState, MediaState};
+pub use state::{COPIED_FOR, DOUBLE_CLICK, DocumentState, MediaState};
 
 use render::{Ctx, IntentFn, Paint, build_row};
 

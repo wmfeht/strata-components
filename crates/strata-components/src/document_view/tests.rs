@@ -698,3 +698,69 @@ fn copy_code_turns_back_on_a_window_at_rest() {
     rest(&mut rt);
     assert_eq!(label(&rt).as_deref(), Some("Copy code"));
 }
+
+fn link_runtime() -> (Runtime<Host>, (f32, f32)) {
+    let text = "Read the guide online.";
+    let at = text.find("guide").unwrap();
+    let mut rt = runtime(vec![
+        Unit::new(UnitKind::Paragraph, "Before the link."),
+        Unit::new(UnitKind::Paragraph, text).spans([Span::new(
+            at..at + 5,
+            SpanStyle::Link("https://example.org/guide".into()),
+        )]),
+    ]);
+    rt.poll = Some(host_poll);
+    settle(&mut rt);
+    let link = rt
+        .elements()
+        .into_iter()
+        .find(|e| e.role == "link")
+        .expect("the link")
+        .rect;
+    (rt, (link[0] + link[2] / 2.0, link[1] + link[3] / 2.0))
+}
+
+fn click(rt: &mut Runtime<Host>, (x, y): (f32, f32)) {
+    rt.pointer_move(x, y);
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    rt.frame(1.0 / 60.0);
+}
+
+#[test]
+fn a_shift_click_on_a_link_does_not_open_it() {
+    // Strata opens a link on a plain single click only (`presses == 1 && !extend`).
+    let (mut rt, at) = link_runtime();
+    let before = rect(&rt, "doc-u0/t");
+    click(&mut rt, (before[0] + 1.0, before[1] + before[3] / 2.0));
+    settle(&mut rt);
+    rt.frame(1.0);
+    rt.physical_input(PhysicalInput::Modifiers(Mods {
+        shift: true,
+        ..Mods::default()
+    }));
+    click(&mut rt, at);
+    rt.physical_input(PhysicalInput::Modifiers(Mods::default()));
+    settle(&mut rt);
+    rt.update(|h, _| assert_eq!(h.intents, [], "a Shift-click opened the link"));
+}
+
+#[test]
+fn a_double_click_on_a_link_opens_it_once() {
+    let (mut rt, at) = link_runtime();
+    click(&mut rt, at);
+    click(&mut rt, at);
+    settle(&mut rt);
+    rt.update(|h, _| {
+        assert_eq!(
+            h.intents,
+            [DocumentIntent::OpenLink("https://example.org/guide".into())]
+        )
+    });
+    // Past the double-click time, a click opens it again.
+    rt.frame(1.0);
+    settle(&mut rt);
+    click(&mut rt, at);
+    settle(&mut rt);
+    rt.update(|h, _| assert_eq!(h.intents.len(), 2));
+}

@@ -185,7 +185,7 @@ pub(crate) fn build_row<S: 'static>(ctx: &Rc<Ctx<S>>, s: &S, i: usize) -> El {
             let room = ctx
                 .width
                 .map(|w| w.min(CONTENT_MAX_WIDTH) - 2.0 * SIDE - indent);
-            (indent, table(ctx, rows, room))
+            (indent, table(ctx, i, rows, room))
         }
         UnitKind::Media { media, list_depth } => {
             (list_indent(*list_depth), media_el(ctx, st, i, u, media))
@@ -339,9 +339,9 @@ fn styled_text<S: 'static>(
     ctx: &Rc<Ctx<S>>,
     content: String,
     st: Styled,
-    style: TextStyle,
-    color: Color,
+    (style, color): (TextStyle, Color),
     key: &str,
+    scope: String,
     wrap: bool,
 ) -> El {
     let p = &ctx.paint;
@@ -366,10 +366,19 @@ fn styled_text<S: 'static>(
     if !uris.is_empty()
         && let Some(f) = ctx.intent.clone()
     {
+        let get_mut = ctx.get_mut;
         t = t.on_link(move |s: &mut S, id: &str, tx| {
+            // Strata opens a link on a plain single click only: a Shift-click extends the
+            // selection, and a double-click's second click doesn't open it again.
+            if tx.mods().shift {
+                return;
+            }
             let n: Option<usize> = id.strip_prefix("link-").and_then(|n| n.parse().ok());
-            if let Some(uri) = n.and_then(|n| uris.get(n)) {
-                f(s, DocumentIntent::OpenLink(uri.clone()), tx);
+            let Some((n, uri)) = n.and_then(|n| Some((n, uris.get(n)?.clone()))) else {
+                return;
+            };
+            if get_mut(s).link_pressed(format!("{scope}#{n}")) {
+                f(s, DocumentIntent::OpenLink(uri), tx);
             }
         });
     }
@@ -390,7 +399,15 @@ fn unit_text<S: 'static>(
 ) -> El {
     let (shown, spans) = st.shown(i);
     let styled = styled(spans, &ctx.paint);
-    styled_text(ctx, shown.to_owned(), styled, style, color, "t", wrap)
+    styled_text(
+        ctx,
+        shown.to_owned(),
+        styled,
+        (style, color),
+        "t",
+        format!("{i}/t"),
+        wrap,
+    )
 }
 
 /// A code block's row: its panel (rounded where the block starts and ends), its text
@@ -567,9 +584,9 @@ fn media_el<S: 'static>(
                 ctx,
                 u.text.clone(),
                 styled(&[], p),
-                p.body,
-                p.muted,
+                (p.body, p.muted),
                 "t",
+                format!("{i}/t"),
                 true,
             ));
         }
@@ -602,7 +619,7 @@ fn media_el<S: 'static>(
 /// proportion, down to [`CELL_MIN`] (rune-kit's `Markdown` sizing), and past that scrolls
 /// sideways. The header row sits on the muted fill. Each cell is a selectable text keyed
 /// `r{row}c{column}`.
-fn table<S: 'static>(ctx: &Rc<Ctx<S>>, rows: &[Vec<Cell>], room: Option<f32>) -> El {
+fn table<S: 'static>(ctx: &Rc<Ctx<S>>, i: usize, rows: &[Vec<Cell>], room: Option<f32>) -> El {
     let p = &ctx.paint;
     let columns = rows.iter().map(Vec::len).max().unwrap_or(0);
     // An estimate of the body face's average advance, generous so a short cell doesn't wrap;
@@ -655,7 +672,15 @@ fn table<S: 'static>(ctx: &Rc<Ctx<S>>, rows: &[Vec<Cell>], room: Option<f32>) ->
                 p.body
             };
             let key = format!("r{r}c{c}");
-            let t = styled_text(ctx, content, st, style, p.text, &key, true);
+            let t = styled_text(
+                ctx,
+                content,
+                st,
+                (style, p.text),
+                &key,
+                format!("{i}/{key}"),
+                true,
+            );
             line = line.child(
                 col()
                     .w(*w)

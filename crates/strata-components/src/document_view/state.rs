@@ -17,6 +17,9 @@ use super::shown::{Insert, Shown, math_inserts};
 use crate::preview_drawer::{DocumentView, FindStatus, HostedPreview};
 use crate::scroll::Bar;
 
+/// The double-click time until the host sets the desktop's: Rune's fixed 0.5 s on Linux.
+pub const DOUBLE_CLICK: f64 = 0.5;
+
 /// How long Copy code shows its check and "Code copied" (Strata's 2 s).
 pub const COPIED_FOR: Duration = Duration::from_secs(2);
 
@@ -121,6 +124,9 @@ pub struct DocumentState {
     all_pending: bool,
     /// The host's clock at its last poll ([`DocumentState::tick`]).
     now: f64,
+    /// The last link opened (its text and number) and when, and the double-click time.
+    last_link: Option<(String, f64)>,
+    double_click: f64,
     /// The document's searchable text, joined and folded on the first find.
     index: OnceCell<Index>,
 }
@@ -150,6 +156,8 @@ impl DocumentState {
             colourable: Vec::new(),
             all_pending: false,
             now: 0.0,
+            last_link: None,
+            double_click: DOUBLE_CLICK,
             index: OnceCell::new(),
         };
         s.set_document(doc);
@@ -309,6 +317,23 @@ impl DocumentState {
         }
         tx.wake_after(std::time::Duration::from_secs_f64(left));
         false
+    }
+
+    /// The double-click time, in seconds (P5's, from the desktop's settings): a second click on
+    /// a link within it doesn't open the link again. [`DOUBLE_CLICK`] until set.
+    pub fn set_double_click_interval(&mut self, secs: f64) {
+        self.double_click = secs;
+    }
+
+    /// A plain click on link `id`: true when it should open, false for the second click of
+    /// a double-click (or a third), timed by the host's clock.
+    pub(crate) fn link_pressed(&mut self, id: String) -> bool {
+        let again = self
+            .last_link
+            .as_ref()
+            .is_some_and(|(last, at)| *last == id && self.now - at < self.double_click);
+        self.last_link = Some((id, self.now));
+        !again
     }
 
     /// A Copy button on `unit` was pressed: it shows its check from the host's last poll.

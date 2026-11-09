@@ -289,7 +289,7 @@ impl<S: 'static> Jobs<S> {
         let accent = k.c.text_accent;
         let open = state.open;
         let get_mut = self.get_mut;
-        let button = row()
+        let mut button = row()
             .key(self.key.clone())
             .role("button")
             .label(label.clone())
@@ -326,6 +326,8 @@ impl<S: 'static> Jobs<S> {
                     .a11y_hidden(),
             );
         if open {
+            // C19's F1 button fills itself with the checked tint while its panel shows.
+            button = button.fill(k.alpha(accent, BUTTON_CHECKED_ALPHA));
             layer.push(popover::anchored(
                 k,
                 popover::raised(k, self.list(s, look), k.radius.md),
@@ -367,6 +369,7 @@ impl<S: 'static> Jobs<S> {
                     .color(c.text_base)
                     .a11y_hidden(),
             );
+        let both = active.is_some();
         if let Some(a) = active {
             header = header.child(
                 rune::text(a)
@@ -376,9 +379,12 @@ impl<S: 'static> Jobs<S> {
             );
         }
         if let Some(f) = finished {
+            // The separator is drawn, not read.
+            let shown = if both { format!("· {f}") } else { f.clone() };
             header = header.child(
-                rune::text(f)
+                rune::text(shown)
                     .key(format!("{key}-finished"))
+                    .label(f)
                     .font(small)
                     .color(c.text_muted),
             );

@@ -77,9 +77,11 @@
 //!   transfer that hasn't stopped [`STALL_AFTER`] seconds later reads "Device not responding".
 //! - Ending: [`Dock::complete`] gives a check, 100 %, Complete and the pin, and a
 //!   [`COMPLETE_FOR`] countdown with a shrinking bar and "closing in 4s". The pointer over the
-//!   card pauses it ("paused"), the pin keeps it ("pinned"); leaving resumes the time left. At
-//!   zero it fades for [`FADE`] (none with animations off), then goes. Complete or X dismisses
-//!   it at once ([`DockIntent::Dismissed`]).
+//!   card pauses it ("paused"), the pin keeps it ("pinned"); leaving resumes the time left. The
+//!   dock tracks the pointer over a card in every phase, so a card that ends under a resting
+//!   pointer starts its countdown paused, as Strata's does (Rune reports a hover only when it
+//!   changes). At zero it fades for [`FADE`] (none with animations off), then goes. Complete
+//!   or X dismisses it at once ([`DockIntent::Dismissed`]); a second ending is ignored.
 //! - **Cancel's end.** Strata's path, which the gallery shows: the host removes the card
 //!   ([`Dock::remove`]) and opens its "Operation cancelled" dialog with the counts (C15). The
 //!   WP's path, [`Dock::close_as_notice`], turns the card into a notice that closes itself
@@ -123,7 +125,15 @@
 //! meta line; a bar while active (pulsing without a total); Details shows the output with
 //! terminal sequences stripped, or "No output yet.", following its end. Escape, a press
 //! outside and Minimize hide it; no job is cancelled. The buttons send
-//! [`JobsIntent`](jobs::JobsIntent)s.
+//! [`JobsIntent`](jobs::JobsIntent)s. While open, the button shows C19's checked tint.
+//!
+//! Clear finished on a list of finished jobs empties it: the list stays open on "No
+//! background jobs." (Rune moves focus from the vanished Clear finished to Minimize), and the
+//! button stays while it is open, reading "Jobs". Closing it then sends focus to
+//! [`Jobs::return_focus`](jobs::Jobs::return_focus), the host's fallback (Strata's file list
+//! cursor row): the button goes with the last job, so it can't take focus back, and Rune has no
+//! call that focuses an element from code (#173). A closed list stays closed when a job comes
+//! later.
 //!
 //! # Live values and commits
 //!
@@ -217,7 +227,7 @@
 //! | The destination reads "→ `<path>`" … | **Strata policy** (the words are the spec's); golden `c16-card` |
 //! | A permanent deletion of a remote selection reads "Deletion without Trash" | **Strata policy** |
 //! | Long file names, statuses, and destinations wrap | golden `c16-cancelling` (PNG: the warning wraps) |
-//! | Several cards stack and update independently; the stack scrolls once it reaches 320 px | script `stack`; review scene `c16-many` |
+//! | Several cards stack and update independently; the stack scrolls once it reaches 320 px | script `stack` (copies, compressions and deletes started apart); review scene `c16-many`; test `scrolling_the_dock_past_counting_cards_commits_only_for_their_seconds` |
 //! | A docked card does not blur or unblur the window | script `window-usable` (no backdrop) |
 //! | A card's X cancels only that card's operation | script `cancel-one` |
 //! | After X, the card retitles … and X is disabled | scripts `cancel-one`, `cancel-operation` |
@@ -228,7 +238,7 @@
 //! | Closing a tab with a docked operation running … "File operations are still active" | **Strata policy** |
 //! | A finished copy, compression, or deletion retitles its card … check icon, 100%, and a Complete button | script `card-completes`, `deletion`; unit `a_completed_card_closes_after_five_seconds_from_wake_to_wake` |
 //! | A completed card counts down 5 seconds with a shrinking bar and "closing in" text, then fades out and closes | test `a_completed_card_closes_after_five_seconds_in_a_resting_window`; script `countdown`; golden `c16-complete` |
-//! | Hovering or focusing a completed card pauses its countdown … leaving resumes | **partial**: hover by test `hover_pauses_the_countdown_and_leaving_resumes_the_rest`, scripts `countdown-pause`, `countdown-resume`; focus is a **Rune gap** (U-C16-4) |
+//! | Hovering or focusing a completed card pauses its countdown … leaving resumes | **partial**: hover by tests `hover_pauses_the_countdown_and_leaving_resumes_the_rest`, `a_card_that_finishes_under_a_resting_pointer_stays_paused`, scripts `countdown-pause`, `countdown-resume`, `countdown-resume-kept`; focus is a **Rune gap** (U-C16-4) |
 //! | The pin button, "Keep notification", keeps a completed card open and shows "pinned" | test `a_pinned_card_stays_until_dismissed`; script `pin` |
 //! | Complete or X on a completed card dismisses only that card | scripts `dismiss-one`, `dismiss-x`, `pin` |
 //! | A docked transfer reports its renamed and left-out items once, after it ends | **Strata policy** (the report is a joining [`Notice`], script `notices`) |
@@ -283,14 +293,14 @@
 //! | A job still cancelling after 10 seconds …; Closing the last application window … | **not applicable**: the service's and Strata's |
 //! | The footer shows a Jobs button only when jobs exist … | scripts `jobs-none`, `jobs-button`; unit `jobs_words_follow_strata` |
 //! | Launching an action opens Jobs in the launching window with the new job first | **partial**: script `jobs-launch` ([`JobsState::open`](jobs::JobsState::open); the order is the host's rows) |
-//! | Minimize, Escape, or a click outside hides the dashboard without cancelling jobs | script `jobs-hide` |
+//! | Minimize, Escape, or a click outside hides the dashboard without cancelling jobs | scripts `jobs-hide-minimize`, `jobs-hide-escape`, `jobs-hide-outside` |
 //! | A row shows the action name and icon, a status with elapsed time …, item counts, and the invoking folder | script `jobs-rows`; test `the_jobs_list_ticks_each_second_while_open_and_stops_when_hidden`; golden `c16-jobs` |
 //! | An active whole-selection job whose script reports no total shows a pulsing progress bar | script `jobs-rows` |
 //! | An active per-item job's bar fills by completed items plus the current item's reported fraction | script `jobs-rows`; unit `jobs_words_follow_strata` ([`per_item_fraction`](jobs::per_item_fraction)) |
 //! | Details expands a job's captured output and Hide collapses it; … "No output yet." | script `jobs-details` |
 //! | Details on a running job shows output as it arrives, follows the bottom … | **partial**: script `jobs-details` (it shows the rows' output); following the end is Rune's `stick_bottom` |
 //! | Terminal colour and control sequences are stripped from the shown output | unit `terminal_sequences_are_stripped_from_output`; script `jobs-details`; golden `c16-jobs` |
-//! | Dismiss removes one finished job; Clear finished removes every finished job | script `jobs-dismiss` (the intents; the gallery's host drops the rows) |
+//! | Dismiss removes one finished job; Clear finished removes every finished job | scripts `jobs-dismiss`, `jobs-clear-all`; test `clearing_every_job_leaves_a_note_then_focus_on_the_fallback_and_the_list_shut` (the intents; the gallery's host drops the rows) |
 //! | The dashboard lists at most 12 jobs, then shows "`<n>` older jobs are hidden" | script `jobs-limit` |
 //!
 //! # Rune drafts (not filed)

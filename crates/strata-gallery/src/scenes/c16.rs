@@ -444,11 +444,28 @@ fn jobs_closed(g: &mut Gallery) {
 
 fn idle(_g: &mut Gallery) {}
 
+/// Eight cards that differ: copies, compressions and deletes, each started 0.6 s before the
+/// next, so each shows its own progress.
 fn many(g: &mut Gallery) {
     let d = demo(g);
-    for _ in 0..8 {
-        d.copy();
+    for i in 0..8 {
+        let id = match i % 3 {
+            0 => d.copy(),
+            1 => d.compress(),
+            _ => d.delete_one(),
+        };
+        if let Some(f) = d.fake(id) {
+            f.started = Some(-0.6 * f64::from(8 - i));
+        }
     }
+}
+
+fn jobs_finished(g: &mut Gallery) {
+    let d = demo(g);
+    d.jobs = sample_jobs();
+    d.jobs.retain(|r| r.status.is_finished());
+    let mut tx = Tx::default();
+    d.jobs_ui.open(&mut tx);
 }
 
 fn many_jobs(g: &mut Gallery) {
@@ -516,6 +533,8 @@ pub const REVIEW: &[Scene] = &[
     pair!("c16-jobs-closed", jobs_closed, dark),
     pair!("c16-many", many),
     pair!("c16-many", many, dark),
+    pair!("c16-jobs-finished", jobs_finished),
+    pair!("c16-jobs-finished", jobs_finished, dark),
     pair!("c16-jobs-many", many_jobs),
     pair!("c16-jobs-many", many_jobs, dark),
     pair!("c16-cancel-notice", cancel_notice),

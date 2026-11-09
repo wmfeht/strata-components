@@ -517,3 +517,28 @@ fn a_card_that_finishes_under_the_pointer_starts_its_countdown_paused() {
         "the whole 5 s: {end}"
     );
 }
+
+#[test]
+fn a_second_completion_is_ignored_as_strata_ignores_it() {
+    let mut dock = Dock::new();
+    let mut tx = Tx::default();
+    dock.start(1, copy(1), &mut tx);
+    assert!(dock.complete(1, "Copy complete", &mut tx));
+    dock.tick(0.0, &mut tx);
+    dock.tick(3.0, &mut tx);
+    assert!(
+        dock.complete(1, "Copy complete again", &mut tx),
+        "it still shows"
+    );
+    assert!(
+        dock.close_as_notice(1, "Operation cancelled", "x", 4.0, &mut tx),
+        "it still shows; a later notice doesn't replace it"
+    );
+    assert_eq!(dock.op(1).unwrap().title(), "Copy complete");
+    let end = wake_to_wake(&mut dock, 3.0, 10.0);
+    assert!(dock.op(1).is_none());
+    assert!(
+        (end - 5.0 - FADE).abs() < 1e-6,
+        "the first countdown ran on: {end}"
+    );
+}

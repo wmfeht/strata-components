@@ -524,6 +524,7 @@ impl Dock {
     /// Operation `id` finished: its card reads `title` ("Copy complete") with a check, 100 %
     /// and Complete, and closes itself after [`COMPLETE_FOR`]. A dialog operation just goes.
     /// False when it never showed (it ended before its reveal): it is gone, and nothing shows.
+    /// A card that has already ended keeps its ending: a second one is ignored.
     pub fn complete(&mut self, id: OpId, title: impl Into<String>, tx: &mut Tx) -> bool {
         self.end(id, EndKind::Complete, title.into(), None, COMPLETE_FOR, tx)
     }
@@ -566,6 +567,11 @@ impl Dock {
         if !op.revealed || op.spec.placement == Placement::Dialog {
             self.remove(id);
             return false;
+        }
+        if matches!(op.phase, Phase::Ended { .. }) {
+            // Already finished: a second ending changes nothing, as Strata's `complete` ignores
+            // a card already completed.
+            return true;
         }
         op.title = title;
         if let Some(text) = text {

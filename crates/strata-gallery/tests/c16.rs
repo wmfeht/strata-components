@@ -450,7 +450,7 @@ mod c16 {
         let c0 = rune::commit_generation();
         run(&mut rt, 1.0);
         let commits = rune::commit_generation() - c0;
-        assert!(commits <= 6, "{commits} commits in a second of progress");
+        assert!(commits <= 4, "{commits} commits in a second of progress");
         let live = &rt.state.c16.dock.op(1).unwrap().live;
         let percent = element(&rt, "c16-dock-card-1-percent").and_then(|e| e.text);
         assert_eq!(percent.as_deref(), Some(&*live.percent.get()));
@@ -530,7 +530,7 @@ mod c16 {
             commits as f64 / seconds
         );
         assert!(
-            commits as f64 / seconds <= 4.5,
+            commits as f64 / seconds <= 4.0,
             "{commits} commits in {seconds} s"
         );
     }

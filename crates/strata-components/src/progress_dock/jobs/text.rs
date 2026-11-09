@@ -128,7 +128,8 @@ pub fn indicator(rows: &[JobRow], words: &JobsWords) -> Option<String> {
     })
 }
 
-/// The dashboard's summary: "2 running · 1 queued", with the finished count after.
+/// The dashboard's summary: "2 running · 1 queued", and the finished count ("3 finished"),
+/// which the list draws after a "· " when both show.
 pub(crate) fn activity(rows: &[JobRow], words: &JobsWords) -> (Option<String>, Option<String>) {
     let running = rows.iter().filter(|r| r.status.is_running()).count();
     let queued = rows
@@ -142,14 +143,7 @@ pub(crate) fn activity(rows: &[JobRow], words: &JobsWords) -> (Option<String>, O
         (r, 0) => Some((words.running)(r)),
         (r, q) => Some(format!("{} · {}", (words.running)(r), (words.queued)(q))),
     };
-    let done = (finished > 0).then(|| {
-        let f = (words.finished)(finished);
-        if active.is_some() {
-            format!("· {f}")
-        } else {
-            f
-        }
-    });
+    let done = (finished > 0).then(|| (words.finished)(finished));
     (active, done)
 }
 

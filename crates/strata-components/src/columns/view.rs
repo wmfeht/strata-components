@@ -792,8 +792,9 @@ pub(super) fn columns_row<S: 'static>(sh: &Rc<Shared<S>>, s: &S) -> El {
         content = content.child(column::shell(sh, s, depth));
     }
     let blank = sh.clone();
+    let blank_key = keys::blank(&p.state.key);
     let blank_el = col()
-        .key(keys::blank(&p.state.key))
+        .key(blank_key.clone())
         .grow(1.0)
         .min_w(0.0)
         .h_full()
@@ -801,7 +802,7 @@ pub(super) fn columns_row<S: 'static>(sh: &Rc<Shared<S>>, s: &S) -> El {
         // does, so assistive technology hears no button for it.
         .a11y_hidden()
         .on_press(move |s: &mut S| blank_press(&blank, s));
-    content.child(sh.dnd.drop_zone(blank_el, blank_zone(sh)))
+    content.child(sh.dnd.drop_zone_keyed(blank_el, blank_key, blank_zone(sh)))
 }
 
 /// The strip's viewport with its bar over it.

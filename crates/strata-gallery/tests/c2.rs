@@ -1795,3 +1795,117 @@ mod c2 {
         assert!((v[39] - 540.0).abs() < 0.5, "{v:?}");
     }
 }
+
+/// X2's hook: `ColumnsView::drop_action` answers for each column's folder rows and background,
+/// with the column's depth, and for the blank space after the last column.
+mod c2_drop_action {
+    use std::cell::RefCell;
+
+    use rune::{Cx, El, Env, Mods, Runtime, col};
+    use strata_components::contract::{
+        Dnd, DropAction, DropActions, DropOffer, DropZone, EntryId, URI_LIST,
+    };
+    use strata_gallery::{Gallery, scenes};
+
+    type Asked = Option<(usize, Option<EntryId>)>;
+
+    thread_local! {
+        static ZONES: RefCell<Vec<(String, Option<String>, DropZone<Gallery>)>> =
+            const { RefCell::new(Vec::new()) };
+        static ASKED: RefCell<Vec<Asked>> = const { RefCell::new(Vec::new()) };
+    }
+
+    fn view(g: &Gallery, _: &mut Cx<Gallery>) -> El {
+        ZONES.with(|z| z.borrow_mut().clear());
+        let dnd = Dnd::custom_keyed(
+            |el, key, zone| {
+                ZONES.with(|z| {
+                    z.borrow_mut().push((
+                        key.key().to_owned(),
+                        key.scope().map(str::to_owned),
+                        zone,
+                    ))
+                });
+                el
+            },
+            |el, _, _| el,
+        );
+        let strip = scenes::c2::columns_view()
+            .dnd(dnd)
+            .drop_action(|_: &Gallery, at: Asked, _, _| {
+                ASKED.with(|a| a.borrow_mut().push(at));
+                at.map(|_| DropAction::Copy)
+            })
+            .build(g);
+        col().w_full().h_full().child(strip)
+    }
+
+    fn mount() -> Runtime<Gallery> {
+        let f = scenes::all_scenes()
+            .into_iter()
+            .find(|(n, _)| *n == "c2-three-columns-light")
+            .map(|(_, f)| f)
+            .expect("the scene");
+        let mut g = Gallery::default();
+        f(&mut g);
+        let mut rt = Runtime::new(g, view, strata_gallery::SIZE, Env::new(false, 1.0));
+        for i in 0..30 {
+            rt.frame(f64::from(i) / 60.0);
+        }
+        rt
+    }
+
+    fn asked(zone: &DropZone<Gallery>, g: &Gallery) -> (Option<DropAction>, Asked) {
+        ASKED.with(|a| a.borrow_mut().clear());
+        let offer = DropOffer::new(vec![URI_LIST.into()], DropActions::COPY | DropActions::MOVE);
+        let action = zone.choose(g, &offer, Mods::default());
+        let at = ASKED
+            .with(|a| a.borrow().last().copied())
+            .expect("the hook was asked");
+        (action, at)
+    }
+
+    #[test]
+    fn the_hook_answers_for_rows_backgrounds_and_the_blank_strip_by_depth() {
+        let rt = mount();
+        let zones = ZONES.with(|z| z.borrow().clone());
+        let column_keys: Vec<String> = (0..rt.state.c2.columns.len())
+            .filter_map(|d| rt.state.c2.columns.column_key(d))
+            .collect();
+        assert!(column_keys.len() >= 3, "{column_keys:?}");
+        let mut rows = 0;
+        for (depth, key) in column_keys.iter().enumerate() {
+            let (_, _, bg) = zones
+                .iter()
+                .find(|(k, s, _)| k == key && s.is_none())
+                .unwrap_or_else(|| panic!("column {depth}'s background"));
+            assert_eq!(
+                asked(bg, &rt.state),
+                (Some(DropAction::Copy), Some((depth, None)))
+            );
+            if let Some((row, scope, zone)) = zones
+                .iter()
+                .find(|(_, s, _)| s.as_deref() == Some(key.as_str()))
+            {
+                assert_eq!(scope.as_deref(), Some(key.as_str()));
+                let (_, at) = asked(zone, &rt.state);
+                let id = row
+                    .strip_prefix("row-")
+                    .and_then(|n| n.parse().ok())
+                    .map(EntryId::new);
+                assert_eq!(at, Some((depth, id)), "{row}");
+                rows += 1;
+            }
+        }
+        assert!(rows >= 2, "folder rows in several columns");
+        let (_, _, blank) = zones
+            .iter()
+            .find(|(k, _, _)| *k == format!("{}-blank", scenes::c2::KEY))
+            .expect("the blank strip");
+        assert_eq!(
+            asked(blank, &rt.state),
+            (None, None),
+            "the blank strip takes no drop"
+        );
+    }
+}

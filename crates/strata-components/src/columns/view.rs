@@ -3,7 +3,7 @@
 
 use std::rc::Rc;
 
-use rune::{El, Key, KeyEvent, PointerButton, Tx, col, row};
+use rune::{El, Key, KeyEvent, Mods, PointerButton, Tx, col, row};
 use strata_kit::look::Look;
 
 use super::column;
@@ -16,7 +16,9 @@ use super::sources::ColumnSources;
 use super::state::ColumnsState;
 use crate::collection::element::{Collection, Intent, PointerInput, RowMarks, viewport_path};
 use crate::collection::pointer::PointerSettings;
-use crate::contract::{Direction, Dnd, DropHover, DropZone, Entry, EntryId, EntrySource, Point};
+use crate::contract::{
+    Direction, Dnd, DropAction, DropHover, DropOffer, DropZone, Entry, EntryId, EntrySource, Point,
+};
 use crate::preview_drawer::{ColumnsFit, DrawerRules};
 use crate::scroll::{AutoscrollSettings, BarLook, overlay};
 
@@ -98,6 +100,8 @@ type MarksFn<S> = Rc<dyn Fn(&S, usize, EntryId) -> RowMarks>;
 type PointerFn<S> = Rc<dyn Fn(&S) -> PointerSettings>;
 type FlagFn<S> = Rc<dyn Fn(&S) -> bool>;
 type IntentFn<S> = Rc<dyn Fn(&mut S, ColumnsIntent, &mut Tx)>;
+type DropActionFn<S> =
+    Rc<dyn Fn(&S, Option<(usize, Option<EntryId>)>, &DropOffer, Mods) -> Option<DropAction>>;
 
 /// What the view was built with, shared by its parts' handlers.
 pub(super) struct Shared<S> {
@@ -110,6 +114,7 @@ pub(super) struct Shared<S> {
     escape_closes: FlagFn<S>,
     pub(super) show_sizes: FlagFn<S>,
     pub(super) dnd: Dnd<S>,
+    drop_action: Option<DropActionFn<S>>,
     on_intent: Option<IntentFn<S>>,
     pub(super) labels: ColumnsLabels,
 }
@@ -126,6 +131,7 @@ impl<S> Clone for Shared<S> {
             escape_closes: self.escape_closes.clone(),
             show_sizes: self.show_sizes.clone(),
             dnd: self.dnd.clone(),
+            drop_action: self.drop_action.clone(),
             on_intent: self.on_intent.clone(),
             labels: self.labels.clone(),
         }
@@ -199,6 +205,7 @@ impl<S: 'static> ColumnsView<S> {
                 escape_closes: Rc::new(|_| true),
                 show_sizes: Rc::new(|_| true),
                 dnd: Dnd::rune(),
+                drop_action: None,
                 on_intent: None,
                 labels: ColumnsLabels::default(),
             }),
@@ -264,6 +271,19 @@ impl<S: 'static> ColumnsView<S> {
     /// The drag-and-drop binder: Rune's own by default; X2 passes the system shim's.
     pub fn dnd(self, dnd: Dnd<S>) -> Self {
         self.with(|sh| sh.dnd = dnd)
+    }
+
+    /// Says which action a drag would take, or `None` to refuse it, for a binder that
+    /// negotiates while the drag hovers (W1's `DropZone::action`): over column `depth`'s folder
+    /// row (`Some((depth, Some(id)))`), its background (`Some((depth, None))`), or the blank
+    /// space after the last column (`None`, which takes no drop: refuse it there unless the host
+    /// routes it itself). Without it, W1's rule with an unknown volume, everywhere.
+    pub fn drop_action(
+        self,
+        f: impl Fn(&S, Option<(usize, Option<EntryId>)>, &DropOffer, Mods) -> Option<DropAction>
+        + 'static,
+    ) -> Self {
+        self.with(|sh| sh.drop_action = Some(Rc::new(f)))
     }
 
     /// The words the view shows and assistive technology reads.
@@ -413,6 +433,12 @@ pub(super) fn collection<S: 'static>(sh: &Rc<Shared<S>>, s: &S, serial: u64) -> 
     let edge_bar = column.bar.clone();
     let bar_key = format!("{key}-bar");
     let bar_target = viewport_path(&key);
+    if let Some(f) = sh.drop_action.clone() {
+        let act = sh.clone();
+        c = c.drop_action(move |s: &S, target, offer, mods| {
+            f(s, Some((depth_of(&act, s, serial)?, target)), offer, mods)
+        });
+    }
     c.name(title)
         .row_height(|_: &S, l: &Look| l.row.columns)
         .keys_by_host()
@@ -709,19 +735,23 @@ pub(super) fn drag_over<S: 'static>(
 /// follows a drag over it, so the strip autoscrolls there too.
 pub(super) fn blank_zone<S: 'static>(sh: &Rc<Shared<S>>) -> DropZone<S> {
     let (hover, moves) = (sh.clone(), sh.clone());
-    DropZone::new(|_: &mut S, _, _| {})
-        .on_hover(move |s: &mut S, h, _offer, tx| {
-            let at = match h {
-                DropHover::Accepting => tx.drop_point().map(|p| Point::new(p.window_x, p.window_y)),
-                DropHover::Rejecting | DropHover::Left => None,
-            };
-            drag_over(&hover, s, at, tx);
-        })
-        .on_move(move |s: &mut S, p, tx| {
-            if !drag_over(&moves, s, Some(Point::new(p.window_x, p.window_y)), tx) {
-                tx.live_only();
-            }
-        })
+    let zone = DropZone::new(|_: &mut S, _, _| {});
+    let zone = match sh.drop_action.clone() {
+        Some(f) => zone.action(move |s: &S, offer, mods| f(s, None, offer, mods)),
+        None => zone,
+    };
+    zone.on_hover(move |s: &mut S, h, _offer, tx| {
+        let at = match h {
+            DropHover::Accepting => tx.drop_point().map(|p| Point::new(p.window_x, p.window_y)),
+            DropHover::Rejecting | DropHover::Left => None,
+        };
+        drag_over(&hover, s, at, tx);
+    })
+    .on_move(move |s: &mut S, p, tx| {
+        if !drag_over(&moves, s, Some(Point::new(p.window_x, p.window_y)), tx) {
+            tx.live_only();
+        }
+    })
 }
 
 /// Where the strip and its columns are now, in window points.

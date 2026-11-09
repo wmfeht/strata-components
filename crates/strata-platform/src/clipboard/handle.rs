@@ -46,8 +46,9 @@ impl<S: 'static> Sink for Core<S> {
 #[doc(hidden)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TestRoute {
-    /// Bind no data control, so a Wayland window takes the data device (mutter's case).
-    pub no_data_control: bool,
+    /// Behave as on a compositor with no data control (mutter): a Wayland window takes the
+    /// data device, or with no winit display, X11 through Xwayland.
+    pub as_if_no_data_control: bool,
     /// Behave as on libwayland < 1.23: winit's display is out of reach.
     pub as_if_libwayland_below_1_23: bool,
 }

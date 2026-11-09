@@ -18,7 +18,8 @@
 //!   so `App::on_quit` shuts down.
 //!
 //! Flags: `--title T`, `--with-dnd` (drag and drop attached too, sharing the substrate),
-//! and the test switches `--no-data-control` (the data device, as on mutter) and
+//! and the test switches `--as-if-no-data-control` (a compositor without data control, as
+//! mutter: the data device) and
 //! `--as-if-libwayland-1-22` (no route to winit's display).
 
 #[cfg(feature = "clipboard")]
@@ -285,7 +286,7 @@ mod demo {
             .map_or("clipboard", |t| Box::leak(t.clone().into_boxed_str()));
         rune::tooling::set_app_id("strata-clipboard-demo");
         let route = TestRoute {
-            no_data_control: flag("--no-data-control"),
+            as_if_no_data_control: flag("--as-if-no-data-control"),
             as_if_libwayland_below_1_23: flag("--as-if-libwayland-1-22"),
         };
         let clip = Clipboard::<State>::new()

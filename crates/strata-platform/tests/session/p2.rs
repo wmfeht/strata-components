@@ -3,11 +3,11 @@
 //!
 //! Each scope item runs on each route it applies to:
 //! - **W**: Wayland data control (sway's default);
-//! - **D**: Wayland `wl_data_device` on winit's display, with data control turned off (the
-//!   test switch), as on mutter;
+//! - **D**: Wayland `wl_data_device` on winit's display, on a compositor that seems to have
+//!   no data control (the test switch hides its globals), as mutter;
 //! - **X**: X11 selections;
-//! - **XW**: a Wayland window with no Wayland route (libwayland < 1.23 and no data control,
-//!   simulated), through Xwayland.
+//! - **XW**: a Wayland window with no Wayland route (libwayland < 1.23 and a compositor with
+//!   no data control, both simulated), through Xwayland.
 //!
 //! D needs libwayland 1.23 or later (winit's display); on an older host its tests check only
 //! that the app reports no route there, and say so on stderr.
@@ -45,7 +45,7 @@ impl B {
 
     fn args(self) -> &'static [&'static str] {
         match self {
-            B::D => &["--no-data-control"],
+            B::D => &["--as-if-no-data-control"],
             B::W | B::X => &[],
         }
     }
@@ -1181,7 +1181,7 @@ fn wayland_without_any_wayland_route_copies_and_pastes_through_xwayland() {
     let demo = Demo::start_with(
         &s,
         Display::Wayland,
-        &["--as-if-libwayland-1-22", "--no-data-control"],
+        &["--as-if-libwayland-1-22", "--as-if-no-data-control"],
         &[Display::X11],
         None,
     )

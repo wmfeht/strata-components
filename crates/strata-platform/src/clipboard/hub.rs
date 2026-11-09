@@ -15,7 +15,7 @@ use std::time::Duration;
 use rune::WindowHandle;
 
 use crate::transfer::{
-    self, DataControl, SelectionOffer, SourceId, SourceSpec, Subscription, Transfer, Turn, Wants,
+    self, SelectionOffer, SourceId, SourceSpec, Subscription, Transfer, Turn, Wants,
 };
 
 use super::api::{
@@ -162,12 +162,8 @@ pub(super) fn attach(
         let turn_poster = poster.clone();
         let turn: Turn = Arc::new(move |f| turn_poster(Job::Run(f)));
         let wants = Wants {
-            data_control: if test.no_data_control {
-                DataControl::Off
-            } else {
-                DataControl::SharedElseOwn
-            },
             as_if_libwayland_below_1_23: test.as_if_libwayland_below_1_23,
+            as_if_no_data_control: test.as_if_no_data_control,
             ..Wants::default()
         };
         // P0 binds once per process: when drag and drop bound it first, these wants don't

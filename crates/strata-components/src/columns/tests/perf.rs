@@ -12,6 +12,11 @@
 //! - opening a fifth column of 100,000 entries;
 //! - 120 frames of a held file drag near the bottom of a column (its autoscroll).
 //!
+//! Every row has a size badge (C2b), as in Strata, where every file has a size: its chip, hover
+//! group and description are in the figures. The chip costs each scroll frame what its text
+//! costs to mount: at C2b, p50 0.70 to 0.75 ms and p95 2.2 to 3.5 ms against 0.58 and 1.6 with
+//! no badges (machine load near 50), every hard bar still held.
+//!
 //! The bar (plan §4 C1, C2, work package C2: "a column of 100k entries"), asserted: no view run
 //! while scrolling either way or while a held drag autoscrolls; no scroll frame, either way,
 //! over 16.7 ms; a click and a Left or Right commit within 4 ms at p95, a click rebuilding at
@@ -114,6 +119,10 @@ impl ColumnSources for Sources {
     fn open_child(&self, depth: usize) -> Option<EntryId> {
         // Each column opens its first entry (a folder) in the next.
         (depth + 1 < self.0.len()).then(|| self.0[depth].id_at(0))
+    }
+    fn badge(&self, _depth: usize, index: usize) -> Option<Cow<'_, str>> {
+        // Every row has a badge (C2b), the worst case: its chip, hover group and description.
+        Some(Cow::Owned(format!("{} kB", index % 1000)))
     }
 }
 

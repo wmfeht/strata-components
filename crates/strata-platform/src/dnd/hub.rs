@@ -193,15 +193,18 @@ fn with<R>(f: impl FnOnce(&mut Hub) -> R) -> Option<R> {
     HUB.with(|h| h.borrow_mut().as_mut().map(f))
 }
 
-/// Attaches `window` (its core `core`, reached through `sink`), binding the substrate on
-/// the first call. On the UI thread, from `App::on_window`.
-/// Test switches for strata-platform's own tests: what the first attach behaves as if it found.
+/// A test switch for strata-platform's own tests: what the first attach behaves as if it
+/// found. Not API ([`super::Dnd::test_route`]).
 #[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct TestRoute {
-    pub(crate) as_if_libwayland_below_1_23: bool,
-    pub(crate) as_if_no_data_control: bool,
+pub struct TestRoute {
+    /// Behave as on libwayland < 1.23: winit's display is out of reach.
+    pub as_if_libwayland_below_1_23: bool,
+    /// Behave as on a compositor with no data control (mutter).
+    pub as_if_no_data_control: bool,
 }
 
+/// Attaches `window` (its core `core`, reached through `sink`), binding the substrate on
+/// the first call. On the UI thread, from `App::on_window`.
 pub(crate) fn attach(
     window: &WindowHandle,
     sink: Rc<dyn Sink>,

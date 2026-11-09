@@ -196,15 +196,8 @@ impl<S: 'static> Dnd<S> {
     /// A test switch for strata-platform's own tests: what the first attach behaves as if it
     /// found. Not API.
     #[doc(hidden)]
-    pub fn test_route(
-        self,
-        as_if_libwayland_below_1_23: bool,
-        as_if_no_data_control: bool,
-    ) -> Self {
-        self.0.test.set(hub::TestRoute {
-            as_if_libwayland_below_1_23,
-            as_if_no_data_control,
-        });
+    pub fn test_route(self, route: hub::TestRoute) -> Self {
+        self.0.test.set(route);
         self
     }
 

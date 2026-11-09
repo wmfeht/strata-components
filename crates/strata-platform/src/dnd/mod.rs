@@ -169,6 +169,8 @@ pub use api::{
     Actions, AskReply, DRAG_THRESHOLD, DragAction, DragItem, DragSource, DropData, DropOffer,
     DropPoint, DropTarget, Error, Hover, Status, TEXT_TYPES,
 };
+#[doc(hidden)]
+pub use hub::TestRoute;
 pub use icon::{DragIcon, DragImage};
 pub use local::LOCAL_MIME;
 pub use window::Dnd;

@@ -40,7 +40,7 @@ mod demo {
     use serde_json::{Value, json};
     use strata_platform::dnd::{
         Actions, AskReply, Dnd, DragAction, DragIcon, DragImage, DragItem, DragSource, DropData,
-        DropTarget, Hover,
+        DropTarget, Hover, TestRoute,
     };
     use strata_test_peer::protocol::{Offer, fnv1a64};
 
@@ -440,9 +440,9 @@ mod demo {
         title: &'static str,
         key: &str,
         handles: &Handles,
-        route: (bool, bool),
+        route: TestRoute,
     ) -> App<State> {
-        let dnd = Dnd::<State>::new().test_route(route.0, route.1);
+        let dnd = Dnd::<State>::new().test_route(route);
         let state_dnd = dnd.clone();
         let window = key.to_owned();
         let mut spec = AppSpec::new(title, (720.0, 480.0), || unreachable!("init is set"), view);
@@ -496,10 +496,10 @@ mod demo {
             .map_or("dnd", |t| Box::leak(t.clone().into_boxed_str()));
         rune::tooling::set_app_id("strata-dnd-demo");
         let handles: Handles = Arc::default();
-        let route = (
-            flag("--as-if-libwayland-1-22"),
-            flag("--as-if-no-data-control"),
-        );
+        let route = TestRoute {
+            as_if_libwayland_below_1_23: flag("--as-if-libwayland-1-22"),
+            as_if_no_data_control: flag("--as-if-no-data-control"),
+        };
         let mut app = window_app(title, "main", &handles, route);
         if flag("--two-windows") {
             let second: &'static str = Box::leak(format!("{title} second").into_boxed_str());

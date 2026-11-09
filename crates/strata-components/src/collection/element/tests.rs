@@ -6,6 +6,7 @@ mod describe;
 mod fixture;
 mod hooks;
 mod perf;
+mod x2;
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;

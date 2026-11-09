@@ -760,7 +760,7 @@ fn row_zone<S: 'static>(cfg: &Rc<Config<S>>, on_drop: DropFn<S>, id: EntryId) ->
     let hover_cfg = cfg.clone();
     let edge = cfg.clone();
     let drop_cfg = cfg.clone();
-    DropZone::new(move |s: &mut S, dropped: crate::contract::Dropped, tx| {
+    let zone = DropZone::new(move |s: &mut S, dropped: crate::contract::Dropped, tx| {
         // Where it landed when the platform says, else where the last move was (a drop with
         // no position and no move over the stuck header goes to the row it covers).
         let under_stuck = dropped
@@ -773,8 +773,12 @@ fn row_zone<S: 'static>(cfg: &Rc<Config<S>>, on_drop: DropFn<S>, id: EntryId) ->
             _ => Some(id),
         };
         on_drop(s, target, dropped, tx);
-    })
-    .on_hover(move |s: &mut S, hover, _offer, tx| {
+    });
+    let zone = match cfg.drop_action.clone() {
+        Some(f) => zone.action(move |s: &S, offer, mods| f(s, Some(id), offer, mods)),
+        None => zone,
+    };
+    zone.on_hover(move |s: &mut S, hover, _offer, tx| {
         let st = (hover_cfg.get_mut)(s).1;
         match hover {
             DropHover::Accepting | DropHover::Rejecting => st.drop = Some(DropOver::Row(id)),

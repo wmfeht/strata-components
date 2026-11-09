@@ -78,7 +78,9 @@
 //!   never hears presses on it: no selection, no click intent, no drag threshold. So rows get
 //!   no `drag_out`, and the element takes no `DragSource`. A drag starts when the pointer
 //!   controller (C1b) emits [`Intent::BeginDrag`] past its threshold, with the window point;
-//!   the host binds that to the system drag (X2, through the platform shim).
+//!   the host binds that to the system drag (X2, through the platform shim), with the
+//!   container's phases from [`Collection::on_drag_phase`] and the zones' action from
+//!   [`Collection::drop_action`].
 //! - **Selecting from assistive technology.** Options have no press handler of their own
 //!   (all input goes to the container, above), so an assistive client's default action on an
 //!   option (AT-SPI's "click") does nothing at the pinned rev. Rune has no way to route an
@@ -195,7 +197,8 @@ use std::ops::Range;
 use std::rc::Rc;
 
 use rune::{
-    El, GrowthSpec, KeyEvent, Live, PointerButton, ScrollPos, ScrollSpec, Tx, WheelEvent, col, text,
+    El, GrowthSpec, KeyEvent, Live, Mods, PointerButton, ScrollPos, ScrollSpec, Tx, WheelEvent,
+    col, text,
 };
 use strata_kit::look::Look;
 
@@ -217,7 +220,8 @@ pub use state::{CollectionState, DropOver};
 #[cfg(doc)]
 use crate::collection::selection::Selection;
 use crate::contract::{
-    CollectionGeometry, Dnd, DropHover, DropZone, Dropped, EntryId, EntrySource, Point, Rect,
+    CollectionGeometry, Dnd, DropAction, DropHover, DropOffer, DropZone, Dropped, EntryId,
+    EntrySource, Point, Rect,
 };
 
 type GetFn<S> = Rc<dyn Fn(&S) -> (&dyn EntrySource, &CollectionState)>;
@@ -238,6 +242,9 @@ type GroupStyleFn = Rc<dyn Fn(&Look) -> GroupStyle>;
 type PressFn<S> = Rc<dyn Fn(&mut S, &PointerInput, &mut Tx)>;
 type ScrollFn = Rc<dyn Fn(ScrollPos)>;
 pub(crate) type DragOverFn<S> = Rc<dyn Fn(&mut S, Option<Point>, &mut Tx) -> bool>;
+pub(crate) type DragPhaseFn<S> = Rc<dyn Fn(&mut S, &rune::Drag, &str, &mut Tx) -> bool>;
+pub(crate) type DropActionFn<S> =
+    Rc<dyn Fn(&S, Option<EntryId>, &DropOffer, Mods) -> Option<DropAction>>;
 type WheelFn<S> = Rc<dyn Fn(&mut S, WheelEvent, &mut Tx) -> bool>;
 
 /// What [`Collection`] was built with, shared by its rows and handlers.
@@ -278,6 +285,8 @@ pub(crate) struct Config<S> {
     on_scroll: Option<ScrollFn>,
     keys_by_host: bool,
     on_drag_over: Option<DragOverFn<S>>,
+    on_drag_phase: Option<DragPhaseFn<S>>,
+    drop_action: Option<DropActionFn<S>>,
     header_defer: Option<f32>,
     on_wheel: Option<WheelFn<S>>,
     rest: Option<Rest<S>>,
@@ -360,6 +369,8 @@ impl<S: 'static> Collection<S> {
                 on_scroll: None,
                 keys_by_host: false,
                 on_drag_over: None,
+                on_drag_phase: None,
+                drop_action: None,
                 header_defer: None,
                 on_wheel: None,
                 rest: None,
@@ -578,6 +589,38 @@ impl<S: 'static> Collection<S> {
         f: impl Fn(&mut S, Option<Point>, &mut Tx) -> bool + 'static,
     ) -> Self {
         self.cfg.on_drag_over = Some(Rc::new(f));
+        self
+    }
+
+    /// Hears each phase of the container's drag handler before the controllers do, with the
+    /// collection's key: for a host that starts a system drag from [`Intent::BeginDrag`] (X2,
+    /// through P1's `Dnd::start_drag`, which needs the phase and the key of the element whose
+    /// `on_drag` it is, and `Dnd::owns` on every phase). True takes the phase: a taken move is
+    /// ignored, and a taken release ends the press as a cancelled one (no click, no rename),
+    /// as the system drag owns it. A taken press is ignored too.
+    ///
+    /// The container keeps its key and its place for as long as the collection is built, so
+    /// a drag started from it can rely on its source staying mounted (P1's rule), however the
+    /// rows scroll or re-key.
+    pub fn on_drag_phase(
+        mut self,
+        f: impl Fn(&mut S, &rune::Drag, &str, &mut Tx) -> bool + 'static,
+    ) -> Self {
+        self.cfg.on_drag_phase = Some(Rc::new(f));
+        self
+    }
+
+    /// Says which action a drag over a folder row (`Some(id)`) or the background (`None`)
+    /// would take, or `None` to refuse it, for a binder that negotiates while the drag hovers
+    /// (W1's `DropZone::action`): the host's copy-or-move rule with its volume lookup, and its
+    /// guard against dropping items into their own folder. Without it, W1's rule with an
+    /// unknown volume. A drag over the stuck group header is asked about the row it covers
+    /// (its drop then goes to the background, as before). Needs [`Collection::on_drop`].
+    pub fn drop_action(
+        mut self,
+        f: impl Fn(&S, Option<EntryId>, &DropOffer, Mods) -> Option<DropAction> + 'static,
+    ) -> Self {
+        self.cfg.drop_action = Some(Rc::new(f));
         self
     }
 
@@ -992,11 +1035,15 @@ fn background_zone<S: 'static>(cfg: &Rc<Config<S>>, on_drop: row::DropFn<S>) -> 
     let get_mut = cfg.get_mut.clone();
     let hover_cfg = cfg.clone();
     let edge = cfg.clone();
-    DropZone::new(move |s: &mut S, dropped, tx| {
+    let zone = DropZone::new(move |s: &mut S, dropped, tx| {
         (get_mut)(s).1.drop = None;
         on_drop(s, None, dropped, tx);
-    })
-    .on_hover(move |s: &mut S, hover, _offer, tx| {
+    });
+    let zone = match cfg.drop_action.clone() {
+        Some(f) => zone.action(move |s: &S, offer, mods| f(s, None, offer, mods)),
+        None => zone,
+    };
+    zone.on_hover(move |s: &mut S, hover, _offer, tx| {
         let st = (hover_cfg.get_mut)(s).1;
         match hover {
             DropHover::Accepting | DropHover::Rejecting => {

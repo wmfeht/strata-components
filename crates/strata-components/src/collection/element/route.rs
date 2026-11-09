@@ -319,6 +319,15 @@ fn default_region<S: 'static>(
 
 /// `on_drag` on the container.
 pub(super) fn on_drag<S: 'static>(cfg: &Rc<Config<S>>, s: &mut S, d: &mut Drag, tx: &mut Tx) {
+    // A host's system drag owns the phases after it starts (`Collection::on_drag_phase`).
+    let taken = cfg
+        .on_drag_phase
+        .as_ref()
+        .is_some_and(|f| f(s, d, &cfg.key, tx));
+    if taken && d.phase != Phase::Up {
+        tx.live_only();
+        return;
+    }
     let [wx, wy] = d.window_point();
     let window = Point::new(wx, wy);
     let phase = match d.phase {
@@ -394,7 +403,8 @@ pub(super) fn on_drag<S: 'static>(cfg: &Rc<Config<S>>, s: &mut S, d: &mut Drag, 
         hit,
         mods: tx.mods(),
         clicks: d.clicks,
-        cancelled: d.cancelled(),
+        // A release the system drag took ends the press as a cancelled one.
+        cancelled: d.cancelled() || taken,
         now: cfg.now(s),
     };
     if phase == PointerPhase::Down

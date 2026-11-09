@@ -310,6 +310,11 @@ impl Peer {
         })
     }
 
+    /// X11: become the clipboard manager; with `answer: false`, one that never answers.
+    pub fn clipboard_manager(&self, answer: bool) {
+        self.request(Command::ClipboardManager { answer });
+    }
+
     // ---- drag and drop ----
 
     /// Starts a drag from the peer's window; a press on it must still be held.

@@ -112,6 +112,15 @@ pub enum Command {
     DropProxy,
     /// Exports the peer's window for another client to parent to ([`Exported`]).
     Export,
+    /// X11 only: become the session's clipboard manager (take `CLIPBOARD_MANAGER`). An owner
+    /// that hands `CLIPBOARD` over (`SAVE_TARGETS`, naming its types in the request's
+    /// property) has them all taken in one `MULTIPLE` conversion, INCR included; the peer then
+    /// answers, reports [`Event::ManagerSaved`], and takes `CLIPBOARD` with what it saved. With
+    /// `answer: false` it takes `CLIPBOARD_MANAGER` and never answers, so the owner's wait
+    /// runs out.
+    ClipboardManager {
+        answer: bool,
+    },
     /// X11 only: the root window's children whose `_NET_WM_WINDOW_TYPE` lists `ty` (an atom
     /// name such as `_NET_WM_WINDOW_TYPE_DND`), with their size and map state
     /// ([`TypedWindow`]).
@@ -374,6 +383,12 @@ pub enum Event {
         mime: String,
         action: Option<Action>,
         data: Received,
+    },
+    /// As clipboard manager: an owner handed `CLIPBOARD` over. `saved` are the types it
+    /// gave, `refused` those its `MULTIPLE` answer refused.
+    ManagerSaved {
+        saved: Vec<String>,
+        refused: Vec<String>,
     },
     /// Something failed outside a request.
     Error {

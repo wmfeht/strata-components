@@ -83,6 +83,7 @@
                               "children": [
                                 {
                                   "actions": [
+                                    "context-menu",
                                     "scroll-into-view"
                                   ],
                                   "children": [
@@ -102,7 +103,7 @@
                                       "states": [
                                         "focused"
                                       ],
-                                      "value": "Notes.mdz"
+                                      "value": "zNotes.md"
                                     }
                                   ],
                                   "key": "rename",

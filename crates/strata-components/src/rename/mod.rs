@@ -18,14 +18,16 @@
 //! let list = Collection::new(KEY, ..)
 //!     .rename(|s: &App| s.rename.renaming_in(KEY), editor.slot());
 //! layer.extend(editor.message(s, look)); // the window's overlay layer (`rune_kit::root`)
+//! // each poll:
+//! let polled = s.rename.tick(KEY, &s.listing, &s.coll);
 //! ```
 //!
 //! - **Opening.** On C1b's `Intent::BeginRename`, or its own F2 or Ctrl+R, the host calls
 //!   [`RenameState::begin`] with the collection's key, the entry and its name, then reveals
 //!   the row (`CollectionState::reveal`, which reaches unmounted rows too). A new item's
 //!   default name opens with [`Initial::All`].
-//! - **Every poll** it calls [`RenameState::tick`] with the listing and collection of the
-//!   edit's scope, builds the view again when the result changed, and acts on its intents.
+//! - **Every poll** it calls [`RenameState::tick`] with the key, listing and collection of the
+//!   edit's scope ([`RenameState::scope`]), builds the view again when the result changed, and acts on its intents.
 //! - **Intents.** [`RenameIntent::Rename`] and [`RenameIntent::Move`] (a typed path) are the
 //!   host's to carry out; [`RenameIntent::Keep`] renames nothing. An ending [`By::Next`] or
 //!   [`By::Previous`] (Tab, Shift+Tab) asks the host to move the selection to the neighbour
@@ -70,14 +72,23 @@
 //! - **Validation.** The validator runs as the text changes; an empty field is never an error.
 //!   A refused name turns the field's outline `danger`, marks it invalid, gives it the message
 //!   as its description, and shows the message ([`RenameEditor::message`]): a polite live
-//!   region (`status`) anchored under the field, or over it at the window's bottom edge, in the
-//!   host's overlay layer. Inside the row it was clipped to the row (probe P4), whose height it
-//!   mustn't change. A press on it keeps editing.
+//!   region (`status`) anchored under the field, in the host's overlay layer. Inside the row it
+//!   was clipped to the row (probe P4), whose height it mustn't change. Rune flips it over the
+//!   field only at the window's edge, not the listing's: under the listing's last visible row
+//!   it hangs past the listing, over whatever lies below. It takes no presses: a press on it
+//!   reaches what lies under it (the row below) and ends the edit, as any press outside the
+//!   field does in Strata.
 //! - **The field's menu.** The field has its own `on_secondary_press`, which hears a
 //!   right-click, the Menu key and Shift+F10, so Rune's native field menu (empty on Linux at the
 //!   pinned rev) never opens. It asks for [`RenameIntent::FieldMenu`]; the menu is C21's. A host
 //!   that opens one calls [`RenameState::menu_opened`], so the field losing the keyboard to it
-//!   ends nothing, and [`RenameState::menu_closed`] after.
+//!   ends nothing, and [`RenameState::menu_closed`] after. The hold also ends once the field
+//!   has the keyboard back after losing it, so a host that forgets `menu_closed` doesn't leave
+//!   the edit deaf to blurs.
+//! - **The box.** The field's box (its fill and outline, a row tall) is a `textbox`, as
+//!   rune-kit's text inputs are: Rune routes a press anywhere in it to the field, so a press in
+//!   its margin, off the text line, moves the caret rather than ending the edit. A right-click
+//!   there is the field's menu press too.
 //! - **Spellcheck** is off: a file name isn't prose. Rune has no checker on Linux anyway.
 //! - **Upstream #180.** Rune syncs focus into every field of the last view, the one just
 //!   removed too, so [`RenameState::edit`] is always present: a spare while no edit is open.
@@ -105,14 +116,24 @@
 //!   shows only the error style and the accessible description ("no tooltip shows").
 //! - **D3: the edit ends when its row leaves the viewport** (owner ruling), not at GTK's unmap,
 //!   which comes a few rows later.
-//! - **D4: a press that keeps the keyboard doesn't commit.** Strata commits on any press
-//!   outside the field; here only a press that takes the keyboard does. A control with
-//!   `preserve_focus_on_press` (C24's bar) leaves the edit open; such a host calls
-//!   [`RenameState::commit`] (Rune draft U-C5-2).
+//! - **D4: a press that leaves the field the keyboard doesn't commit.** Strata commits on a
+//!   press with any button anywhere outside the field (a capture-phase click); here only a
+//!   press that takes the keyboard does. At the pinned rev these leave the field focused
+//!   (`runtime/input/pointer.rs`, `pointer_down`; `gesture.rs`, `button_down`; `secondary.rs`):
+//!   - a primary press on an element with `preserve_focus_on_press`, or on an unfocusable
+//!     element inside one (C24's bar, toolbar buttons built that way);
+//!   - a primary press on a link in text;
+//!   - a primary press on an element with `keeps_text_selection`, or inside one;
+//!   - any secondary or middle press (probed: a right-click or middle click on another row
+//!     leaves the field focused).
+//!
+//!   A host calls [`RenameState::commit`] for each it has: C1e's `Collection::on_press` hears
+//!   every press on the listing outside the editor, any button. Rune draft U-C5-2.
 //! - **D5: no field menu on Linux until C21** (owner ruling). Strata's GTK entry shows Cut,
 //!   Copy, Paste, Delete, Select All and Insert Emoji.
 //! - **D6: a pasted tab or line break is dropped** (Rune's single-line field).
-//! - **D7: none.** Probe P2 passed: the keyboard goes back to the collection.
+//! - **D7 was a fallback, not needed.** It would have covered focus landing on nothing after
+//!   the editor closed; probe P2 passed, and the keyboard goes back to the collection.
 //! - **D8: a name holding a line break draws on two lines** in the single-line field, clipped
 //!   to the row (probe P7). Names with line breaks are legal on Linux, and rare.
 //! - **No editor rect.** The work package has the editor report its rect for
@@ -171,8 +192,9 @@
 //! - **C2:** the size badge hidden while editing (`RowState::renaming` says so).
 //!
 //! In process, without bullets (`rename/tests.rs`): a row scrolled out, the entry leaving the
-//! listing or renamed elsewhere, the field menu and its hold, the message taking a press,
-//! #180, a composition ending in a blur, and paste.
+//! listing or renamed elsewhere, the field menu and its hold (and the hold ending without
+//! `menu_closed`), a press in the box's margin, a press on the message, a `tick` with another
+//! collection's scope, #180, a composition ending in a blur, and paste.
 //!
 //! # Rune
 //!
@@ -195,12 +217,13 @@
 //!   Repro (headless, `strata-spikes/c5-probes/tests/u_c5_1.rs`):
 //!   `TextInput::new(&edit).build(k).on_secondary_press(f)`, right-click the field: `f` never
 //!   runs. Ask: forward `on_secondary_press` (or expose the inner field's `El`).
-//! - **U-C5-2: no "press outside" for a field.** A press on a control with
-//!   `preserve_focus_on_press` leaves a field focused and tells it nothing, so an inline editor
-//!   can't end on a press elsewhere, as a GTK capture-phase click or a web `pointerdown`
-//!   listener on the document can. Repro: a focused `text_input` beside a
-//!   `preserve_focus_on_press(true)` button; press the button: no handler of the field's runs.
-//!   Ask: an `El::on_press_outside` for an element and its subtree.
+//! - **U-C5-2: no "press outside" for a field.** A press that leaves a field focused (D4's
+//!   list: a `preserve_focus_on_press` control, a link, a `keeps_text_selection` element, any
+//!   secondary or middle press) tells it nothing, so an inline editor can't end on a press
+//!   elsewhere, as a GTK capture-phase click or a web `pointerdown` listener on the document
+//!   can. Repro: a focused `text_input` beside a `preserve_focus_on_press(true)` button; press
+//!   the button, or right-click beside the field: no handler of the field's runs, and it stays
+//!   focused. Ask: an `El::on_press_outside` for an element and its subtree, any button.
 //! - Reused: #106 (focus change; C6's U-C6-3), #173 (`Tx::focus`), #180, #225 (a focused field
 //!   redraws every frame on Wayland), U-C6-7 (scripts have no input-method event), S5's popup
 //!   menus on Linux.

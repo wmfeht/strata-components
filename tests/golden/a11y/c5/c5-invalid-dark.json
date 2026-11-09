@@ -83,6 +83,7 @@
                               "children": [
                                 {
                                   "actions": [
+                                    "context-menu",
                                     "scroll-into-view"
                                   ],
                                   "children": [
@@ -212,9 +213,6 @@
               "role": "group"
             },
             {
-              "actions": [
-                "click"
-              ],
               "children": [
                 {
                   "key": "rename-message-text",

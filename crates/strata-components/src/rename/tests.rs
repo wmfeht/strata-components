@@ -314,7 +314,7 @@ fn mount(n: usize) -> Runtime<App> {
     };
     let mut rt = Runtime::new(app, view, (400.0, 300.0), Env::new(false, 1.0));
     rt.poll = Some(|s: &mut App, _, _| {
-        let polled = s.rename.tick(&s.listing, &s.coll);
+        let polled = s.rename.tick(KEY, &s.listing, &s.coll);
         s.heard.extend(polled.intents);
         polled.changed
     });
@@ -466,10 +466,54 @@ fn a_right_click_on_the_field_asks_the_host_for_a_menu_and_keeps_editing() {
     frames(&mut rt, 1);
     rt.secondary_up(x, y);
     frames(&mut rt, 3);
+    // Rune keeps its popup menus out of the accessibility tree: ask the runtime.
+    assert!(rt.popup_menu().is_none(), "no native field menu");
     assert!(matches!(last(&rt), Some(RenameIntent::FieldMenu { .. })));
     assert!(rt.state.rename.has_keyboard());
-    let tree = rt.accessibility_json().to_string();
-    assert!(!tree.contains("\"menu\""), "no native field menu: {tree}");
+}
+
+#[test]
+fn a_press_in_the_editors_box_off_the_text_line_keeps_editing() {
+    let mut rt = mount(20);
+    begin(&mut rt, 1);
+    let [bx, by, _, bh] = rect(&rt, keys::EDITOR);
+    let [fx, fy, fw, fh] = rect(&rt, keys::FIELD);
+    // The box's margins, around the text line: above it, below it, and before it.
+    let points = [
+        (fx + fw / 2.0, by + 1.0),
+        (fx + fw / 2.0, by + bh - 1.0),
+        (bx + 1.0, by + bh / 2.0),
+    ];
+    for (x, y) in points {
+        assert!(
+            !(x >= fx && x <= fx + fw && y >= fy && y <= fy + fh),
+            "({x}, {y}) is off the text line {:?}",
+            [fx, fy, fw, fh]
+        );
+        rt.pointer_move(x, y);
+        rt.pointer_down(x, y);
+        frames(&mut rt, 1);
+        rt.pointer_up(x, y);
+        frames(&mut rt, 3);
+        assert!(
+            rt.state.rename.has_keyboard(),
+            "a press at ({x}, {y}) in the box kept the edit: {:?}",
+            rt.state.heard
+        );
+    }
+    assert!(rt.state.heard.is_empty(), "{:?}", rt.state.heard);
+    // A right-click there is the field's too.
+    let (x, y) = points[2];
+    rt.secondary_down(x, y);
+    frames(&mut rt, 1);
+    rt.secondary_up(x, y);
+    frames(&mut rt, 3);
+    assert!(
+        matches!(last(&rt), Some(RenameIntent::FieldMenu { .. })),
+        "{:?}",
+        rt.state.heard
+    );
+    assert!(rt.popup_menu().is_none());
 }
 
 #[test]
@@ -495,7 +539,28 @@ fn a_host_menu_holds_the_edit_open_while_it_has_the_keyboard() {
 }
 
 #[test]
-fn the_validators_message_shows_under_the_field_and_a_press_on_it_keeps_editing() {
+fn a_menu_hold_ends_once_the_field_has_the_keyboard_back() {
+    // The host opened a menu and never said it closed: the user clicks back in the field,
+    // then away. That press commits.
+    let mut rt = mount(20);
+    rt.state.menu_opens = true;
+    begin(&mut rt, 1);
+    rt.key(KeyEvent {
+        key: Key::ContextMenu,
+        mods: Mods::default(),
+    });
+    frames(&mut rt, 2);
+    tap(&mut rt, "other");
+    assert!(rt.state.rename.is_open(), "the menu holds the edit");
+    tap(&mut rt, keys::FIELD);
+    assert!(rt.state.rename.has_keyboard());
+    tap(&mut rt, "other");
+    assert!(!rt.state.rename.is_open(), "{:?}", rt.state.heard);
+    assert_eq!(last(&rt).and_then(RenameIntent::by), Some(By::Blur));
+}
+
+#[test]
+fn the_validators_message_shows_under_the_field_and_a_press_on_it_is_a_press_outside() {
     let mut rt = mount(20);
     begin(&mut rt, 1);
     for c in ["a", "/", "/"] {
@@ -513,30 +578,41 @@ fn the_validators_message_shows_under_the_field_and_a_press_on_it_keeps_editing(
         message[1] >= row[1] + row[3] - 8.0,
         "under the field: {row:?} {message:?}"
     );
-    let selected = rt.state.coll.selection.selected_ids(&rt.state.listing);
+    // Walk the tree (a `serde_json::Value`, which this crate doesn't name) for the message.
+    let mut stack = vec![rt.accessibility_json()];
+    let mut found = None;
+    while let Some(node) = stack.pop() {
+        if let Some(children) = node.get("children").and_then(|c| c.as_array()) {
+            stack.extend(children.iter().cloned());
+        }
+        if node["key"] == keys::MESSAGE {
+            found = Some(node);
+        }
+    }
+    let node = found.expect("the message's node");
+    assert_eq!(node["role"], "status");
+    assert!(node.get("actions").is_none(), "nothing to press: {node}");
+    // The press goes to the row under the message, as any press outside the field.
     tap(&mut rt, keys::MESSAGE);
-    assert!(rt.state.rename.has_keyboard());
+    assert!(!rt.state.rename.is_open());
+    assert_eq!(
+        last(&rt),
+        Some(&RenameIntent::Keep {
+            id: EntryId::new(1),
+            why: Kept::Invalid,
+            by: By::Blur
+        })
+    );
     assert_eq!(
         rt.state.coll.selection.selected_ids(&rt.state.listing),
-        selected
-    );
-    rt.key(KeyEvent {
-        key: Key::Backspace,
-        mods: Mods::default(),
-    });
-    frames(&mut rt, 3);
-    assert_eq!(rt.state.rename.error(), None);
-    assert!(
-        rt.elements()
-            .iter()
-            .all(|e| e.key.as_deref() != Some(keys::MESSAGE) || e.exiting)
+        vec![EntryId::new(2)]
     );
 }
 
 #[test]
-fn a_field_removed_by_its_own_enter_survives_runes_focus_sync() {
-    // Upstream #180: Rune syncs focus into every field of the last view, also the one just
-    // removed; the spare edit takes it.
+fn a_field_the_host_closes_with_a_blur_survives_runes_focus_sync() {
+    // Upstream #180: Rune syncs focus into every field of the last view, also the one the
+    // host just closed; the spare edit takes it.
     let mut rt = mount(20);
     begin(&mut rt, 1);
     rt.update(|s, tx| {
@@ -546,6 +622,14 @@ fn a_field_removed_by_its_own_enter_survives_runes_focus_sync() {
     frames(&mut rt, 3);
     assert!(!rt.state.rename.is_open());
     assert!(!rt.state.rename.edit.focused);
+}
+
+#[test]
+#[cfg(debug_assertions)]
+#[should_panic(expected = "the edit's scope")]
+fn a_tick_with_another_collections_state_is_a_host_bug() {
+    let mut st = opened("Notes.md");
+    let _ = st.tick("elsewhere", &listing(3), &CollectionState::new());
 }
 
 #[test]

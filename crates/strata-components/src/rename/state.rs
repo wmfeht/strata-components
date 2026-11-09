@@ -44,6 +44,9 @@ pub struct RenameState {
     seen_shown: bool,
     /// A field menu the host opened is showing: the field's lost keyboard isn't a blur.
     menu: bool,
+    /// The field lost the keyboard while the menu held the edit: once it has it back, the
+    /// menu is gone, whether or not the host said so.
+    menu_lost: bool,
 }
 
 impl RenameState {
@@ -81,6 +84,7 @@ impl RenameState {
         self.seen_focus = false;
         self.seen_shown = false;
         self.menu = false;
+        self.menu_lost = false;
         out.changed = true;
         out
     }
@@ -92,6 +96,12 @@ impl RenameState {
             .as_ref()
             .filter(|o| o.scope == scope)
             .map(|o| o.id)
+    }
+
+    /// The key of the collection the edit is in: the one whose listing and state
+    /// [`RenameState::tick`] takes.
+    pub fn scope(&self) -> Option<&str> {
+        self.open.as_ref().map(|o| o.scope.as_str())
     }
 
     /// The entry being renamed, in any collection.
@@ -161,15 +171,28 @@ impl RenameState {
         }
     }
 
-    /// One poll, with the listing and the collection of the edit's scope. It ends an edit
+    /// One poll, with the key, listing and collection of the edit's scope
+    /// ([`RenameState::scope`]). It ends an edit
     /// whose entry left the listing or was renamed elsewhere ([`By::Listing`]), whose row
     /// scrolled out of the viewport after it had shown there ([`By::Scrolled`], as Strata's
     /// editor ends when its row unmaps), or whose field lost the keyboard ([`By::Blur`], a
     /// commit: Rune has no focus-change hook, upstream #106).
-    pub fn tick(&mut self, source: &dyn EntrySource, coll: &CollectionState) -> Polled {
+    ///
+    /// Passing another collection's state would judge the row against the wrong viewport: a
+    /// debug build panics when `scope` isn't the edit's.
+    pub fn tick(
+        &mut self,
+        scope: &str,
+        source: &dyn EntrySource,
+        coll: &CollectionState,
+    ) -> Polled {
         let Some(open) = self.open.as_mut() else {
             return Polled::default();
         };
+        debug_assert_eq!(
+            scope, open.scope,
+            "RenameState::tick takes the listing and collection of the edit's scope"
+        );
         let Some(index) = source.index_of(open.id) else {
             return self.cancel(By::Listing);
         };
@@ -189,23 +212,32 @@ impl RenameState {
         }
         if self.edit.focused {
             self.seen_focus = true;
-        } else if self.seen_focus && !self.menu {
-            return self.commit(By::Blur);
+            if std::mem::take(&mut self.menu_lost) {
+                self.menu = false;
+            }
+        } else if self.seen_focus {
+            if !self.menu {
+                return self.commit(By::Blur);
+            }
+            self.menu_lost = true;
         }
         Polled::default()
     }
 
     /// The host opened a field menu for a [`RenameIntent::FieldMenu`]: until
-    /// [`RenameState::menu_closed`], the field losing the keyboard to it ends nothing.
+    /// [`RenameState::menu_closed`], the field losing the keyboard to it ends nothing. The hold
+    /// also ends once the field has the keyboard back after losing it.
     pub fn menu_opened(&mut self) {
         if self.open.is_some() {
             self.menu = true;
+            self.menu_lost = false;
         }
     }
 
     /// The field menu closed: the field asks for the keyboard back if the menu didn't
     /// return it.
     pub fn menu_closed(&mut self) -> Polled {
+        self.menu_lost = false;
         if !std::mem::take(&mut self.menu) || self.open.is_none() {
             return Polled::default();
         }
@@ -278,6 +310,7 @@ impl RenameState {
         self.seen_focus = false;
         self.seen_shown = false;
         self.menu = false;
+        self.menu_lost = false;
         // A fresh spare: the old text and its history go, and Rune's focus sync for the
         // removed field lands here (#180).
         self.edit = TextEdit::new("");

@@ -22,20 +22,40 @@
     {
       "t": 1.0,
       "type": "key",
-      "name": "Up"
+      "name": "F2"
     },
     {
       "t": 1.2,
+      "type": "type",
+      "text": "Pics"
+    },
+    {
+      "t": 1.6,
+      "type": "key",
+      "name": "Enter"
+    },
+    {
+      "t": 1.8,
+      "type": "key",
+      "name": "Down"
+    },
+    {
+      "t": 2.0,
+      "type": "key",
+      "name": "Down"
+    },
+    {
+      "t": 2.2,
       "type": "key",
       "name": "F2"
     },
     {
-      "t": 1.4,
+      "t": 2.4,
       "type": "type",
-      "text": "Work"
+      "text": "Box"
     },
     {
-      "t": 1.8,
+      "t": 2.75,
       "type": "key",
       "name": "Enter"
     }
@@ -43,10 +63,14 @@
   "expect": [
     {
       "key": "c5-log-0",
-      "name": "Renamed Projects to Work (Enter)"
+      "name": "Renamed archive.tar.gz to Box.gz (Enter)"
     },
     {
       "key": "c5-log-1",
+      "name": "Renamed photos.2024 to Pics (Enter)"
+    },
+    {
+      "key": "c5-log-2",
       "name": "Renamed Notes.md to Memo.md (Enter)"
     },
     {

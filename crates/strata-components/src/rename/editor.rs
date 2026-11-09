@@ -116,14 +116,15 @@ impl<S: 'static> RenameEditor<S> {
     }
 
     /// The validator's message while it refuses the name, for the host's window overlay
-    /// layer (`rune_kit::root`'s): anchored under the field, or over it at the window's
-    /// bottom edge, drawn above the rows. Inside the row it would be clipped to the row,
-    /// whose height it mustn't change. A polite live region, so assistive technology says
-    /// each new message; the field's description holds it too. A press on it keeps editing.
+    /// layer (`rune_kit::root`'s): anchored under the field, drawn above the rows, and flipped
+    /// over the field only at the window's edge (not the listing's). Inside the row it would
+    /// be clipped to the row, whose height it mustn't change. A polite live region, so
+    /// assistive technology says each new message; the field's description holds it too. It
+    /// takes no presses: one on it reaches what lies under it and ends the edit.
     pub fn message(&self, s: &S, look: &Look) -> Option<El> {
         let st = (self.get)(s);
         st.renaming()?;
-        st.error().map(|m| message_el::<S>(look, m))
+        st.error().map(|m| message_el(look, m))
     }
 }
 
@@ -147,8 +148,7 @@ fn build<S: 'static>(cfg: &Rc<RenameEditor<S>>, s: &S, rcx: &RowCx<'_>) -> El {
         None => "Rename".to_owned(),
     };
 
-    let (edit_cfg, key_cfg, change_cfg, menu_cfg) =
-        (cfg.clone(), cfg.clone(), cfg.clone(), cfg.clone());
+    let (edit_cfg, key_cfg, change_cfg) = (cfg.clone(), cfg.clone(), cfg.clone());
     let mut field = text_input(&st.edit, (cfg.font)(look))
         .single_line()
         .key(FIELD)
@@ -185,16 +185,19 @@ fn build<S: 'static>(cfg: &Rc<RenameEditor<S>>, s: &S, rcx: &RowCx<'_>) -> El {
         })
         // The field's own menu press: without it Rune asks for its native field menu, which
         // shows nothing on Linux at the pinned rev. The host's menu (C21) answers the intent.
-        .on_secondary_press(move |s: &mut S, p: PointerPress, tx: &mut Tx| {
-            let polled = (menu_cfg.get)(s).field_menu(Point::new(p.x, p.y));
-            route(&menu_cfg, s, polled, tx);
-        });
+        .on_secondary_press(menu_press(cfg));
     if let Some(message) = error {
         field = field.invalid(true).description(message.to_owned());
     }
 
+    // The box is a `textbox`, as rune-kit's text inputs are: Rune routes a press anywhere in it
+    // to the field (`runtime/input/hit.rs`, `textbox_input`), so a press in its margin, off the
+    // text line, edits rather than reaching the collection under it and ending the edit. Its
+    // menu press is the field's too.
     row()
         .key(EDITOR)
+        .role("textbox")
+        .on_secondary_press(menu_press(cfg))
         .grow(1.0)
         .min_w(0.0)
         .h_full()
@@ -218,8 +221,19 @@ fn build<S: 'static>(cfg: &Rc<RenameEditor<S>>, s: &S, rcx: &RowCx<'_>) -> El {
         .child(field)
 }
 
-/// The validator's message: under the field, or over it at the window's bottom edge.
-fn message_el<S: 'static>(look: &Look, message: &str) -> El {
+/// The field's menu press, on the field and on the box around it.
+fn menu_press<S: 'static>(
+    cfg: &Rc<RenameEditor<S>>,
+) -> impl Fn(&mut S, PointerPress, &mut Tx) + 'static {
+    let cfg = cfg.clone();
+    move |s: &mut S, p: PointerPress, tx: &mut Tx| {
+        let polled = (cfg.get)(s).field_menu(Point::new(p.x, p.y));
+        route(&cfg, s, polled, tx);
+    }
+}
+
+/// The validator's message: under the field, or over it at the window's edge.
+fn message_el(look: &Look, message: &str) -> El {
     let kit = &look.kit;
     col()
         .key(MESSAGE)
@@ -240,12 +254,11 @@ fn message_el<S: 'static>(look: &Look, message: &str) -> El {
                         .color(kit.c.danger.fg),
                 ),
         )
-        .live_region(LiveRegion::Polite)
-        // A press on the message is its own (not the row's under it) and keeps editing. Only
-        // a press handler makes an anchored overlay a press target (`.hit()` doesn't).
-        .on_press(|_: &mut S| {})
-        .preserve_focus_on_press(true)
-        // A status (ARIA's polite message role): a group with a press handler reads as a
-        // button.
+        // A status: ARIA's role for a polite message. It takes no presses: one on it reaches
+        // what lies under it (the row below), and ends the edit as any press outside the
+        // field does, as Strata's. (`.hit()` wouldn't make it a press target either: it marks
+        // a rect as native overlay input, `Runtime::hit_regions`, and `top_target` skips such
+        // a node unless it is a button.)
         .role("status")
+        .live_region(LiveRegion::Polite)
 }

@@ -11,6 +11,30 @@
     },
     {
       "t": 0.4,
+      "type": "tap",
+      "x": 480,
+      "y": 92
+    },
+    {
+      "t": 0.6,
+      "type": "tap",
+      "x": 480,
+      "y": 114
+    },
+    {
+      "t": 0.8,
+      "type": "tap",
+      "x": 949,
+      "y": 103
+    },
+    {
+      "t": 1.0,
+      "type": "tap",
+      "x": 33,
+      "y": 103
+    },
+    {
+      "t": 1.2,
       "type": "type",
       "text": "z"
     }
@@ -18,7 +42,7 @@
   "expect": [
     {
       "key": "rename-field",
-      "value": "Notes.mdz",
+      "value": "zNotes.md",
       "focused": true
     },
     {

@@ -17,6 +17,10 @@
   ],
   "expect": [
     {
+      "key": "c5-log-0",
+      "name": "Renamed Notes.md to Memo.md (focus left)"
+    },
+    {
       "key": "c5-title",
       "name": "Downloads · 2 items"
     },

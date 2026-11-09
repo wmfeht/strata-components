@@ -41,11 +41,16 @@
                 },
                 {
                   "key": "c5-log-0",
-                  "name": "Renamed Projects to Work (Enter)",
+                  "name": "Renamed archive.tar.gz to Box.gz (Enter)",
                   "role": "label"
                 },
                 {
                   "key": "c5-log-1",
+                  "name": "Renamed photos.2024 to Pics (Enter)",
+                  "role": "label"
+                },
+                {
+                  "key": "c5-log-2",
                   "name": "Renamed Notes.md to Memo.md (Enter)",
                   "role": "label"
                 },
@@ -54,7 +59,7 @@
                     "focus",
                     "context-menu"
                   ],
-                  "activeDescendant": "row-1",
+                  "activeDescendant": "row-4",
                   "children": [
                     {
                       "actions": [
@@ -73,19 +78,16 @@
                                 "scroll-into-view"
                               ],
                               "key": "row-1",
-                              "name": "Work",
+                              "name": "Projects",
                               "position": 1,
-                              "role": "list-box-option",
-                              "states": [
-                                "selected"
-                              ]
+                              "role": "list-box-option"
                             },
                             {
                               "actions": [
                                 "scroll-into-view"
                               ],
                               "key": "row-2",
-                              "name": "photos.2024",
+                              "name": "Pics",
                               "position": 2,
                               "role": "list-box-option"
                             },
@@ -103,9 +105,12 @@
                                 "scroll-into-view"
                               ],
                               "key": "row-4",
-                              "name": "archive.tar.gz",
+                              "name": "Box.gz",
                               "position": 4,
-                              "role": "list-box-option"
+                              "role": "list-box-option",
+                              "states": [
+                                "selected"
+                              ]
                             },
                             {
                               "actions": [

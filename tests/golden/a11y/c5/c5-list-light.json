@@ -169,6 +169,7 @@
                                       "children": [
                                         {
                                           "actions": [
+                                            "context-menu",
                                             "scroll-into-view"
                                           ],
                                           "children": [

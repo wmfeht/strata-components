@@ -601,6 +601,6 @@ pub fn on_key(g: &mut Gallery, key: &KeyEvent, tx: &mut Tx) -> bool {
 pub fn poll(g: &mut Gallery, t: f64, tx: &mut Tx) -> bool {
     let d = &mut g.c5;
     d.clock = t;
-    let polled = d.rename.tick(&d.listing, &d.coll);
+    let polled = d.rename.tick(d.scope(), &d.listing, &d.coll);
     d.heard_all(polled, tx)
 }

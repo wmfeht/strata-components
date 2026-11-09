@@ -1181,6 +1181,31 @@ fn x11_on_quit_shuts_down_and_hands_the_clipboard_over() {
     );
 }
 
+/// The X11 connection fails: the held copy is lost as failed, and the diagnostic reaches the
+/// app's handler, which may call the clipboard back (it asks for the status) while the app
+/// lives on.
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn x11_a_failed_connection_loses_the_copy_and_the_diagnostic_may_call_back() {
+    let s = Session::start();
+    let demo = Demo::start(&s, B::X).expect("X11");
+    let at = demo.app.line_count();
+    let copy = demo.copy_offers(Selection::Clipboard, &[Offer::text(UTF8, "a")]);
+    demo.change(at, "holding", Some(copy));
+    let at = demo.send(json!({ "cmd": "break" }));
+    assert_eq!(
+        demo.wait(at, "the break", |v| v["ev"] == "broke")["ok"],
+        true
+    );
+    let lost = demo.change(at, "lost", Some(copy));
+    assert_eq!(lost["why"], "failed", "{lost}");
+    let diag = demo.wait(at, "the diagnostic", |v| v["ev"] == "diagnostic");
+    assert_eq!(diag["route"], "X11", "{diag}");
+    assert_eq!(demo.state(copy), "Some(Lost(Failed))", "the app lives on");
+    let down = demo.quit("quit");
+    assert_eq!(down["bound"], true, "{down}");
+}
+
 // ---- 12. Through Xwayland (XW) ----
 
 /// libwayland < 1.23 and no data control, simulated: the app's clipboard goes through

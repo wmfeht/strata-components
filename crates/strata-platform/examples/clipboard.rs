@@ -13,6 +13,7 @@
 //! - `{"cmd":"clear","copy":n}`, `{"cmd":"state","copy":n}`, `{"cmd":"offered","selection":…}`;
 //! - `{"cmd":"read","selection":…,"mimes":[…],"max_bytes":n}`, `{"cmd":"read-files","selection":…}`;
 //! - `{"cmd":"rune-copy","text":"…"}`: Rune's own `Tx::copy`;
+//! - `{"cmd":"break"}`: the platform ends the clipboard's connection (a test switch);
 //! - `{"cmd":"quit"}`: the clipboard's shutdown, then `Tx::quit`; `{"cmd":"quit-dnd"}`: drag
 //!   and drop's shutdown instead (with `--with-dnd`); `{"cmd":"quit-only"}`: `Tx::quit` alone,
 //!   so `App::on_quit` shuts down.
@@ -234,6 +235,10 @@ mod demo {
                     log("read-error", json!({ "error": format!("{e:?}") }));
                 }
             }
+            "break" => log(
+                "broke",
+                json!({ "ok": clipboard::provoke_connection_failure() }),
+            ),
             "rune-copy" => {
                 tx.copy(field("text").as_str().unwrap_or_default());
                 log("rune-copied", json!({}));
@@ -292,7 +297,13 @@ mod demo {
         let clip = Clipboard::<State>::new()
             .test_route(route)
             .on_change(|_, c, _| log("change", change(c)));
-        clipboard::on_diagnostic(|m| log("diagnostic", json!({ "message": m })));
+        // It asks the clipboard back, as an app's handler may: no borrow of the clipboard's may
+        // be held while it runs.
+        let diag_clip = clip.clone();
+        clipboard::on_diagnostic(move |m| {
+            let route = diag_clip.status().map(|s| format!("{:?}", s.route));
+            log("diagnostic", json!({ "message": m, "route": route }));
+        });
         let with_dnd = flag("--with-dnd");
         let state_clip = clip.clone();
         #[cfg(feature = "dnd")]

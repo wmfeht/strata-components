@@ -236,10 +236,12 @@ pub(super) fn status() -> Option<Status> {
 }
 
 /// Takes in what the platform reported since the last pump, and queues the changes on every
-/// handle.
+/// handle. Diagnostics go out once the hub is no longer borrowed: the app's handler may call
+/// the clipboard back.
 pub(super) fn pump() {
-    let Some((changes, sinks)) = with(|hub| {
+    let Some((changes, sinks, diagnostics)) = with(|hub| {
         let mut changes = Vec::new();
+        let mut diagnostics = Vec::new();
         for event in hub.sub.drain() {
             match event {
                 transfer::Event::SelectionChanged {
@@ -266,7 +268,7 @@ pub(super) fn pump() {
                     changes.extend(hub.book.cancelled(copy, data_device));
                 }
                 transfer::Event::Failed { message } => {
-                    diagnostic(&format!("the platform connection failed: {message}"));
+                    diagnostics.push(format!("the platform connection failed: {message}"));
                     hub.failed = true;
                     hub.specs.clear();
                     hub.offers.clear();
@@ -277,10 +279,13 @@ pub(super) fn pump() {
         }
         hub.sinks.retain(|(_, s)| s.strong_count() > 0);
         let sinks: Vec<Rc<dyn Sink>> = hub.sinks.iter().filter_map(|(_, s)| s.upgrade()).collect();
-        (changes, sinks)
+        (changes, sinks, diagnostics)
     }) else {
         return;
     };
+    for message in diagnostics {
+        diagnostic(&message);
+    }
     for sink in sinks {
         for c in &changes {
             sink.queue(c.clone());

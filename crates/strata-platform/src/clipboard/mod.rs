@@ -123,6 +123,16 @@ pub fn shutdown() -> Result<Closed, Error> {
     hub::shutdown()
 }
 
+/// A test switch for strata-platform's own tests: makes the platform end the clipboard's
+/// connection (the X11 one, else a Wayland connection of our own), to check how a failure is
+/// reported. False without one.
+#[doc(hidden)]
+pub fn provoke_connection_failure() -> bool {
+    crate::transfer::Transfer::current().is_some_and(|t| {
+        t.provoke_x11_connection_failure() || t.provoke_protocol_error_on_own_connection()
+    })
+}
+
 /// Where problems that no call could return go (a failed connection, a hand-off the
 /// clipboard manager didn't take): stderr by default. On the UI thread.
 pub fn on_diagnostic(f: impl Fn(&str) + 'static) {

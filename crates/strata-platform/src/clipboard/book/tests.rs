@@ -215,3 +215,16 @@ fn finished_copies_are_forgotten_beyond_a_bound() {
     assert_eq!(b.state(CopyId(1)), None);
     assert_eq!(b.state(CopyId(300)), Some(CopyState::Lost(Lost::Taken)));
 }
+
+#[test]
+fn an_echo_listing_the_types_in_another_order_is_still_ours() {
+    let mut b = Book::default();
+    b.copied(C, CopyId(1), m(&["a", "b"]));
+    assert_eq!(
+        b.selection(C, Some(m(&["b", "a"])), &holds_all),
+        [Change::Holding {
+            selection: C,
+            copy: CopyId(1)
+        }]
+    );
+}

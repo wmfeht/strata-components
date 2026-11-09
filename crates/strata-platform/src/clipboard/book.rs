@@ -4,7 +4,7 @@
 //! A copy holds once its own selection comes back (the compositor's echo, or X11's owner
 //! change) while the platform still says the source holds it. Several copies of ours can be
 //! in flight at once (a copy, then another before the first's echo), so the echo is matched
-//! to the newest copy that still holds and offers exactly the echoed types.
+//! to the newest copy that still holds and offers exactly the echoed types (in any order).
 //!
 //! That rule is guarded by the unit tests in `book/tests.rs`, not by the session tests: every
 //! platform here cancels a source before it announces the next owner, on the same
@@ -67,7 +67,7 @@ impl Book {
             .filter(|(id, e)| {
                 e.selection == selection
                     && !matches!(e.state, CopyState::Lost(_))
-                    && e.mimes == mimes
+                    && same_types(&e.mimes, &mimes)
                     && holds(**id)
             })
             .map(|(id, _)| *id)
@@ -198,6 +198,13 @@ impl Book {
             }
         }
     }
+}
+
+/// The same types, in any order: a platform may list an offer's types in another order than
+/// they were offered.
+fn same_types(a: &[String], b: &[String]) -> bool {
+    use std::collections::BTreeSet;
+    a.iter().collect::<BTreeSet<_>>() == b.iter().collect::<BTreeSet<_>>()
 }
 
 #[cfg(test)]

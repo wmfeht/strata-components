@@ -1,0 +1,40 @@
+{
+  "bullets": [
+    "browser/view-modes/icons: After a fast scroll stops, visible tiles fill their thumbnails and details without further input."
+  ],
+  "scene": "c3-hundred-k-light",
+  "events": [
+    {
+      "t": 1.2,
+      "type": "wheel",
+      "key": "c3-grid",
+      "dx": 0,
+      "dy": -6000
+    },
+    {
+      "t": 1.25,
+      "type": "wheel",
+      "key": "c3-grid",
+      "dx": 0,
+      "dy": -6000
+    },
+    {
+      "t": 1.3,
+      "type": "wheel",
+      "key": "c3-grid",
+      "dx": 0,
+      "dy": -6000
+    },
+    {
+      "t": 3.5,
+      "type": "mark",
+      "name": "end"
+    }
+  ],
+  "expect": [
+    {
+      "key": "c3-filled",
+      "name": "Visible 40: thumbnails 12 of 12, details 40"
+    }
+  ]
+}

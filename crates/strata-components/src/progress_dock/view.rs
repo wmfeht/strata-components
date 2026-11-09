@@ -491,19 +491,6 @@ impl Bar {
     }
 }
 
-/// A zero-size element that asks for a wake once it is laid out: a timer a handler without a
-/// `Tx` started then gets its tick in a resting window. A new `generation` mounts a new one.
-pub(crate) fn wake_beacon<S: 'static>(key: &str, generation: u64) -> El {
-    el().key(format!("{key}-wake-{generation}"))
-        .absolute(0.0, 0.0)
-        .size(0.0, 0.0)
-        .a11y_hidden()
-        .on_layout_tx(|_: &mut S, _, tx: &mut Tx| {
-            tx.wake_after(std::time::Duration::ZERO);
-            tx.live_only();
-        })
-}
-
 /// The glow around a card or a notice when the look's glow is on, else the kit's overlay
 /// shadow, as C15's panel.
 fn glow(look: &Look, e: El) -> El {

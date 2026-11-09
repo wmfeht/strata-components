@@ -421,15 +421,16 @@ fn a_cancelled_card_can_become_a_notice_that_closes_itself() {
 }
 
 #[test]
-fn an_untimed_cancel_asks_the_views_for_a_wake_until_the_next_tick() {
+fn an_untimed_cancel_stalls_eight_seconds_after_the_next_tick() {
     let mut dock = Dock::new();
     let mut tx = Tx::default();
     dock.start(1, copy(1), &mut tx);
     dock.tick(0.0, &mut tx);
     assert!(dock.cancel_untimed(1));
-    assert!(dock.wants_wake().is_some());
-    assert!(dock.tick(1.0, &mut tx));
-    assert!(dock.wants_wake().is_none());
+    assert!(!dock.cancel_untimed(1), "once");
+    let end = wake_to_wake(&mut dock, 1.0, 20.0);
+    assert_eq!(dock.op(1).unwrap().title(), "Device not responding");
+    assert!((end - 9.0).abs() < 1e-6, "{end}");
 }
 
 #[test]

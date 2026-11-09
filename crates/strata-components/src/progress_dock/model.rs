@@ -381,10 +381,6 @@ pub struct Dock {
     last_flush: Option<f64>,
     /// Something changed since that the views haven't read.
     dirty: bool,
-    /// A handler without a `Tx` started a timer: the views mount a wake beacon
-    /// ([`Dock::wants_wake`]) until the next tick.
-    wake: Option<u64>,
-    wakes: u64,
     /// The wake the last call asked for, in seconds from its clock.
     asked: Option<f64>,
 }
@@ -645,23 +641,12 @@ impl Dock {
         true
     }
 
-    /// [`Dock::cancel`] from a handler without a `Tx` (C15's buttons and Escape): the views
-    /// mount a wake beacon so the next tick comes even in a resting window.
+    /// [`Dock::cancel`] from a handler without a `Tx` (C15's buttons and Escape). The stall's
+    /// clock starts at the next tick: at the pin Rune runs a frame, and so a poll, right after
+    /// the commit the cancel makes (`tests/c16.rs` steps it from wake to wake, Escape with
+    /// animations off included).
     pub fn cancel_untimed(&mut self, id: OpId) -> bool {
-        let mut tx = Tx::default();
-        let started = self.cancel(id, &mut tx);
-        if started {
-            self.wakes += 1;
-            self.wake = Some(self.wakes);
-        }
-        started
-    }
-
-    /// A wake beacon's generation while one is due: an element keyed by it that asks for a
-    /// wake from its first layout, the one place a view gets a `Tx` (a workaround for C15's
-    /// `Tx`-less handlers and Rune draft U-C1e-6).
-    pub fn wants_wake(&self) -> Option<u64> {
-        self.wake
+        self.cancel(id, &mut Tx::default())
     }
 
     /// The user dismissed finished card `id`. True when it was finished (and is now gone).
@@ -737,7 +722,7 @@ impl Dock {
     pub fn tick(&mut self, now: f64, tx: &mut Tx) -> bool {
         let words = self.words.clone();
         let animations = !self.still;
-        let mut changed = self.wake.take().is_some();
+        let mut changed = false;
         let mut wake: Option<f64> = None;
         let mut want = |w: f64| wake = Some(wake.map_or(w, |v: f64| v.min(w)));
         let mut gone = Vec::new();

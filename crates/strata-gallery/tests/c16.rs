@@ -278,7 +278,7 @@ mod c16 {
 
     // operations/progress: "If the transfer has not stopped 8 seconds after Cancel, the title
     // becomes 'Device not responding'…": Cancel from the dialog, whose C15 buttons carry no
-    // Tx, still gets its wake (the dock's beacon).
+    // Tx, still stalls on time.
     #[test]
     fn a_stalled_cancel_in_the_dialog_reads_device_not_responding_after_8_s() {
         for animations in [true, false] {
@@ -303,6 +303,30 @@ mod c16 {
             let dialog = element(&rt, "c16-progress-dialog").unwrap();
             assert_eq!(dialog.label.as_deref(), Some("Device not responding"));
         }
+    }
+
+    // The same stall reached by Escape with animations off, where no press motion keeps
+    // frames coming: the poll after the cancel's commit stamps it (review 1, should-fix 3,
+    // which removed the wake beacon no test needed).
+    #[test]
+    fn escape_in_a_still_dialog_stalls_from_its_own_wake() {
+        let mut rt = mount_with("c16-idle-light", still);
+        tap(&mut rt, "c16-start-move-stuck");
+        run(&mut rt, 1.0);
+        rt.key(KeyEvent {
+            key: Key::Escape,
+            mods: Mods::default(),
+        });
+        let start = rt.state.c16.now;
+        let end = wake_until(&mut rt, 12.0, |g| {
+            card(g, 1).as_deref() == Some("Device not responding")
+        });
+        assert_eq!(card(&rt.state, 1).as_deref(), Some("Device not responding"));
+        assert!(
+            (end - start - 8.0).abs() < 0.1,
+            "stalled {:.3} s after Escape",
+            end - start
+        );
     }
 
     // operations/progress/dock: "When a notice expires and the dock holds no other row, the

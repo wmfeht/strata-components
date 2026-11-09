@@ -1,6 +1,6 @@
 {
   "bullets": [
-    "browser/view-modes/columns: On release, the window's other open columns ease to the dragged width once"
+    "browser/view-modes/columns: A resize or autofit is saved as `browser_column_width`"
   ],
   "scene": "c2-three-columns-light",
   "events": [

@@ -8,8 +8,9 @@
 //!
 //! The defaults are Strata's (`src/style.css`, `upstream/main` 35ee677ab): `.column-header`,
 //! `.active-column .column-header`, `.column-resize-handle`, `.columns > .drop-destination
-//! .column-drop-veil` and `.file-size`. The colours come from the Kit, as K1 maps Strata's: `@strata_accent` is
-//! `bg_accent`, `@strata_border` `std_border`, `@strata_surface` `surface_raised`. No token
+//! .column-drop-veil` and `.file-size`. The colours come from the Kit, as K1 maps Strata's:
+//! `@strata_accent` is `bg_accent`, `@strata_border` `std_border`, `@strata_surface`
+//! `surface_raised`. No token
 //! here inherits from a core length, so overriding one moves only the columns.
 
 use rune::{Color, TextStyle};

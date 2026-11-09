@@ -43,10 +43,10 @@ pub(super) fn content_width(
     if depth >= sources.len() {
         return 0.0;
     }
+    // The header's padding either side of its title; its line is a bottom border.
     let title = tokens::header_inset(look)
         + measure(sources.title(depth), tokens::header_title_font(look))
-        + look.space.xs
-        + tokens::edge_width(look);
+        + look.space.xs;
     let row_chrome =
         2.0 * collection::row_inset(look) + 2.0 * look.space.xs + look.icon_size.md + look.space.sm;
     let source = sources.source(depth);

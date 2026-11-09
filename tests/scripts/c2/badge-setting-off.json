@@ -1,6 +1,6 @@
 {
   "bullets": [
-    "browser/view-modes/columns: With Show sizes in Columns view off, the badge stays hidden"
+    "browser/view-modes/columns: With Show sizes in Columns view off"
   ],
   "scene": "c2-sizes-off-light",
   "events": [

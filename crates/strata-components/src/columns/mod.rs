@@ -72,7 +72,8 @@
 //!   ([`ColumnsState::set_width_cap`]). The release (a click too) gives every other open column
 //!   the same width, easing once, and hands the host the width ([`ColumnsIntent::Width`]); a
 //!   cancelled drag puts it back. Two presses on one edge within 400 ms of the host's clock fit
-//!   that column alone to the widest of its title and the rows on screen, easing, within one
+//!   that column alone (any press counts, as in Strata: a drag begun within 400 ms of the last
+//!   press on that edge fits rather than resizes) to the widest of its title and the rows on screen, easing, within one
 //!   standard column and the area, and hand the host that width. The pointer on an edge turns
 //!   its line the accent at once (and lights C9's divider line beside the last column); resting
 //!   there 400 ms shows a "Column width" caption. New columns open at the saved width, narrowed
@@ -250,24 +251,24 @@
 //! | 76 Columns fill the strip's height; the paste destination's header is marked | PNG goldens, *partial*: the active column's header is marked; the destination is Strata's |
 //! | 77 The horizontal bar shows no square at its leading edge | PNG `c2-overflow-*` (C24's strip bar, shown) |
 //! | 78 Dragging an edge resizes only that column, never below 300 | page `dragging_an_edge_resizes…`; unit `widths_never_draw_below…` |
-//! | 79 The release spreads the width to the other columns | `edge-spread`; page (c2b) `the_release_eases_the_other_columns…`, `a_click_on_an_edge_spreads…` |
+//! | 79 The release spreads the width to the other columns | page (c2b) `the_release_eases_the_other_columns…`, `a_click_on_an_edge_spreads…` (widths aren't in the tree a script sees) |
 //! | 80 A press 6 px either side of the line resizes the left column | page `a_press_either_side_of_the_line…` |
 //! | 81 Resting 400 ms on an edge shows "Column width", following it | `resize-caption`; page `a_rest_on_a_column_edge…` |
 //! | 82 The edge meeting the preview lights its divider line | page `the_edge_of_the_column_beside_the_preview…` (with C9's `light_line`); page (c2b) `the_edge_beside_the_preview_lights…_at_once` |
 //! | 83 Two presses on an edge fit that column alone, easing, never below 300 | `edge-autofit`; page (c2b) `two_presses_on_an_edge_within_400_ms…`, *partial*: the header's actions aren't measured |
-//! | 87 An autofit saves its capped width | page (c2b) `an_autofit_stops_at_the_area…`, *partial*: saving is the host's |
 //! | 84 Drags stop at the visible browser area | page `an_edge_drag_stops_at_the_area…`, page (c2b) `an_autofit_stops_at_the_area…`, *partial*: the area is the host's ([`ColumnsState::set_width_cap`]) |
 //! | 85 The cap never goes below a standard column, scaled | page `an_edge_drag_stops…`; unit `widths_never_draw_below…` |
-//! | 86 A resize is saved; new columns open at it, open ones keep theirs | page `dragging_an_edge_resizes…`, *partial*: saving is the host's |
+//! | 86 A resize is saved; new columns open at it, open ones keep theirs | `edge-spread` (the release hands the width over); page `dragging_an_edge_resizes…`, *partial*: saving is the host's |
+//! | 87 An autofit saves its capped width | page (c2b) `an_autofit_stops_at_the_area…`, *partial*: saving is the host's |
 //! | 88 A saved width wider than the area opens narrowed; the setting stays | page `a_saved_width_wider_than_the_area…` |
 //! | 89 A text-size change narrows wider columns; the earlier size restores them | page (c2b) `a_text_size_change_narrows…` |
 //! | 90 A window shrink narrows none; an edge drag snaps such a column to the area | page (c2b) `a_window_shrink_narrows_no_open_column…` |
 //! | 91 A cancelled edge drag restores the width | page `a_cancelled_edge_drag…` |
-//! | 92 A hovered, selected or open-path folder shows "N items" | `badge-sizes`; page (c2b) `selected_and_open_path_rows_show_their_badge…`, *partial*: the words are the host's ([`ColumnSources::badge`]) |
-//! | 93 Files show their size | `badge-sizes`; page (c2b) `selected_and_open_path_rows…`, *partial*: as 92 |
-//! | 94 A row with nothing to show shows no badge | `badge-sizes`; page (c2b) `a_folder_whose_count_is_unknown…` |
+//! | 92 A hovered, selected or open-path folder shows "N items" | `badge-sizes` (the words, as the row's description; the chip is hidden from the tree); the chip: page (c2b) `selected_and_open_path_rows_show_their_badge…`, `the_pointer_fades_a_badge_in…`; *partial*: the words are the host's ([`ColumnSources::badge`]) |
+//! | 93 Files show their size | `badge-sizes` (the words, as 92); the chip: page (c2b) `selected_and_open_path_rows…`; *partial*: as 92 |
+//! | 94 A row with nothing to show shows no badge | `badge-sizes` (no description); the chip: page (c2b) `a_folder_whose_count_is_unknown…` |
 //! | 95 An opaque surface chip, 5 px corners; the highlight on the open path | PNG `c2-badges-*` (slot tokens `columns.badge.*`) |
-//! | 96 With the setting off, no badge | `badge-setting-off`; PNG `c2-sizes-off-*`; page (c2b) `with_sizes_off_no_row_shows_a_badge…`, *partial*: every window passing the same setting is the host's |
+//! | 96 With the setting off, no badge | `badge-setting-off` (no row described); the chip: PNG `c2-sizes-off-*`, page (c2b) `with_sizes_off_no_row_shows_a_badge…`; *partial*: every window passing the same setting is the host's |
 //! | 97 With the setting off no counts are asked for; on, shown rows fill | Strata policy (the host reads each column's `visible_range`); the view shows a count that fills (page (c2b) `with_sizes_off…`) |
 //! | 98 A count that arrives with the setting off stays hidden | page (c2b) `with_sizes_off_no_row_shows_a_badge_and_a_late_count_stays_hidden` |
 //! | 99 The pointer fades a badge in over 120 ms | page (c2b) `the_pointer_fades_a_badge_in…` |
@@ -276,7 +277,7 @@
 //! | 102 The pointer leaving a row hides it at once | page (c2b) `the_pointer_fades_a_badge_in…_leaving_hides_it_at_once` |
 //! | 103 Arrow keys hide a hovered, unselected row's badge at once | page (c2b) `arrow_keys_hide_a_hovered_rows_badge…` |
 //! | 104 Moving the pointer then fades it in again | page (c2b) `arrow_keys_hide…_the_next_move_fades_it_back` |
-//! | 105 A row being renamed hides it; it returns only with the setting on | `badge-rename`; page (c2b) `a_renamed_row_hides_its_badge…`, *partial*: the editor is C5's (the page stands one in) |
+//! | 105 A row being renamed hides it; it returns only with the setting on | `badge-rename` (its description goes); the chip, and its return: page (c2b) `a_renamed_row_hides_its_badge…`; *partial*: the editor is C5's (the page stands one in) |
 //! | 106, 107 The Appearance menu's "Show sizes in Columns view" | Strata policy (C21's menu, the host's setting) |
 //! | 108 A press moving less than the threshold starts no drag | `below-threshold`; page `a_press_that_moves_less…` (C1b's threshold) |
 //!

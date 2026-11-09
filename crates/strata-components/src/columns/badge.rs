@@ -7,10 +7,15 @@
 //! overlay is. Its visibility is Rune's hover-group paint, so the pointer crossing rows commits
 //! nothing: the row's content is a hover group whose hover fades in over 120 ms and goes at
 //! once; the chip's `group_opacity` rests at 1 on a selected or open-path row, else at 0, and
-//! rises to 1 under the hover only while the collection's hover is live. In keyboard mode
-//! (C1e's `row_hover` off) the content is no hover group at all, so a hovered row's chip rests,
-//! and the group a pointer move brings back fades in afresh. Its rest changes land at once (an
-//! instant opacity motion).
+//! rises to 1 under the hover. In keyboard mode (C1e's `row_hover` off) a transparent cover
+//! over the row content takes the hover alone (`El::hover_alone`, no handlers, hidden from
+//! assistive technology), so the group rests and a hovered row's chip hides at once; the
+//! pointer move that ends keyboard mode removes the cover, and the group's hover, still the
+//! same element, fades in afresh. Its rest changes land at once (an instant opacity motion).
+//!
+//! Rows are memoised by C1e on the look's colours, type, space and row heights, not on what
+//! only the badge reads, so the content slot's version hashes that too: the `columns.badge.*`
+//! tokens, the highlight fill and whether animations are on.
 
 use std::borrow::Cow;
 use std::hash::{Hash, Hasher};
@@ -43,9 +48,19 @@ fn shown_text<'s, S: 'static>(
     p.sources.badge(depth, rcx.index).filter(|t| !t.is_empty())
 }
 
-fn version_of(text: Option<&str>) -> u64 {
+/// The memo version of a row's badge: its text, and what of the look only the badge reads.
+fn version_of(text: Option<&str>, look: &Look) -> u64 {
     let mut h = std::hash::DefaultHasher::new();
     text.hash(&mut h);
+    look.animations.hash(&mut h);
+    look.fill.highlight.hash(&mut h);
+    for v in [
+        tokens::badge_radius(look),
+        tokens::badge_pad(look),
+        tokens::badge_inset(look),
+    ] {
+        v.to_bits().hash(&mut h);
+    }
     h.finish()
 }
 
@@ -54,7 +69,9 @@ fn version_of(text: Option<&str>) -> u64 {
 pub(super) fn content<S: 'static>(sh: &Rc<Shared<S>>, serial: u64) -> ContentSlot<S> {
     let (v, b) = (sh.clone(), sh.clone());
     ContentSlot::new(
-        move |s: &S, rcx: &RowCx<'_>| version_of(shown_text(&v, s, serial, rcx).as_deref()),
+        move |s: &S, rcx: &RowCx<'_>| {
+            version_of(shown_text(&v, s, serial, rcx).as_deref(), rcx.look)
+        },
         move |s: &S, rcx: &RowCx<'_>, icon: El, label: El| {
             let look = rcx.look;
             let content = row()
@@ -111,7 +128,8 @@ fn chip(look: &Look, t: &str, rcx: &RowCx<'_>, hover_live: bool) -> El {
         0.0
     };
     // Keyboard mode: a hovered row shows only what it shows at rest (Strata's
-    // `.keyboard-navigation row:hover:not(:selected) .file-size`).
+    // `.keyboard-navigation row:hover:not(:selected) .file-size`). The cover already rests the
+    // group then; this keeps the chip at rest should the cover not hold the hover.
     let hovered = if hover_live { 1.0 } else { rest };
     let fill = if open_path {
         look.fill.highlight
@@ -143,7 +161,11 @@ fn chip(look: &Look, t: &str, rcx: &RowCx<'_>, hover_live: bool) -> El {
 pub(super) fn describe<S: 'static>(sh: &Rc<Shared<S>>, serial: u64) -> Describe<S> {
     let (v, b) = (sh.clone(), sh.clone());
     Describe::new(
-        move |s: &S, rcx: &RowCx<'_>| version_of(shown_text(&v, s, serial, rcx).as_deref()),
+        move |s: &S, rcx: &RowCx<'_>| {
+            let mut h = std::hash::DefaultHasher::new();
+            shown_text(&v, s, serial, rcx).hash(&mut h);
+            h.finish()
+        },
         move |s: &S, rcx: &RowCx<'_>| shown_text(&b, s, serial, rcx).map(Cow::into_owned),
     )
 }

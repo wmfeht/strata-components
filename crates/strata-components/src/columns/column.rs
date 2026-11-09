@@ -212,8 +212,10 @@ fn edge<S: 'static>(
 /// A drag of a column's edge: only this column follows the pointer, between one standard
 /// column and the area's cap; the release (a click too) gives every other open column the
 /// same width, easing once, and hands the host the width; a cancelled drag puts the width
-/// back. A second press on the same edge within [`AUTOFIT_WITHIN`] fits the column to its
-/// content instead (Strata's two presses, timed by the host's clock).
+/// back. A second press on the same edge within [`AUTOFIT_WITHIN`] of the last fits the column to
+/// its content instead (Strata's two presses, timed by the host's clock), even one that would
+/// start a fresh drag: as Strata's `repeats_press`, any press counts, so a drag begun within
+/// 400 ms of a click or another drag on that edge fits the column and resizes nothing.
 fn resize<S: 'static>(
     sh: &Rc<Shared<S>>,
     s: &mut S,

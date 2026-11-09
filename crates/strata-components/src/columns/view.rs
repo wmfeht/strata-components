@@ -285,8 +285,8 @@ impl<S: 'static> ColumnsView<S> {
     }
 
     /// Runs the columns' controllers' timeouts and queued commands, a held drag's autoscroll,
-    /// and the widths' following of the text size and the area: call it from the host's poll on every frame, with the host's clock in
-    /// seconds. True when state the view reads changed. The window's middle-click autoscroll is
+    /// and the widths' following of the text size and the area: call it from the host's poll
+    /// on every frame, with the host's clock in seconds. True when state the view reads changed. The window's middle-click autoscroll is
     /// the host's to drive (`ColumnsState::autoscroll`).
     pub fn tick(&self, s: &mut S, now: f64, tx: &mut Tx) -> bool {
         let serials: Vec<u64> = {

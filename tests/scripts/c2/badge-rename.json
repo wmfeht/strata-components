@@ -1,6 +1,6 @@
 {
   "bullets": [
-    "browser/view-modes/columns: While a row is being renamed its badge stays hidden"
+    "browser/view-modes/columns: While a row is being renamed"
   ],
   "scene": "c2-three-columns-light",
   "events": [

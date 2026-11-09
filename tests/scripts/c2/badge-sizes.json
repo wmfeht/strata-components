@@ -1,7 +1,7 @@
 {
   "bullets": [
-    "browser/view-modes/columns: Hovering or selecting a folder row, or a folder on the open path, shows",
-    "browser/view-modes/columns: Files show their size in the same badge.",
+    "browser/view-modes/columns: Hovering or selecting a folder row, or a folder on the open path, shows \"No items\" or \"N items\"",
+    "browser/view-modes/columns: Files show their size",
     "browser/view-modes/columns: A row with no size or count to show"
   ],
   "scene": "c2-home-light",

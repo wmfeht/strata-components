@@ -340,6 +340,74 @@ mod c2b {
         assert_eq!(description(&rt, &cv), None);
     }
 
+    /// The chip of row `row`, as drawn.
+    fn chip(rt: &Runtime<Gallery>, row: &str) -> ElementInfo {
+        let tail = format!("/{row}/");
+        rt.elements()
+            .into_iter()
+            .find(|e| {
+                !e.exiting
+                    && e.key.as_deref() == Some(keys::BADGE)
+                    && format!("{}/", e.path).contains(&tail)
+            })
+            .expect("a chip")
+    }
+
+    #[test]
+    fn turning_animations_off_at_runtime_reaches_rows_already_built() {
+        // browser/view-modes/columns: Moving the pointer onto a row fades its badge in over 120
+        // ms (with animations off, at once; rows are memoised, so the change must reach rows
+        // built before it).
+        let mut rt = scene("c2-badges-light");
+        let letters = row("Documents", "Letters");
+        let (x, y) = at(&rt, &letters);
+        let (ox, oy) = at(&rt, &keys::title("c2-col-1"));
+        rt.update(|g, _| g.look.animations = false);
+        settle(&mut rt, 2);
+        rt.pointer_move(x, y);
+        rt.frame(DT);
+        rt.frame(DT);
+        assert_eq!(
+            badge(&rt, &letters),
+            Some(1.0),
+            "at once with animations off"
+        );
+        rt.pointer_move(ox, oy);
+        settle(&mut rt, 2);
+        rt.update(|g, _| g.look.animations = true);
+        settle(&mut rt, 2);
+        rt.pointer_move(x, y);
+        rt.frame(DT);
+        rt.frame(DT);
+        let o = badge(&rt, &letters).expect("badge");
+        assert!(o > 0.0 && o < 1.0, "fading again with them on: {o}");
+    }
+
+    #[test]
+    fn the_badge_tokens_and_the_highlight_reach_rows_already_built() {
+        // browser/view-modes/columns: The badge is an opaque chip in the theme's surface color
+        // with 5 px rounded corners; on an open-path folder row it takes the highlight color
+        // (overrides of them reach rows built before the change).
+        let mut rt = scene("c2-badges-light");
+        let documents = row("Home", "Documents");
+        assert_eq!(chip(&rt, &documents).radius, 5.0);
+        let highlight = rune::Color {
+            r: 1.0,
+            g: 0.0,
+            b: 0.0,
+            a: 1.0,
+        };
+        rt.update(|g, _| {
+            g.look.slots.columns.badge_radius = Some(2.0);
+            g.look.fill.highlight = highlight;
+        });
+        // A fill eases to its new colour.
+        settle(&mut rt, 30);
+        let c = chip(&rt, &documents);
+        assert_eq!(c.radius, 2.0);
+        assert_eq!(c.fill, highlight);
+    }
+
     // Widths.
 
     #[test]
@@ -472,6 +540,27 @@ mod c2b {
         assert_eq!([width(&rt, 0), width(&rt, 1), width(&rt, 2)], [600.0; 3]);
         drag_edge(&mut rt, 1, 10.0);
         assert_eq!(width(&rt, 0), 450.0, "snaps to the area");
+        release(&mut rt);
+    }
+
+    #[test]
+    fn a_press_on_a_narrowed_columns_edge_starts_from_the_width_drawn() {
+        // browser/view-modes/columns: Dragging a column's right edge resizes only that column
+        // while the pointer moves (from the width drawn: a column narrowed to the area, which
+        // grew since, follows the pointer from there, not from its saved width).
+        let mut rt = scene("c2-home-light");
+        rt.update(|g, _| {
+            g.c2.columns.set_default_width(1_729.0);
+            g.c2.columns.set_width_cap(Some(500.0));
+        });
+        tap_name(&mut rt, &row("Home", "Music"));
+        settle(&mut rt, 40);
+        assert_eq!(width(&rt, 1), 500.0, "opened narrowed to the area");
+        set_cap(&mut rt, 640.0);
+        settle(&mut rt, 2);
+        assert_eq!(width(&rt, 1), 500.0, "a wider area doesn't widen it");
+        drag_edge(&mut rt, 2, 10.0);
+        assert_eq!(width(&rt, 1), 510.0, "from where it is drawn");
         release(&mut rt);
     }
 

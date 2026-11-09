@@ -108,8 +108,11 @@ fn suggestion<S: 'static>(
         } else {
             Color::TRANSPARENT
         })
+        // A tint only: the pointer never moves the keyboard's highlight. Rune reports a hover
+        // when a row scrolls under a pointer that isn't moving, so Down past the list's end
+        // would hand the highlight to whatever row the pointer rests on (review round 1, B1).
+        // Strata's list has no hover highlight either.
         .hover(k.c.hover)
-        .on_hover(move |s: &mut S| access(s).set_highlighted(Some(i)))
         .on_press_tx(move |s: &mut S, tx: &mut Tx| {
             let polled = access(s).choose(i);
             route(&emit, s, polled, tx);

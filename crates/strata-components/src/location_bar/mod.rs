@@ -40,6 +40,7 @@
 //!   and keep their natural width, so a deep path scrolls rather than squeezes.
 //! - A press on a separator, the current label or the empty space after the crumbs opens the
 //!   entry; a secondary press anywhere opens the hierarchy menu under the bar at the press's x.
+//!   An ancestor's label is dim, and takes the text colour under the pointer or a drag.
 //! - The wheel scrolls the crumbs sideways and the edges fade over hidden crumbs; C24's overflow
 //!   bar sits in its own row under them, shown on hover or scroll.
 //! - After a navigation (`navigated`, which remounts the crumb row) and whenever the crumbs come
@@ -55,7 +56,12 @@
 //!   highlighted suggestion, the only one, or a longer common prefix and closes the list, else
 //!   highlights the next; Down reopens it. Up, Down, Page Up and Page Down step and wrap. Tab
 //!   during a listing, the arrow and paging keys while the list shows, and Enter behind them
-//!   wait for the list, then run in order.
+//!   wait for the list, then run in order. A click on a suggestion takes it at once, dropping
+//!   the listing and any waiting keys, as Strata's `row_activated` does. Ctrl+L while editing
+//!   keeps the typed text, selects it and lists it afresh.
+//! - The pointer only tints a row: it never moves the keyboard's highlight, which Enter takes.
+//!   Rune reports a hover when a row scrolls under a still pointer, so a hover highlight would
+//!   follow Down's scrolling (review round 1). Strata's list has none either.
 //! - The suggestions hang under the entry at its width. Rows are memoised by their list and
 //!   highlight: Rune builds every row's element on each commit, and only the mounted rows lay
 //!   out. Strata caps a list at 50; `tests/perf.rs` holds 1,000 to its bars and reports 10,000.
@@ -68,7 +74,8 @@
 //! is the bar's own: see `drops.rs`. An accepting hover arms it and asks for a wake now; the next
 //! [`LocationBarState::tick`] stamps the start on the host's clock and asks for a wake when
 //! [`SPRING_DELAY`] (0.75 s, [`LocationBar::spring_delay`]; `None` turns it off) has passed;
-//! that tick opens the crumb ([`Via::Spring`]). A leave, a drop or a navigation disarms it. The
+//! that tick opens the crumb ([`Via::Spring`]). A leave, a drop or a navigation disarms it; the
+//! same hover reported again (X2's binder may, on each motion) keeps its start. The
 //! Copy path feedback ([`COPIED_FOR`]) runs the same way. Both hold in a window at rest, which
 //! polls only at the wakes it asked for (`tests/c6.rs` steps from wake to wake). C8 and X2 can
 //! adopt the model for rows and places.
@@ -82,7 +89,7 @@
 //!
 //! | Bullet (opening words) | Checked by |
 //! | --- | --- |
-//! | Ctrl+L replaces the breadcrumbs with an entry… whole text selected | script `ctrl-l-selects-path` (the page binds Ctrl+L; the key map is Strata's) |
+//! | Ctrl+L replaces the breadcrumbs with an entry… whole text selected | script `ctrl-l-selects-path` (the page binds Ctrl+L; the key map is Strata's); unit `ctrl_l_while_editing_keeps_the_typed_text` |
 //! | Clicking the current crumb, a separator, or empty breadcrumb space opens the entry… | scripts `edit-from-current`, `edit-from-separator`, `edit-from-space`; crumbs and Copy path keep their own: `crumb-click-opens`, `copy-path-feedback` |
 //! | While editing, a click outside… cancels… and still performs the click's normal action | script `click-outside-cancels`; unit `a_press_elsewhere_cancels_on_the_next_tick_only_after_the_entry_had_focus` |
 //! | Enter or the Navigate button opens…; Escape or the Cancel button restores… | scripts `enter-navigates`, `navigate-button`, `cancel-button`, `escape-restores-folder` |
@@ -91,14 +98,14 @@
 //! | The entry and its buttons have the accessible names… | golden `c6-editing` (a11y); names are [`LocationLabels`], the host's to follow its key map |
 //! | While the entry has focus, Ctrl+K and Ctrl+1–3 reach the entry… | **Strata** (key dispatch): [`LocationBarState::entry_focused`] tells the host |
 //! | A location that cannot be opened shows an "Unable to open location" dialog… | **partial**: [`LocationBarState::end_edit`] here; the dialog (C15) and validation are Strata's |
-//! | Escape cancels the edit even while suggestions are showing… | script `escape-closes-suggestions` |
+//! | Escape cancels the edit even while suggestions are showing… | script `escape-closes-suggestions`; test `escape_leaves_nothing_focused` |
 //! | Closing and reopening the editor shows no stale or flashing suggestion list | test `a_reopened_entry_never_shows_the_old_list` (every frame) |
 //! | A folder load that ends while the entry is open and focused… | script `load-keeps-entry`; unit `navigating_keeps_an_entry_being_typed_in` |
 //! | Typed paths (28 bullets) | **Strata policy**: the bar submits the raw text; [`LocationBarState::resume_edit`] keeps the entry on a sanitised URI while it mounts |
 //! | Each ancestor crumb is a button that opens that folder | scripts `crumb-click-opens`, `crumb-return-opens` |
 //! | Clicking an ancestor crumb… selects the folder on the path you came from | **Strata** (navigation): [`Via`] tells it a click or the menu from a spring |
 //! | Right-clicking the breadcrumb bar opens a menu of the current folder and its ancestors… | scripts `hierarchy-menu`, `hierarchy-menu-opens` |
-//! | The hierarchy menu has no arrow. It opens below the crumb bar at the click's x… | golden `c6-menu` (PNG); geometry isn't asserted |
+//! | The hierarchy menu has no arrow. It opens below the crumb bar at the click's x… | scripts `hierarchy-menu`, `hierarchy-menu-opens` open it with a real secondary press (its placement there isn't asserted: geometry); golden `c6-menu` (PNG) draws it opened where such a press opens it, which the scene sets, since scenes can't press |
 //! | The hierarchy menu marks as current the folder the bar names | script `hierarchy-menu`; golden `c6-menu` (a11y: checked) |
 //! | In Columns…; Switching from Columns…; Switching back… (3) | **Strata**: which folder it passes as the trail |
 //! | Middle-clicking an ancestor crumb… opens it in a new, active tab | script `middle-click-new-tab` (the intent; tabs are Strata's and C7's) |
@@ -106,7 +113,7 @@
 //! | In a file chooser, middle-clicking a crumb opens nothing | test `a_chooser_s_middle_click_opens_nothing` ([`LocationBar::open_in_new`]) |
 //! | Middle-clicking the current crumb opens no tab | script `middle-click-new-tab` |
 //! | Parent breadcrumbs accept file drops; Dropping… before 750 ms transfers… without navigating | script `drop-on-crumb` |
-//! | Holding a file drag over a parent breadcrumb for 750 ms navigates there, and the drag stays held | script `spring-open`; test `the_spring_opens_in_a_resting_window`; unit `a_resting_drag_springs_once_after_its_delay` |
+//! | Holding a file drag over a parent breadcrumb for 750 ms navigates there, and the drag stays held | script `spring-open`; test `the_spring_opens_in_a_resting_window`; units `a_resting_drag_springs_once_after_its_delay`, `a_repeated_hover_on_the_same_crumb_keeps_the_spring_s_start` |
 //! | A breadcrumb under a file drag shows an accent tint and an accent inset ring | golden `c6-drop-hover` (PNG) |
 //! | For paths under home, the crumbs and the hierarchy menu start at `~` | **Strata** (its trail); the gallery's trail shows it |
 //! | When crumbs overflow, the wheel scrolls them horizontally and edge fades mark the hidden part | test `the_wheel_scrolls_overflowing_crumbs`; golden `c6-deep` (PNG, the fades) |
@@ -114,7 +121,7 @@
 //! | Crumb labels longer than 32 characters are shortened in the middle | unit `long_labels_shorten_in_the_middle`; golden `c6-deep` |
 //! | Deep paths keep each crumb label at its text width… | golden `c6-deep` (PNG) |
 //! | After navigation, or after submitting or cancelling the entry, the crumbs scroll to show the current crumb | test `the_current_crumb_shows_after_a_navigation_a_submit_and_a_cancel` |
-//! | The current crumb's Copy path button copies the path and shows a check and "Path copied" for 2 seconds | scripts `copy-path-feedback`, `copy-path-resets`; test `the_copy_feedback_ends_in_a_resting_window` (the copy itself is the host's, on [`LocationIntent::CopyPath`]) |
+//! | The current crumb's Copy path button copies the path and shows a check and "Path copied" for 2 seconds | scripts `copy-path-feedback`, `copy-path-resets`; test `the_copy_feedback_ends_in_a_resting_window`; unit `a_second_copy_restarts_the_feedback`; golden `c6-copied` (the check) (the copy itself is the host's, on [`LocationIntent::CopyPath`]) |
 //! | The Copy path button is named "Copy path"; after a click… "Path copied", then "Copy path" again 2 s later | the same |
 //!
 //! `browser/navigation/location-bar/completion`:
@@ -124,19 +131,19 @@
 //! | While editing, a popover under the entry, matching its width, lists child folders… | **partial**: script `completion-lists`, golden `c6-completion`; what it lists is Strata's planner |
 //! | A relative prefix…; Typing only `~`…; When the typed text names an existing folder…; Hidden folders… | **Strata** (its planner; the gallery fakes it) |
 //! | Each suggestion shows a folder icon, the name with the typed prefix highlighted, and its parent folder… | **partial**: golden `c6-completion` draws [`Candidate`]'s icon, matched ranges and hint; their content is Strata's |
-//! | Down and Up move through suggestions, wrapping…, and Page Down and Page Up move by 5 | script `arrows-wrap-and-page`; unit `arrows_wrap_and_paging_moves_five` |
+//! | Down and Up move through suggestions, wrapping…, and Page Down and Page Up move by 5 | script `arrows-wrap-and-page`; unit `arrows_wrap_and_paging_moves_five`; test `a_resting_pointer_never_moves_the_highlight`; test `down_while_composing_moves_no_highlight` |
 //! | Page Down and Page Up still move by 5 after `page_down` or `page_up` is rebound… | by design: the bar reads the keys, not the host's key map |
 //! | Tab inserts the highlighted suggestion, the only suggestion, or a longer common prefix and closes the popover; Down reopens it | scripts `tab-inserts-highlighted`, `tab-inserts-only`, `tab-common-prefix-down-reopens`; unit `tab_takes_the_common_prefix_then_cycles` |
 //! | A key added to `focus_next` or `focus_previous`… completes the path as Tab does | script `complete-key` (the page passes F7 to [`LocationBar::complete_keys`]) |
 //! | When Tab has nothing longer to insert, it highlights the next suggestion instead | script `tab-cycles` |
-//! | Enter on a highlighted suggestion opens that folder | scripts `enter-on-suggestion`, `click-suggestion` |
+//! | Enter on a highlighted suggestion opens that folder | scripts `enter-on-suggestion`, `click-suggestion`; test `a_resting_pointer_never_moves_the_highlight`; unit `a_click_takes_its_suggestion_even_while_keys_wait` |
 //! | The popover does not appear while the breadcrumbs are showing | script `no-popover-on-crumbs`; unit `a_late_or_stale_answer_is_dropped` |
 //! | While the typed folder is being listed, the previous suggestions stay… | scripts `previous-stay-while-listing`, `stale-result-dropped`; unit `an_answer_for_another_generation_or_text_is_dropped` |
 //! | Tab pressed during the listing waits for its list… they then run in order | scripts `deferred-keys`, `deferred-down-then-enter`; units `keys_during_a_listing_wait_and_run_in_order`, `a_tab_that_relists_carries_the_rest_to_the_new_listing` |
 //! | Switching to another window, minimising, or hiding Strata while suggestions show closes the popover… | test `losing_the_window_closes_the_suggestions_and_keeps_the_edit` (on a host whose root hears activation) |
 //! | A listing still pending when the window loses focus is cancelled… | test `a_listing_pending_at_deactivation_is_cancelled_and_refocus_reopens_nothing` |
 //! | Editing the entry text while the window is not focused shows no suggestions | test `editing_while_the_window_is_inactive_asks_for_nothing` |
-//! | Refocusing the window does not reopen suggestions; the next text change shows them again | test `a_listing_pending_at_deactivation_is_cancelled_and_refocus_reopens_nothing` |
+//! | Refocusing the window does not reopen suggestions; the next text change shows them again | tests `refocusing_keeps_a_list_closed_by_deactivation_closed`, `a_listing_pending_at_deactivation_is_cancelled_and_refocus_reopens_nothing` |
 //! | Hiding the location entry closes the popover and cancels a pending listing | **partial**: test `dismissing_closes_the_list_and_cancels_the_listing`; when it hides is Strata's |
 //! | Switching tabs closes the previous tab's suggestions…; In the portal file chooser, focusing another window… | **Strata** (one state per tab; the chooser host forwards its window's activation) |
 //!
@@ -158,6 +165,15 @@
 //!   secondary press, as Strata does, rather than one per crumb as the work package words it.
 //! - **The entry is a combobox group around a text box**, since Rune makes every input a text
 //!   box (U-C6-1).
+//! - **What assistive technology hears twice.** A crumb's list item and its button both read
+//!   the crumb's name: Rune names an unlabelled list item from its content, so leaving its
+//!   label out changes nothing. The combobox group and its text box both read "Location
+//!   (Ctrl+L)": the group needs a name of its own (Rune names containers by their label alone),
+//!   and the text box's name is what a reader says as it enters it (U-C6-1 would make them one
+//!   node). Buttons are the header's actions, named by their tooltip with no description.
+//! - **The hierarchy menu has no name, and long names read shortened.** rune-kit's `Menu` takes
+//!   no accessible name, and a `MenuItem`'s name is the text it draws, which the bar shortens
+//!   in the middle past [`CRUMB_CHARS`] as Strata draws it (U-C6-8).
 //! - **Navigate and Cancel are pointer-only**: pressing a focusable button would take the
 //!   keyboard from the entry, and nothing tells the bar where it went (U-C6-3), so the edit
 //!   would cancel. Enter and Escape do the same from the keyboard. Strata's are Tab stops.
@@ -206,6 +222,9 @@
 //!   handler.
 //! - **U-C6-7 (draft, not filed)** Headless scripts have no input-method event, so a
 //!   composition is testable only in process (`Runtime::ime`).
+//! - **U-C6-8 (draft, not filed)** rune-kit's `Menu` takes no accessible name (`.label`), and a
+//!   `MenuItem` can't give an accessible name apart from the text it draws, so an item shortened
+//!   to fit reads shortened. Here: the menu reads unnamed, and its items read as drawn.
 //! - Reused: U-C1e-6 (no clock in `Tx`: the host's `tick`), C15's `Tx::focus` draft (the host
 //!   gives its view the keyboard after a cancel), U3 (a drag's paths only at the drop), and
 //!   U-C1b-1 (script pointer events drop modifiers: still so at this rev, probe P6b; fixed at

@@ -84,6 +84,8 @@ pub struct LocationBarState {
     /// The entry has held focus since the edit began: only then does losing it end the edit.
     seen_focus: bool,
     menu: Option<(f32, f32)>,
+    /// The ancestor crumb under the pointer.
+    hovered: Option<usize>,
     drop: Option<(usize, DropHover)>,
     spring: Option<Spring>,
     copied: Copied,
@@ -103,6 +105,7 @@ impl Default for LocationBarState {
             window_focused: true,
             seen_focus: false,
             menu: None,
+            hovered: None,
             drop: None,
             spring: None,
             copied: Copied::Rest,
@@ -191,11 +194,20 @@ impl LocationBarState {
     /// keyboard: Ctrl+L, or a press on the crumbs' empty space. Asks for suggestions.
     pub fn begin_edit(&mut self, text: &str) -> Polled {
         let mut out = Polled::changed();
+        self.menu = None;
+        if self.editing {
+            // Ctrl+L again keeps what was typed, selects it, and lists it afresh, as Strata's
+            // `begin_location_edit` does.
+            self.edit.set_selection(0, self.edit.text.len());
+            self.edit.break_history_group();
+            self.edit.focused = true;
+            out.merge(self.edited());
+            return out;
+        }
         if self.completion.clear() {
             out.push(LocationIntent::CancelCompletion);
         }
         self.editing = true;
-        self.menu = None;
         self.seen_focus = false;
         self.edit = TextEdit::new(text);
         self.edit.set_selection(0, text.len());
@@ -234,6 +246,7 @@ impl LocationBarState {
         self.trail_generation = self.trail_generation.wrapping_add(1);
         self.spring = None;
         self.drop = None;
+        self.hovered = None;
         self.menu = None;
         if self.entry_focused() {
             return Polled::changed();
@@ -371,12 +384,18 @@ impl LocationBarState {
     }
 
     /// A suggestion chosen with the pointer.
+    /// Taken at once, even while keys wait for a listing (Strata's `row_activated`): the keys and
+    /// the listing are dropped.
     pub(crate) fn choose(&mut self, i: usize) -> Polled {
-        self.completion.set_highlighted(Some(i));
-        self.command(Command::Activate).0
+        match self.completion.choose(i) {
+            Some(out) => self.apply(out),
+            None => Polled::default(),
+        }
     }
 
-    pub(crate) fn copy_pressed(&mut self) {
+    /// Shows "Path copied" for [`COPIED_FOR`], counted from the next tick: the Copy path button
+    /// does this itself; a scene, or a host restoring a tab, may too.
+    pub fn show_copied(&mut self) {
         self.copied = Copied::Pending;
     }
 
@@ -390,6 +409,13 @@ impl LocationBarState {
     ) {
         self.set_drop_hover(index, hover);
         match (hover, delay) {
+            // A binder may report the same hover again (X2's on each motion): the spring keeps
+            // its start, as Strata's `schedule_spring_load_navigation` does.
+            (DropHover::Accepting, Some(_))
+                if self
+                    .spring
+                    .as_ref()
+                    .is_some_and(|s| s.index == index && s.id == id) => {}
             (DropHover::Accepting, Some(delay)) => {
                 self.spring = Some(Spring {
                     index,
@@ -407,6 +433,18 @@ impl LocationBarState {
     pub(crate) fn drag_ended(&mut self) {
         self.spring = None;
         self.drop = None;
+    }
+
+    pub(crate) fn hovered_crumb(&self) -> Option<usize> {
+        self.hovered
+    }
+
+    pub(crate) fn hover_crumb(&mut self, index: usize, over: bool) {
+        if over {
+            self.hovered = Some(index);
+        } else if self.hovered == Some(index) {
+            self.hovered = None;
+        }
     }
 
     pub(crate) fn trail_generation(&self) -> u64 {

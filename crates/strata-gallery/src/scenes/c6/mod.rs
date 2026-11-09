@@ -415,9 +415,17 @@ fn drop_hover(g: &mut Gallery, dark: bool) {
     g.c6.bar.set_drop_hover(1, DropHover::Accepting);
 }
 
+/// The Copy path button just after a press: its check and "Path copied".
+fn copied(g: &mut Gallery, dark: bool) {
+    scene(g, dark);
+    g.c6.bar.show_copied();
+}
+
 fn menu(g: &mut Gallery, dark: bool) {
     scene(g, dark);
-    // Under the bar, a little in from its start: where a secondary press there opens it.
+    // Opened where a secondary press 160 points in would open it: at the press's x, its top on
+    // the bar's bottom (the bar is centred in the header). Scenes can't press; the scripts
+    // `hierarchy-menu` and `hierarchy-menu-opens` open it with a real secondary press.
     let look = &g.look;
     let header = look.frame.bar + 2.0 * look.frame.inset;
     let bar = BarLook::app(look).horizontal();
@@ -442,6 +450,8 @@ pub const SCENES: &[Scene] = &[
     ("c6-drop-hover-dark", |g| drop_hover(g, true)),
     ("c6-menu-light", |g| menu(g, false)),
     ("c6-menu-dark", |g| menu(g, true)),
+    ("c6-copied-light", |g| copied(g, false)),
+    ("c6-copied-dark", |g| copied(g, true)),
 ];
 
 /// Scenes for review with `--scene` only, kept out of the goldens.

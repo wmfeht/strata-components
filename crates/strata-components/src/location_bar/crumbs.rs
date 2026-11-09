@@ -6,7 +6,6 @@ use std::time::Duration;
 use rune::{
     El, Key, KeyEvent, PointerButton, PointerEvent, Tx, WheelEvent, col, el, icon, row, text,
 };
-use rune_kit::{IconButton, IconButtonVariant};
 use strata_kit::icons::IconName;
 
 use super::build::{Ctx, crumb_key, route};
@@ -14,6 +13,11 @@ use super::data::{CRUMB_CHARS, Crumb, elide_middle};
 use super::drops;
 use super::intent::{LocationIntent, Via};
 use crate::contract::dnd::DropHover;
+use crate::header;
+
+/// A crumb's drop ring and keyboard focus ring, in points: Strata's 1 px inset accent ring (a
+/// hairline the Look has no token for, as C8's drop outline).
+const RING: f32 = 1.0;
 
 /// The strip's viewport key under the bar keyed `key`.
 pub(crate) fn viewport_key(key: &str) -> String {
@@ -149,7 +153,7 @@ fn ancestor<S: 'static>(cx: &Ctx<'_, S>, i: usize, crumb: &Crumb, n: usize) -> E
         .radius(k.radius.sm)
         .hover(look.fill.highlight)
         .press_scale(0.97)
-        .focus_ring(1.0, 0.0, k.c.border_focus);
+        .focus_ring(RING, 0.0, k.c.border_focus);
     if let Some(badge) = crumb.badge {
         button = button.child(
             icon(look.icon(badge), look.icon_size.sm)
@@ -157,23 +161,27 @@ fn ancestor<S: 'static>(cx: &Ctx<'_, S>, i: usize, crumb: &Crumb, n: usize) -> E
                 .a11y_hidden(),
         );
     }
+    // Strata's crumbs are dim until the pointer or a drag is over them.
+    let lit = hovered || cx.state.hovered_crumb() == Some(i);
     button = button.child(
         text(elide_middle(&crumb.label, CRUMB_CHARS).into_owned())
             .font(k.ty.ui)
-            .color(k.c.text_weak)
+            .color(if lit { k.c.text_base } else { k.c.text_weak })
             .a11y_hidden(),
     );
     if hovered {
         // Strata's drop look: the accent tint and an accent ring inside the edge.
         button = button
             .fill(look.fill.highlight)
-            .outline(1.0, -1.0, k.c.border_focus);
+            .outline(RING, -RING, k.c.border_focus);
     }
     let id = crumb.id.clone();
     let (press_id, key_id) = (id.clone(), id.clone());
     let (emit, key_emit) = (cx.emit.clone(), cx.emit.clone());
     let open_in_new = cx.open_in_new;
+    let access = cx.access;
     button = button
+        .on_hover_change(move |s: &mut S, over: bool, _: &mut Tx| access(s).hover_crumb(i, over))
         .on_press_tx(move |s: &mut S, tx: &mut Tx| {
             let id = press_id.clone();
             let intent = if tx.button() == PointerButton::Middle {
@@ -230,24 +238,22 @@ fn current<S: 'static>(cx: &Ctx<'_, S>, crumb: &Crumb, n: usize) -> El {
         cx.labels.copy.clone()
     };
     let (access, emit) = (cx.access, cx.emit.clone());
-    let copy = IconButton::new(look.icon(if copied {
+    let icon_name = if copied {
         IconName::Check
     } else {
         IconName::Copy
-    }))
-    .variant(IconButtonVariant::Ghost)
-    .control_size(cx.control_size())
-    .label(label.clone())
-    .help(label)
-    .on_press_tx(move |s: &mut S, tx: &mut Tx| {
-        access(s).copy_pressed();
-        // The handler has no clock: the next poll stamps the press, then asks for the wake that
-        // ends the feedback. A window at rest polls only at the wakes it asked for.
-        tx.wake_after(Duration::ZERO);
-        emit(s, LocationIntent::CopyPath, tx);
-    })
-    .build(k)
-    .key(format!("{}-copy", cx.key));
+    };
+    // The header's action look; its tooltip names it.
+    let copy = header::action(look, icon_name, &label)
+        .on_press_tx(move |s: &mut S, tx: &mut Tx| {
+            access(s).show_copied();
+            // The handler has no clock: the next poll stamps the press, then asks for the wake that
+            // ends the feedback. A window at rest polls only at the wakes it asked for.
+            tx.wake_after(Duration::ZERO);
+            emit(s, LocationIntent::CopyPath, tx);
+        })
+        .build(k)
+        .key(format!("{}-copy", cx.key));
     let mut name = row()
         .key(format!("{}-current", cx.key))
         .role("none")

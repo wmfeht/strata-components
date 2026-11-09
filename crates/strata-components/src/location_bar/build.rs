@@ -3,7 +3,6 @@
 use std::rc::Rc;
 
 use rune::{Chord, Cx, El, Mods, Tx, el};
-use rune_kit::ControlSize;
 use strata_kit::look::Look;
 
 use super::data::{LocationLabels, Trail};
@@ -229,20 +228,5 @@ impl<S> Ctx<'_, S> {
 
     pub fn bar_look(&self) -> BarLook {
         BarLook::app(self.look).horizontal()
-    }
-
-    /// The kit's button size nearest the bar control size (the header's own rule).
-    pub fn control_size(&self) -> ControlSize {
-        let points = self.look.frame.control;
-        [
-            (16.0, ControlSize::Mini),
-            (20.0, ControlSize::Small),
-            (24.0, ControlSize::Regular),
-            (28.0, ControlSize::Large),
-            (36.0, ControlSize::ExtraLarge),
-        ]
-        .into_iter()
-        .min_by(|a, b| (a.0 - points).abs().total_cmp(&(b.0 - points).abs()))
-        .map_or(ControlSize::Regular, |(_, size)| size)
     }
 }

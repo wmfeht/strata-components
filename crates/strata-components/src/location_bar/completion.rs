@@ -223,6 +223,19 @@ impl Completion {
         (out, false)
     }
 
+    /// Suggestion `i` chosen with the pointer: its replacement, submitted at once. The listing in
+    /// flight and the keys waiting for it are dropped. `None` when there is no such suggestion.
+    pub fn choose(&mut self, i: usize) -> Option<Out> {
+        let replacement = self.shown.get(i)?.replacement.clone();
+        let cancelled = self.dismiss();
+        Some(Out {
+            text: Some(replacement.clone()),
+            submit: Some(replacement),
+            queries: Vec::new(),
+            cancelled,
+        })
+    }
+
     /// Whether `command` waits for the listing in flight: Tab always does, Down, Up and the
     /// paging keys do while the list shows, and Enter does behind any of those.
     fn defer(&mut self, command: Command) -> bool {

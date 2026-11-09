@@ -375,6 +375,8 @@ mod c6 {
         /// Answers, each with the frames left before it lands.
         due: Vec<(u32, Completions)>,
         delay: u32,
+        /// How many suggestions each answer holds: `f00/`, `f01/`, … (two by default).
+        count: usize,
     }
 
     impl Host {
@@ -389,10 +391,18 @@ mod c6 {
             match intent {
                 LocationIntent::Complete(q) => {
                     self.heard.push(format!("complete {}", q.text));
-                    let found = ["Alpha", "Beta"]
-                        .iter()
-                        .map(|n| Candidate::new(format!("{n}/"), format!("{}{n}/", q.text)))
-                        .collect();
+                    let found = if self.count == 0 {
+                        ["Alpha", "Beta"]
+                            .iter()
+                            .map(|n| Candidate::new(format!("{n}/"), format!("{}{n}/", q.text)))
+                            .collect()
+                    } else {
+                        (0..self.count)
+                            .map(|i| {
+                                Candidate::new(format!("f{i:02}/"), format!("{}f{i:02}/", q.text))
+                            })
+                            .collect()
+                    };
                     self.due
                         .push((self.delay, Completions::new(q.generation, found)));
                 }
@@ -449,7 +459,12 @@ mod c6 {
     }
 
     fn host(delay: u32) -> Runtime<Host> {
+        host_with(delay, 0)
+    }
+
+    fn host_with(delay: u32, count: usize) -> Runtime<Host> {
         let h = Host {
+            count,
             look: Look::fallback(false),
             trail: Trail::new(
                 vec![
@@ -559,5 +574,89 @@ mod c6 {
         assert_eq!(rt.state.heard, ["cancel"]);
         assert!(!rt.state.bar.suggestions_open());
         assert!(rt.state.bar.editing());
+    }
+
+    // browser/navigation/location-bar/completion: "Down and Up move through suggestions…" and
+    // "Enter on a highlighted suggestion opens that folder." With the pointer resting on the
+    // list, Down scrolls rows under it; a row passing under a still pointer must not take the
+    // keyboard's highlight (review round 1, B1: Enter opened `f09/` instead of `f17/`).
+    #[test]
+    fn a_resting_pointer_never_moves_the_highlight() {
+        let mut rt = host_with(0, 30);
+        typ(&mut rt, "~/");
+        run(&mut rt, 0.2);
+        assert!(rt.state.bar.suggestions_open());
+        let (x, y) = centre(&rt, "loc-option-3");
+        rt.pointer_move(x, y);
+        run(&mut rt, 0.2);
+        let mut seen = Vec::new();
+        for _ in 0..18 {
+            key(&mut rt, Key::Down, Mods::default());
+            run(&mut rt, 0.1);
+            seen.push(rt.state.bar.highlighted());
+        }
+        let want: Vec<_> = (0..18).map(Some).collect();
+        assert_eq!(seen, want, "the highlight follows Down only");
+        rt.state.heard.clear();
+        key(&mut rt, Key::Enter, Mods::default());
+        assert!(
+            rt.state.heard.iter().any(|h| h.contains("~/f17/")),
+            "{:?}",
+            rt.state.heard
+        );
+    }
+
+    // Review round 1, SF1: refocusing the window after it closed a list that was showing
+    // reopens nothing ("Refocusing the window does not reopen suggestions").
+    #[test]
+    fn refocusing_keeps_a_list_closed_by_deactivation_closed() {
+        let mut rt = host(0);
+        typ(&mut rt, "/a");
+        run(&mut rt, 0.1);
+        assert!(rt.state.bar.suggestions_open());
+        rt.window_focus(false);
+        run(&mut rt, 0.1);
+        rt.window_focus(true);
+        run(&mut rt, 0.3);
+        assert!(!rt.state.bar.suggestions_open());
+        assert!(element(&rt, "loc-suggestions").is_none());
+    }
+
+    // While an input method composes, the arrows are its own: Down doesn't step the list.
+    #[test]
+    fn down_while_composing_moves_no_highlight() {
+        let mut rt = mount("c6-short-light");
+        key(&mut rt, Key::Command('l'), ctrl());
+        typ(&mut rt, "~/D");
+        run(&mut rt, 0.3);
+        assert!(rt.state.c6.bar.suggestions_open());
+        rt.ime(Ime::Preedit("か".into(), Some((3, 3))));
+        rt.frame(FRAME);
+        key(&mut rt, Key::Down, Mods::default());
+        assert_eq!(rt.state.c6.bar.highlighted(), None);
+        rt.ime(Ime::Preedit(String::new(), None));
+        rt.frame(FRAME);
+        key(&mut rt, Key::Down, Mods::default());
+        assert_eq!(rt.state.c6.bar.highlighted(), Some(0));
+    }
+
+    // Escape gives the keyboard up: nothing keeps focus once the entry closes.
+    #[test]
+    fn escape_leaves_nothing_focused() {
+        let mut rt = mount("c6-short-light");
+        key(&mut rt, Key::Command('l'), ctrl());
+        typ(&mut rt, "~/D");
+        run(&mut rt, 0.2);
+        assert!(rt.has_focus());
+        key(&mut rt, Key::Escape, Mods::default());
+        run(&mut rt, 0.1);
+        assert!(
+            !rt.has_focus(),
+            "focus stayed on {:?}",
+            rt.elements()
+                .iter()
+                .find(|e| e.focused)
+                .map(|e| e.path.clone())
+        );
     }
 }

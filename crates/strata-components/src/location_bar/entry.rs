@@ -2,12 +2,13 @@
 //! that drive the suggestions.
 
 use rune::{El, Key, KeyEvent, Tx, row};
-use rune_kit::{IconButton, IconButtonVariant, TextInput};
+use rune_kit::TextInput;
 use strata_kit::icons::IconName;
 
 use super::build::{Ctx, field_key, option_key, route};
 use super::completion::Command;
 use super::state::Polled;
+use crate::header;
 
 pub(super) fn view<S: 'static>(cx: &Ctx<'_, S>) -> El {
     let look = cx.look;
@@ -40,11 +41,8 @@ pub(super) fn view<S: 'static>(cx: &Ctx<'_, S>) -> El {
         .build(k);
     let button = |icon: IconName, label: &str, suffix: &str, cancel: bool| {
         let emit = cx.emit.clone();
-        IconButton::new(look.icon(icon))
-            .variant(IconButtonVariant::Ghost)
-            .control_size(cx.control_size())
-            .label(label.to_owned())
-            .help(label.to_owned())
+        // The header's action look; its tooltip names it.
+        header::action(look, icon, label)
             .on_press_tx(move |s: &mut S, tx: &mut Tx| {
                 let st = access(s);
                 let polled = if cancel {
@@ -108,7 +106,7 @@ fn key(
         if tx.key_repeat() {
             return (Polled::default(), true);
         }
-        tx.blur();
+        // No `tx.blur()`: the entry leaves the tree, and Rune drops its focus with it.
         return (st.cancel(), true);
     }
     if complete.iter().any(|c| c.matches_tx(ev, tx)) {

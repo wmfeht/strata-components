@@ -158,7 +158,7 @@ fn a_resting_drag_springs_once_after_its_delay() {
 fn the_copy_feedback_lasts_two_seconds() {
     let mut s = LocationBarState::new();
     let mut tx = Tx::default();
-    s.copy_pressed();
+    s.show_copied();
     assert!(s.copied());
     let _ = s.tick(10.0, &mut tx);
     let _ = s.tick(10.0 + COPIED_FOR - 0.1, &mut tx);
@@ -175,6 +175,79 @@ fn a_leave_from_another_crumb_keeps_the_hover() {
     assert_eq!(s.drop_hover(), Some((2, DropHover::Accepting)));
     s.set_drop_hover(2, DropHover::Left);
     assert_eq!(s.drop_hover(), None);
+}
+
+// Review round 1, SF3: a binder that reports the same accepting hover again (X2's may, on every
+// motion) must not restart the spring, as Strata's `schedule_spring_load_navigation` keeps it.
+#[test]
+fn a_repeated_hover_on_the_same_crumb_keeps_the_spring_s_start() {
+    let mut s = LocationBarState::new();
+    let mut tx = Tx::default();
+    s.drag_over(1, "/home/demo", DropHover::Accepting, Some(SPRING_DELAY));
+    let _ = s.tick(1.0, &mut tx);
+    s.drag_over(1, "/home/demo", DropHover::Accepting, Some(SPRING_DELAY));
+    let _ = s.tick(1.5, &mut tx);
+    assert_eq!(
+        intents(s.tick(1.0 + SPRING_DELAY, &mut tx)),
+        [LocationIntent::Open {
+            id: "/home/demo".into(),
+            via: Via::Spring
+        }]
+    );
+    // Another crumb starts afresh.
+    s.drag_over(1, "/home/demo", DropHover::Accepting, Some(SPRING_DELAY));
+    let _ = s.tick(5.0, &mut tx);
+    s.drag_over(0, "/", DropHover::Accepting, Some(SPRING_DELAY));
+    assert!(intents(s.tick(5.0 + SPRING_DELAY, &mut tx)).is_empty());
+}
+
+// A second press restarts the two seconds.
+#[test]
+fn a_second_copy_restarts_the_feedback() {
+    let mut s = LocationBarState::new();
+    let mut tx = Tx::default();
+    s.show_copied();
+    let _ = s.tick(10.0, &mut tx);
+    let _ = s.tick(11.5, &mut tx);
+    s.show_copied();
+    let _ = s.tick(11.5, &mut tx);
+    let _ = s.tick(12.5, &mut tx);
+    assert!(s.copied(), "still showing 1 s after the second press");
+    let _ = s.tick(11.5 + COPIED_FOR, &mut tx);
+    assert!(!s.copied());
+}
+
+// Review round 1, nit: Ctrl+L while editing keeps the typed text and selects it, as Strata's
+// `begin_location_edit` does.
+#[test]
+fn ctrl_l_while_editing_keeps_the_typed_text() {
+    let mut s = LocationBarState::new();
+    let _ = s.begin_edit("~/Projects");
+    s.edit.replace_text("~/Mu");
+    let p = s.begin_edit("~/Projects");
+    assert_eq!(s.edit.text, "~/Mu");
+    assert_eq!(s.edit.range(), (0, "~/Mu".len()));
+    assert_eq!(query(&p).text, "~/Mu");
+}
+
+// Review round 1, nit: a click on a shown suggestion while keys wait for a listing takes that
+// suggestion at once, as Strata's `row_activated` does; the waiting keys and listing are dropped.
+#[test]
+fn a_click_takes_its_suggestion_even_while_keys_wait() {
+    let mut s = LocationBarState::new();
+    let q = query(&s.begin_edit("~/D"));
+    let _ = s.deliver(Completions::new(q.generation, two()));
+    s.edit.replace_text("~/Do");
+    let _ = s.edited();
+    let (_, _) = s.command(completion::Command::Complete);
+    let out = intents(s.choose(1));
+    assert!(
+        out.contains(&LocationIntent::Submit {
+            text: "~/Documents/".into()
+        }),
+        "{out:?}"
+    );
+    assert!(!s.editing());
 }
 
 mod perf;

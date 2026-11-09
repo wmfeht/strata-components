@@ -1,6 +1,9 @@
 //! Perf: the suggestion list at 50 (Strata's cap), 1,000 and 10,000 candidates.
 //!
-//! `cargo test --profile perf -p strata-components --lib location_bar::tests::perf -- --ignored --nocapture`
+//! ```text
+//! cargo test --profile perf -p strata-components --lib location_bar::tests::perf \
+//!     -- --ignored --nocapture
+//! ```
 //!
 //! A 900 pt window at scale 2 with the bar in its header and the entry open. For each size: the
 //! frame that lands a delivery (the list's first draw), 60 arrow steps (each a commit moving the
@@ -176,7 +179,8 @@ fn the_suggestion_list_stays_within_its_budget() {
             prefix: best(|r| r.prefix),
         };
         println!(
-            "{n:>6} candidates: delivery {:.2} ms; arrow p50 {:.2} p95 {:.2} ms; keystroke p50 {:.2} p95 {:.2} ms; common prefix {:.3} ms",
+            "{n:>6} candidates: delivery {:.2} ms; arrow p50 {:.2} p95 {:.2} ms; \
+             keystroke p50 {:.2} p95 {:.2} ms; common prefix {:.3} ms",
             fig.deliver, fig.step_p50, fig.step_p95, fig.key_p50, fig.key_p95, fig.prefix
         );
         if n == 1_000 {

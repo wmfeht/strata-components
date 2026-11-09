@@ -3,8 +3,9 @@
 //! Spring-loading is the crumb's own model, so a host and X2's binder need nothing more than
 //! hover reports: an accepting hover arms it and asks for a wake now, `LocationBarState::tick`
 //! stamps its start on the host's clock at that wake, asks for one when the delay ends, and
-//! opens the crumb ([`super::Via::Spring`]) then; a leave, a drop or a navigation disarms it. C8 and X2 can adopt the same model for rows and
-//! sidebar places.
+//! opens the crumb ([`super::Via::Spring`]) then; a leave, a drop or a navigation disarms it,
+//! and the same hover reported again keeps its start. C8 and X2 can adopt the same model for
+//! rows and sidebar places.
 
 use std::time::Duration;
 

@@ -497,8 +497,7 @@ impl Dock {
         op.sample = Some(sample);
         op.publish(&words);
         let next = op.derive(&words);
-        let reshaped = !op.revealed
-            || next.fraction.is_some() != op.shown.fraction.is_some()
+        let reshaped = next.fraction.is_some() != op.shown.fraction.is_some()
             || next.count.is_some() != op.shown.count.is_some()
             || next.items_line.is_some() != op.shown.items_line.is_some()
             || next.title != op.shown.title;

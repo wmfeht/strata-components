@@ -250,6 +250,60 @@ mod c16 {
         assert_eq!(rt.state.c16.heard, "Dismissed 1");
     }
 
+    // operations/progress/dock: "The pin button, 'Keep notification', keeps a completed card
+    // open … until it is dismissed": unpinning, by assistive technology so no hover pauses it,
+    // resumes the countdown in a resting window from the pin's own wake (review 2, SF3).
+    #[test]
+    fn unpinning_resumes_the_countdown_in_a_resting_window() {
+        let mut rt = completed_copy(|_| {});
+        assert!(rt.accessibility_action(
+            "c16-dock-card-1-pin",
+            rune::accesskit::Action::Click,
+            None
+        ));
+        rt.frame(FRAME);
+        wake_until(&mut rt, 30.0, |_| false);
+        assert!(card(&rt.state, 1).is_some(), "pinned, it stays");
+        assert!(rt.accessibility_action(
+            "c16-dock-card-1-pin",
+            rune::accesskit::Action::Click,
+            None
+        ));
+        rt.frame(FRAME);
+        let start = rt.state.c16.now;
+        let end = wake_until(&mut rt, 10.0, |g| g.c16.dock.op(1).is_none());
+        assert!(card(&rt.state, 1).is_none(), "unpinned, it closes");
+        assert!(end - start < 5.0 + 0.18 + 0.05, "{:.3} s", end - start);
+    }
+
+    // The pointer crossing a card changes nothing the view draws (a running card has no
+    // countdown, and a finished card's words follow at the tick): the hover is live-only
+    // (review 2, nit).
+    #[test]
+    fn the_pointer_crossing_a_card_commits_nothing() {
+        let mut rt = mount("c16-cancelling-light");
+        run(&mut rt, 0.5);
+        let (x, y) = centre(&rt, "c16-dock-card-1");
+        let cross = |rt: &mut Runtime<Gallery>| {
+            let c0 = rune::commit_generation();
+            rt.pointer_move(x, y);
+            rt.frame(FRAME);
+            rt.pointer_move(5.0, 300.0);
+            rt.frame(FRAME);
+            rune::commit_generation() - c0
+        };
+        // Debug builds re-run the view after a live-only event to check nothing it draws
+        // changed: no warning means the hover was truly live-only.
+        cross(&mut rt);
+        assert!(
+            rt.live_only_warnings().is_empty(),
+            "{:?}",
+            rt.live_only_warnings()
+        );
+        rt.check_live_only(false);
+        assert_eq!(cross(&mut rt), 0);
+    }
+
     // operations/progress: "An operation on fewer than 16 items shows no progress dialog for
     // its first 350 ms, and none at all if it finishes sooner."
     #[test]

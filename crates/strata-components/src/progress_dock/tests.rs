@@ -463,6 +463,12 @@ fn jobs_words_follow_strata() {
         Some("3 jobs finished · failures")
     );
     assert_eq!(jobs::indicator(&[], &w), None, "no jobs: no button");
+    let cancelling = vec![JobRow::new(1, "Resize", JobStatus::Cancelling, 0.0)];
+    assert_eq!(
+        jobs::indicator(&cancelling, &w).as_deref(),
+        Some("1 job running"),
+        "a job cancelling still runs until it stops"
+    );
     assert_eq!(jobs::per_item_fraction(2, 10, Some(0.5)), Some(0.25));
     assert_eq!(jobs::per_item_fraction(0, 0, None), None);
 }
@@ -546,4 +552,87 @@ fn a_second_completion_is_ignored_as_strata_ignores_it() {
         (end - 5.0 - FADE).abs() < 1e-6,
         "the first countdown ran on: {end}"
     );
+}
+
+#[test]
+fn a_resized_track_moves_the_fill_and_restarts_a_countdown_bar() {
+    let mut dock = Dock::new();
+    let mut tx = Tx::default();
+    dock.start(1, copy(1), &mut tx);
+    dock.progress(1, transfer(10, 40, 1, 4), 0.0, &mut tx);
+    assert!(
+        dock.set_track(1, 200.0, 4.0),
+        "the first size needs the view"
+    );
+    assert_eq!(dock.op(1).unwrap().live.fill.get(), [0.0, 0.0, 50.0, 4.0]);
+    assert!(
+        !dock.set_track(1, 200.2, 4.0),
+        "a move within half a point is no resize"
+    );
+    assert!(
+        !dock.set_track(1, 220.0, 4.0),
+        "a running card's fill is live: no commit"
+    );
+    assert_eq!(dock.op(1).unwrap().live.fill.get(), [0.0, 0.0, 55.0, 4.0]);
+    dock.complete(1, "Copy complete", &mut tx);
+    dock.tick(0.0, &mut tx);
+    assert!(
+        dock.set_track(1, 240.0, 4.0),
+        "a counting card's bar restarts at the new width"
+    );
+}
+
+#[test]
+fn a_card_that_changes_shape_commits_at_once_inside_the_quarter_second() {
+    let mut dock = Dock::new();
+    let mut tx = Tx::default();
+    dock.start(1, copy(1), &mut tx);
+    assert!(dock.progress(1, transfer(10, 4_000, 1, 4), 0.0, &mut tx));
+    assert!(
+        !dock.progress(1, transfer(20, 4_000, 1, 4), 0.05, &mut tx),
+        "a change of numbers waits"
+    );
+    // The flush to the device pulses the bar: a change of shape lands at once.
+    let busy = transfer(4_000, 4_000, 4, 4).busy("Writing to device…");
+    assert!(dock.progress(1, busy, 0.1, &mut tx));
+    assert_eq!(dock.op(1).unwrap().shown.fraction, None);
+}
+
+#[test]
+fn a_sample_after_completion_leaves_the_finished_card_alone() {
+    let mut dock = Dock::new();
+    let mut tx = Tx::default();
+    dock.start(1, copy(1), &mut tx);
+    dock.progress(1, transfer(10, 40, 1, 4), 0.0, &mut tx);
+    dock.complete(1, "Copy complete", &mut tx);
+    let before = dock.op(1).unwrap().shown.clone();
+    assert!(!dock.progress(1, transfer(20, 40, 2, 4).current("late.jpg"), 0.5, &mut tx));
+    let op = dock.op(1).unwrap();
+    assert_eq!(op.shown, before);
+    assert_eq!(&*op.live.percent.get(), "100%");
+    assert_eq!(&*op.live.count.get(), "4/4");
+}
+
+#[test]
+fn a_notice_shows_for_its_own_time() {
+    let mut dock = Dock::new();
+    let mut tx = Tx::default();
+    dock.notice(
+        Notice::new("Text size: 16px").status().shown_for(1.5),
+        &mut tx,
+    );
+    let end = wake_to_wake(&mut dock, 0.0, 10.0);
+    assert!(dock.is_empty());
+    assert!((end - 1.5).abs() < 1e-6, "{end}");
+}
+
+#[test]
+fn an_operation_in_the_dialog_leaves_the_dock_empty() {
+    let mut dock = Dock::new();
+    let mut tx = Tx::default();
+    let mut spec = copy(1);
+    spec.placement = Placement::Dialog;
+    dock.start(1, spec, &mut tx);
+    assert!(dock.op(1).is_some());
+    assert!(dock.is_empty(), "the dialog shows it, not the dock");
 }

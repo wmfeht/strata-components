@@ -361,6 +361,9 @@ impl<S: 'static> DockView<S> {
         let hover = self.get_mut;
         card = card.on_hover_change(move |s: &mut S, h, tx: &mut Tx| {
             hover(s).hover(id, h, tx);
+            // The view reads only what the dock shows, which the tick this asks for updates
+            // (and commits); the hover itself draws nothing.
+            tx.live_only();
         });
         if let Some(fade) = &op.fade {
             card = card.live_opacity(fade);

@@ -71,8 +71,9 @@ Nothing is released yet. The first release is planned for milestone M1 with the 
     id), which other clients see; on X11 only a drag with a local payload does.
   - `Dnd::start_drag` takes the phase and the element's key.
   - Call `dnd::shutdown()` before `Tx::quit` or `AppHandle::quit`, in `App::on_quit`, and in
-    the last window's `on_close` (`on_quit` doesn't run in a last window that is closing). A drag from another app takes the compositor's action. X11's
-    source shows no cursor feedback. Link is X11 only.
+    the last window's `on_close` (`on_quit` doesn't run in a last window that is closing). A
+    drag from another app takes the compositor's action. X11's source shows no cursor
+    feedback. Link is X11 only.
 - `clipboard`: copy and paste with any MIME types on Wayland and X11, beside Rune's own
   text clipboard. A `Clipboard` per state type, attached from `App::on_window`.
   - `Clipboard::copy` writes a `Content` of any types at once, each with bytes or a lazy

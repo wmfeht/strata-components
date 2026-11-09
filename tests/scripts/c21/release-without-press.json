@@ -18,40 +18,40 @@
       "key": "c21-menu-item9"
     },
     {
-      "t": 0.35,
+      "t": 0.45,
       "type": "up",
       "key": "c21-menu-item9-sub-item0"
     },
     {
-      "t": 0.4,
+      "t": 0.5,
       "type": "up",
       "key": "c21-menu-item12"
     },
     {
-      "t": 0.5,
+      "t": 0.6,
       "type": "tap",
       "key": "c21-menu-item11",
       "button": "secondary"
     },
     {
-      "t": 0.6,
+      "t": 0.7,
       "type": "down",
       "key": "row-9",
       "button": "secondary"
     },
     {
-      "t": 0.65,
+      "t": 0.75,
       "type": "move",
       "key": "c21-menu-item13"
     },
     {
-      "t": 0.7,
+      "t": 0.8,
       "type": "up",
       "key": "c21-menu-item13",
       "button": "secondary"
     },
     {
-      "t": 0.9,
+      "t": 1.0,
       "type": "tap",
       "key": "c21-menu-item12"
     }

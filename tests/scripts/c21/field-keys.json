@@ -1,0 +1,45 @@
+{
+  "bullets": [
+    "browser/context-menu: While a text input has focus, Menu and Shift+F10 open the input's text-editing menu instead of a file menu."
+  ],
+  "scene": "c21-start-light",
+  "events": [
+    {
+      "t": 0.2,
+      "type": "tap",
+      "key": "c21-search"
+    },
+    {
+      "t": 0.3,
+      "type": "type",
+      "text": "draft notes"
+    },
+    {
+      "t": 0.4,
+      "type": "key",
+      "name": "ContextMenu"
+    },
+    {
+      "t": 0.5,
+      "type": "key",
+      "name": "Escape"
+    },
+    {
+      "t": 0.6,
+      "type": "key",
+      "name": "F10",
+      "shift": true
+    }
+  ],
+  "expect": [
+    {
+      "key": "c21-field-menu-menu",
+      "role": "menu",
+      "name": "Text editing"
+    },
+    {
+      "key": "c21-menu-menu",
+      "absent": true
+    }
+  ]
+}

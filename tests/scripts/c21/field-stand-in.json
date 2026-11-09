@@ -1,0 +1,29 @@
+{
+  "bullets": [
+    "browser/context-menu: Text-input menu styling covers the filter and search fields, location entry, inline rename, dialog fields, settings fields, and text previews."
+  ],
+  "scene": "c21-start-light",
+  "events": [
+    {
+      "t": 0.2,
+      "type": "tap",
+      "key": "c21-rename",
+      "button": "secondary"
+    },
+    {
+      "t": 0.4,
+      "type": "key",
+      "name": "Escape"
+    }
+  ],
+  "expect": [
+    {
+      "key": "c21-status",
+      "name": "The rename's field menu closed"
+    },
+    {
+      "key": "c21-rename",
+      "focused": true
+    }
+  ]
+}

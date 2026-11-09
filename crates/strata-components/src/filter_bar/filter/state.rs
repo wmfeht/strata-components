@@ -43,8 +43,8 @@ pub enum FilterIntent {
     },
     /// The filter closed (Escape, or [`FilterState::close`]).
     Closed,
-    /// Enter in the field: open entry `id`, file or folder, whatever the click and preview
-    /// preferences.
+    /// Enter in the field: open entry `id` ([`FilterState::target`]), file or folder,
+    /// whatever the click and preview preferences.
     Open {
         /// The Enter target.
         id: EntryId,
@@ -271,14 +271,17 @@ impl FilterState {
     }
 
     /// What Enter in the field opens: the top result until the user picks one after the query
-    /// last changed, then the first selected result in display order (Strata's
-    /// `filter_activation_position`). `None` with an empty query, no results, or (after a
-    /// pick, or in 10xer mode) nothing selected.
+    /// last changed; after that, per mode, as Strata does. Search results that replace the
+    /// listing ([`Shows::Replace`]) open their cursor, or the top result with none
+    /// (`inline_search.rs`, `current_position`): where Down lands. A listing narrowed in place
+    /// ([`Shows::InPlace`]) opens its first selected result in display order
+    /// (`filter_activation_position`). `None` with an empty query, no results, or (in place,
+    /// after a pick or in 10xer mode) nothing selected.
     pub fn target(&self, r: Results<'_>) -> Option<EntryId> {
         if !self.open || self.edit.text.trim().is_empty() {
             return None;
         }
-        self.tracker.target(r, self.tenxer)
+        self.tracker.target(r, self.tenxer, self.shows)
     }
 
     /// Where Down from the field lands: the top result while Enter opens it, else the results'

@@ -64,10 +64,10 @@ fn enter_opens_the_top_result_outlined_while_the_field_has_the_keyboard() {
     );
 }
 
-// "A pick… removes the outline; Enter then opens the pick", in display order: Strata's
-// `filter_activation_position` opens the first selected result.
+// "A pick… removes the outline; Enter then opens the pick": the last click, the cursor (and,
+// here, the first selected result too: the modes' rules are below).
 #[test]
-fn after_a_pick_enter_opens_the_first_selected_result_in_display_order() {
+fn after_a_pick_enter_opens_the_pick() {
     let src = source(&["a", "b", "c", "d"]);
     let mut sel = Selection::new();
     let mut st = FilterState::new();
@@ -128,13 +128,15 @@ fn a_query_edit_drops_the_pick_and_a_same_query_update_keeps_it() {
     assert!(!st.tracker.picked, "but the pick goes");
 }
 
-// "With 10xer mode on, no result is outlined and a query edit keeps the selected result."
+// "With 10xer mode on, no result is outlined and a query edit keeps the selected result." In
+// place, so Enter needs a selection (search results: the next test but one).
 #[test]
 fn tenxer_mode_outlines_nothing_and_keeps_the_selection() {
     let src = source(&["a", "b"]);
     let mut sel = Selection::new();
     let mut st = FilterState::new();
     st.set_tenxer(true);
+    st.set_shows(Shows::InPlace);
     let _ = typed(&mut st, "a");
     assert_eq!(st.outlined(r(&src, &sel)), None);
     assert_eq!(
@@ -276,7 +278,74 @@ fn down_lands_on_the_cursor_after_a_pick_and_on_the_top_result_before() {
     );
     assert_eq!(
         st.target(r(&src, &sel)),
+        Some(id(4)),
+        "search results' Enter opens where Down lands"
+    );
+}
+
+// Owner's ruling on round 1, item 1: Enter after a pick follows Strata per mode. Search
+// results that replace the listing open their cursor (`inline_search.rs`, `current_position`),
+// as Down lands there; a listing narrowed in place opens its first selected result in display
+// order (`filter_activation_position`).
+#[test]
+fn after_a_pick_enter_in_search_results_opens_the_cursor() {
+    let src = source(&["a", "b", "c", "d"]);
+    let mut sel = Selection::new();
+    let mut st = FilterState::new();
+    let _ = typed(&mut st, "x");
+    let _ = sel.select_only(&src, 1);
+    let _ = sel.toggle(&src, 3);
+    st.pick();
+    assert_eq!(sel.cursor(), Some(id(4)));
+    assert_eq!(
+        st.target(r(&src, &sel)),
+        Some(id(4)),
+        "the cursor, not the first selected"
+    );
+    assert_eq!(
+        st.target(r(&src, &sel)),
+        st.landing(r(&src, &sel)),
+        "where Down lands"
+    );
+}
+
+#[test]
+fn after_a_pick_enter_in_place_opens_the_first_selected_result() {
+    let src = source(&["a", "b", "c", "d"]);
+    let mut sel = Selection::new();
+    let mut st = FilterState::new();
+    st.set_shows(Shows::InPlace);
+    let _ = typed(&mut st, "x");
+    let _ = sel.select_only(&src, 1);
+    let _ = sel.toggle(&src, 3);
+    st.pick();
+    assert_eq!(sel.cursor(), Some(id(4)));
+    assert_eq!(
+        st.target(r(&src, &sel)),
         Some(id(2)),
-        "Enter keeps Strata's in-place rule"
+        "the first selected, not the cursor"
+    );
+}
+
+// In 10xer mode nothing is offered as the top result: search results open their cursor, or
+// the top result with no cursor (Strata's `current_position().unwrap_or(0)`), selected or not.
+#[test]
+fn tenxer_search_results_open_the_cursor_or_the_top_result() {
+    let src = source(&["a", "b", "c"]);
+    let mut sel = Selection::new();
+    let mut st = FilterState::new();
+    st.set_tenxer(true);
+    let _ = typed(&mut st, "x");
+    assert_eq!(
+        st.target(r(&src, &sel)),
+        Some(id(1)),
+        "no cursor: the top result"
+    );
+    let _ = sel.move_cursor(&src, 2, crate::collection::selection::AnchorRule::Move);
+    assert!(sel.is_empty());
+    assert_eq!(
+        st.target(r(&src, &sel)),
+        Some(id(3)),
+        "the cursor, though nothing is selected"
     );
 }

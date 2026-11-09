@@ -3,10 +3,14 @@
 //!
 //! Until the user picks a result after the query last changed, Enter opens the top result,
 //! and while the field has the keyboard that row is outlined. After a pick, while something is
-//! selected, Enter opens the first selected result in display order, as Strata's
-//! `filter_activation_position` does. Deselecting everything gives the top result back. In
-//! 10xer mode nothing is outlined and Enter always opens the first selected result.
+//! selected, Enter follows Strata per mode ([`super::Shows`]): search results that replace the
+//! listing open their cursor, or the top result with none (`inline_search.rs`,
+//! `current_position().unwrap_or(0)`), where Down lands too; a listing narrowed in place opens
+//! its first selected result in display order (`filter_activation_position`). Deselecting
+//! everything gives the top result back. In 10xer mode nothing is outlined, so the same rules
+//! apply from the start.
 
+use super::state::Shows;
 use crate::collection::selection::Selection;
 use crate::contract::{EntryId, EntrySource};
 
@@ -77,15 +81,23 @@ impl Tracker {
         !self.scrolled && self.offers_top(has_rows, has_selection, tenxer)
     }
 
-    /// What Enter opens: the top result while it is offered, else the first selected result
-    /// in display order.
-    pub fn target(&self, r: Results<'_>, tenxer: bool) -> Option<EntryId> {
+    /// What Enter opens: the top result while it is offered; else, for search results, the
+    /// cursor or the top result; in place, the first selected result in display order.
+    pub fn target(&self, r: Results<'_>, tenxer: bool, shows: Shows) -> Option<EntryId> {
         self.query.as_ref()?;
-        let rows = !r.source.is_empty();
-        if self.offers_top(rows, !r.selection.is_empty(), tenxer) {
+        if r.source.is_empty() {
+            return None;
+        }
+        if self.offers_top(true, !r.selection.is_empty(), tenxer) {
             return Some(r.source.id_at(0));
         }
-        first_selected(r)
+        match shows {
+            Shows::Replace => {
+                let at = r.selection.cursor_index(r.source).unwrap_or(0);
+                Some(r.source.id_at(at))
+            }
+            Shows::InPlace => first_selected(r),
+        }
     }
 }
 

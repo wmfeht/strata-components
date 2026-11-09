@@ -52,14 +52,17 @@
 //! ```
 //!
 //! - **The Enter target** (Strata's `Tracker`): until the user picks a result after the query
-//!   last changed, Enter opens the top result; after a pick, while something is selected, the
-//!   first selected result in display order (Strata's `filter_activation_position`, not the
-//!   cursor). Deselecting everything gives the top result back. A query edit (one typed back
+//!   last changed, Enter opens the top result. After a pick, while something is selected, it
+//!   follows Strata per mode (owner's ruling): search results that replace the listing open
+//!   their cursor, or the top result with none (`inline_search.rs`, `current_position`), where
+//!   Down lands; a listing narrowed in place opens its first selected result in display order
+//!   (`filter_activation_position`). Deselecting everything gives the top result back. A query
+//!   edit (one typed back
 //!   included) drops the pick; with search results that replace the listing it drops their
 //!   selection too ([`filter::FilterState::shown`] returns true), while a listing narrowed in
 //!   place ([`filter::Shows::InPlace`]: Trash, Recent, a network share) keeps its selection. A
 //!   same-query update keeps the pick. In 10xer mode nothing is outlined and an edit keeps the
-//!   selection.
+//!   selection; Enter follows the per-mode rules from the start.
 //! - **The outline** is C1e's `RowMarks::enter_target` (a 1 pt `text_accent` outline), on the top
 //!   result while Enter opens it and the field has the keyboard.
 //! - **Keeping the top result in view**: after each set of results, while the field has the
@@ -191,7 +194,7 @@
 //! | In search results the outline comes with no selection; the in-place filter keeps the listing's selection | goldens `c18-filter-target`, `c18-filter-in-place`; unit `a_query_edit_drops_the_pick_and_a_same_query_update_keeps_it` |
 //! | Moving focus from the field to a result or elsewhere removes the outline | scripts `outline-leaves-with-focus` (a click), `tab-out-removes-outline` (no pick); unit `enter_opens_the_top_result_outlined_while_the_field_has_the_keyboard` |
 //! | In Icons and List, Enter in the field with no pick opens the outlined top result | script `enter-opens-top`; test `a_held_enter_opens_once`; unit, as above |
-//! | A pick, such as Ctrl+click…, removes the outline; Enter then opens the pick | script `pick-then-enter`; unit `after_a_pick_enter_opens_the_first_selected_result_in_display_order` |
+//! | A pick, such as Ctrl+click…, removes the outline; Enter then opens the pick | scripts `pick-then-enter`, `enter-opens-cursor` (search results: the cursor), `enter-in-place-opens-first-selected` (in place: the first selected); units `after_a_pick_enter_opens_the_pick`, `after_a_pick_enter_in_search_results_opens_the_cursor`, `after_a_pick_enter_in_place_opens_the_first_selected_result` |
 //! | A pick is an arrow key, Down from the field, a click, a Ctrl+click, focus moving into the results… | scripts `pick-then-enter`, `down-and-up` (the host calls `pick` from C1e's `on_selection`) |
 //! | Deselecting every result after a pick returns the outline and Enter to the top result | script `deselect-returns-top`; unit `deselecting_every_result_after_a_pick_returns_the_top_result` |
 //! | In search results, editing the query text drops the pick and the results' selection | script `edit-drops-pick`; unit `a_query_edit_drops_the_pick_and_a_same_query_update_keeps_it` |
@@ -201,7 +204,7 @@
 //! | While the field has focus, the list keeps the top result scrolled into view as results arrive | test `the_top_result_follows_the_results_until_they_are_scrolled`; unit `the_top_result_follows_until_the_results_scroll_and_again_after_an_edit` |
 //! | A button press, wheel scroll, touch, or drag hover on the results stops that scrolling… | **partial**: the same test calls `results_scrolled` as a host's wheel hook would: a host can't hear a wheel over a C1e collection (Rune's `on_wheel` stops at the nearest scroll view; `Collection::on_scroll` reads no state): a C1e seam follow-up. A press comes through `Collection::on_press` |
 //! | With only the outline showing, Space in the field types a space and opens no preview | script `space-types-with-outline` |
-//! | With 10xer mode on, no result is outlined and a query edit keeps the selected result | unit `tenxer_mode_outlines_nothing_and_keeps_the_selection` |
+//! | With 10xer mode on, no result is outlined and a query edit keeps the selected result | units `tenxer_mode_outlines_nothing_and_keeps_the_selection`, `tenxer_search_results_open_the_cursor_or_the_top_result` |
 //! | In the file chooser, Enter in the filter field chooses the top result… | **Strata**: the same [`filter::FilterIntent::Open`] |
 //!
 //! `integration/10xer-mode`:
@@ -263,10 +266,10 @@
 //! - **Losing the keyboard is noticed a frame late**, in `tick` (U-C6-3).
 //! - **The host reports picks** ([`filter::FilterState::pick`]): the bar can't see the results'
 //!   selection change or focus enter them.
-//! - **Enter after a pick opens the first selected result** (Strata's in-place filter,
-//!   `filter_activation_position`; owner's ruling), while Down lands on the cursor (Strata's
-//!   search results). Strata's search results' Enter opens their cursor too
-//!   (`inline_search.rs`): an owner item.
+//! - **Enter after a pick follows Strata per mode** (owner's ruling): the cursor in search
+//!   results (`inline_search.rs`), the first selected result in place
+//!   (`filter_activation_position`). Strata keeps the two rules in two code paths; here one
+//!   [`filter::FilterState::target`] picks by [`filter::Shows`].
 //! - **Our own candidate list**, not rune-kit's `PopupList`, whose rows can't draw matched
 //!   ranges (U-C6-4), as C6's.
 //!

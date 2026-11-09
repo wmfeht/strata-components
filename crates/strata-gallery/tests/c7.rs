@@ -250,16 +250,78 @@ mod c7 {
             shift: true,
             ..Mods::default()
         };
-        // Ctrl+Shift+0: tab 10, off to the left. In a window at rest: a frame only at each
-        // wake the strip asked for.
+        // Ctrl+Shift+0: tab 10, off to the left. In a window at rest: a frame while something
+        // moves, else only at each wake the strip asked for.
+        let start = rect(&rt, &tab(10))[0];
         key(&mut rt, Key::Command('0'), mods);
-        rest(&mut rt, 2.0);
+        let mut xs = vec![rect(&rt, &tab(10))[0]];
+        for _ in 0..120 {
+            if rt.animating {
+                rt.frame(FRAME);
+            } else if let Some(deadline) = rt.wake_deadline() {
+                rt.frame((deadline - rt.state.c7.now).max(0.001));
+            } else {
+                break;
+            }
+            xs.push(rect(&rt, &tab(10))[0]);
+        }
         assert_eq!(rt.state.c7.active, Some(TabId(10)));
         let t = rect(&rt, &tab(10));
         assert!(
             t[0] >= viewport[0] + fade - 0.5,
             "tab 10 {t:?} starts clear of the left fade in {viewport:?}"
         );
+        // It lands in one step: the first frame that moves it puts it where it stays, with no
+        // shift by the fade's width a frame later (review 2).
+        let moved = xs.iter().find(|&&x| (x - start).abs() > 0.5).copied();
+        assert_eq!(moved, Some(t[0]), "frames: {xs:?}");
+    }
+
+    // The user's wheel, vertical or sideways, right after a selection wins over its reveal
+    // still to land (review 2: the reveal's jump undid it).
+    #[test]
+    fn a_wheel_right_after_a_selection_beats_its_reveal() {
+        let mods = Mods {
+            ctrl: true,
+            shift: true,
+            ..Mods::default()
+        };
+        for (frames, dx, dy) in [
+            (0, 0.0, -200.0),
+            (1, 0.0, -200.0),
+            (2, 0.0, -200.0),
+            (0, -200.0, 0.0),
+            (1, -200.0, 0.0),
+            (2, -200.0, 0.0),
+        ] {
+            let mut rt = mount("c7-overflow-light");
+            // Ctrl+Shift+0 selects tab 10, off to the left; the wheel then asks for more on
+            // the right.
+            rt.key(KeyEvent {
+                key: Key::Command('0'),
+                mods,
+            });
+            for _ in 0..frames {
+                rt.frame(FRAME);
+            }
+            // Over the tab under the viewport's middle.
+            let viewport = rect(&rt, "c7-scroll");
+            let mid = viewport[0] + viewport[2] / 2.0;
+            let under = (1..=30)
+                .map(|id| rect(&rt, &tab(id)))
+                .find(|r| (r[0]..r[0] + r[2]).contains(&mid))
+                .expect("a tab under the middle");
+            let at = (under[0] + under[2] / 2.0, under[1] + under[3] / 2.0);
+            rt.pointer_move(at.0, at.1);
+            let before = rect(&rt, &tab(1))[0];
+            rt.wheel_event(rune::WheelEvent::new(dx, dy).at(at.0, at.1));
+            run(&mut rt, 0.5);
+            let after = rect(&rt, &tab(1))[0];
+            assert!(
+                after < before - 100.0,
+                "wheel ({dx}, {dy}) {frames} frames after: tab 1 {before} -> {after}"
+            );
+        }
     }
 
     /// The width a tab gives its title, from rune-kit's `title` element inside it.

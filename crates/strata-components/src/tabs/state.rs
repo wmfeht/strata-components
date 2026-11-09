@@ -173,18 +173,27 @@ impl BrowserTabsState {
                 }
             }
         }
+        // The user's wheel since the last tick wins over a reveal still to land (review 2).
+        self.probe.frame_begins();
+        let wheeled = self.probe.take_wheel();
+        if wheeled {
+            self.reveal = None;
+        }
         self.reveal_step(tx);
         if data.active != self.active {
             self.active = data.active;
             self.reveal = None;
-            if let Some(id) = data.active {
-                tx.scroll_into_view_in(scroll_key(&self.key), tab_key(&self.key, id));
-                // A strip at rest (no drag: a press already revealed the tab it lifts) brings it
-                // a fade's width clear of the edges once it has drawn (U-C7-7).
-                if self.drag.phase == rune_kit::shell::TabDragPhase::Idle {
+            match data.active {
+                _ if wheeled => {}
+                // A strip at rest brings the tab a fade's width clear of the edges in one jump,
+                // once it has drawn and its place can be read (U-C7-7).
+                Some(id) if self.drag.phase == rune_kit::shell::TabDragPhase::Idle => {
                     self.reveal = Some((id, 0));
                     tx.wake_after(Duration::ZERO);
                 }
+                // A press that starts a drag: rune-kit revealed the tab it lifts.
+                Some(id) => tx.scroll_into_view_in(scroll_key(&self.key), tab_key(&self.key, id)),
+                None => {}
             }
         }
         let title = window_title(
@@ -198,9 +207,10 @@ impl BrowserTabsState {
         out
     }
 
-    /// Brings the tab a reveal waits on clear of the edge fades, once it has drawn: Rune's
-    /// `scroll_into_view_in` stops at the edge, under the fade, and a horizontal viewport has no
-    /// scroll margin (U-C7-7). Reads the strip's offset from its markers (`probe.rs`).
+    /// Brings the tab a reveal waits on clear of the edge fades, once it has drawn, in one
+    /// jump: Rune's `scroll_into_view_in` stops at the edge, under the fade, and a horizontal
+    /// viewport has no scroll margin (U-C7-7). Reads the strip's offset from its markers
+    /// (`probe.rs`), so it lands a frame after the selection.
     fn reveal_step(&mut self, tx: &mut Tx) {
         let Some((id, waited)) = self.reveal else {
             return;
@@ -210,10 +220,16 @@ impl BrowserTabsState {
                 self.reveal = Some((id, waited + 1));
                 tx.wake_after(Duration::ZERO);
             }
-            Reveal::Pending | Reveal::Clear => self.reveal = None,
+            // It never drew where it could be read: Rune's reveal, to the edge at least.
+            Reveal::Pending => {
+                self.reveal = None;
+                tx.scroll_into_view_in(scroll_key(&self.key), tab_key(&self.key, id));
+            }
+            Reveal::Clear => self.reveal = None,
             Reveal::To(x) => {
                 self.reveal = None;
                 tx.scroll_to_instant(scroll_key(&self.key), x, 0.0);
+                self.probe.revealed();
             }
         }
     }

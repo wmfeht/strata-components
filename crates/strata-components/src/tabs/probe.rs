@@ -41,6 +41,11 @@ pub(super) struct Probe {
     /// tab button and the gap before it), as last built.
     fade: Rc<Cell<f32>>,
     trailing: Rc<Cell<f32>>,
+    /// A wheel over a tab since the last tick: the user scrolled, so a reveal not yet landed
+    /// stands down.
+    wheeled: Rc<Cell<bool>>,
+    /// A reveal's jump went out in this frame's tick, so the screen doesn't show it yet.
+    revealing: Rc<Cell<bool>>,
 }
 
 impl Default for Probe {
@@ -53,6 +58,8 @@ impl Default for Probe {
             active_id: Rc::new(Cell::new(None)),
             fade: Rc::new(Cell::new(0.0)),
             trailing: Rc::new(Cell::new(0.0)),
+            wheeled: Rc::new(Cell::new(false)),
+            revealing: Rc::new(Cell::new(false)),
         }
     }
 }
@@ -97,6 +104,32 @@ impl Probe {
         if active.is_none() {
             self.active_id.set(None);
         }
+    }
+
+    /// A wheel reached a tab (`wheel.rs`), whichever way it scrolls.
+    pub(super) fn note_wheel(&self) {
+        self.wheeled.set(true);
+    }
+
+    /// Whether a wheel reached a tab since the last call.
+    pub(super) fn take_wheel(&self) -> bool {
+        self.wheeled.replace(false)
+    }
+
+    /// A tick begins a frame: the last frame's jump, if any, now shows.
+    pub(super) fn frame_begins(&self) {
+        self.revealing.set(false);
+    }
+
+    /// A reveal's jump went out in this frame's tick.
+    pub(super) fn revealed(&self) {
+        self.revealing.set(true);
+    }
+
+    /// Whether a reveal's jump went out in this frame, unseen yet: a wheel in the same frame
+    /// must override it with a jump of its own, from where the screen shows the strip.
+    pub(super) fn revealing(&self) -> bool {
+        self.revealing.get()
     }
 
     /// How far the viewport has scrolled, in points.

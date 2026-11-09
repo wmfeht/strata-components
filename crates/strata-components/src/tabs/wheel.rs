@@ -9,7 +9,10 @@
 //!   before the strip's viewport (probe 2 in `strata-spikes/c7-probes`); a wheel over the gap
 //!   between two tabs reaches none of them and scrolls nothing;
 //! - the offset is read from where hidden markers drew (`probe.rs`, with its caveats);
-//! - a mostly sideways gesture is left to the viewport, which scrolls it itself.
+//! - a mostly sideways gesture is left to the viewport, which scrolls it itself, except in the
+//!   frame a reveal's jump went out (`state.rs`), which it would undo;
+//! - any wheel over a tab cancels a reveal still to land, so the user's scroll wins. A wheel over
+//!   the gap between two tabs reaches no tab and doesn't.
 
 use rune::{El, Tx, WheelEvent};
 
@@ -19,12 +22,19 @@ use super::probe::Probe;
 pub(super) fn sideways<S: 'static>(tab: El, probe: &Probe, scroll: String) -> El {
     let probe = probe.clone();
     tab.on_wheel(move |_: &mut S, ev: WheelEvent, tx: &mut Tx| {
-        if ev.dy.abs() <= ev.dx.abs() {
+        // The user's scroll wins over a reveal still to land (`state.rs`), whichever way.
+        probe.note_wheel();
+        let sideways = ev.dy.abs() <= ev.dx.abs();
+        // A sideways gesture is the viewport's, unless a reveal's jump went out this frame: the
+        // jump would land after it and undo it, so this wheel jumps instead, from where the
+        // screen shows the strip, and lands last (review 2).
+        if sideways && !probe.revealing() {
             return false;
         }
-        let offset = probe.offset();
-        // A wheel turned down (content moving up, `dy` negative) shows what is to the right.
-        let to = (offset - ev.dy).max(0.0);
+        // A wheel turned down (content moving up, `dy` negative) shows what is to the right;
+        // one moving content right (`dx` positive) shows what is to the left.
+        let delta = if sideways { ev.dx } else { ev.dy };
+        let to = (probe.offset() - delta).max(0.0);
         tx.scroll_to_instant(scroll.clone(), to, 0.0);
         true
     })

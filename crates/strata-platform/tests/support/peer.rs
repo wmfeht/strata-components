@@ -113,8 +113,8 @@ impl Peer {
     /// Whether an event passing `pred` came from line `mark` on, waiting up to `wait`. For
     /// what must not happen (a cancelled drag's drop): it doesn't move `wait_event`'s place.
     #[cfg_attr(
-        not(feature = "dnd"),
-        expect(dead_code, reason = "only P1's session tests, behind dnd, use it")
+        not(any(feature = "dnd", feature = "clipboard")),
+        expect(dead_code, reason = "only P1's and P2's session tests use it")
     )]
     pub fn saw_since(&self, mark: usize, wait: Duration, pred: impl Fn(&Event) -> bool) -> bool {
         let deadline = Instant::now() + wait;
@@ -311,6 +311,13 @@ impl Peer {
     }
 
     /// X11: become the clipboard manager; with `answer: false`, one that never answers.
+    #[cfg_attr(
+        not(feature = "clipboard"),
+        expect(
+            dead_code,
+            reason = "only P2's session tests, behind clipboard, use it"
+        )
+    )]
     pub fn clipboard_manager(&self, answer: bool) {
         self.request(Command::ClipboardManager { answer });
     }

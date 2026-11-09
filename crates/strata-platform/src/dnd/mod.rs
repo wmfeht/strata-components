@@ -50,6 +50,13 @@
 //!   no proof reaches keeps its capture until the window's next press or focus change.
 //!   Upstream Rune `dev` (44 commits past the pin) still has no way to end it. "Rune's
 //!   capture on Wayland" below lists what remains. Tests guard it at the pinned Rune rev.
+//!
+//!   **Re-check at the next Rune bump:** upstream #408 (`dece2aff`, past the pin) rewrites how
+//!   Rune holds a press (`capture::Held` replaces the runtime's capture fields). The Escape
+//!   relies on Rune's `cancel_drag` finding the held element by its path and answering with a
+//!   cancelled `Up`: run P1's session suites (`wayland_runes_capture_ends_when_the_drag_starts`
+//!   and the capture paths below) on the new rev before adopting it. At `dev` `f3160022` there
+//!   is still no public way to end a capture.
 //! - **U3** (draft, not filed): file-drop acceptance sees no app state and no drag identity.
 //! - **U-P1-1** (draft, not filed): an element has one handler of each kind, and a shim
 //!   can't read an element's key. So [`Dnd::drag_source`] takes the element's `on_drag` and
@@ -137,7 +144,9 @@
 //! # For X2 (wiring components to P1)
 //!
 //! - Zones need keys: a W1 `DropZone` carries none, and [`Dnd::drop_target`] needs one
-//!   unique in the window (U-P1-1). Key the element and pass the same key.
+//!   unique in the window (U-P1-1). Key the element and pass the same key, or, for a key
+//!   unique only inside a keyed ancestor (rows inside their list), [`Dnd::drop_target_in`]
+//!   with that ancestor's key as the scope.
 //! - C1b's pointer intent owns the row's `on_drag`, so a row can't take
 //!   [`Dnd::drag_source`]. From C1b's begin-drag intent call [`Dnd::start_drag`] with the
 //!   row's `Drag` and its key, and route every phase through [`Dnd::owns`] first, ignoring

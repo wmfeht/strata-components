@@ -169,7 +169,7 @@
 //! | Bullet (opening words) | Checked by |
 //! | --- | --- |
 //! | Ctrl+F, or the pane's filter button, reveals the filter field… | script `ctrl-f-opens` (the page binds both) |
-//! | With Type to search on, typing a printable character… opens the filter with that character | script `type-to-search`; test `a_burst_of_type_to_search_keys_all_reach_the_query` (which keys, and the preference, are Strata's) |
+//! | With Type to search on, typing a printable character… opens the filter with that character | scripts `type-to-search`, `type-replaces-query` (from a result, the key replaces the query, as Strata's `show_filter_with_query` does); test `a_burst_of_type_to_search_keys_all_reach_the_query` (which keys, and the preference, are Strata's) |
 //! | With Type to search on, `/`… opens an empty filter | script `slash-opens-empty` |
 //! | Escape in the filter field, or clearing the query, restores the normal listing… | scripts `escape-restores`, `clearing-restores` (the listing's cursor row has the keyboard after); unit `closing_or_clearing_gives_back_the_listing_and_its_selection` (hidden files are Strata's) |
 //! | With a pinyin input method composing…, Escape cancels only the composition | test `escape_while_composing_keeps_the_filter_open` |

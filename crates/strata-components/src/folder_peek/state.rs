@@ -3,6 +3,8 @@
 
 use std::rc::Rc;
 
+use rune::Live;
+
 use super::place::{Placement, place};
 use crate::collection::element::{RestReport, RestView};
 use crate::contract::{EntryId, Rect};
@@ -50,6 +52,41 @@ struct Open {
     place: Placement,
     /// The folder's row reports the pointer resting on it.
     row: bool,
+    /// The sideways scroll's offset as the peek opened ([`FolderPeek::sideways`]).
+    ///
+    /// [`FolderPeek::sideways`]: super::FolderPeek::sideways
+    sideways_at: f32,
+}
+
+/// Live values the card and a sideways scroll share, written as frames draw, with no view
+/// run.
+#[derive(Clone)]
+pub(super) struct Lives {
+    /// The sideways scroll's offset, where the host follows one ([`FolderPeek::sideways`]).
+    ///
+    /// [`FolderPeek::sideways`]: super::FolderPeek::sideways
+    pub(super) sideways: Live<f32>,
+    /// The card's opacity: 0 from the frame a sideways scroll moves its folder until the peek
+    /// closes, so the card is never drawn where it no longer belongs.
+    pub(super) shown: Live<f32>,
+}
+
+impl Default for Lives {
+    fn default() -> Self {
+        Self {
+            sideways: Live::new(0.0),
+            shown: Live::new(1.0),
+        }
+    }
+}
+
+impl std::fmt::Debug for Lives {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Lives")
+            .field("sideways", &self.sideways.get())
+            .field("shown", &self.shown.get())
+            .finish()
+    }
 }
 
 /// The folder peek's state, which the host keeps and passes by accessor.
@@ -66,6 +103,7 @@ pub struct PeekState {
     card: bool,
     /// The host has an overlay up (a menu, popover, dialog or palette).
     covered: bool,
+    pub(super) lives: Lives,
 }
 
 impl PeekState {
@@ -153,6 +191,7 @@ impl PeekState {
             return Change::None;
         };
         self.serial += 1;
+        self.lives.shown.set(1.0);
         self.open = Some(Open {
             target: PeekTarget {
                 collection: collection.into(),
@@ -162,6 +201,7 @@ impl PeekState {
             },
             place,
             row: origin == Origin::Hover,
+            sideways_at: self.lives.sideways.get(),
         });
         Change::Opened
     }
@@ -200,6 +240,26 @@ impl PeekState {
             return Change::None;
         }
         self.open(r.collection.clone(), r.id, Origin::Hover, r.row, r.viewport)
+    }
+
+    /// The sideways offset the open peek opened at.
+    pub(super) fn sideways_at(&self) -> Option<f32> {
+        self.open.as_ref().map(|o| o.sideways_at)
+    }
+
+    /// Where the open peek's anchor was drawn: a peek whose folder's row was carried sideways
+    /// (a sideways scroll, a relayout) closes, since its card was placed once, as it opened.
+    pub(super) fn anchor_drawn(&mut self, x: f32) -> Change {
+        let Some(o) = &self.open else {
+            return Change::None;
+        };
+        let placed = o.place.x - super::place::CARD_GAP;
+        if (x - placed).abs() > 0.5 {
+            self.close();
+            Change::Closed
+        } else {
+            Change::None
+        }
     }
 
     /// What a collection's viewport shows now: a peek whose folder left it closes, whether the

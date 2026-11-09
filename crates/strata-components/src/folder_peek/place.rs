@@ -57,7 +57,9 @@ pub fn place(item: Rect, viewport: Rect) -> Option<Placement> {
         (Side::Left, left)
     } else {
         // Ends `MARGIN` short of the trailing edge, so Rune never flips it; in a viewport
-        // less than `MARGIN` wider than the card, it overhangs the leading edge by the rest.
+        // less than `MARGIN` wider than the card (256 to 263 pt), it overhangs by the rest: at
+        // the leading edge, or at the trailing edge where Rune holds it 8 pt inside the window
+        // (a pane at x 0).
         (Side::Over, viewport.x + viewport.w - MARGIN - WIDTH)
     };
     Some(Placement {

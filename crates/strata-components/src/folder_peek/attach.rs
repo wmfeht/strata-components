@@ -19,6 +19,7 @@ use crate::contract::Rect;
 pub(super) fn rows<S: 'static>(sh: &Rc<Shared<S>>, base: Collection<S>) -> Collection<S> {
     let (delays, report, version, part, view) =
         (sh.clone(), sh.clone(), sh.clone(), sh.clone(), sh.clone());
+    let drawn = sh.clone();
     base.rest(
         Rest::new(
             move |s: &S, rcx: &RowCx<'_>| {
@@ -63,10 +64,17 @@ pub(super) fn rows<S: 'static>(sh: &Rc<Shared<S>>, base: Collection<S>) -> Colle
             },
             move |s: &S, rcx: &RowCx<'_>| {
                 let dx = anchor_dx(&part, s, rcx)?;
+                let drawn = drawn.clone();
                 Some(
                     el().key(anchor_key(rcx.scope))
                         .pin(Some(dx), Some(0.0), None, Some(0.0))
-                        .w(0.0),
+                        .w(0.0)
+                        // A row carried sideways (C4's sideways scroll) closes the peek, a frame
+                        // after; [`FolderPeek::sideways`] hides the card in the frame itself.
+                        .on_drawn_layout_tx(move |s: &mut S, r, tx| {
+                            let change = (drawn.get_mut)(s).anchor_drawn(r[0]);
+                            drawn.changed(s, change, tx);
+                        }),
                 )
             },
         ),

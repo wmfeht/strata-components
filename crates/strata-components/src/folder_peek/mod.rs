@@ -49,6 +49,11 @@
 //!   start in it ends: a sidebar row, a tab, another pane, a P1 or X2 system drag. The folder
 //!   a drag is dropped on then never peeks until the pointer arrives on a row again. (A drag of
 //!   the collection's own holds by itself.)
+//! - Call `CollectionState::hold_rest` on each peeking collection when the preference turns
+//!   peeking on or off, so a rest under way then never opens a peek.
+//! - Wrap the sideways scroll around the collection (what C4's `ListTable::build` returns)
+//!   in [`FolderPeek::sideways`]: a sideways scroll closes the peek, and its card is never drawn
+//!   moved.
 //! - Call [`PeekState::set_covered`] while an overlay covers the collections and back when it
 //!   goes: a context menu (C21), a popover (`rune_kit::Popover`), a dialog (C15), the search
 //!   palette (C17), anything over the rows with or without a scrim. Rune counts the rows under
@@ -72,8 +77,8 @@
 //! - **A peek starts only from the pointer arriving on a folder**, as Strata's starts only from
 //!   a motion enter (C1e's rest hook): not on a folder a scroll carries under a parked pointer,
 //!   one a drag was dropped on, nor one under a parked pointer when peeking turns on; moving
-//!   inside the row doesn't count, leaving it for more than its 80 ms leave delay and coming
-//!   back does.
+//!   inside the row doesn't count, leaving it (for another row, or out of the collection) for
+//!   more than its 80 ms leave delay and coming back does.
 //! - **A peek closes when its folder leaves the view** (scrolled out, unmounted, removed),
 //!   whether the pointer or a key opened it. Rune's `on_visible_rows` gives no transaction, so
 //!   the host's [`FolderPeek::on_change`] hears that close with one whose scrolls and wakes go
@@ -94,7 +99,9 @@
 //! # Deviations
 //!
 //! 1. The card keeps 8 pt inside the viewport's trailing edge, and opens left only 8 pt clear
-//!    of the window's leading edge (Rune's anchored margin); Strata lets it touch them.
+//!    of the window's leading edge (Rune's anchored margin); Strata lets it touch them. In a
+//!    viewport 256 to 263 pt wide the card still shows (Strata shows it at 262) and hangs past
+//!    it by up to 8 pt: past the trailing edge when the pane starts at the window's edge.
 //! 2. The entrance is `HoverCard`'s, a fade and a 0.96 scale from its top-left corner on
 //!    either side; Strata slides from the item's side over 150 ms.
 //! 3. `HoverCard`'s 4 pt inner padding, raised surface and elevation, where Strata's header is
@@ -117,6 +124,9 @@
 //!    Strata's plain click leaves a pending peek running.
 //! 10. A quick out and back (under the 80 ms leave delay) is no leave to Rune, so it doesn't
 //!     restart a folder's wait; Strata's motion enter would.
+//! 11. A sideways scroll of the list closes the peek (owner ruling): the card is hidden in the
+//!     frame the scroll moves the folder's row ([`FolderPeek::sideways`]), and the peek closes
+//!     on the next. Strata's card stays where it opened, in its overlay.
 //!
 //! # Rune drafts (not filed)
 //!
@@ -144,9 +154,10 @@
 //!   drawer. Ask: a boundary element for flip and clamp, as Floating UI's `boundary`. Related:
 //!   #362 (report the side a placement flipped to).
 //!
-//! Upstream past the pin (checked 2026-11-09, dev 10 commits past the pin): no change to
-//! `HoverCard`, `hover_delays` or hover input; `c650fe0` adds `Tx::clock` and `Tx::wake_at`,
-//! not adopted.
+//! Upstream past the pin (checked 2026-11-09 at `26769da`, 49 commits past it): U-C22-1, U-C22-2
+//! and U-C22-3 still stand there. Hover input moved to new press and focus types with the same
+//! rule (every hit under the pointer), `HoverCard` is unchanged, and anchoring only gained
+//! right-to-left mirroring. `c650fe0` adds `Tx::clock` and `Tx::wake_at`, not adopted.
 //!
 //! Work package: C22, `docs/work/phase-1-leaves/C22-folder-peek.md`.
 //!
@@ -410,6 +421,25 @@ impl<S: 'static> FolderPeek<S> {
             Some(bounds) => attach::clip(viewport, bounds),
             None => viewport,
         }
+    }
+
+    /// Follows the sideways scroll `scroll` around the collection (the element C4's
+    /// `ListTable::build` returns): from the frame a sideways scroll moves the peeked folder,
+    /// its card is hidden, and the peek closes on the next frame (owner ruling; Strata's card
+    /// stays where it opened, in its overlay). Without it a sideways scroll still closes the
+    /// peek, a frame late, with the card drawn moved in that frame. It sets the scroll's
+    /// `on_scroll_offset`.
+    pub fn sideways(&self, s: &S, scroll: El) -> El {
+        let st = (self.sh.get)(s);
+        let lives = st.lives.clone();
+        let at = st.sideways_at();
+        scroll.on_scroll_offset(move |p: rune::ScrollPos| {
+            let x = p.offset[0];
+            lives.sideways.set(x);
+            if at.is_some_and(|at| (x - at).abs() > 0.5) {
+                lives.shown.set(0.0);
+            }
+        })
     }
 
     /// The part of the window the collection shows itself in, in window points, when that is

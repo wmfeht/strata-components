@@ -187,3 +187,15 @@ fn a_peek_whose_folder_leaves_the_view_closes() {
     assert_eq!(st.view(&view("files", &[2, 3, 4])), Change::Closed);
     assert_eq!(st.target(), None);
 }
+
+// Review round 2, B1-r2: a peek whose folder's row was drawn moved sideways closes.
+#[test]
+fn a_peek_whose_anchor_moved_sideways_closes() {
+    let mut st = on();
+    st.row_rest(&report(1, true));
+    let anchor = st.placement().unwrap().x - super::place::CARD_GAP;
+    assert_eq!(st.anchor_drawn(anchor), Change::None, "where it opened");
+    assert_eq!(st.anchor_drawn(anchor + 0.25), Change::None, "rounding");
+    assert_eq!(st.anchor_drawn(anchor - 40.0), Change::Closed);
+    assert_eq!(st.target(), None);
+}

@@ -47,8 +47,10 @@ pub(super) fn card<S: 'static>(sh: &Rc<Shared<S>>, s: &S) -> Option<El> {
         .build(&look.kit, &mut layer);
     let surface = layer.pop()?;
     let hover = sh.clone();
+    let shown = (sh.get)(s).lives.shown.clone();
     Some(
         surface
+            .live_opacity(&shown)
             .hover_delays(Duration::ZERO, sh.behavior.close)
             .on_hover_change(move |s: &mut S, inside, tx| {
                 let change = (hover.get_mut)(s).card_rest(inside);
@@ -127,16 +129,18 @@ fn body<S: 'static>(sh: &Rc<Shared<S>>, s: &S, target: &PeekTarget, look: &Look)
             PeekStatus::Loading => {}
             PeekStatus::Ready => {
                 list = list.child(
-                    message("peek-empty", look, body_min).child(
+                    message(look, body_min).child(
                         text(labels.empty.clone())
+                            .key("peek-empty")
                             .font(k.ty.ui_compact)
                             .color(k.c.text_muted),
                     ),
                 );
             }
             PeekStatus::Error(why) => {
-                let line = |t: String| {
+                let line = |key: &str, t: String| {
                     text(t)
+                        .key(key)
                         .font(k.ty.ui_compact)
                         .color(k.c.danger.fg)
                         .align(Align::Center)
@@ -144,9 +148,9 @@ fn body<S: 'static>(sh: &Rc<Shared<S>>, s: &S, target: &PeekTarget, look: &Look)
                         .shrink()
                 };
                 list = list.child(
-                    message("peek-error", look, body_min)
-                        .child(line(labels.unreadable.clone()))
-                        .child(line(why.clone())),
+                    message(look, body_min)
+                        .child(line("peek-error", labels.unreadable.clone()))
+                        .child(line("peek-error-message", why.clone())),
                 );
             }
         }
@@ -181,10 +185,10 @@ fn body<S: 'static>(sh: &Rc<Shared<S>>, s: &S, target: &PeekTarget, look: &Look)
     group
 }
 
-/// A line of text centred in the body.
-fn message(key: &str, look: &Look, body_min: f32) -> El {
+/// Lines of text centred in the body: a plain container, so assistive technology hears the
+/// lines, not an unnamed group around them.
+fn message(look: &Look, body_min: f32) -> El {
     col()
-        .key(key)
         .w_full()
         .min_h(body_min - 2.0 * look.space.xs)
         .px(look.space.md)

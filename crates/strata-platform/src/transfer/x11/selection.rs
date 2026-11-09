@@ -248,7 +248,7 @@ impl Actor {
             Cmd::Disown { id } => self.disown(id),
             Cmd::HandOff { deadline, reply } => self.start_hand_off(deadline, reply),
             Cmd::Ready { request, bytes } => self.answer(request, bytes),
-            Cmd::MultiReady { key, index, bytes } => self.multi_ready(key, index, bytes),
+            Cmd::MultiReady { key, target, bytes } => self.multi_ready(key, target, bytes),
             Cmd::KillSelf => {
                 // KillClient on a resource of ours closes our own connection.
                 let _ = self.conn.kill_client(self.win);
@@ -783,6 +783,7 @@ impl Actor {
 
     pub(super) fn expire(&mut self, now: Instant) {
         self.end_hand_off(Some(now), super::HandOff::TimedOut);
+        self.expire_multis(now);
         #[cfg(feature = "dnd")]
         if self
             .hook

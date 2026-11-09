@@ -7,13 +7,15 @@
 //! A pair's data larger than one chunk goes by INCR, each on its own property, as a single
 //! request's does.
 
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use x11rb::NONE;
 use x11rb::protocol::xproto::{Atom, AtomEnum, ConnectionExt as _, PropMode};
 use x11rb::wrapper::ConnectionExt as _;
 
-use super::super::data::SourceSpec;
+use super::super::data::{SourceSpec, WRITE_IDLE};
 use super::super::event::{Event, SourceId};
 use super::selection::Request;
 use super::{Actor, Cmd};
@@ -35,11 +37,37 @@ struct Pair {
     answer: Option<Answer>,
 }
 
-/// A `MULTIPLE` request waiting for its lazy writers.
+/// A `MULTIPLE` request waiting for its lazy writers, until its deadline.
 pub(super) struct Multi {
     key: u64,
     req: Request,
     pairs: Vec<Pair>,
+    deadline: Instant,
+}
+
+impl Multi {
+    pub(super) fn deadline(&self) -> Instant {
+        self.deadline
+    }
+}
+
+/// The most pairs one `MULTIPLE` request may name. A request can carry up to 32k, and each
+/// distinct target costs a round trip for its name; more is refused whole.
+pub(super) const MAX_PAIRS: usize = 1024;
+
+/// How long a `MULTIPLE` request waits for its lazy writers: then the pairs still waiting are
+/// refused and the rest answered, as long as a source write may wait for its reader.
+const WAIT: Duration = WRITE_IDLE;
+
+/// The targets the pairs ask for, each once, in the order first asked.
+pub(super) fn distinct(pairs: &[(Atom, Atom)]) -> Vec<Atom> {
+    let mut seen = Vec::new();
+    for &(t, _) in pairs {
+        if !seen.contains(&t) {
+            seen.push(t);
+        }
+    }
+    seen
 }
 
 /// The pairs of an `ATOM_PAIR` list, or None if it isn't one (an odd count).
@@ -83,12 +111,14 @@ impl Actor {
         let Some(asked) = words.as_deref().and_then(parse_pairs) else {
             return self.notify(&req, NONE);
         };
-        let key = self.next_multi;
-        self.next_multi += 1;
-        let mut pairs = Vec::with_capacity(asked.len());
+        if asked.len() > MAX_PAIRS {
+            return self.notify(&req, NONE);
+        }
+        // Each target once, however often it is asked: one name lookup, one writer run.
+        let mut answers: HashMap<Atom, Option<Answer>> = HashMap::new();
         let mut lazy = Vec::new();
-        for (i, &(target, property)) in asked.iter().enumerate() {
-            let answer = if property == NONE || target == self.atoms.MULTIPLE {
+        for target in distinct(&asked) {
+            let answer = if target == self.atoms.MULTIPLE {
                 Some(Answer::Refused)
             } else if target == self.atoms.TARGETS {
                 let mut list = vec![
@@ -113,45 +143,94 @@ impl Actor {
                             Some(Some(bytes)) => Some(Answer::Bytes(bytes)),
                             Some(None) => Some(Answer::Refused),
                             None => {
-                                lazy.push((i, writer));
+                                lazy.push((target, writer));
                                 None
                             }
                         }
                     }
                 }
             };
-            pairs.push(Pair {
+            answers.insert(target, answer);
+        }
+        let pairs = asked
+            .iter()
+            .map(|&(target, property)| Pair {
                 target,
                 property,
-                answer,
-            });
-        }
-        self.multis.push(Multi { key, req, pairs });
-        for (index, writer) in lazy {
-            // Each writer runs on a worker; its bytes come back as a command.
+                answer: if property == NONE {
+                    Some(Answer::Refused)
+                } else {
+                    answers.get(&target).cloned().flatten()
+                },
+            })
+            .collect();
+        let key = self.next_multi;
+        self.next_multi += 1;
+        self.multis.push(Multi {
+            key,
+            req,
+            pairs,
+            deadline: Instant::now() + WAIT,
+        });
+        // One worker per distinct lazy type, however many pairs ask for it (so at most the
+        // copy's lazy types): a writer that never returns holds its own worker only, the
+        // others answer, and the request is answered by its deadline.
+        for (target, writer) in lazy {
             let mailbox = self.mailbox.clone();
             let spawned = std::thread::Builder::new()
                 .name("transfer-write".into())
                 .spawn(move || {
                     let bytes = writer.get();
-                    let _ = mailbox.post(Cmd::MultiReady { key, index, bytes });
+                    let _ = mailbox.post(Cmd::MultiReady { key, target, bytes });
                 });
             if spawned.is_err() {
-                self.multi_ready(key, index, None);
+                self.multi_ready(key, target, None);
             }
         }
-        self.multi_ready(key, usize::MAX, None);
+        self.settle_if_done(key);
     }
 
-    /// A writer of `MULTIPLE` request `key` finished (`index` past the pairs: none did, just
-    /// check). Once every pair has its answer, the request is answered.
-    pub(super) fn multi_ready(&mut self, key: u64, index: usize, bytes: Option<Arc<[u8]>>) {
+    /// A writer of `MULTIPLE` request `key` finished: every pair asking for `target` has its
+    /// answer.
+    pub(super) fn multi_ready(&mut self, key: u64, target: Atom, bytes: Option<Arc<[u8]>>) {
+        let Some(m) = self.multis.iter_mut().find(|m| m.key == key) else {
+            return;
+        };
+        let answer = bytes.map_or(Answer::Refused, Answer::Bytes);
+        for pair in m.pairs.iter_mut().filter(|p| p.target == target) {
+            pair.answer.get_or_insert_with(|| answer.clone());
+        }
+        self.settle_if_done(key);
+    }
+
+    /// The `MULTIPLE` requests whose deadline passed: their pairs still waiting are refused,
+    /// and they are answered.
+    pub(super) fn expire_multis(&mut self, now: Instant) {
+        let late: Vec<u64> = self
+            .multis
+            .iter()
+            .filter(|m| m.deadline <= now)
+            .map(|m| m.key)
+            .collect();
+        for key in late {
+            self.refuse_waiting(key);
+        }
+    }
+
+    fn refuse_waiting(&mut self, key: u64) {
+        if let Some(m) = self.multis.iter_mut().find(|m| m.key == key) {
+            for pair in &mut m.pairs {
+                pair.answer.get_or_insert(Answer::Refused);
+            }
+        }
+        self.settle_if_done(key);
+    }
+
+    /// Answers request `key` once every pair has its answer.
+    fn settle_if_done(&mut self, key: u64) {
         let Some(m) = self.multis.iter().position(|m| m.key == key) else {
             return;
         };
-        if let Some(pair) = self.multis[m].pairs.get_mut(index) {
-            pair.answer = Some(bytes.map_or(Answer::Refused, Answer::Bytes));
-        }
         if self.multis[m].pairs.iter().any(|p| p.answer.is_none()) {
             return;
         }

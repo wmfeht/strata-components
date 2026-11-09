@@ -83,10 +83,10 @@ enum Cmd {
         deadline: Instant,
         reply: Sender<HandOff>,
     },
-    /// A lazy writer of pair `index` of `MULTIPLE` request `key` finished on a worker.
+    /// The lazy writer of `target`, asked by `MULTIPLE` request `key`, finished on a worker.
     MultiReady {
         key: u64,
-        index: usize,
+        target: Atom,
         bytes: Option<Arc<[u8]>>,
     },
     /// A lazy writer finished on a worker: answer the request that asked for it.
@@ -562,6 +562,7 @@ impl Actor {
             .map(Incoming::deadline)
             .chain(self.outgoing.iter().map(Outgoing::deadline))
             .chain(self.handoff.as_ref().map(handoff::Waiting::deadline))
+            .chain(self.multis.iter().map(multiple::Multi::deadline))
             .chain(hook)
             .min()
     }

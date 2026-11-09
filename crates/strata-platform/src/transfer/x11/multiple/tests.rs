@@ -21,3 +21,12 @@ fn a_refused_pair_gets_none_for_its_property_and_the_rest_stay_as_asked() {
         vec![10, 20, 11, NONE, 12, 22]
     );
 }
+
+#[test]
+fn each_target_is_planned_once_in_the_order_first_asked() {
+    use super::distinct;
+    assert_eq!(
+        distinct(&[(7, 1), (8, 2), (7, 3), (7, 4), (9, 5)]),
+        vec![7, 8, 9]
+    );
+}

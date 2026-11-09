@@ -2988,3 +2988,43 @@ fn a_key_that_moves_the_cursor_during_a_bands_edge_scroll_keeps_its_reveal() {
     rt.pointer_up(x, H - 2.0);
     rt.frame(1.0 / 60.0);
 }
+
+// A collection inside a sideways strip (C2's E7).
+
+/// The collection 400 points into a 500-point sideways strip, so it starts clipped.
+fn view_in_strip(s: &Host, _: &mut Cx<Host>) -> El {
+    col().size(W, H).child(
+        col().key("strip").w_full().h_full().scroll_x().child(
+            rune::row()
+                .h_full()
+                .child(col().key("spacer").w(400.0).h_full())
+                .child(col().w(300.0).h_full().child(collection(s).build(s))),
+        ),
+    )
+}
+
+/// Reveals entry 50 and reports where the strip's spacer and the row then stand.
+fn reveal_in_strip(own: bool) -> (f32, bool) {
+    let mut host = Host::new(200);
+    host.coll.set_own_viewport_reveals(own);
+    let mut rt = Runtime::new(host, view_in_strip, (W, H), Env::new(false, 1.0));
+    rt.frame(0.0);
+    settle(&mut rt);
+    assert_eq!(element(&rt, "spacer").expect("spacer").rect[0], 0.0);
+    rt.update(|s, tx| s.coll.reveal(SCOPE, &s.src, 50, tx));
+    rt.frame(1.0 / 60.0);
+    let spacer = element(&rt, "spacer").expect("spacer").rect[0];
+    let row = element(&rt, "row-50").is_some_and(|r| r.visible[3] >= r.rect[3] - 0.5);
+    (spacer, row)
+}
+
+#[test]
+fn own_viewport_reveals_leave_a_sideways_strip_around_the_collection_where_it_is() {
+    let (spacer, shown) = reveal_in_strip(true);
+    assert_eq!(spacer, 0.0, "the strip stays");
+    assert!(shown, "the row shows in the listing, its full height");
+    // Without them, Rune's reveal request also scrolls the strip, at once (Rune draft U-C2-4).
+    let (spacer, shown) = reveal_in_strip(false);
+    assert!(spacer < -100.0, "the strip jumped: {spacer}");
+    assert!(shown);
+}

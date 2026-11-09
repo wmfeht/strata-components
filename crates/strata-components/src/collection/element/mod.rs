@@ -87,6 +87,12 @@
 //!   descendant (C1c).
 //! - **No cursor reveal on a pointer press.** A key or a tick that moves the cursor scrolls it
 //!   into view; a press moves it only onto what the viewport already shows.
+//! - **Reveals can be kept to the collection's own viewport**
+//!   ([`CollectionState::set_own_viewport_reveals`], C2). A reveal request scrolls a sideways
+//!   viewport around the collection too, at once (Rune draft U-C2-4), so a collection inside a
+//!   strip that glides to it on its own (C2's columns) reveals by an instant offset on its own
+//!   viewport instead, worked out from the geometry. Off by default: other hosts' reveals are
+//!   Rune's, as before.
 //! - **Sticky group headers are an overlay** ([`CollectionState::set_groups`], C1f). Rune
 //!   sticks an element only inside its own virtual row, which would put a whole group (up to
 //!   every entry) in one row, so each group's header is a virtual line of its own and the

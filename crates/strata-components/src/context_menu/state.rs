@@ -101,9 +101,13 @@ impl ContextMenuState {
     }
 
     /// Replaces the open menu's model, as when a lookup finishes (Open With…). Open
-    /// submenus stay open while the new model still has a submenu at their place. Rows are
-    /// keyed by position (rune-kit's), so keep rows above the focused one where they were:
-    /// replace a row in place rather than insert one above it.
+    /// submenus stay open while the new model still has a submenu at their place.
+    ///
+    /// Rows are keyed by their place in the menu (rune-kit's, counting the header, labels and
+    /// separators), and the keyboard follows the key. Replacing a row in place keeps the
+    /// keyboard on its action; adding or removing an entry above the focused row hands the
+    /// keyboard to another action, or to the first row when its key is now a separator or a
+    /// label. So reserve a row that a lookup will fill (insensitive) rather than add it then.
     pub fn update_model(&mut self, model: MenuModel) {
         if let Some(open) = &mut self.open {
             let keep = (1..=open.submenu.len())

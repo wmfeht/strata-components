@@ -13,6 +13,16 @@
       "button": "secondary"
     },
     {
+      "t": 0.3,
+      "type": "tap",
+      "key": "c21-menu-item9"
+    },
+    {
+      "t": 0.35,
+      "type": "up",
+      "key": "c21-menu-item9-sub-item0"
+    },
+    {
       "t": 0.4,
       "type": "up",
       "key": "c21-menu-item12"

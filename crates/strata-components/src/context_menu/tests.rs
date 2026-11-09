@@ -1014,3 +1014,115 @@ fn a_paste_lands_only_in_the_edit_it_was_asked_for() {
     step(&mut rt);
     assert_eq!(rt.state.edit.text, "another name");
 }
+
+#[test]
+fn chords_in_a_field_follow_runes_rule_shift_menu_opens_super_menu_doesnt() {
+    // A field's Menu key is Rune's (`context_menu_key`), which hands it to the field's own
+    // `on_secondary_press`: plain or with Shift, never with Ctrl, Alt or Super.
+    for (mods, opens) in [
+        (
+            Mods {
+                shift: true,
+                ..Mods::default()
+            },
+            true,
+        ),
+        (
+            Mods {
+                logo: true,
+                ..Mods::default()
+            },
+            false,
+        ),
+        (
+            Mods {
+                ctrl: true,
+                cmd: true,
+                ..Mods::default()
+            },
+            false,
+        ),
+    ] {
+        let (mut rt, _) = with_clipboard(Some("x"));
+        rt.update(|s, _| s.edit.focused = true);
+        step(&mut rt);
+        press(&mut rt, Key::ContextMenu, mods);
+        assert_eq!(rt.state.fields.is_open(), opens, "{mods:?}");
+    }
+}
+
+#[test]
+fn the_collections_menu_chords_that_open_nothing_stop_at_menu_keys() {
+    // Passed on, Rune would hand them to the collection's own secondary press at its
+    // bottom-left, which opens nothing only because that point is on the viewport's bottom
+    // edge, outside it. Taken here, nothing behind them depends on that.
+    use crate::collection::element::{Ctx, Flow, KeyController, KeyInput};
+    let src = listing(5);
+    let rows = UniformRows::new(5, 30.0, 300.0);
+    let mut sel = Selection::new();
+    sel.select_only(&src, 1);
+    let mut keys = MenuKeys::alone(AnchorEdge::Center);
+    for (key, mods) in [
+        (
+            Key::ContextMenu,
+            Mods {
+                shift: true,
+                ..Mods::default()
+            },
+        ),
+        (
+            Key::ContextMenu,
+            Mods {
+                ctrl: true,
+                cmd: true,
+                ..Mods::default()
+            },
+        ),
+        (
+            Key::Function(10),
+            Mods {
+                shift: true,
+                ctrl: true,
+                cmd: true,
+                ..Mods::default()
+            },
+        ),
+    ] {
+        let ev = KeyEvent {
+            key: key.clone(),
+            mods,
+        };
+        let input = KeyInput::new(&ev);
+        let mut cx = Ctx::new(
+            &src,
+            &rows,
+            Rect::new(0.0, 0.0, 300.0, 150.0),
+            0.0,
+            &mut sel,
+        );
+        assert_eq!(keys.key(&input, &mut cx), Flow::Handled, "{key:?} {mods:?}");
+        assert!(cx.effects().is_empty(), "and opens nothing");
+    }
+}
+
+#[test]
+fn a_model_update_that_replaces_a_row_in_place_keeps_the_keyboard_on_its_action() {
+    // browser/context-menu: "focus stays there while Open With lookup finishes". Rows are
+    // keyed by position (U-C21-5), so this holds when the lookup replaces Open With… where it
+    // was; a row added above the focused one gives the focus to another (see update_model).
+    let mut rt = opened();
+    key(&mut rt, Key::Down);
+    assert_eq!(focused(&rt).as_deref(), Some("m-item6"));
+    rt.update(|s, _| {
+        let mut m = model();
+        m.sections[0].items[1] = Item::new("with", "Open With…");
+        s.menu.update_model(m);
+    });
+    step(&mut rt);
+    let row = live(&rt, "m-item6").unwrap();
+    assert_eq!((row.focused, row.label.as_deref()), (true, Some("Send to")));
+    assert!(
+        live(&rt, "m-item4").unwrap().focusable,
+        "Open With… is sensitive now"
+    );
+}

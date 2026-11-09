@@ -102,7 +102,8 @@ pub fn menu_chord(ev: &KeyEvent) -> Option<bool> {
 /// element's bottom-left (`context_menu_key`), which for a collection is outside its
 /// viewport. The collection's keys come first, so this takes them there: it emits
 /// [`Intent::ContextMenu`] with [`keyboard_anchor`]'s target, and a zero-size rect at its
-/// point as `anchor`, as C1b sends a press. A held key opens one menu.
+/// point as `anchor`, as C1b sends a press. A held key opens one menu. The chords that open
+/// none ([`menu_chord`]'s `Some(false)`) stop here too, so the page never hears them.
 pub struct MenuKeys {
     inner: Option<Box<dyn KeyController>>,
     edge: AnchorEdge,
@@ -132,7 +133,10 @@ impl KeyController for MenuKeys {
                 }
                 Flow::Handled
             }
-            Some(false) => Flow::Pass,
+            // Passed on, Rune would hand Shift+Menu (its rule lets Shift through) to the
+            // collection's own secondary press at its bottom-left, which opens nothing only
+            // because that point lies on the viewport's bottom edge, outside it. Taken here.
+            Some(false) => Flow::Handled,
             None => match self.inner.as_mut() {
                 Some(k) => k.key(input, cx),
                 None => Flow::Pass,

@@ -55,6 +55,14 @@ mod c21 {
         press_with(rt, key, Mods::default());
     }
 
+    /// A right-click at window point (`x`, `y`).
+    fn right_click(rt: &mut Runtime<Gallery>, x: f32, y: f32) {
+        rt.secondary_down(x, y);
+        rt.frame(FRAME);
+        rt.secondary_up(x, y);
+        run(rt, 0.2);
+    }
+
     fn status(rt: &Runtime<Gallery>) -> String {
         rt.state.c21.status.clone()
     }
@@ -62,34 +70,6 @@ mod c21 {
     fn tab_into_the_list(rt: &mut Runtime<Gallery>) {
         for _ in 0..3 {
             press(rt, Key::Tab);
-        }
-    }
-
-    // browser/context-menu: "Menu or Shift+F10 with Hyper or Meta held opens the menu as
-    // without them." Rune reports Super, Hyper and Meta alike as `logo`. The script
-    // `menu-key-super` sends the keys with `"logo": true`; a script's `{"hold": ..}` reaches
-    // pointer events only, not keys.
-    #[test]
-    fn menu_and_shift_f10_with_super_held_open_the_menu() {
-        let logo = Mods {
-            logo: true,
-            ..Mods::default()
-        };
-        for (key, mods) in [
-            (Key::ContextMenu, logo),
-            (
-                Key::Function(10),
-                Mods {
-                    shift: true,
-                    ..logo
-                },
-            ),
-        ] {
-            let mut rt = mount("c21-start-light");
-            tab_into_the_list(&mut rt);
-            press_with(&mut rt, key.clone(), mods);
-            assert_eq!(status(&rt), "Menu 1 on Notes.md", "{key:?}");
-            assert!(element(&rt, "c21-menu-menu").is_some());
         }
     }
 
@@ -167,5 +147,58 @@ mod c21 {
         press(&mut rt, Key::Escape);
         assert!(!rt.state.c21.rename_menu);
         assert_eq!(focused(&rt).as_deref(), Some("c21-rename"));
+    }
+
+    // browser/context-menu: "Right-clicking an entry anywhere in a long, scrolled list shows
+    // its menu at the click." The script `scrolled-list` checks the target; this, the point.
+    #[test]
+    fn a_right_click_in_a_scrolled_list_opens_the_menu_at_the_click() {
+        let mut rt = mount("c21-start-light");
+        tab_into_the_list(&mut rt);
+        press(&mut rt, Key::End);
+        run(&mut rt, 0.5);
+        let [x, y, w, h] = element(&rt, "row-40").expect("revealed").visible;
+        let (px, py) = (x + w * 0.3, y + h / 2.0);
+        right_click(&mut rt, px, py);
+        assert_eq!(status(&rt), "Menu 1 on scan-36.pdf");
+        let at = rt.state.c21.menu.at().expect("open");
+        assert_eq!((at.x, at.y), (px, py));
+    }
+
+    // browser/context-menu: "In a small window, right-clicking an entry near the bottom edge
+    // opens the menu at the click." Where it draws (flipped above, slid left) is the
+    // `c21-edge` golden's.
+    #[test]
+    fn a_right_click_near_the_bottom_right_corner_opens_the_menu_at_the_click() {
+        let mut rt = mount("c21-start-light");
+        right_click(&mut rt, 900.0, 610.0);
+        assert_eq!(status(&rt), "Menu 1 on scan-18.pdf");
+        let at = rt.state.c21.menu.at().expect("open");
+        assert_eq!((at.x, at.y), (900.0, 610.0));
+        let menu = element(&rt, "c21-menu-menu").expect("drawn");
+        let [mx, my, mw, mh] = menu.rect;
+        assert!(
+            mx >= 0.0 && my >= 0.0 && mx + mw <= 960.0 && my + mh <= 640.0,
+            "inside"
+        );
+    }
+
+    // browser/context-menu: "Screen readers get each row's label as its name and its shortcut
+    // as its description." The shortcut is the item's keyboard-shortcut property (the golden
+    // trees leave shortcuts out, as each platform spells them its way).
+    #[test]
+    fn a_rows_shortcut_is_its_keyboard_shortcut_property() {
+        let rt = mount("c21-item-light");
+        let tree = rt.accessibility_json();
+        fn find<'a>(v: &'a serde_json::Value, key: &str) -> Option<&'a serde_json::Value> {
+            if v["key"] == key {
+                return Some(v);
+            }
+            v["children"].as_array()?.iter().find_map(|c| find(c, key))
+        }
+        let copy = find(&tree, "c21-menu-item12").expect("Copy");
+        assert_eq!(copy["name"], "Copy");
+        assert_eq!(copy["shortcut"], "Ctrl+C");
+        assert!(copy.get("description").is_none(), "not the description");
     }
 }

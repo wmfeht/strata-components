@@ -41,17 +41,22 @@
 //!   centre (List), vertically centred; the background menu at the viewport's centre. A cursor
 //!   scrolled out of view is revealed first. Rune's own Menu-key handling would open the
 //!   collection's `on_secondary_press` at the collection's bottom-left, outside its viewport;
-//!   the collection's keys come first, so `MenuKeys` takes the keys there.
+//!   the collection's keys come first, so `MenuKeys` takes the keys there, the chords that
+//!   open no menu included (Rune's rule would let Shift+Menu through to that press).
 //! - **Text fields.** [`FieldMenu::hook`] is the field's `on_secondary_press`. Without one, at
 //!   Rune 5d421fd, a right-click, Menu or Shift+F10 on a field asks for Rune's native field
 //!   menu, which shows nothing on Linux. Rune hands the field's Menu key and Shift+F10 to the
 //!   hook too, at the field's bottom-left. C5's inline editor sends `RenameIntent::FieldMenu {
 //!   id, at }` instead: the host calls [`FieldMenu::open`] and `RenameState::menu_opened`, and
-//!   `menu_closed` from [`FieldMenu::on_close`]. rune-kit's `TextInput`, `TextArea` and
+//!   `menu_closed` from [`FieldMenu::on_close`]. The host's poll calls [`FieldMenu::check`]:
+//!   a menu whose field went (the entry deleted mid-rename) closes and tells `on_close`. A
+//!   field's chords are Rune's: Menu plain or with Shift, never with Ctrl, Alt or Super.
+//!   rune-kit's `TextInput`, `TextArea` and
 //!   `TextField` take no `on_secondary_press` for their inner field, so they get no menu until
 //!   Rune adds one (U-C21-2): C6's entry, and C17's, C18's and C20's fields, stay as they are.
-//! - **The chooser's minimum size.** [`chooser_minimum`]: `3 × W + 16` wide and the tallest
-//!   submenu plus 16 tall, required while menus stay in the window (S1, Q5).
+//! - **The chooser's minimum size.** [`chooser_minimum`] measures the chooser's menus as drawn:
+//!   a menu's width plus twice its widest submenu's, plus 16 pt, and the tallest submenu plus
+//!   16 pt, required while menus stay in the window (S1, Q5; `3 × W + 16` when all are `W`).
 //!
 //! # Placement
 //!
@@ -70,16 +75,18 @@
 //! outside closes it. C21 adds:
 //!
 //! - Right, Enter or Space on a submenu's row opens it with its first row focused; Left closes
-//!   it and refocuses the row; Escape in it closes the whole menu. A submenu the keyboard opens
-//!   is a modal of its own, so the keyboard moves into it, and back to its row as it closes (a
-//!   press outside it closes it alone). A click opens a submenu that isn't, so the parent's
-//!   rows stay clickable.
+//!   it and refocuses the row; Escape in it closes the whole menu. The keys open it as a click
+//!   does, then send a Tab, which moves the keyboard into it (the next focus group in the
+//!   menu's modal); its `focus_return` brings the keyboard back to its row as it closes. So
+//!   the parent's rows stay clickable, and a press outside both closes the whole menu. (A
+//!   submenu of its own modal would take the keyboard as well, but swallows a press outside
+//!   it: a click on the parent's Copy would run nothing.)
 //! - Tab and Shift+Tab move as Down and Up, as GTK's menus do (Rune's Tab leaves a focus group).
-//! - Ctrl+A stays in the menu, so the view's Select All doesn't run under it.
+//! - Ctrl+A stays in the menu, so the window's Select All doesn't run under it.
 //!
 //! After a pointer input, the focused first row shows its highlight on the first arrow, which
-//! then doesn't move (rune-kit's NSMenu model); Enter runs it at once. After a key, the
-//! highlight shows at once.
+//! then doesn't move (rune-kit's NSMenu model; a deviation, below); Enter runs it at once.
+//! After a key, the highlight shows at once.
 //!
 //! # Look
 //!
@@ -99,31 +106,31 @@
 //! | Right-clicking an unselected entry makes it the only selected entry… | script `pointer-open` (C1b selects; C21 opens) |
 //! | Right-clicking an entry inside a multi-selection keeps the whole selection | script `pointer-multi` |
 //! | Menu alone or Shift+F10 opens the menu of the focused selected entry… | script `menu-key`; unit `menu_and_shift_f10_…` |
-//! | Ctrl+Shift+F10, Shift+Menu, and Ctrl+Menu open no menu | script `menu-chords`; unit `menu_and_shift_f10_…` |
-//! | Menu or Shift+F10 with Hyper or Meta held opens the menu… | script `menu-key-super`; test `menu_and_shift_f10_with_super_held_open_the_menu`. Rune reports Super, Hyper and Meta as one `logo` |
+//! | Ctrl+Shift+F10, Shift+Menu, and Ctrl+Menu open no menu | script `menu-chords`; unit `menu_and_shift_f10_…`, `the_collections_menu_chords_…`. In a text field the chords are Rune's: Shift+Menu opens the field menu (unit `chords_in_a_field_…`) |
+//! | Menu or Shift+F10 with Hyper or Meta held opens the menu… | script `menu-key-super` (`"logo": true` on the keys); unit `menu_and_shift_f10_…`. Rune reports Super, Hyper and Meta as one `logo`. In a text field Super+Menu opens nothing (Rune's rule; unit `chords_in_a_field_…`) |
 //! | With several entries selected, Menu or Shift+F10 opens the multi-selection menu… | script `menu-key-multi` |
 //! | With nothing selected, Menu or Shift+F10 opens the active pane's background menu | script `background`; unit `the_keyboard_anchor_…` |
 //! | A keyboard-opened item menu anchors to the entry… right edge… center in List | unit `the_keyboard_anchor_…`, `a_cursor_out_of_view_…`; test `the_menu_key_reveals_…`; golden `c21-keyboard-anchor` |
-//! | While a text input has focus, Menu and Shift+F10 open the input's text-editing menu… | script `field-keys`; unit `menu_and_shift_f10_in_a_focused_field_…`. Partial: core text fields only (U-C21-2) |
+//! | While a text input has focus, Menu and Shift+F10 open the input's text-editing menu… | script `field-keys`; unit `menu_and_shift_f10_in_a_focused_field_…`, `chords_in_a_field_…` (Rune's chords: Shift+Menu opens it, Super+Menu doesn't). Partial: core text fields only (U-C21-2) |
 //! | With a menu open, a secondary click on another entry… opens that entry's menu in one click | **Partial**: the click closes the menu only. A press on the menu's scrim reaches nothing under it (U-C21-6), and reopening at the entry needs a C1e seam (`secondary_press_at`, a follow-up) |
-//! | A button release that reaches a menu… before any press inside it is ignored | script `release-without-press`; unit `a_release_without_a_press_…` |
+//! | A button release that reaches a menu… before any press inside it is ignored | script `release-without-press` (on the menu and on a submenu's row); unit `a_release_without_a_press_…` |
 //! | Pressing the secondary button, moving onto a menu row, and releasing does not run the row… | the same |
 //! | After that, a full click on a menu row runs it | the same |
-//! | A menu opens with keyboard focus on its first visible action… | script `first-focus`; unit `the_menu_opens_with_the_keyboard_…`; test `a_right_click_menu_has_the_keyboard_…` |
+//! | A menu opens with keyboard focus on its first visible action… | script `first-focus`; unit `the_menu_opens_with_the_keyboard_…`; test `a_right_click_menu_has_the_keyboard_…`. **Partial**: after a pointer input the first arrow shows the highlight before moving (deviation); focus stays while Open With… is replaced in place (unit `a_model_update_that_replaces_…`), but a row added above the focused one moves it (U-C21-5) |
 //! | Up and Down move between enabled actions, skipping separators and wrapping…; Home and End… | script `menu-keys`; unit `up_and_down_skip_…` |
 //! | Enter or Space activates the focused action and closes the menu | scripts `menu-keys`, `space-activates`; unit `enter_and_space_…` |
 //! | Escape closes the menu, keeps the selection, and returns focus… | script `escape`; unit `escape_closes_the_menu_…` |
-//! | Ctrl+A while a menu is open leaves the menu open | script `ctrl-a`; unit `ctrl_a_leaves_the_menu_open` |
-//! | On a submenu row…, Right, Space, or Enter opens the submenu with its first action focused | script `submenu-keys`; unit `right_opens_a_submenu_…` |
+//! | Ctrl+A while a menu is open leaves the menu open | script `ctrl-a`; unit `ctrl_a_leaves_the_menu_open` (a window Ctrl+A binding under the menu doesn't run) |
+//! | On a submenu row…, Right, Space, or Enter opens the submenu with its first action focused | script `submenu-keys`; unit `right_opens_a_submenu_…`, `with_a_keyboard_opened_submenu_…` (the parent's rows still click; a press outside both closes the menu) |
 //! | Left in a submenu closes only the submenu and refocuses its row… | script `submenu-left`; unit `right_opens_a_submenu_…` |
 //! | In the file chooser's menus, Up, Down, Tab, and Shift+Tab move… and wrap | script `chooser-tab` (every menu moves so) |
 //! | Actions hidden for the current target leave no empty group or doubled separator | unit `an_empty_section_draws_no_separator_or_label` |
 //! | An action with a shortcut shows it at the row's right | golden `c21-item` (PNG); the hint's text is Strata's |
 //! | While the selection's types are looked up… Open With… insensitive, described… | mechanism: [`Item::enabled`] and [`Item::description`]; golden `c21-item` (a11y: disabled, the description). When is Strata's |
 //! | Permanently delete shows CircleX with a red label and icon… | mechanism: [`Item::danger`]; golden `c21-item`. The icon is Strata's |
-//! | Screen readers get each row's label as its name and its shortcut as its description | **Partial**: the label is the name; the shortcut is the item's keyboard-shortcut property, not its description (owner's ruling) |
-//! | Right-clicking an entry anywhere in a long, scrolled list shows its menu at the click | script `scrolled-list` |
-//! | In a small window, right-clicking an entry near the bottom edge opens the menu at the click | script `edge`; golden `c21-edge` |
+//! | Screen readers get each row's label as its name and its shortcut as its description | test `a_rows_shortcut_is_its_keyboard_shortcut_property`. **Partial**: the label is the name; the shortcut is the item's keyboard-shortcut property, not its description (owner's ruling) |
+//! | Right-clicking an entry anywhere in a long, scrolled list shows its menu at the click | script `scrolled-list` (the target); test `a_right_click_in_a_scrolled_list_…` (the point) |
+//! | In a small window, right-clicking an entry near the bottom edge opens the menu at the click | script `edge`; test `a_right_click_near_the_bottom_right_…` (the point); golden `c21-edge` |
 //! | A menu opens below the click, and flips above it when the screen has no room below | golden `c21-edge`. **Partial**: the window's room, not the screen's (U14) |
 //! | A menu with no room… above or below the click shrinks and scrolls… | golden `c21-scrolling` (in the window) |
 //! | A menu opened near the screen's left or right edge slides horizontally… | golden `c21-edge` (the window's edge) |
@@ -157,8 +164,15 @@
 //! - Submenus open on a click or the keys, not on hover: rune-kit's `MenuItem` has no hover
 //!   hook (U-C21-4).
 //! - A shortcut is the item's keyboard-shortcut property, not its description.
-//! - Rows are keyed by position (rune-kit's), so a model update that adds a row above the
-//!   focused one moves the keyboard down a row: [`ContextMenuState::update_model`] says so.
+//! - Rows are keyed by their place in the menu (rune-kit's `{key}-item{n}`, counting the
+//!   header, labels and separators), so a model update that adds or removes an entry above the
+//!   focused row hands its key to another entry. The keyboard then lands on another action, or
+//!   on the first row when that key is now a separator or a label. Replacing a row in place
+//!   keeps it ([`ContextMenuState::update_model`]). Strata's multi-selection Open, added above
+//!   Open With… once the lookup ends, moves it: reserve its row (insensitive) until then.
+//! - After a pointer input, the menu's first row has the keyboard but no visible highlight:
+//!   the first arrow shows it there, and only the next moves (rune-kit's NSMenu model; Rune
+//!   decides it from whether the last input was a key). GTK moves on the first arrow.
 //!
 //! # Rune gaps
 //!
@@ -173,15 +187,17 @@
 //!   their inner field themselves and take no `on_secondary_press` for it, and a field's own
 //!   menu wins over every ancestor's (`secondary_target`), so an app can't give them a menu.
 //!   Ask: `.on_secondary_press(..)` on the three, passed to the inner field. Here: none.
-//! - **U-C21-3 (draft, not filed)** `TextEdit` has no `can_undo` or `can_redo`, and a field's
-//!   line mode (what `paste` filters by) is set only once Rune edits it. Ask: both checks, and
-//!   a public single-line setter. Here: undoing a clone ([`FieldMenu`]'s `history`), and the
-//!   menu filters a single-line paste itself.
+//! - **U-C21-3 (draft, not filed)** `TextEdit` has no `can_undo` or `can_redo`. Ask: both.
+//!   Here: undoing a clone when the menu opens ([`FieldMenu`]'s `history`). (A field's line
+//!   mode needs nothing: Rune gives every mounted field its line mode whenever focus moves,
+//!   so `paste` keeps a single-line field on one line once the menu has the keyboard.)
 //! - **U-C21-4 (draft, not filed)** rune-kit's submenus open only when the app sets them
 //!   open, and nothing in them moves the keyboard: no Right or Left, and the keyboard can't
 //!   enter one, and no hover opens one. Ask: Right, Left, Enter and Space on a submenu row, focus
 //!   into it, and hover-open with a delay. Its focus part goes as a comment on #173 (`Tx::focus`),
-//!   not a new issue. Here: C21's own keys, and a keyboard-opened submenu made a modal.
+//!   not a new issue, with the first-arrow case: after a pointer input a menu's first row has
+//!   the keyboard unshown, and an app can't show it there (GTK moves on the first arrow).
+//!   Here: C21's own keys, and a sent Tab that moves the keyboard into a submenu.
 //! - **U-C21-5 (draft, not filed)** `MenuItem` is keyed by position, so a row added above the
 //!   focused one moves the keyboard. Ask: `MenuItem::key`. Its menu-name half is U-C6-8 (extend
 //!   it; C21 names the surface it finds in the layer).

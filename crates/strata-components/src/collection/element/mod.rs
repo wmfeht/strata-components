@@ -190,13 +190,15 @@ use std::borrow::Cow;
 use std::ops::Range;
 use std::rc::Rc;
 
-use rune::{El, GrowthSpec, KeyEvent, Live, PointerButton, ScrollPos, ScrollSpec, Tx, col, text};
+use rune::{
+    El, GrowthSpec, KeyEvent, Live, PointerButton, ScrollPos, ScrollSpec, Tx, WheelEvent, col, text,
+};
 use strata_kit::look::Look;
 
 pub use a11y::{Announcement, Roles, default_announcement};
 pub use keys::{
-    ICON, LABEL, ROWS, STATUS, STUCK, VIEWPORT, header_key, part_path, row_key, row_path,
-    viewport_path,
+    ICON, LABEL, ROWS, STATUS, STUCK, VIEWPORT, entry_path, header_key, part_path, row_key,
+    row_path, viewport_path,
 };
 use lines::LineMap;
 pub use lines::{Group, GroupStyle, GroupedRows, Groups, Lines, OnePerLine};
@@ -232,6 +234,7 @@ type GroupStyleFn = Rc<dyn Fn(&Look) -> GroupStyle>;
 type PressFn<S> = Rc<dyn Fn(&mut S, &PointerInput, &mut Tx)>;
 type ScrollFn = Rc<dyn Fn(ScrollPos)>;
 pub(crate) type DragOverFn<S> = Rc<dyn Fn(&mut S, Option<Point>, &mut Tx) -> bool>;
+type WheelFn<S> = Rc<dyn Fn(&mut S, WheelEvent, &mut Tx) -> bool>;
 
 /// What [`Collection`] was built with, shared by its rows and handlers.
 pub(crate) struct Config<S> {
@@ -249,6 +252,7 @@ pub(crate) struct Config<S> {
     group_style: GroupStyleFn,
     dnd: Dnd<S>,
     read_only: bool,
+    bare_items: bool,
     on_drop: Option<row::DropFn<S>>,
     icon: Option<Slot<S>>,
     label: Option<Slot<S>>,
@@ -271,6 +275,7 @@ pub(crate) struct Config<S> {
     keys_by_host: bool,
     on_drag_over: Option<DragOverFn<S>>,
     header_defer: Option<f32>,
+    on_wheel: Option<WheelFn<S>>,
 }
 
 impl<S> Config<S> {
@@ -328,6 +333,7 @@ impl<S: 'static> Collection<S> {
                 group_style: Rc::new(GroupStyle::from_look),
                 dnd: Dnd::rune(),
                 read_only: false,
+                bare_items: false,
                 on_drop: None,
                 icon: None,
                 label: None,
@@ -350,6 +356,7 @@ impl<S: 'static> Collection<S> {
                 keys_by_host: false,
                 on_drag_over: None,
                 header_defer: None,
+                on_wheel: None,
             },
         }
     }
@@ -413,6 +420,15 @@ impl<S: 'static> Collection<S> {
     /// see it as [`Ctx::read_only`].
     pub fn read_only(mut self) -> Self {
         self.cfg.read_only = true;
+        self
+    }
+
+    /// Items draw none of the row's own chrome: no selection fill, hover, outline, corner
+    /// radius or side inset, only the host's opacity marks (cut, dragging). The content slot
+    /// draws the item's state itself from [`RowCx::state`] and [`RowCx::hover_live`], as C3's
+    /// tiles light their frame and caption, not the whole cell.
+    pub fn bare_items(mut self) -> Self {
+        self.cfg.bare_items = true;
         self
     }
 
@@ -551,6 +567,16 @@ impl<S: 'static> Collection<S> {
         f: impl Fn(&mut S, Option<Point>, &mut Tx) -> bool + 'static,
     ) -> Self {
         self.cfg.on_drag_over = Some(Rc::new(f));
+        self
+    }
+
+    /// Hears wheel and trackpad deltas over the viewport before it scrolls (Rune's
+    /// `El::on_wheel` on the viewport itself): true takes the delta. An `on_wheel` on an
+    /// ancestor of the collection never hears a wheel over its rows, since Rune offers a wheel
+    /// only up to the nearest scroll view (Rune draft U-C3-3), so a view that claims a modified
+    /// wheel (C3's Ctrl+Shift+wheel) does it here.
+    pub fn on_wheel(mut self, f: impl Fn(&mut S, WheelEvent, &mut Tx) -> bool + 'static) -> Self {
+        self.cfg.on_wheel = Some(Rc::new(f));
         self
     }
 
@@ -695,6 +721,7 @@ impl<S: 'static> Collection<S> {
             config_key: row::config_key(&cfg),
             row_height,
             per_line: per,
+            inset: if per > 1 { cfg.lines.inset() } else { 0.0 },
             len,
             grouped: map.groups().is_some(),
             hover_live: st.hover_live,
@@ -775,8 +802,12 @@ impl<S: 'static> Collection<S> {
                     f(p);
                 }
             })
-            .on_layout_tx(move |s: &mut S, r, tx| route::on_layout(&layout_cfg, s, r, tx))
-            .child(rows);
+            .on_layout_tx(move |s: &mut S, r, tx| route::on_layout(&layout_cfg, s, r, tx));
+        let viewport = match cfg.on_wheel.clone() {
+            Some(f) => viewport.on_wheel(move |s: &mut S, e, tx| f(s, e, tx)),
+            None => viewport,
+        }
+        .child(rows);
 
         let drag_cfg = cfg.clone();
         let secondary_cfg = cfg.clone();

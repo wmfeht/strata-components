@@ -4,6 +4,7 @@
 
 mod describe;
 mod fixture;
+mod hooks;
 mod perf;
 
 use std::cell::{Cell, RefCell};

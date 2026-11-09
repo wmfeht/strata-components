@@ -45,7 +45,7 @@ mod tests;
 ///
 /// Every line is the element's row height tall, so the geometry's rects must match what the
 /// element draws: line `l` spans `[l·h, (l+1)·h)`, and its entries share the width equally,
-/// in index order.
+/// in index order, inside the line's [`Lines::inset`] on each side.
 ///
 /// Used by: C1e ([`OnePerLine`]), C3 (a grid of N per line).
 pub trait Lines {
@@ -53,6 +53,13 @@ pub trait Lines {
     /// same for every line. The first build has no width yet (0): return 1 or a guess; the
     /// element builds again once the viewport's width gives another count.
     fn per_line(&self, width: f32) -> usize;
+
+    /// The space left and right of a line holding several entries, in points: the entries
+    /// share the width inside it, and the geometry must put them there too. 0 by default, and
+    /// for lines of one entry, which keep the row's own inset.
+    fn inset(&self) -> f32 {
+        0.0
+    }
 
     /// The geometry of `len` entries in lines `row_height` tall, in a viewport `width` by
     /// `viewport_height` points, in content coordinates.

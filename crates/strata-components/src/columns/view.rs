@@ -755,6 +755,9 @@ pub(super) fn columns_row<S: 'static>(sh: &Rc<Shared<S>>, s: &S) -> El {
         .grow(1.0)
         .min_w(0.0)
         .h_full()
+        // Blank space, not a control: a press there clears the selection, as an empty area
+        // does, so assistive technology hears no button for it.
+        .a11y_hidden()
         .on_press(move |s: &mut S| blank_press(&blank, s));
     content.child(sh.dnd.drop_zone(blank_el, blank_zone(sh)))
 }

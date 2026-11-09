@@ -1210,4 +1210,20 @@ mod c2 {
         let (w, visible) = shown(&rt, 5);
         assert!((w - visible).abs() < 0.5, "level-4 shows {visible} of {w}");
     }
+
+    #[test]
+    fn the_blank_strip_is_no_control_assistive_technology_hears() {
+        // What assistive technology hears: the strip and its named lists, no unnamed button for
+        // the blank space after the last column (a press there clears the selection).
+        let rt = scene("c2-three-columns-light");
+        assert!(
+            info(&rt, &keys::blank("c2")).is_some(),
+            "it is there to press"
+        );
+        assert!(
+            node(&rt, &keys::blank("c2")).is_none(),
+            "{:?}",
+            node(&rt, &keys::blank("c2"))
+        );
+    }
 }

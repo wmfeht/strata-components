@@ -550,6 +550,12 @@ impl<K: Copy + PartialEq + std::fmt::Debug + 'static> PromptState<K> {
         out
     }
 
+    /// The text changed outside the field's own editing: C21's `FieldMenu` cut, pasted or
+    /// deleted (`FieldMenu::on_change`). The same as typing.
+    pub fn text_edited(&mut self) -> Polled<K> {
+        self.edited()
+    }
+
     /// A key in the field, before the editor sees it. `Some` takes it.
     pub(crate) fn key(&mut self, ev: &KeyEvent, repeat: bool) -> Option<Polled<K>> {
         let o = self.open.as_ref()?;

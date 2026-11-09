@@ -246,14 +246,26 @@
 //! result" (script `enter-opens-top`), "Down from a column's filter field selects the outlined
 //! top result and makes it the pick" (script `down-and-up`). Which column holds the bar is C2's.
 //!
+//! `browser/context-menu` (C21's text menu over these fields, attached in the gallery):
+//!
+//! | Bullet (opening words) | Checked by |
+//! | --- | --- |
+//! | While a text input has focus, Menu and Shift+F10 open the input's text-editing menu… | script `prompt-field-menu` (Shift+F10 in a prompt) |
+//! | Escape closes the menu…, and returns focus to the entry… | scripts `field-menu-escape` (the filter field), `prompt-field-menu` (the prompt stays open: [`prompt::PromptState::hold_open`] while the menu has the keyboard) |
+//! | Text-input menu styling covers the filter and search fields… | scripts `field-right-click`, `field-menu-delete` (a menu edit reaches the query: [`filter::FilterState::text_edited`]) |
+//!
 //! # Deliberate changes
 //!
 //! - **Rune's core `text_input` in a text box frame of our own**, drawn with the Kit tokens
 //!   rune-kit's `TextInput` uses, not `TextInput`: its inner field takes no
 //!   `on_secondary_press` (U-C21-2), so its right-click opens Rune's native field menu, empty on
 //!   Linux, and C21's `FieldMenu` can't attach to it (owner's ruling).
-//! - **The field menu is an intent.** The bar and the prompt send `FieldMenu { at }`; C21's
-//!   `FieldMenu::open` answers it in the host. The gallery logs it until C21 lands.
+//! - **The field menu is an intent.** The bar and the prompt send `FieldMenu { at }`; the host
+//!   answers it with C21's `FieldMenu::open`, calls `FieldMenu::check` from its poll, and passes
+//!   the menu's edits back with `text_edited` (`FieldMenu::on_change`). For a prompt it holds
+//!   the prompt open while the menu has the keyboard (`hold_open(true)` on the intent,
+//!   `hold_open(false)` from `FieldMenu::on_close`), so the menu's blur doesn't close it. The
+//!   gallery does all of this.
 //! - **Keycaps are our own chip**, on Strata's keycap look, not rune-kit's `Keybind`, which
 //!   upper-cases `g` to `G` (U-C18-1; owner's ruling).
 //! - **No slide-down**: the bar appears and goes at once, where Strata's revealer slides (owner's

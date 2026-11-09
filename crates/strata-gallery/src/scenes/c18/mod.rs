@@ -27,6 +27,7 @@ use rune_kit::{Button, ButtonVariant};
 use strata_components::collection::element::{Collection, CollectionState, Intent, RowMarks};
 use strata_components::collection::keyboard::KeySettings;
 use strata_components::collection::selection::{AnchorRule, SyncRule};
+use strata_components::context_menu::{FieldMenu, FieldMenuState};
 use strata_components::contract::{EntryId, EntryKind, EntrySource, ListEntry, ListSource};
 use strata_components::filter_bar::chord::{self, ChordMap, ChordOption, ChordOutcome, ChordState};
 use strata_components::filter_bar::filter::{
@@ -84,6 +85,8 @@ pub struct Demo {
     pub filter: FilterState,
     pub prompt: PromptState<Kind>,
     pub chord: ChordState<Act>,
+    /// C21's text menu over the filter field or the prompt's.
+    pub fields: FieldMenuState<Field>,
     pub flash: Flash,
     pub tenxer: bool,
     /// The 10xer `f` filter's committed query, and `s`'s.
@@ -120,6 +123,7 @@ impl Default for Demo {
             filter: FilterState::new(),
             prompt: PromptState::new(),
             chord: ChordState::new(),
+            fields: FieldMenuState::new(),
             flash: Flash::new(),
             tenxer: false,
             listing_filter: String::new(),
@@ -222,13 +226,84 @@ fn bar(g: &Gallery) -> FilterBar<Gallery> {
                 .filter_map(|id| d.listing.index_of(*id))
                 .any(|i| d.listing.entry(i).kind == EntryKind::File)
         })
-        .on_intent(|g: &mut Gallery, intent, tx| g.c18.filtered(intent, tx))
+        .on_intent(|g: &mut Gallery, intent, tx| match intent {
+            FilterIntent::FieldMenu { at } => field_menu().open(g, Field::Filter, at, tx),
+            intent => g.c18.filtered(intent, tx),
+        })
 }
 
 fn prompt() -> FooterPrompt<Gallery, Kind> {
     FooterPrompt::new(PROMPT, prompt_state, prompt_state_mut)
         .focus_return(PANE)
-        .on_intent(|g: &mut Gallery, intent, tx| g.c18.prompted(intent, tx))
+        .on_intent(|g: &mut Gallery, intent, tx| match intent {
+            // The menu takes the keyboard: hold the prompt open until it gives it back.
+            PromptIntent::FieldMenu { at } => {
+                g.c18.prompt.hold_open(true);
+                field_menu().open(g, Field::Prompt, at, tx);
+                if !g.c18.fields.is_open() {
+                    g.c18.prompt.hold_open(false);
+                }
+            }
+            intent => g.c18.prompted(intent, tx),
+        })
+}
+
+/// The fields C21's text menu opens over.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Field {
+    Filter,
+    Prompt,
+}
+
+fn field_edit_mut(g: &mut Gallery, f: Field) -> Option<&mut rune::TextEdit> {
+    let d = &mut g.c18;
+    match f {
+        Field::Filter if d.filter.is_open() => Some(&mut d.filter.edit),
+        Field::Prompt if d.prompt.is_open() => Some(&mut d.prompt.edit),
+        _ => None,
+    }
+}
+
+fn field_edit(g: &Gallery, f: Field) -> Option<&rune::TextEdit> {
+    let d = &g.c18;
+    match f {
+        Field::Filter if d.filter.is_open() => Some(&d.filter.edit),
+        Field::Prompt if d.prompt.is_open() => Some(&d.prompt.edit),
+        _ => None,
+    }
+}
+
+/// C21's text menu for the filter field and the prompt's (Cut, Copy, Paste, Delete, Select
+/// All). An edit it makes reaches the bar or the prompt as typing does; closing it gives the
+/// field the keyboard back and lets the prompt close on a blur again.
+fn field_menu() -> FieldMenu<Gallery, Field> {
+    FieldMenu::new(
+        "c18-field-menu",
+        |g: &Gallery| &g.c18.fields,
+        |g: &mut Gallery| &mut g.c18.fields,
+        field_edit_mut,
+        field_edit,
+    )
+    .on_change(|g: &mut Gallery, f, tx| match f {
+        Field::Filter => {
+            let before = {
+                let r = results(g);
+                r.selection.position(r.source)
+            };
+            let polled = g.c18.filter.text_edited(before);
+            bar(g).route(g, polled, tx);
+        }
+        Field::Prompt => {
+            let polled = g.c18.prompt.text_edited();
+            prompt().route(g, polled, tx);
+        }
+    })
+    .on_close(|g: &mut Gallery, f| {
+        if f == Field::Prompt {
+            g.c18.prompt.hold_open(false);
+        }
+        g.c18.log = format!("{f:?} menu closed");
+    })
 }
 
 fn collection(tenxer: bool) -> Collection<Gallery> {
@@ -425,7 +500,6 @@ impl Demo {
             }
             FilterIntent::Preview => self.log = "Quick preview".into(),
             // C21's FieldMenu answers this in Strata; it isn't merged yet.
-            FilterIntent::FieldMenu { .. } => self.log = "Field menu".into(),
             _ => {}
         }
     }
@@ -554,7 +628,6 @@ impl Demo {
                 self.renaming = None;
                 self.log = format!("Dismissed {kind:?} by {by:?}");
             }
-            PromptIntent::FieldMenu { .. } => self.log = "Field menu".into(),
             _ => {}
         }
     }
@@ -1012,6 +1085,7 @@ pub fn view(g: &Gallery, cx: &mut Cx<Gallery>) -> El {
         pane = pane.active_descendant(path);
     }
     let footer = footer(g, look, cx, &mut layer);
+    let menu = field_menu().build(g, look, &mut layer);
     let outlined = d
         .filter
         .outlined(results(g))
@@ -1047,7 +1121,8 @@ pub fn view(g: &Gallery, cx: &mut Cx<Gallery>) -> El {
             .children(filter_bar)
             .child(pane)
             .child(footer)
-            .child(readouts),
+            .child(readouts)
+            .child(menu),
         layer,
     )
 }
@@ -1257,6 +1332,10 @@ pub fn poll(g: &mut Gallery, t: f64, tx: &mut Tx) -> bool {
     changed |= polled.changed;
     g.c18.route_prompt(polled, tx);
     changed |= g.c18.flash.tick(t, tx);
+    // A menu whose field closed (Escape in the filter's results, a submitted prompt) closes.
+    if field_menu().check(g) {
+        changed = true;
+    }
     let d = &mut g.c18;
     if let Some((at, text)) = d.pending_query.clone() {
         if at <= t + 1e-6 {

@@ -9,151 +9,95 @@
                 {
                   "children": [
                     {
-                      "key": "c18-title",
-                      "name": "Documents",
-                      "role": "label"
-                    },
-                    {
                       "actions": [
-                        "click"
-                      ],
-                      "key": "c18-filter-toggle",
-                      "name": "Filter",
-                      "role": "button"
-                    }
-                  ],
-                  "key": "c18-header",
-                  "role": "group"
-                },
-                {
-                  "children": [
-                    {
-                      "actions": [
-                        "context-menu"
+                        "scroll-up",
+                        "scroll-down",
+                        "set-scroll-offset"
                       ],
                       "children": [
                         {
                           "actions": [
-                            "click",
-                            "focus",
-                            "context-menu",
-                            "set-value",
-                            "replace-selected-text",
-                            "set-text-selection"
-                          ],
-                          "key": "c18-filter-field",
-                          "name": "Filter list (Ctrl+F)",
-                          "placeholder": "Filter 12 items…",
-                          "role": "text-input",
-                          "states": [
-                            "focused"
-                          ],
-                          "value": "rep"
-                        }
-                      ],
-                      "key": "c18-filter-box",
-                      "role": "group"
-                    }
-                  ],
-                  "key": "c18-filter",
-                  "role": "group"
-                },
-                {
-                  "actions": [
-                    "focus"
-                  ],
-                  "children": [
-                    {
-                      "actions": [
-                        "context-menu"
-                      ],
-                      "children": [
-                        {
-                          "actions": [
-                            "scroll-up",
-                            "scroll-down",
-                            "set-scroll-offset"
+                            "scroll-into-view"
                           ],
                           "children": [
                             {
                               "actions": [
                                 "scroll-into-view"
                               ],
-                              "children": [
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "row-3",
-                                  "name": "reports",
-                                  "position": 1,
-                                  "role": "list-box-option"
-                                },
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "row-10",
-                                  "name": "report-2025.ods",
-                                  "position": 2,
-                                  "role": "list-box-option"
-                                },
-                                {
-                                  "actions": [
-                                    "scroll-into-view"
-                                  ],
-                                  "key": "row-11",
-                                  "name": "report.pdf",
-                                  "position": 3,
-                                  "role": "list-box-option"
-                                }
+                              "key": "c18-field-menu-item0",
+                              "name": "Cut",
+                              "role": "menu-item",
+                              "states": [
+                                "disabled"
+                              ]
+                            },
+                            {
+                              "actions": [
+                                "scroll-into-view"
                               ],
-                              "key": "rows",
-                              "role": "group",
-                              "setSize": 3
+                              "key": "c18-field-menu-item1",
+                              "name": "Copy",
+                              "role": "menu-item",
+                              "states": [
+                                "disabled"
+                              ]
+                            },
+                            {
+                              "actions": [
+                                "click",
+                                "focus",
+                                "scroll-into-view"
+                              ],
+                              "key": "c18-field-menu-item2",
+                              "name": "Paste",
+                              "role": "menu-item",
+                              "states": [
+                                "focused"
+                              ]
+                            },
+                            {
+                              "actions": [
+                                "scroll-into-view"
+                              ],
+                              "key": "c18-field-menu-item3",
+                              "name": "Delete",
+                              "role": "menu-item",
+                              "states": [
+                                "disabled"
+                              ]
+                            },
+                            {
+                              "actions": [
+                                "click",
+                                "focus",
+                                "scroll-into-view"
+                              ],
+                              "key": "c18-field-menu-item5",
+                              "name": "Select All",
+                              "role": "menu-item"
                             }
                           ],
-                          "key": "viewport",
-                          "role": "scroll-view",
-                          "states": [
-                            "clips"
-                          ]
-                        },
-                        {
-                          "key": "status",
-                          "name": "",
-                          "role": "label",
-                          "states": [
-                            "live-polite"
-                          ]
+                          "key": "rows",
+                          "role": "group"
                         }
                       ],
-                      "key": "c18-list",
-                      "name": "Files",
-                      "role": "list-box"
+                      "key": "scroll",
+                      "role": "scroll-view",
+                      "states": [
+                        "clips"
+                      ]
                     }
                   ],
-                  "key": "c18-pane",
-                  "name": "Documents pane",
+                  "key": "c18-field-menu-scroll-area",
                   "role": "group"
-                },
-                {
-                  "key": "c18-footer",
-                  "role": "group"
-                },
-                {
-                  "key": "c18-outlined",
-                  "name": "Outlined: reports",
-                  "role": "label"
-                },
-                {
-                  "key": "c18-log",
-                  "name": "Field menu",
-                  "role": "label"
                 }
               ],
-              "key": "c18",
-              "role": "group"
+              "key": "c18-field-menu-menu",
+              "name": "Text editing",
+              "role": "menu",
+              "states": [
+                "modal"
+              ]
             }
           ],
           "key": "kit-root",

@@ -338,6 +338,14 @@ impl FilterState {
         }
     }
 
+    /// The field's text changed outside the field's own editing: C21's `FieldMenu` cut,
+    /// pasted or deleted (`FieldMenu::on_change`). The same as typing: asks for the query, or
+    /// gives the listing back when it emptied. `before` is the listing's selection now, saved
+    /// if a query starts.
+    pub fn text_edited(&mut self, before: Position) -> Polled {
+        self.text_changed(|| before)
+    }
+
     // The bar's own handlers.
 
     /// Whether the next edit would save the listing's selection: a query starting over

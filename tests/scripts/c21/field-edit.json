@@ -15,24 +15,24 @@
       "text": "draft notes"
     },
     {
-      "t": 0.5,
+      "t": 0.84,
       "type": "tap",
       "key": "c21-search",
       "button": "secondary"
     },
     {
-      "t": 0.6,
+      "t": 0.94,
       "type": "tap",
       "key": "c21-field-menu-item5"
     },
     {
-      "t": 0.7,
+      "t": 1.04,
       "type": "key",
       "name": "F10",
       "shift": true
     },
     {
-      "t": 0.8,
+      "t": 1.14,
       "type": "tap",
       "key": "c21-field-menu-item0"
     }

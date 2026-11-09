@@ -69,6 +69,8 @@ pub(super) struct Request {
     pub(super) target: Atom,
     pub(super) property: Atom,
     time: u32,
+    /// The request named no property (an obsolete requestor): `property` is the target.
+    pub(super) obsolete: bool,
 }
 
 /// An answer too large for one property, sent in chunks as the requestor deletes each.
@@ -577,6 +579,7 @@ impl Actor {
             target: r.target,
             property,
             time: r.time,
+            obsolete: r.property == NONE,
         };
         let Some(owned) = self.owned.get(&r.selection).filter(|_| r.owner == self.win) else {
             return self.notify(&req, NONE);

@@ -61,8 +61,9 @@ pub(super) fn answered_pairs(pairs: &[(Atom, Atom)], refused: &[bool]) -> Vec<u3
 impl Actor {
     /// A `MULTIPLE` request for a selection we hold as `id` with `spec`.
     pub(super) fn multiple(&mut self, req: Request, id: SourceId, spec: SourceSpec, time: u32) {
-        // An obsolete requestor names no property, and MULTIPLE can't work without one.
-        if req.property == req.target {
+        // An obsolete requestor names no property, and MULTIPLE can't work without one. A
+        // property named MULTIPLE is fine: gsd-clipboard and xfsettingsd ask into it.
+        if req.obsolete {
             return self.notify(&req, NONE);
         }
         let words = self

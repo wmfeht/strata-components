@@ -2,33 +2,31 @@
   "bullets": [
     "preview/preview-panel/find: Typing a query selects and reveals the first literal, case-insensitive match"
   ],
-  "scene": "c11-markdown-light",
+  "scene": "c11-long-light",
   "events": [
     {
       "t": 0.2,
       "type": "tap",
-      "key": "doc-u1/t"
+      "key": "preview-find"
     },
     {
       "t": 0.4,
-      "type": "key",
-      "name": "f",
-      "cmd": true
-    },
-    {
-      "t": 0.6,
       "type": "type",
-      "text": "RELEASE"
+      "text": "THE END"
     }
   ],
   "expect": [
     {
       "key": "preview-find-status",
-      "name": "Match 1 of 2"
+      "name": "Match 1 of 1"
     },
     {
       "key": "c11-selection",
-      "name": "Release"
+      "name": "The end"
+    },
+    {
+      "key": "doc-u1999",
+      "role": "group"
     }
   ]
 }

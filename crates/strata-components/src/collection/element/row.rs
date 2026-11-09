@@ -475,8 +475,12 @@ fn build_item<S: 'static>(cfg: &Rc<Config<S>>, frame: &Frame, s: &S, index: usiz
     // A grid cell, and a row among header lines, states its place in the set itself, so it
     // changes with its index.
     let place = (frame.per_line > 1 || frame.grouped).then_some((index, frame.len));
-    // Only a collection with the hook reads it.
+    // Only rows that draw them read the rest hook and the peek fill.
     let rest = cfg.rest.as_ref().map(|r| r.version(s, &rcx));
+    let peek_fill = state
+        .marks
+        .peek_anchor
+        .then(|| color_key(tokens::peek_fill(look)));
     let version = (
         (entry.name, entry.kind, entry.icon, entry.thumbnail),
         state,
@@ -486,7 +490,7 @@ fn build_item<S: 'static>(cfg: &Rc<Config<S>>, frame: &Frame, s: &S, index: usiz
         frame.hover_live,
         versions,
         place,
-        rest,
+        (rest, peek_fill),
     );
     memo(row_key(id), version, || item(cfg, frame, s, &rcx))
 }
@@ -548,6 +552,8 @@ fn item<S: 'static>(cfg: &Rc<Config<S>>, frame: &Frame, s: &S, rcx: &RowCx<'_>) 
         .clip_soft(0.0);
     if state.selected || state.drop_target {
         inner = inner.fill(rune_kit::TableStyle::from_kit(kit).selected);
+    } else if state.marks.peek_anchor {
+        inner = inner.fill(tokens::peek_fill(look));
     }
     if frame.hover_live {
         inner = inner.hover(kit.c.hover);
@@ -631,6 +637,11 @@ fn rest_row<S: 'static>(
         outer = outer.child(part.inert().a11y_hidden());
     }
     outer
+}
+
+/// A colour as a memo key.
+fn color_key(c: rune::Color) -> [u32; 4] {
+    [c.r, c.g, c.b, c.a].map(f32::to_bits)
 }
 
 /// A group's header line: its label over the style's divider, a heading named by the label.

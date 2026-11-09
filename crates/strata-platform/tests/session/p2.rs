@@ -1211,6 +1211,46 @@ fn x11_on_quit_shuts_down_and_hands_the_clipboard_over() {
     );
 }
 
+/// The normal way out: the last window closes, `App::on_quit` runs in no window, and the
+/// shutdown in that window's `on_close` hands the clipboard over.
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn x11_closing_the_last_window_shuts_down_and_hands_the_clipboard_over() {
+    let s = Session::start();
+    let manager = s.peer(Display::X11);
+    manager.clipboard_manager(true);
+    let mut demo = Demo::start(&s, B::X).expect("X11");
+    let at = demo.app.line_count();
+    let copy = demo.copy_offers(Selection::Clipboard, &[Offer::text(UTF8, "kept")]);
+    demo.change(at, "holding", Some(copy));
+    s.sway_command(&format!("[con_id={}] kill", demo.window.id));
+    let down = demo.wait(at, "the shutdown", |v| v["ev"] == "shutdown");
+    assert_eq!(
+        (&down["why"], &down["hand_off"]),
+        (&json!("close"), &json!("Saved")),
+        "{down}"
+    );
+    let status = demo.app.wait_exit();
+    assert!(status.success(), "the app exited with {status}");
+    demo.no_errors();
+    let saved = manager.wait_event("manager-saved", |e| matches!(e, Event::ManagerSaved { .. }));
+    let Event::ManagerSaved { saved, refused } = saved else {
+        unreachable!()
+    };
+    assert_eq!(
+        (saved, refused),
+        (vec![UTF8.to_owned()], Vec::<String>::new())
+    );
+    let reader = s.peer(Display::X11);
+    assert_eq!(
+        reader
+            .read(Selection::Clipboard, Via::X11, UTF8)
+            .text
+            .as_deref(),
+        Some("kept")
+    );
+}
+
 /// The X11 connection fails: the held copy is lost as failed, and the diagnostic reaches the
 /// app's handler, which may call the clipboard back (it asks for the status) while the app
 /// lives on.

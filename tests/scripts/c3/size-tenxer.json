@@ -31,12 +31,20 @@
       "name": "-",
       "ctrl": true,
       "alt": true
+    },
+    {
+      "t": 1.2,
+      "type": "key",
+      "name": "+",
+      "shift": true,
+      "ctrl": true,
+      "alt": true
     }
   ],
   "expect": [
     {
       "key": "c3-size",
-      "name": "Thumbnail size: 80px"
+      "name": "Thumbnail size: 96px"
     },
     {
       "key": "row-7",

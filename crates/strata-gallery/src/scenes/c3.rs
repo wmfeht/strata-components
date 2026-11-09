@@ -26,7 +26,9 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use rune::{Cx, El, HelpLook, Key, KeyEvent, Tx, col, row, text};
-use strata_components::collection::element::{Collection, CollectionState, Controllers, Intent};
+use strata_components::collection::element::{
+    Collection, CollectionState, Controllers, Intent, RowMarks,
+};
 use strata_components::collection::keyboard::{KeySettings, Keyboard};
 use strata_components::collection::selection::{CursorGone, SyncRule};
 use strata_components::contract::{
@@ -255,6 +257,8 @@ pub struct Demo {
     /// The entry being renamed: a stand-in editor shows in its name's place (C5's comes
     /// later). Escape ends it.
     pub renaming: Option<EntryId>,
+    /// The host's marks on tiles (cut, dragging, the filter's Enter target).
+    pub marks: HashMap<EntryId, RowMarks>,
 }
 
 impl Default for Demo {
@@ -287,6 +291,7 @@ impl Default for Demo {
             thumbs_on: true,
             with_details: true,
             renaming: None,
+            marks: HashMap::new(),
         }
     }
 }
@@ -553,12 +558,21 @@ fn short_rows(g: &mut Gallery, dark: bool) {
     d.pane = Some(400.0);
 }
 
+/// A drop target, a cut tile, a dragged tile and the filter's Enter target, side by side.
 fn marks(g: &mut Gallery, dark: bool) {
     let d = open(g, dark, Folder::Pictures);
     d.coll
         .set_drop_over(Some(strata_components::collection::element::DropOver::Row(
             EntryId::new(1),
         )));
+    let mut mark = |id: u64, set: fn(&mut RowMarks)| {
+        let mut m = RowMarks::default();
+        set(&mut m);
+        d.marks.insert(EntryId::new(id), m);
+    };
+    mark(3, |m| m.cut = true);
+    mark(4, |m| m.dragging = true);
+    mark(5, |m| m.enter_target = true);
 }
 
 fn text_size(g: &mut Gallery, dark: bool) {
@@ -645,6 +659,7 @@ pub fn collection(g: &Gallery) -> Collection<Gallery> {
     )
     .name(d.folder.title())
     .clock(|g: &Gallery| g.c3.clock)
+    .marks(|g: &Gallery, id| g.c3.marks.get(&id).copied().unwrap_or_default())
     .settings(KeySettings::default().wrap_rows(true))
     .settings(SizeKeys::default_map().with_tenxer(d.tenxer))
     .on_intent(|g: &mut Gallery, intent, tx| {

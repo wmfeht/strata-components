@@ -10,12 +10,13 @@ use super::metrics::TileMetrics;
 
 const LONG: &str = "2026-10-07-release-candidate-build-final-v3-with-a-very-long-tail.tar.gz";
 
+/// The thumbnail slot keeps the tile size at any text size; the caption's reserved lines grow
+/// with it. (The metrics take no name or details at all: a tile's height never follows them.)
 #[test]
-fn a_tile_is_as_tall_with_any_name_or_details_and_its_slot_ignores_the_text_size() {
+fn a_tiles_slot_ignores_the_text_size_and_its_caption_follows_it() {
     let look = Look::fallback(false);
     let a = TileMetrics::new(&look, 64.0, 2, true);
     assert_eq!(a.slot, 64.0);
-    // The name and details reserve their lines: nothing the host streams in moves the grid.
     let mut big = Look::fallback(false);
     big.kit.ty.ui_compact.size *= 2.0;
     big.kit.ty.ui_compact.line_height *= 2.0;
@@ -201,5 +202,45 @@ fn a_long_details_line_hits_only_inside_the_card() {
         super::regions::region(&m, cell_w, &cut, wide, Point::new(m.margin / 2.0, y)),
         Region::Gutter,
         "the tile's margin"
+    );
+}
+
+/// The filter's Enter target is outlined in the accent (Strata's `.enter-target`), as a
+/// selected frame is outlined in its own ring, unless the cursor ring is drawn over it.
+#[test]
+fn the_enter_target_frame_is_outlined_in_the_accent() {
+    use crate::collection::element::{RowCx, RowMarks, RowState};
+    use crate::contract::{Entry, EntryId, EntryKind};
+
+    let look = Look::fallback(false);
+    let entry = Entry::new(EntryId::new(1), "a.txt", EntryKind::File, "");
+    let marks = RowMarks {
+        enter_target: true,
+        ..RowMarks::default()
+    };
+    let rcx = |marks, cursor_shown| RowCx {
+        index: 0,
+        entry,
+        state: RowState {
+            marks,
+            cursor_shown,
+            ..RowState::default()
+        },
+        look: &look,
+        scope: "grid",
+        hover_live: false,
+    };
+    assert_eq!(
+        super::tile::frame_look(&rcx(marks, false)).1,
+        Some((1.0, look.kit.c.text_accent))
+    );
+    assert_eq!(
+        super::tile::frame_look(&rcx(RowMarks::default(), false)).1,
+        None
+    );
+    assert_ne!(
+        super::tile::frame_look(&rcx(marks, true)).1,
+        Some((1.0, look.kit.c.text_accent)),
+        "the cursor ring wins"
     );
 }

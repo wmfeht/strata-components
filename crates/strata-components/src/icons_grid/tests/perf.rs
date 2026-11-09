@@ -392,6 +392,13 @@ fn best(kind: Kind, size: f32) -> Run {
     Run::best(&runs)
 }
 
+/// The bar above, in absolute milliseconds where it isn't relative to C4.
+///
+/// Load-sensitive: the absolute bars, the size step's 16.7 ms above all, hold against wall
+/// time, not against C4 in the same run, so a loaded machine can fail them on its own. A size
+/// step is 6 to 8 ms at p95 at this machine's usual load (C3 review round 1) and failed once
+/// under a 4 × slowdown (C3 review round 2: 22 ms against 16.7). Rerun a failure on an idle
+/// machine before reading it as a regression; the bar stays.
 #[test]
 #[ignore = "perf: run with --profile perf -- --ignored --nocapture"]
 fn a_100k_grid_scrolls_zooms_and_reflows_within_the_bar() {

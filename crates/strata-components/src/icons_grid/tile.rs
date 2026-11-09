@@ -86,10 +86,11 @@ pub(super) fn frame_look(rcx: &RowCx<'_>) -> (Option<Color>, Option<(f32, Color)
         None
     };
     if st.selected {
-        let fill = tokens::frame_selected_fill(look);
-        // Strata deepens a selected frame under the pointer: 22 % to 30 % of the accent.
-        let hovered = k.alpha(fill, (fill.a * 30.0 / 22.0).min(1.0));
-        return (Some(fill), ring, hover.then_some(hovered));
+        return (
+            Some(tokens::frame_selected_fill(look)),
+            ring,
+            hover.then(|| tokens::frame_selected_hover_fill(look)),
+        );
     }
     (None, ring, hover.then(|| tokens::frame_hover_fill(look)))
 }

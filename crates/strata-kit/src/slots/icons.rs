@@ -29,6 +29,7 @@ pub struct Icons {
     pub frame_icon: Option<Color>,
     pub frame_selected_fill: Option<Color>,
     pub frame_selected_ring: Option<Color>,
+    pub frame_selected_hover_fill: Option<Color>,
     pub frame_hover_fill: Option<Color>,
     pub frame_drop_fill: Option<Color>,
     pub frame_focus_ring: Option<Color>,
@@ -122,6 +123,21 @@ pub fn frame_selected_ring(look: &Look) -> Color {
         .icons
         .frame_selected_ring
         .unwrap_or_else(|| k.alpha(k.c.bg_accent, 0.6))
+}
+
+/// A selected tile's frame fill under the pointer: `icons.frame.selected_hover_fill`, else
+/// the default selected fill (the accent at 22 %) deepened as Strata deepens it, to 30 %. It
+/// derives from the accent, not from `icons.frame.selected_fill`: a slot token inherits only
+/// core tokens, so setting one slot token moves no other.
+pub fn frame_selected_hover_fill(look: &Look) -> Color {
+    let k = &look.kit;
+    look.slots
+        .icons
+        .frame_selected_hover_fill
+        .unwrap_or_else(|| {
+            let fill = k.alpha(k.c.bg_accent, 0.22);
+            k.alpha(fill, (fill.a * 30.0 / 22.0).min(1.0))
+        })
 }
 
 /// A hovered tile's frame fill: `icons.frame.hover_fill`, else the accent at 15 %.
@@ -239,6 +255,11 @@ pub const TOKENS: &[Token] = &[
     Token::color("icons.frame.selected_ring", frame_selected_ring, |l, v| {
         l.slots.icons.frame_selected_ring = Some(v)
     }),
+    Token::color(
+        "icons.frame.selected_hover_fill",
+        frame_selected_hover_fill,
+        |l, v| l.slots.icons.frame_selected_hover_fill = Some(v),
+    ),
     Token::color("icons.frame.hover_fill", frame_hover_fill, |l, v| {
         l.slots.icons.frame_hover_fill = Some(v)
     }),

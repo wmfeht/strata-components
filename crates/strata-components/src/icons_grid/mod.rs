@@ -110,6 +110,12 @@
 //! (Strata's entry kind, as the gallery shows). No column index or count (Rune draft
 //! R-C4-3).
 //!
+//! A line row reads "row N of <entry count>" (`line-9` in `c3-default` is position 2 of 40,
+//! though its group holds 5): each cell's `position_in_set(index, len)` gives its container
+//! the cells' set size (Rune `a11y/tree.rs:340`), and that overrides the row's own size of
+//! set (`:398`, after the virtual list's at `:395`). No fix here short of dropping the cells'
+//! positions, which say more (draft U-C3-4).
+//!
 //! # Decisions and deviations
 //!
 //! - **Down and Up with no tile under or over** (a short last row) move as GTK's GridView does
@@ -171,14 +177,14 @@
 //! | icons: Hover feedback appears only over a tile's thumbnail and caption… | gallery `hover_lights_the_frame_or_the_name…` |
 //! | icons: Folders show "No items" or their item count, audio and video their duration… | *partial*: PNG goldens show the host's text; the text is the host's |
 //! | icons: Details stream into visible tiles…; revisiting… shows them from cache | *partial*: runtime `a_details_line_landing_rebuilds_its_tile_alone`; streaming and caching are the host's |
-//! | icons: Details arriving do not change tile size or move the grid | runtime `a_details_line_landing…`; unit `a_tile_is_as_tall…`; PNG goldens `c3-loading` against `c3-default` |
+//! | icons: Details arriving do not change tile size or move the grid | runtime `a_details_line_landing…` (the metrics take no details text); PNG goldens `c3-loading` against `c3-default` |
 //! | icons: After a fast scroll stops, visible tiles fill their thumbnails and details… | `fling-fill` |
 //! | icons: Moving the slider scales existing thumbnails in place without flashing generic icons | gallery `a_size_step_keeps_landed_thumbnails_drawn…` |
 //! | icons: With Remember… off, the slider sets the default size, and other windows' Icons panes follow it | *partial*: runtime `two_grids_over_one_size_both_follow_a_step`; the default is the host's |
 //! | icons: Resting the pointer about a second (900 ms) on a card whose name is middle-ellipsized… | *partial*: gallery `a_cut_name_rests_into_a_tooltip…`, `the_tooltip_waits_for_the_pages_delay` (the host's window-wide delay) |
 //! | icons: A name that fits in its two caption lines shows no tooltip | gallery `a_cut_name_rests_into_a_tooltip…` |
 //! | icons: The tooltip appears only over the card's thumbnail or caption, not its padding | gallery `a_cut_name_rests_into_a_tooltip…` |
-//! | icons: Over the caption, only the name's text box and the details text count… | gallery `a_cut_name_rests_into_a_tooltip…` |
+//! | icons: Over the caption, only the name's text box and the details text count… | gallery `a_cut_name_rests_into_a_tooltip…`, `a_rest_beside_a_cut_names_box_or_its_details_shows_no_tooltip` |
 //! | icons: Moving more than 4 px or leaving the card restarts the wait. Sweeping… shows no tooltips | *partial*: Rune restarts on leaving an element (deviation above) |
 //! | icons: Pressing a mouse button cancels the wait until the pointer moves again… | *partial*: Rune's press hides it until the pointer leaves (deviation above) |
 //! | icons: After a rename commits, the tooltip shows the new name; while the rename field is open, none appears | gallery `a_tile_being_renamed_has_no_tooltip…` |
@@ -205,10 +211,11 @@
 //! | view-modes: Icons shows at most 20 columns at Content Compact and at most 16 at Airy | `column-cap-compact`, `column-cap-airy`; unit `rows_hold_more_tiles…` |
 //! | view-modes: Long filenames are middle-ellipsized in… Icons captions… | PNG golden `c3-long-names`; unit `a_name_that_fits_is_whole…`, *partial*: Icons |
 //! | position-restore: The exact scroll offset returns only… for Icons only at the same grid width… | runtime `a_scroll_offset_comes_back_only_at_its_grids_width` |
-//! | marquee: A plain marquee replaces the selection with the entries under the band | `marquee-2d` (a block two columns by three rows) |
-//! | marquee: A Ctrl-marquee toggles…; A Shift-marquee adds… | `marquee-shift-ctrl` (each over a block two columns by two rows, the modifiers held) |
-//! | pointer-intent: In Icons, the gutter beside the thumbnail inside a card is blank space for marquee | `marquee-2d` (the band starts on a tile's blank card space) |
-//! | pointer-intent: On an unselected entry, a drag from blank row space beside the filename starts a marquee | `marquee-2d` |
+//! | marquee: A plain marquee replaces the selection with the entries under the band | `marquee-2d` (two columns by four rows, the short last row's one tile included) |
+//! | marquee: A Ctrl-marquee toggles…; A Shift-marquee adds… | `marquee-shift-ctrl` (the modifiers held: Shift over one column by three rows, Ctrl over two columns by three rows) |
+//! | pointer-intent: In Icons, the gutter beside the thumbnail inside a card is blank space for marquee | gallery `a_drag_from_a_cards_blank_space_draws_a_band` |
+//! | pointer-intent: On an unselected entry, a drag from blank row space beside the filename starts a marquee | gallery `beside_a_short_name_is_blank_space_and_its_drawn_box_is_the_name` |
+//! | pointer-intent: On an unselected entry, a drag from the icon or rendered filename starts a file drag | `thumbnail-drag`, `name-drag`; gallery `beside_a_short_name…` (the name box's edge) |
 //! | rename: Clicking the name text of the only selected item again, after the double-click interval, opens the editor | `caption-hits` (on the name's box) |
 //!
 //! The thumbnail-size bullets on the popover, the notice, saving and the chooser, and every
@@ -248,6 +255,18 @@
 //!   notch: the view scrolls and the size stays; 1.5 s later the same notch steps it (C3 review
 //!   round 1). Ask: a capture-phase `on_wheel`, or let ancestors claim a modified wheel, as
 //!   GTK's capture phase does; and offer a delta whose modifiers changed as a new gesture.
+//!
+//! - **U-C3-4: an item's set size becomes its container's.** `El::position_in_set(i, n)` on
+//!   an item sets `n` as the size of set of the element that holds it (`a11y/tree.rs:340`,
+//!   applied at `:398`), overriding the container's own: its place among its siblings (the
+//!   virtual list's `:395`, or the app's). Repro (probed at 5d421fd): in a `.scroll(..)`
+//!   viewport, `col().growth(..).virtual_rows(5, ..)` of `row().role("row")`s, each holding 8
+//!   `text(..).role("gridcell").position_in_set(n + 1, 40)`; `accessibility_json()` gives the
+//!   list `setSize: 5`, every row `position: k, setSize: 40`, and the cells no size, so a
+//!   screen reader says "row 2 of 40". Searched upstream for `position_in_set`, `size_of_set`, `set_size` and
+//!   "position in set": nothing filed. Ask: keep a container's size of set to its own set, and
+//!   give the items' size to the container as a count of its children (AccessKit's row or
+//!   column count) where its role has one.
 //!
 //! A fourth probe found nothing to file: a memo whose line is re-keyed by a reflow is reused,
 //! not rebuilt; tiles a reflow builds again are the ones the mounted window newly takes in.

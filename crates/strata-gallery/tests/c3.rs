@@ -84,6 +84,19 @@ mod c3 {
         (x + w / 2.0, y + h + 2.0)
     }
 
+    /// Presses at `from`, moves to `to` over six frames, releases there and settles.
+    fn drag(rt: &mut Runtime<Gallery>, (x0, y0): (f32, f32), (x1, y1): (f32, f32)) {
+        rt.pointer_down(x0, y0);
+        rt.frame(FRAME);
+        for i in 1..=6 {
+            let f = i as f32 / 6.0;
+            rt.pointer_move(x0 + (x1 - x0) * f, y0 + (y1 - y0) * f);
+            rt.frame(FRAME);
+        }
+        rt.pointer_up(x1, y1);
+        run(rt, 0.3);
+    }
+
     /// Moves the pointer onto `path` and rests it there past the page's tooltip delay.
     fn rest_on(rt: &mut Runtime<Gallery>, path: &str) -> Option<String> {
         let (x, y) = center(rt, path);
@@ -286,17 +299,8 @@ mod c3 {
     #[test]
     fn a_drag_from_a_cards_blank_space_draws_a_band() {
         let mut rt = mount("c3-default-light");
-        let (x0, y0) = under_frame(&rt, 1);
-        let (x1, y1) = under_frame(&rt, 10);
-        rt.pointer_down(x0, y0);
-        rt.frame(FRAME);
-        for i in 1..=6 {
-            let f = i as f32 / 6.0;
-            rt.pointer_move(x0 + (x1 - x0) * f, y0 + (y1 - y0) * f);
-            rt.frame(FRAME);
-        }
-        rt.pointer_up(x1, y1);
-        run(&mut rt, 0.3);
+        let (from, to) = (under_frame(&rt, 1), under_frame(&rt, 10));
+        drag(&mut rt, from, to);
         assert_eq!(selected(&rt), vec![1, 2, 9, 10]);
         assert!(
             !rt.state.c3.intent.starts_with("Dragging"),
@@ -389,5 +393,87 @@ mod c3 {
         });
         run(&mut rt, 0.2);
         assert!(thumb(&rt), "the image part again");
+    }
+
+    /// A cut tile and a dragged tile draw faded (`collection.cut.opacity`,
+    /// `collection.drag.opacity`), the whole tile, its frame and name with it; an unmarked tile
+    /// beside them doesn't.
+    #[test]
+    fn cut_and_dragged_tiles_draw_faded() {
+        let rt = mount("c3-marks-light");
+        let look = rt.state.look();
+        let opacity = |path: &str| {
+            element(&rt, path)
+                .unwrap_or_else(|| panic!("{path}"))
+                .opacity
+        };
+        let cut = strata_kit::slots::collection::cut_opacity(look);
+        let drag = strata_kit::slots::collection::drag_opacity(look);
+        assert!(cut < 1.0 && drag < 1.0);
+        for path in ["row-3", "row-3/icon", "row-3/label"] {
+            assert!(
+                (opacity(path) - cut).abs() < 0.01,
+                "{path}: {}",
+                opacity(path)
+            );
+        }
+        for path in ["row-4", "row-4/icon", "row-4/label"] {
+            assert!(
+                (opacity(path) - drag).abs() < 0.01,
+                "{path}: {}",
+                opacity(path)
+            );
+        }
+        for path in ["row-2", "row-5", "row-6/label"] {
+            assert_eq!(opacity(path), 1.0, "{path}");
+        }
+    }
+
+    /// pointer-intent: "On an unselected entry, a drag from blank row space beside the filename
+    /// starts a marquee", and "a drag from the … rendered filename starts a file drag": 2 pt
+    /// left of `beach.jpg`'s drawn name box a drag draws a band; 2 pt inside it, it drags the
+    /// file. The name's hit box is its drawn box, neither the cell's width nor narrower.
+    #[test]
+    fn beside_a_short_name_is_blank_space_and_its_drawn_box_is_the_name() {
+        for (dx, band) in [(-2.0f32, true), (2.0, false)] {
+            let mut rt = mount("c3-default-light");
+            let [x, y, _, h] = element(&rt, "row-7/label").expect("beach.jpg's name").rect;
+            let [tx, ty, ..] = element(&rt, "row-15/icon").expect("a tile below").visible;
+            drag(&mut rt, (x + dx, y + h / 2.0), (tx + 5.0, ty + 5.0));
+            let intent = rt.state.c3.intent.clone();
+            if band {
+                assert!(!intent.starts_with("Dragging"), "beside: {intent}");
+                assert!(
+                    selected(&rt).len() > 1,
+                    "beside: a band, {:?}",
+                    selected(&rt)
+                );
+            } else {
+                assert_eq!(intent, "Dragging 1 items", "inside");
+                assert_eq!(selected(&rt), vec![7], "inside");
+            }
+        }
+    }
+
+    /// icons: "Over the caption, only the name's text box and the details text count": a rest
+    /// 2 pt beside a cut name's drawn box, or beside the details text, shows no tooltip; 2 pt
+    /// inside either, it does.
+    #[test]
+    fn a_rest_beside_a_cut_names_box_or_its_details_shows_no_tooltip() {
+        let mut rt = mount("c3-default-light");
+        let card = element(&rt, "row-11").expect("the long name's tile").rect;
+        for path in ["row-11/label", "row-11/details"] {
+            let [x, y, _, h] = element(&rt, path).unwrap_or_else(|| panic!("{path}")).rect;
+            assert!(x - 2.0 > card[0], "{path} leaves card space beside it");
+            for (dx, tip) in [(-2.0f32, None), (2.0, Some(LONG))] {
+                rt.pointer_move(1.0, 1.0);
+                run(&mut rt, 0.2);
+                assert_eq!(
+                    rest_at(&mut rt, x + dx, y + h / 2.0).as_deref(),
+                    tip,
+                    "{path} {dx}"
+                );
+            }
+        }
     }
 }

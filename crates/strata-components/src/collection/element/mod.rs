@@ -120,6 +120,10 @@
 //!   (`browser/selection/marquee`). Parts of the header with their own press or drag
 //!   handlers (C4's headings) keep their presses, as Rune gives a press to its innermost
 //!   handler. C2 and C3 get the same rule for any header they add.
+//! - **Rest rows carry a hover handler** ([`Collection::rest`], C22, owner ruling). Rows whose
+//!   rest hook gives them delays get Rune's `hover_delays` and `on_hover_change`, the only
+//!   handler a row has besides a drop zone. It isn't a press handler, so presses still reach the
+//!   container. A collection without the hook builds the same rows as before.
 //! - **A heading per group, nothing per row** (owner ruling). A header line is a heading named
 //!   by its group; rows don't repeat their group's name, as in GTK.
 //!
@@ -202,7 +206,7 @@ pub use keys::{
 };
 use lines::LineMap;
 pub use lines::{Group, GroupStyle, GroupedRows, Groups, Lines, OnePerLine};
-pub use row::{ContentSlot, Describe, RowCx, RowMarks, RowState, Slot};
+pub use row::{ContentSlot, Describe, Rest, RestReport, RestView, RowCx, RowMarks, RowState, Slot};
 pub use seam::{
     Activation, Controllers, Ctx, Effect, Flow, Hit, Intent, KeyController, KeyInput,
     MarqueeController, PointerController, PointerInput, PointerPhase, Region, Settings,
@@ -276,6 +280,7 @@ pub(crate) struct Config<S> {
     on_drag_over: Option<DragOverFn<S>>,
     header_defer: Option<f32>,
     on_wheel: Option<WheelFn<S>>,
+    rest: Option<Rest<S>>,
 }
 
 impl<S> Config<S> {
@@ -357,6 +362,7 @@ impl<S: 'static> Collection<S> {
                 on_drag_over: None,
                 header_defer: None,
                 on_wheel: None,
+                rest: None,
             },
         }
     }
@@ -578,6 +584,13 @@ impl<S: 'static> Collection<S> {
     /// wheel (C3's Ctrl+Shift+wheel) does it here.
     pub fn on_wheel(mut self, f: impl Fn(&mut S, WheelEvent, &mut Tx) -> bool + 'static) -> Self {
         self.cfg.on_wheel = Some(Rc::new(f));
+        self
+    }
+
+    /// Rows that report the pointer resting on them, with Rune's hover delays, and a part
+    /// pinned in them: C22's folder peek. See [`Rest`].
+    pub fn rest(mut self, rest: Rest<S>) -> Self {
+        self.cfg.rest = Some(rest);
         self
     }
 
@@ -826,9 +839,17 @@ impl<S: 'static> Collection<S> {
             .on_secondary_press_local(move |s: &mut S, e, tx| {
                 route::on_secondary(&secondary_cfg, s, e, tx)
             })
-            .on_pointer_move_local(move |s: &mut S, _, tx| {
-                route::on_pointer_move(&move_cfg, s, tx)
+            .on_pointer_move_local(move |s: &mut S, p, tx| {
+                route::on_pointer_move(&move_cfg, s, p, tx)
             });
+        if cfg.rest.is_some() {
+            // The pointer leaving the collection forgets the row it was on, so coming back onto
+            // that row is an arrival.
+            let leave_cfg = cfg.clone();
+            root = root.on_hover_change(move |s: &mut S, inside, tx| {
+                route::on_hover(&leave_cfg, s, inside, tx)
+            });
+        }
         if !cfg.keys_by_host {
             root = root
                 .focusable(true)

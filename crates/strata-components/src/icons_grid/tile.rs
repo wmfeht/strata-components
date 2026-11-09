@@ -233,7 +233,8 @@ pub(super) fn details_of<S>(shared: &Shared<S>, s: &S, rcx: &RowCx<'_>) -> Optio
 
 /// The content slot: the card, its frame, name and details stacked and centred, inside the
 /// tile's margin and the card's padding. A tile whose name is cut carries the whole name as a
-/// tooltip over its frame, its name and its details, none while it renames.
+/// tooltip over its frame, its name and its details, none while it renames or a folder peek is
+/// open from it (C22).
 pub(super) fn content_slot<S: 'static>(shared: &Rc<Shared<S>>, b: Built) -> ContentSlot<S> {
     let (version_shared, build_shared) = (shared.clone(), shared.clone());
     let key = b.key();
@@ -245,7 +246,11 @@ pub(super) fn content_slot<S: 'static>(shared: &Rc<Shared<S>>, b: Built) -> Cont
         move |s: &S, rcx: &RowCx<'_>, frame: El, label: El| {
             let m = &b.m;
             let look = rcx.look;
-            let help = (b.cut(&build_shared, s, rcx.entry.name).cut && !rcx.state.renaming)
+            // A tile a folder peek is open from (C22) shows no tooltip: the card beside it holds
+            // the folder's name, and a tooltip would cover one or the other.
+            let help = (b.cut(&build_shared, s, rcx.entry.name).cut
+                && !rcx.state.renaming
+                && !rcx.state.marks.peek_anchor)
                 .then(|| rcx.entry.name.to_owned());
             let (frame, label) = match &help {
                 Some(name) => (frame.help(name.clone()), label.help(name.clone())),

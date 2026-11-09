@@ -3,6 +3,7 @@
 
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
+use std::time::Duration;
 
 use rune::{El, Tx, icon, memo, row, text};
 use strata_kit::icons::IconName;
@@ -13,7 +14,7 @@ use super::Config;
 use super::keys::{ICON, LABEL, header_key, line_key, row_key};
 use super::lines::{Group, GroupStyle, Line, LineMap};
 use super::state::DropOver;
-use crate::contract::{DropHover, DropZone, Entry, EntryId, Point};
+use crate::contract::{DropHover, DropZone, Entry, EntryId, Point, Rect};
 
 /// Marks the host puts on rows, each with its own look.
 ///
@@ -221,6 +222,136 @@ impl<S: 'static> Describe<S> {
     }
 }
 
+type DelaysFn<S> = Rc<dyn Fn(&S, &RowCx<'_>) -> Option<(Duration, Duration)>>;
+type ReportFn<S> = Rc<dyn Fn(&mut S, RestReport, &mut Tx)>;
+type PartFn<S> = Rc<dyn Fn(&S, &RowCx<'_>) -> Option<El>>;
+type ViewFn<S> = Rc<dyn Fn(&mut S, RestView) -> bool>;
+
+/// Rows that report the pointer resting on them, through Rune's `El::hover_delays`: C22's
+/// folder peek. Set with [`Collection::rest`](super::Collection::rest).
+///
+/// Each row `delays` gives `Some((enter, leave))` for reports `true` once the pointer has
+/// rested on it for `enter`, and `false` once it has stayed off it for `leave`; a pass shorter
+/// than the delay reports nothing, and a press cancels a wait (Rune). A row that leaves the
+/// tree (scrolled out, a listing change, another view) reports its leave at once.
+///
+/// A `true` report counts only on the row the pointer last arrived on by moving over the
+/// collection, as Strata's peek starts only from a motion enter: a row a scroll carries under
+/// a parked pointer, the row a press of the collection's own ended on, and the row a drag from
+/// elsewhere ended on (once the host calls [`CollectionState::hold_rest`]) report nothing
+/// until the pointer leaves it (for another row, or out of the collection) and comes back;
+/// moving inside the row doesn't count. None counts while row hover is off after keyboard
+/// navigation ([`CollectionState::row_hover`]).
+///
+/// Rune counts a row under an overlay (a card, a menu, a scrim) as hovered too (Rune draft
+/// U-C22-1): the hook's owner decides what an overlay hides.
+///
+/// [`CollectionState::hold_rest`]: super::CollectionState::hold_rest
+///
+/// The delays and the part are part of the row's memo version, so they may read anything; a
+/// part that reads the state beyond its [`RowCx`] gives a `version` that changes with it.
+///
+/// [`CollectionState::row_hover`]: super::CollectionState::row_hover
+///
+/// Used by: C22.
+pub struct Rest<S> {
+    pub(super) delays: DelaysFn<S>,
+    pub(super) report: ReportFn<S>,
+    pub(super) part: Option<(VersionFn<S>, PartFn<S>)>,
+    pub(super) view: Option<ViewFn<S>>,
+}
+
+impl<S> Clone for Rest<S> {
+    fn clone(&self) -> Self {
+        Self {
+            delays: self.delays.clone(),
+            report: self.report.clone(),
+            part: self.part.clone(),
+            view: self.view.clone(),
+        }
+    }
+}
+
+impl<S: 'static> Rest<S> {
+    /// Rows `delays` gives delays for report to `report`.
+    pub fn new(
+        delays: impl Fn(&S, &RowCx<'_>) -> Option<(Duration, Duration)> + 'static,
+        report: impl Fn(&mut S, RestReport, &mut Tx) + 'static,
+    ) -> Self {
+        Self {
+            delays: Rc::new(delays),
+            report: Rc::new(report),
+            part: None,
+            view: None,
+        }
+    }
+
+    /// A part added to the rows `build` returns one for, last, made inert and hidden from
+    /// assistive technology: it takes no input and says nothing. The builder pins it within the
+    /// row (C22's peek anchor). Built again whenever `version` changes.
+    pub fn part(
+        mut self,
+        version: impl Fn(&S, &RowCx<'_>) -> u64 + 'static,
+        build: impl Fn(&S, &RowCx<'_>) -> Option<El> + 'static,
+    ) -> Self {
+        self.part = Some((Rc::new(version), Rc::new(build)));
+        self
+    }
+
+    /// Hears which entries the viewport shows whenever that changes (a scroll, a listing
+    /// change): C22 closes a peek whose folder left the view. Return true when it changed what
+    /// the view reads. Rune's `on_visible_rows` gives no transaction.
+    pub fn on_view(mut self, f: impl Fn(&mut S, RestView) -> bool + 'static) -> Self {
+        self.view = Some(Rc::new(f));
+        self
+    }
+
+    /// The memo version of what this hook adds to a row.
+    fn version(&self, s: &S, rcx: &RowCx<'_>) -> u64 {
+        let mut h = std::hash::DefaultHasher::new();
+        (self.delays)(s, rcx).hash(&mut h);
+        if let Some((version, _)) = &self.part {
+            version(s, rcx).hash(&mut h);
+        }
+        h.finish()
+    }
+}
+
+/// What the viewport shows, for [`Rest::on_view`].
+///
+/// Fields may be added.
+///
+/// Used by: C22.
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct RestView {
+    /// The collection's key.
+    pub collection: Rc<str>,
+    /// The entries the viewport shows, in order.
+    pub visible: Vec<EntryId>,
+}
+
+/// A row's rest report: the pointer came to rest on it, or left it.
+///
+/// Fields may be added.
+///
+/// Used by: C22.
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct RestReport {
+    /// The collection's key.
+    pub collection: Rc<str>,
+    /// The row's entry.
+    pub id: EntryId,
+    /// The pointer rests on the row (`true`) or left it (`false`).
+    pub inside: bool,
+    /// The row's rect in window points, as the element lays it out now. Empty on a leave from
+    /// an entry the source no longer holds.
+    pub row: Rect,
+    /// The viewport's rect in window points.
+    pub viewport: Rect,
+}
+
 /// The width of a row's outline (the cursor, a drop target, the Enter target): a hairline,
 /// as Strata draws them (`outline: 1px`, `src/style.css`). No look token sizes outlines.
 const OUTLINE: f32 = 1.0;
@@ -284,6 +415,9 @@ pub(super) fn config_key<S>(cfg: &Config<S>) -> u64 {
     // Hashed only when set, so every collection without bare items keeps its rows' versions.
     if cfg.bare_items {
         true.hash(&mut h);
+    }
+    if cfg.rest.is_some() {
+        "rest".hash(&mut h);
     }
     h.finish()
 }
@@ -378,6 +512,12 @@ fn build_item<S: 'static>(cfg: &Rc<Config<S>>, frame: &Frame, s: &S, index: usiz
     // A grid cell, and a row among header lines, states its place in the set itself, so it
     // changes with its index.
     let place = (frame.per_line > 1 || frame.grouped).then_some((index, frame.len));
+    // Only rows that draw them read the rest hook and the peek fill.
+    let rest = cfg.rest.as_ref().map(|r| r.version(s, &rcx));
+    let peek_fill = state
+        .marks
+        .peek_anchor
+        .then(|| color_key(tokens::peek_fill(look)));
     let version = (
         (entry.name, entry.kind, entry.icon, entry.thumbnail),
         state,
@@ -387,6 +527,7 @@ fn build_item<S: 'static>(cfg: &Rc<Config<S>>, frame: &Frame, s: &S, index: usiz
         frame.hover_live,
         versions,
         place,
+        (rest, peek_fill),
     );
     memo(row_key(id), version, || item(cfg, frame, s, &rcx))
 }
@@ -448,6 +589,8 @@ fn item<S: 'static>(cfg: &Rc<Config<S>>, frame: &Frame, s: &S, rcx: &RowCx<'_>) 
         .clip_soft(0.0);
     if state.selected || state.drop_target {
         inner = inner.fill(rune_kit::TableStyle::from_kit(kit).selected);
+    } else if state.marks.peek_anchor {
+        inner = inner.fill(tokens::peek_fill(look));
     }
     if frame.hover_live {
         inner = inner.hover(kit.c.hover);
@@ -494,6 +637,9 @@ fn finish_item<S: 'static>(
     if let Some(description) = cfg.describe.as_ref().and_then(|d| (d.build)(s, rcx)) {
         outer = outer.description(description);
     }
+    if let Some(rest) = &cfg.rest {
+        outer = rest_row(cfg, rest, s, rcx, outer);
+    }
     if cfg.read_only {
         return outer;
     }
@@ -503,6 +649,36 @@ fn finish_item<S: 'static>(
         outer = cfg.dnd.drop_zone(outer, row_zone(cfg, on_drop.clone(), id));
     }
     outer
+}
+
+/// Row `outer` with the rest hook's delays and report, and its part.
+fn rest_row<S: 'static>(
+    cfg: &Rc<Config<S>>,
+    rest: &Rest<S>,
+    s: &S,
+    rcx: &RowCx<'_>,
+    mut outer: El,
+) -> El {
+    if let Some((enter, leave)) = (rest.delays)(s, rcx) {
+        let report_cfg = cfg.clone();
+        let id = rcx.entry.id;
+        // Not a press handler, so presses still reach the container (`Handlers::has_primary`
+        // at the pinned rev).
+        outer = outer
+            .hover_delays(enter, leave)
+            .on_hover_change(move |s: &mut S, inside, tx| {
+                super::route::on_rest(&report_cfg, s, id, inside, tx)
+            });
+    }
+    if let Some(part) = rest.part.as_ref().and_then(|(_, build)| build(s, rcx)) {
+        outer = outer.child(part.inert().a11y_hidden());
+    }
+    outer
+}
+
+/// A colour as a memo key.
+fn color_key(c: rune::Color) -> [u32; 4] {
+    [c.r, c.g, c.b, c.a].map(f32::to_bits)
 }
 
 /// A group's header line: its label over the style's divider, a heading named by the label.

@@ -233,8 +233,9 @@ type PartFn<S> = Rc<dyn Fn(&S, &RowCx<'_>) -> Option<El>>;
 /// rested on it for `enter`, and `false` once it has stayed off it for `leave`; a pass shorter
 /// than the delay reports nothing, and a press cancels a wait (Rune). A row that leaves the
 /// tree (scrolled out, a listing change, another view) reports its leave at once. While row
-/// hover is off after keyboard navigation ([`CollectionState::row_hover`]), a `true` report is
-/// dropped, so a row that moves under a parked pointer reports nothing until the pointer moves.
+/// hover is off after keyboard navigation ([`CollectionState::row_hover`]), and after a press
+/// ends (a drag dropped or let go on a row), a `true` report is dropped until the pointer
+/// moves: a row that moves under a parked pointer, or one a drag ended on, reports nothing.
 ///
 /// The delays and the part are part of the row's memo version, so they may read anything; a
 /// part that reads the state beyond its [`RowCx`] gives a `version` that changes with it.

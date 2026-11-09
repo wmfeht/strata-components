@@ -41,6 +41,8 @@ pub struct CollectionState {
     pub(super) visible: Range<usize>,
     pub(super) drop: Option<DropOver>,
     pub(super) hover_live: bool,
+    /// A press ended since the pointer last moved: rest reports wait for it to move.
+    pub(super) rest_held: bool,
     pub(super) keyboard: bool,
     pub(super) active: bool,
     pub(super) layout: u64,
@@ -95,6 +97,7 @@ impl Default for CollectionState {
             visible: 0..0,
             drop: None,
             hover_live: true,
+            rest_held: false,
             keyboard: false,
             active: true,
             layout: 0,

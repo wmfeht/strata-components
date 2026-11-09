@@ -3256,3 +3256,38 @@ fn the_rest_part_mounts_in_the_row_that_asks_inert_and_hidden() {
         "hidden from assistive technology"
     );
 }
+
+#[test]
+fn a_row_a_drag_ends_on_reports_resting_only_once_the_pointer_moves() {
+    let mut rt = rest_runtime(30);
+    settle(&mut rt);
+    let (x, y) = centre_of(&rt, "row-5");
+    let (_, to) = centre_of(&rt, "row-10");
+    rt.pointer_move(x, y);
+    rt.pointer_down(x, y);
+    for i in 1..=10 {
+        rt.pointer_move(x, y + (to - y) * i as f32 / 10.0);
+        rt.frame(1.0 / 60.0);
+    }
+    rt.pointer_up(x, to);
+    rt.frame(1.0 / 60.0);
+    wake_until(&mut rt, 1.0, |_| false);
+    assert!(
+        !rt.state.rests.iter().any(|r| r.inside),
+        "dropped: {:?}",
+        rt.state.rests
+    );
+    // The pointer moves on to another folder: it reports again.
+    let (x, y) = centre_of(&rt, "row-0");
+    rt.pointer_move(x, y);
+    rt.frame(1.0 / 60.0);
+    wake_until(&mut rt, 1.0, |s| s.rests.iter().any(|r| r.inside));
+    let inside: Vec<_> = rt
+        .state
+        .rests
+        .iter()
+        .filter(|r| r.inside)
+        .map(|r| r.id)
+        .collect();
+    assert_eq!(inside, [id(0)]);
+}

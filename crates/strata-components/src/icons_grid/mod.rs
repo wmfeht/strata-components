@@ -190,7 +190,7 @@
 //! | thumbnail-size: In 10xer mode, with the Icons listing focused, plain +, =, or − steps the size… | `size-tenxer` |
 //! | thumbnail-size: The Ctrl+Alt step keys come from `[keymap.default]` in both modes… | *partial*: unit `a_rebound_default_chord_applies_in_tenxer_too`; the keymap file is the host's |
 //! | thumbnail-size: With Remember sort and icon size per folder off, Ctrl+Alt+0 returns the size… to 64 px | *partial*: `size-reset` (the grid sends Reset; the gallery host's policy lands on 64) |
-//! | thumbnail-size, by Ctrl+Shift+wheel (lgse/strata#1721, no bullet of its own) | gallery `ctrl_shift_wheel_steps_the_size…`; unit `a_notch_is_one_step…` |
+//! | thumbnail-size, by Ctrl+Shift+wheel (lgse/strata#1721, no bullet of its own) | `size-wheel` (named for the ladder bullet); unit `a_notch_is_one_step…`; C1e hooks `the_viewport_hears_wheels_first…` (a taken wheel doesn't scroll) |
 //! | keyboard-navigation: In Icons, arrows move one tile in that direction, using rows as laid out | `keyboard-2d`; unit `up_and_down_move_by_rows…` |
 //! | keyboard-navigation: In Icons and List, Up and Down move focus and selection… | `keyboard-2d`, *partial*: Icons |
 //! | keyboard-navigation: In Icons, Left on a later row's first tile moves to the previous row's last tile… | `keyboard-wrap` |
@@ -199,12 +199,12 @@
 //! | selection: plain Home, End, Page Up, and Page Down move the range anchor…; Shift+Home after End selects every entry | `keyboard-pages`, `keyboard-home-end`, *partial*: Icons |
 //! | scrolling: A page is the number of rows that fit… times the tiles per row | `keyboard-page-down`, `keyboard-pages`; unit `a_page_is_the_rows_that_fit…` |
 //! | scrolling: In Icons the tiles per row follow the current width, so… changing thumbnail size changes the next page at once | `page-after-size` |
-//! | view-modes: …Shift+Right in Icons then selects only the third and fourth… | gallery `a_ctrl_click_then_shift_right…`, *partial*: Icons |
+//! | view-modes: …Shift+Right in Icons then selects only the third and fourth… | `shift-right` (Ctrl held through the click), *partial*: Icons |
 //! | view-modes: Icons shows at most 20 columns at Content Compact and at most 16 at Airy | `column-cap-compact`, `column-cap-airy`; unit `rows_hold_more_tiles…` |
 //! | view-modes: Long filenames are middle-ellipsized in… Icons captions… | PNG golden `c3-long-names`; unit `a_name_that_fits_is_whole…`, *partial*: Icons |
 //! | position-restore: The exact scroll offset returns only… for Icons only at the same grid width… | runtime `a_scroll_offset_comes_back_only_at_its_grids_width` |
 //! | marquee: A plain marquee replaces the selection with the entries under the band | `marquee-2d` (a block two columns by three rows) |
-//! | marquee: A Ctrl-marquee toggles…; A Shift-marquee adds… | gallery `ctrl_and_shift_bands_toggle_and_add…` (in process until the Rune move brings scripts' held modifiers) |
+//! | marquee: A Ctrl-marquee toggles…; A Shift-marquee adds… | `marquee-shift-ctrl` (each over a block two columns by two rows, the modifiers held) |
 //! | pointer-intent: In Icons, the gutter beside the thumbnail inside a card is blank space for marquee | `marquee-2d` (the band starts on a tile's blank card space) |
 //! | pointer-intent: On an unselected entry, a drag from blank row space beside the filename starts a marquee | `marquee-2d` |
 //! | rename: Clicking the name text of the only selected item again, after the double-click interval, opens the editor | `caption-hits` (on the name's box) |

@@ -1,7 +1,6 @@
-//! C3's page in process: what the accessibility tree doesn't show or a script can't hold at
-//! the pinned Rune. Tooltips (a pointer resting for the page's 900 ms), hover, modified presses
-//! and Ctrl+Shift+wheel can't be scripted or seen in the tree; held thumbnails across a zoom
-//! need the store. Each test names the bullets it checks; the scripts in `tests/scripts/c3/`
+//! C3's page in process: what the accessibility tree doesn't show. Tooltips (a pointer resting
+//! for the page's 900 ms) and hover aren't in the tree; held thumbnails across a zoom need the
+//! store; the paths X2 finds tiles by need the element tree. Each test names the bullets it checks; the scripts in `tests/scripts/c3/`
 //! and `strata-components`' `icons_grid` tests check the rest.
 
 #[expect(
@@ -12,31 +11,13 @@
 mod support;
 
 mod c3 {
-    use rune::{
-        ElementInfo, Env, GesturePhase, Key, KeyEvent, Mods, PhysicalInput, Runtime, WheelEvent,
-    };
+    use rune::{ElementInfo, Env, Key, KeyEvent, Mods, PhysicalInput, Runtime};
     use strata_components::contract::{EntryId, EntrySource};
     use strata_components::thumbnails::State;
     use strata_gallery::scenes::c3::{HELP_DELAY, grid};
     use strata_gallery::{Gallery, scenes};
 
     const FRAME: f64 = 1.0 / 60.0;
-
-    const CTRL: Mods = Mods {
-        shift: false,
-        cmd: true,
-        alt: false,
-        ctrl: true,
-        logo: false,
-    };
-
-    const SHIFT: Mods = Mods {
-        shift: true,
-        cmd: false,
-        alt: false,
-        ctrl: false,
-        logo: false,
-    };
 
     fn mount(name: &str) -> Runtime<Gallery> {
         let scene = scenes::all_scenes()
@@ -204,88 +185,6 @@ mod c3 {
         run(&mut rt, 0.3);
         assert!(hover(&rt, "row-13/label") > 0.0);
         assert_eq!(hover(&rt, "row-13/frame"), 0.0);
-    }
-
-    /// view-modes: "Click the first of five entries and Ctrl+click the third. Shift+Down in
-    /// List or Shift+Right in Icons then selects only the third and fourth, as in Columns."
-    #[test]
-    fn a_ctrl_click_then_shift_right_selects_the_third_and_fourth() {
-        let mut rt = mount("c3-default-light");
-        click(&mut rt, "row-1/frame", Mods::default());
-        click(&mut rt, "row-3/frame", CTRL);
-        assert_eq!(selected(&rt), vec![1, 3]);
-        key(&mut rt, Key::Right, SHIFT);
-        assert_eq!(selected(&rt), vec![3, 4]);
-    }
-
-    /// marquee: "A Ctrl-marquee toggles each crossed entry relative to the selection at press"
-    /// and "A Shift-marquee adds the crossed entries to the selection at press", each over a
-    /// block of tiles two columns by two rows.
-    #[test]
-    fn ctrl_and_shift_bands_toggle_and_add_a_block_of_tiles() {
-        let band = |rt: &mut Runtime<Gallery>, mods: Mods, from: &str, to: &str| {
-            let (x0, y0) = center(rt, from);
-            let (x1, y1) = center(rt, to);
-            rt.physical_input(PhysicalInput::Modifiers(mods));
-            rt.pointer_down(x0, y0);
-            rt.frame(FRAME);
-            for i in 1..=6 {
-                let f = i as f32 / 6.0;
-                rt.pointer_move(x0 + (x1 - x0) * f, y0 + (y1 - y0) * f);
-                rt.frame(FRAME);
-            }
-            rt.pointer_up(x1, y1);
-            rt.frame(FRAME);
-            rt.physical_input(PhysicalInput::Modifiers(Mods::default()));
-            run(rt, 0.3);
-        };
-        let mut rt = mount("c3-default-light");
-        click(&mut rt, "row-3/frame", Mods::default());
-        // Columns 0 and 1 of rows 0 and 1, added to entry 3.
-        band(&mut rt, SHIFT, "row-1/gap", "row-10/gap");
-        assert_eq!(selected(&rt), vec![1, 2, 3, 9, 10]);
-        // Columns 2 and 3 of the same rows, from an unselected tile (a press on a selected
-        // tile's blank space drags the selection): 3 goes, 4, 11 and 12 come.
-        band(&mut rt, CTRL, "row-4/gap", "row-11/gap");
-        assert_eq!(selected(&rt), vec![1, 2, 4, 9, 10, 11, 12]);
-    }
-
-    /// thumbnail-size, by wheel (Strata's Ctrl+Shift+wheel, lgse/strata#1721): a notch over the
-    /// grid steps the size and doesn't scroll; a plain wheel scrolls.
-    #[test]
-    fn ctrl_shift_wheel_steps_the_size_and_a_plain_wheel_scrolls() {
-        let mut rt = mount("c3-default-light");
-        let (x, y) = center(&rt, "row-100/frame");
-        let ctrl_shift = Mods {
-            shift: true,
-            ..CTRL
-        };
-        let notch = |rt: &mut Runtime<Gallery>, dy: f32, mods: Mods| {
-            rt.wheel_event(
-                WheelEvent::new(0.0, dy)
-                    .at(x, y)
-                    .mods(mods)
-                    .precise(false)
-                    .phase(GesturePhase::Moved),
-            );
-            run(rt, 0.3);
-        };
-        notch(&mut rt, 40.0, ctrl_shift);
-        notch(&mut rt, 40.0, ctrl_shift);
-        assert_eq!(rt.state.c3.size, 80.0, "two notches away: two steps larger");
-        notch(&mut rt, -40.0, ctrl_shift);
-        assert_eq!(rt.state.c3.size, 72.0);
-        assert_eq!(
-            rt.state.c3.coll.scroll_offset(),
-            0.0,
-            "and nothing scrolled"
-        );
-        notch(&mut rt, -120.0, Mods::default());
-        assert!(
-            rt.state.c3.coll.scroll_offset() > 0.0,
-            "a plain wheel scrolls"
-        );
-        assert_eq!(rt.state.c3.size, 72.0);
     }
 
     /// icons: "Moving the slider scales existing thumbnails in place without flashing generic

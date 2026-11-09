@@ -79,6 +79,7 @@ pub use data::{ReadLimits, SourceSpec, Writer};
 pub use error::{Error, ReadError, Unsupported};
 pub use event::{Action, Event, Route, Selection, SelectionOffer, SourceId, Subscription};
 pub use wayland::{DragOffer, Prefer};
+pub use x11::HandOff;
 
 use event::Subscribers;
 
@@ -369,6 +370,17 @@ impl Transfer {
                 }
                 Ok(false)
             }
+        }
+    }
+
+    /// Hands the clipboard this process holds on X11 to a running clipboard manager, every
+    /// type of it, so it outlives the process: call it just before [`Transfer::shutdown`].
+    /// Blocks the caller until the manager answers, at most about `timeout`. On Wayland
+    /// there is no such protocol: [`HandOff::NoManager`].
+    pub fn hand_off_clipboard(&self, timeout: std::time::Duration) -> HandOff {
+        match &self.0.backend {
+            Backend::X11(x) => x.hand_off(timeout),
+            Backend::Wayland { .. } => HandOff::NoManager,
         }
     }
 

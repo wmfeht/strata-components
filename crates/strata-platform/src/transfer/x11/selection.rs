@@ -27,14 +27,18 @@ pub(super) struct Owned {
     time: u32,
 }
 
-#[cfg(feature = "dnd")]
 impl Owned {
+    #[cfg(feature = "dnd")]
     pub(super) fn id(&self) -> SourceId {
         self.id
     }
 
     pub(super) fn time(&self) -> u32 {
         self.time
+    }
+
+    pub(super) fn mimes(&self) -> Vec<String> {
+        self.spec.mimes().map(str::to_owned).collect()
     }
 }
 
@@ -60,10 +64,10 @@ impl Owning {
 
 /// A `SelectionRequest` to answer.
 pub(super) struct Request {
-    requestor: Window,
+    pub(super) requestor: Window,
     selection: Atom,
-    target: Atom,
-    property: Atom,
+    pub(super) target: Atom,
+    pub(super) property: Atom,
     time: u32,
 }
 
@@ -192,7 +196,9 @@ impl Actor {
                 });
             }
             Cmd::Disown { id } => self.disown(id),
+            Cmd::HandOff { deadline, reply } => self.start_hand_off(deadline, reply),
             Cmd::Ready { request, bytes } => self.answer(request, bytes),
+            Cmd::MultiReady { key, index, bytes } => self.multi_ready(key, index, bytes),
             Cmd::KillSelf => {
                 // KillClient on a resource of ours closes our own connection.
                 let _ = self.conn.kill_client(self.win);
@@ -408,7 +414,7 @@ impl Actor {
     }
 
     fn converted(&mut self, n: SelectionNotifyEvent) {
-        if n.requestor != self.win {
+        if n.requestor != self.win || self.hand_off_answered(&n) {
             return;
         }
         let selection = n.selection;
@@ -580,7 +586,11 @@ impl Actor {
         }
         if r.target == self.atoms.TARGETS {
             let mimes: Vec<String> = owned.spec.mimes().map(str::to_owned).collect();
-            let mut list = vec![self.atoms.TARGETS, self.atoms.TIMESTAMP];
+            let mut list = vec![
+                self.atoms.TARGETS,
+                self.atoms.TIMESTAMP,
+                self.atoms.MULTIPLE,
+            ];
             list.extend(mimes.iter().filter_map(|m| self.atom(m)));
             let _ = self.conn.change_property32(
                 PropMode::REPLACE,
@@ -602,11 +612,15 @@ impl Actor {
             );
             return self.notify(&req, req.property);
         }
+        if r.target == self.atoms.MULTIPLE {
+            let (id, spec, time) = (owned.id, owned.spec.clone(), owned.time);
+            return self.multiple(req, id, spec, time);
+        }
         let (id, spec) = (owned.id, owned.spec.clone());
         let Some(mime) = self.name(r.target) else {
             return self.notify(&req, NONE);
         };
-        // MULTIPLE and unknown types are refused.
+        // Unknown types are refused.
         let Some(writer) = spec.writer(&mime).cloned() else {
             return self.notify(&req, NONE);
         };
@@ -634,35 +648,36 @@ impl Actor {
         let Some(data) = bytes else {
             return self.notify(&req, NONE);
         };
+        self.put(req.requestor, req.property, req.target, data);
+        self.notify(&req, req.property);
+    }
+
+    /// Writes `data` into `property` of `requestor` as type `target`: at once, or by INCR when
+    /// it is larger than one chunk (the size now, then a chunk each time the requestor
+    /// deletes the property, ending with an empty one).
+    pub(super) fn put(&mut self, requestor: Window, property: Atom, target: Atom, data: Arc<[u8]>) {
         if data.len() <= self.chunk {
-            let _ = self.conn.change_property8(
-                PropMode::REPLACE,
-                req.requestor,
-                req.property,
-                req.target,
-                &data,
-            );
-            return self.notify(&req, req.property);
+            let _ =
+                self.conn
+                    .change_property8(PropMode::REPLACE, requestor, property, target, &data);
+            return;
         }
-        // INCR: announce the size, then send a chunk each time the requestor deletes the
-        // property, ending with an empty one.
         let _ = self.conn.change_window_attributes(
-            req.requestor,
+            requestor,
             &ChangeWindowAttributesAux::new().event_mask(EventMask::PROPERTY_CHANGE),
         );
         let len = u32::try_from(data.len()).unwrap_or(u32::MAX);
         let _ = self.conn.change_property32(
             PropMode::REPLACE,
-            req.requestor,
-            req.property,
+            requestor,
+            property,
             self.atoms.INCR,
             &[len],
         );
-        self.notify(&req, req.property);
         self.outgoing.push(Outgoing {
-            requestor: req.requestor,
-            property: req.property,
-            target: req.target,
+            requestor,
+            property,
+            target,
             data,
             offset: 0,
             ended: false,
@@ -690,7 +705,7 @@ impl Actor {
         out.deadline = Instant::now() + WRITE_IDLE;
     }
 
-    fn notify(&mut self, req: &Request, property: Atom) {
+    pub(super) fn notify(&mut self, req: &Request, property: Atom) {
         let event = SelectionNotifyEvent {
             response_type: SELECTION_NOTIFY_EVENT,
             sequence: 0,
@@ -708,6 +723,7 @@ impl Actor {
     // ---- timeouts ----
 
     pub(super) fn expire(&mut self, now: Instant) {
+        self.end_hand_off(Some(now), super::HandOff::TimedOut);
         #[cfg(feature = "dnd")]
         if self
             .hook

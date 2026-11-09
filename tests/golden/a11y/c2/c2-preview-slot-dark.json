@@ -77,6 +77,7 @@
                                                       "actions": [
                                                         "scroll-into-view"
                                                       ],
+                                                      "description": "27 items",
                                                       "key": "row-1000001",
                                                       "name": "Documents",
                                                       "position": 1,
@@ -86,6 +87,7 @@
                                                       "actions": [
                                                         "scroll-into-view"
                                                       ],
+                                                      "description": "62 items",
                                                       "key": "row-1000002",
                                                       "name": "Pictures",
                                                       "position": 2,
@@ -95,6 +97,7 @@
                                                       "actions": [
                                                         "scroll-into-view"
                                                       ],
+                                                      "description": "40 items",
                                                       "key": "row-1000003",
                                                       "name": "Music",
                                                       "position": 3,
@@ -104,6 +107,7 @@
                                                       "actions": [
                                                         "scroll-into-view"
                                                       ],
+                                                      "description": "5 items",
                                                       "key": "row-1000004",
                                                       "name": "Projects",
                                                       "position": 4,
@@ -116,6 +120,7 @@
                                                       "actions": [
                                                         "scroll-into-view"
                                                       ],
+                                                      "description": "No items",
                                                       "key": "row-1000005",
                                                       "name": "Empty",
                                                       "position": 5,
@@ -134,6 +139,7 @@
                                                       "actions": [
                                                         "scroll-into-view"
                                                       ],
+                                                      "description": "100000 items",
                                                       "key": "row-1000007",
                                                       "name": "Big",
                                                       "position": 7,
@@ -143,6 +149,7 @@
                                                       "actions": [
                                                         "scroll-into-view"
                                                       ],
+                                                      "description": "5 items",
                                                       "key": "row-1000008",
                                                       "name": "deep",
                                                       "position": 8,
@@ -152,6 +159,7 @@
                                                       "actions": [
                                                         "scroll-into-view"
                                                       ],
+                                                      "description": "3.1 MB",
                                                       "key": "row-1000009",
                                                       "name": "notes.txt",
                                                       "position": 9,
@@ -161,6 +169,7 @@
                                                       "actions": [
                                                         "scroll-into-view"
                                                       ],
+                                                      "description": "8.3 MB",
                                                       "key": "row-1000010",
                                                       "name": "todo.md",
                                                       "position": 10,
@@ -170,6 +179,7 @@
                                                       "actions": [
                                                         "scroll-into-view"
                                                       ],
+                                                      "description": "4.9 MB",
                                                       "key": "row-1000011",
                                                       "name": "photo.jpg",
                                                       "position": 11,
@@ -179,6 +189,7 @@
                                                       "actions": [
                                                         "scroll-into-view"
                                                       ],
+                                                      "description": "5.1 MB",
                                                       "key": "row-1000012",
                                                       "name": "budget.ods",
                                                       "position": 12,
@@ -188,6 +199,7 @@
                                                       "actions": [
                                                         "scroll-into-view"
                                                       ],
+                                                      "description": "2.4 MB",
                                                       "key": "row-1000013",
                                                       "name": "report-final.pdf",
                                                       "position": 13,
@@ -290,6 +302,7 @@
                                                       "actions": [
                                                         "scroll-into-view"
                                                       ],
+                                                      "description": "3 items",
                                                       "key": "row-5000001",
                                                       "name": "strata",
                                                       "position": 1,
@@ -302,6 +315,7 @@
                                                       "actions": [
                                                         "scroll-into-view"
                                                       ],
+                                                      "description": "3 items",
                                                       "key": "row-5000002",
                                                       "name": "rune",
                                                       "position": 2,
@@ -311,6 +325,7 @@
                                                       "actions": [
                                                         "scroll-into-view"
                                                       ],
+                                                      "description": "3 items",
                                                       "key": "row-5000003",
                                                       "name": "website",
                                                       "position": 3,
@@ -320,6 +335,7 @@
                                                       "actions": [
                                                         "scroll-into-view"
                                                       ],
+                                                      "description": "7.6 MB",
                                                       "key": "row-5000004",
                                                       "name": "README.md",
                                                       "position": 4,
@@ -329,6 +345,7 @@
                                                       "actions": [
                                                         "scroll-into-view"
                                                       ],
+                                                      "description": "4.2 MB",
                                                       "key": "row-5000005",
                                                       "name": "Cargo.toml",
                                                       "position": 5,
@@ -411,6 +428,7 @@
                                                       "actions": [
                                                         "scroll-into-view"
                                                       ],
+                                                      "description": "7.8 MB",
                                                       "key": "row-972000001",
                                                       "name": "strata.txt",
                                                       "position": 1,
@@ -420,6 +438,7 @@
                                                       "actions": [
                                                         "scroll-into-view"
                                                       ],
+                                                      "description": "3.5 MB",
                                                       "key": "row-972000002",
                                                       "name": "strata-notes.md",
                                                       "position": 2,
@@ -429,6 +448,7 @@
                                                       "actions": [
                                                         "scroll-into-view"
                                                       ],
+                                                      "description": "2.4 MB",
                                                       "key": "row-972000003",
                                                       "name": "index.html",
                                                       "position": 3,

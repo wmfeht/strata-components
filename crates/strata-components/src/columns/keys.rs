@@ -48,6 +48,11 @@ pub fn edge(column: &str) -> String {
     format!("{column}-edge")
 }
 
+/// The key of the accent line a column's resize edge lights under the pointer.
+pub fn edge_accent(column: &str) -> String {
+    format!("{column}-edge-accent")
+}
+
 /// The key of the "Column width" caption over a column's edge.
 pub fn caption(column: &str) -> String {
     format!("{column}-width-caption")
@@ -57,3 +62,6 @@ pub fn caption(column: &str) -> String {
 pub fn wash(column: &str) -> String {
     format!("{column}-drop")
 }
+
+/// The key of a row's size badge, under the row's key (`row-<id>/badge`).
+pub const BADGE: &str = "badge";

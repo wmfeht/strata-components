@@ -74,6 +74,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "27 items",
                                               "key": "row-1000001",
                                               "name": "Documents",
                                               "position": 1,
@@ -83,6 +84,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "62 items",
                                               "key": "row-1000002",
                                               "name": "Pictures",
                                               "position": 2,
@@ -92,6 +94,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "40 items",
                                               "key": "row-1000003",
                                               "name": "Music",
                                               "position": 3,
@@ -101,6 +104,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "5 items",
                                               "key": "row-1000004",
                                               "name": "Projects",
                                               "position": 4,
@@ -110,6 +114,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "No items",
                                               "key": "row-1000005",
                                               "name": "Empty",
                                               "position": 5,
@@ -128,6 +133,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "100000 items",
                                               "key": "row-1000007",
                                               "name": "Big",
                                               "position": 7,
@@ -137,6 +143,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "5 items",
                                               "key": "row-1000008",
                                               "name": "deep",
                                               "position": 8,
@@ -149,6 +156,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "3.1 MB",
                                               "key": "row-1000009",
                                               "name": "notes.txt",
                                               "position": 9,
@@ -158,6 +166,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "8.3 MB",
                                               "key": "row-1000010",
                                               "name": "todo.md",
                                               "position": 10,
@@ -167,6 +176,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "4.9 MB",
                                               "key": "row-1000011",
                                               "name": "photo.jpg",
                                               "position": 11,
@@ -176,6 +186,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "5.1 MB",
                                               "key": "row-1000012",
                                               "name": "budget.ods",
                                               "position": 12,
@@ -185,6 +196,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "2.4 MB",
                                               "key": "row-1000013",
                                               "name": "report-final.pdf",
                                               "position": 13,
@@ -267,6 +279,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "5 items",
                                               "key": "row-20000001",
                                               "name": "level-1",
                                               "position": 1,
@@ -279,6 +292,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "6.5 MB",
                                               "key": "row-20000002",
                                               "name": "deep-0001.txt",
                                               "position": 2,
@@ -288,6 +302,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "6.0 MB",
                                               "key": "row-20000003",
                                               "name": "deep-0002.txt",
                                               "position": 3,
@@ -297,6 +312,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "1.0 MB",
                                               "key": "row-20000004",
                                               "name": "deep-0003.txt",
                                               "position": 4,
@@ -306,6 +322,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "2.6 MB",
                                               "key": "row-20000005",
                                               "name": "deep-0004.txt",
                                               "position": 5,
@@ -388,6 +405,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "5 items",
                                               "key": "row-21000001",
                                               "name": "level-2",
                                               "position": 1,
@@ -400,6 +418,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "3.7 MB",
                                               "key": "row-21000002",
                                               "name": "level-1-0001.txt",
                                               "position": 2,
@@ -409,6 +428,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "7.9 MB",
                                               "key": "row-21000003",
                                               "name": "level-1-0002.txt",
                                               "position": 3,
@@ -418,6 +438,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "8.9 MB",
                                               "key": "row-21000004",
                                               "name": "level-1-0003.txt",
                                               "position": 4,
@@ -427,6 +448,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "905.5 kB",
                                               "key": "row-21000005",
                                               "name": "level-1-0004.txt",
                                               "position": 5,
@@ -509,6 +531,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "5 items",
                                               "key": "row-22000001",
                                               "name": "level-3",
                                               "position": 1,
@@ -521,6 +544,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "3.1 MB",
                                               "key": "row-22000002",
                                               "name": "level-2-0001.txt",
                                               "position": 2,
@@ -530,6 +554,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "4.0 MB",
                                               "key": "row-22000003",
                                               "name": "level-2-0002.txt",
                                               "position": 3,
@@ -539,6 +564,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "5.9 MB",
                                               "key": "row-22000004",
                                               "name": "level-2-0003.txt",
                                               "position": 4,
@@ -548,6 +574,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "352.8 kB",
                                               "key": "row-22000005",
                                               "name": "level-2-0004.txt",
                                               "position": 5,
@@ -630,6 +657,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "5 items",
                                               "key": "row-23000001",
                                               "name": "level-4",
                                               "position": 1,
@@ -642,6 +670,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "3.2 MB",
                                               "key": "row-23000002",
                                               "name": "level-3-0001.txt",
                                               "position": 2,
@@ -651,6 +680,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "2.3 MB",
                                               "key": "row-23000003",
                                               "name": "level-3-0002.txt",
                                               "position": 3,
@@ -660,6 +690,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "3.9 MB",
                                               "key": "row-23000004",
                                               "name": "level-3-0003.txt",
                                               "position": 4,
@@ -669,6 +700,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "8.5 MB",
                                               "key": "row-23000005",
                                               "name": "level-3-0004.txt",
                                               "position": 5,
@@ -751,6 +783,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "5 items",
                                               "key": "row-24000001",
                                               "name": "level-5",
                                               "position": 1,
@@ -763,6 +796,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "5.7 MB",
                                               "key": "row-24000002",
                                               "name": "level-4-0001.txt",
                                               "position": 2,
@@ -772,6 +806,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "4.3 MB",
                                               "key": "row-24000003",
                                               "name": "level-4-0002.txt",
                                               "position": 3,
@@ -781,6 +816,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "526.8 kB",
                                               "key": "row-24000004",
                                               "name": "level-4-0003.txt",
                                               "position": 4,
@@ -790,6 +826,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "7.3 MB",
                                               "key": "row-24000005",
                                               "name": "level-4-0004.txt",
                                               "position": 5,
@@ -892,6 +929,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "5 items",
                                               "key": "row-25000001",
                                               "name": "level-6",
                                               "position": 1,
@@ -901,6 +939,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "6.4 MB",
                                               "key": "row-25000002",
                                               "name": "level-5-0001.txt",
                                               "position": 2,
@@ -910,6 +949,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "6.4 MB",
                                               "key": "row-25000003",
                                               "name": "level-5-0002.txt",
                                               "position": 3,
@@ -919,6 +959,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "224.8 kB",
                                               "key": "row-25000004",
                                               "name": "level-5-0003.txt",
                                               "position": 4,
@@ -928,6 +969,7 @@
                                               "actions": [
                                                 "scroll-into-view"
                                               ],
+                                              "description": "1.7 MB",
                                               "key": "row-25000005",
                                               "name": "level-5-0004.txt",
                                               "position": 5,

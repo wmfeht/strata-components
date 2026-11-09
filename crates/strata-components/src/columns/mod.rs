@@ -1,7 +1,9 @@
 //! ColumnsView (C2): Miller columns, a sideways strip of C1e collections, each its own virtual
 //! list and selection.
 //!
-//! Work package: C2, `docs/work/phase-3-views/C2-columns-view.md`. Feature map nodes
+//! Work package: C2, `docs/work/phase-3-views/C2-columns-view.md`, and its follow-up C2b (the
+//! size badge and the width polish; no WP doc, its scope is C2b's row in
+//! `docs/work/STATUS.md`). Feature map nodes
 //! `browser/view-modes/columns` (108 bullets) and `operations/drag-and-drop/column-autoscroll`
 //! (9). Behaviour follows Strata's `src/ui/browser/columns/` at `upstream/main` 35ee677ab.
 //!
@@ -14,6 +16,7 @@
 //! .collection(|s, depth, c| c.clock(|s: &App| s.clock))      // the host's per-column extras
 //! .pointer_settings(|s: &App| s.pointer_settings())          // P5's interval, the click modes
 //! .header_actions(|s, cx| s.header_actions(cx))              // Refresh, Sort by, the filter
+//! .show_sizes(|s: &App| s.prefs.columns_show_sizes)          // the size badge's setting
 //! .on_intent(|s, intent, tx| s.columns_policy(intent, tx));  // Strata's policy
 //! let strip = view.build(s);                                 // the view (not memoised)
 //! // poll: view.tick(s, now, tx) | s.columns.autoscroll().drive(now, animations, tx)
@@ -66,9 +69,24 @@
 //!   leaves. With animations off, and on a rebuild, nothing moves.
 //! - **Widths.** A column's right edge resizes it, 6 points either side of the line, never below
 //!   one standard column (300 at the default text size) and never past the area the host sets
-//!   ([`ColumnsState::set_width_cap`]); the release hands the host the width once
-//!   ([`ColumnsIntent::Width`]), and a cancelled drag puts it back. Resting on an edge for 400 ms
-//!   shows a "Column width" caption. New columns open at the saved width narrowed to the area.
+//!   ([`ColumnsState::set_width_cap`]). The release (a click too) gives every other open column
+//!   the same width, easing once, and hands the host the width ([`ColumnsIntent::Width`]); a
+//!   cancelled drag puts it back. Two presses on one edge within 400 ms of the host's clock fit
+//!   that column alone (any press counts, as in Strata: a drag begun within 400 ms of the last
+//!   press on that edge fits rather than resizes) to the widest of its title and the rows on screen, easing, within one
+//!   standard column and the area, and hand the host that width. The pointer on an edge turns
+//!   its line the accent at once (and lights C9's divider line beside the last column); resting
+//!   there 400 ms shows a "Column width" caption. New columns open at the saved width, narrowed
+//!   to the area; the first area, and the first after a text-size change, narrow open columns
+//!   wider than it (a window shrinking later narrows none, though an edge drag snaps such a
+//!   column to the area), and the earlier text size draws them at their own width again.
+//! - **The size badge.** A row shows the host's words for it ([`ColumnSources::badge`]: "12
+//!   items", "No items", a file's size) in an opaque chip over the end of its name, while it is
+//!   selected or on the open path (in the highlight there), and under the pointer, fading in over
+//!   120 ms; it hides at once when the pointer, the selection or the open path leaves it, and a
+//!   hovered row's hides at once when the keys move (keyboard mode), until the pointer moves
+//!   again. [`ColumnsView::show_sizes`] off, or a rename open on the row, shows none. All of it is
+//!   paint (Rune's hover groups): the pointer crossing rows commits nothing.
 //! - **Drags.** A held file drag near the strip's left or right edge, or a listing's top or
 //!   bottom, scrolls it ([`drag_scroll`]), and the column under it shows an accent wash and ring.
 //!   Drops on a column go to the host with the column ([`ColumnsIntent::Dropped`]), and the strip
@@ -80,7 +98,9 @@
 //!   descendant is the active column's cursor row, or that column's list while it has no cursor,
 //!   so a change of column is heard as the list it lands in. Each column is a list box named by
 //!   its folder; its header's buttons are named ("Close this pane", the host's), the spinner is a
-//!   progress indicator named "Loading", the resize edge is hidden.
+//!   progress indicator named "Loading", the resize edge is hidden. A row's size badge is its
+//!   description ("Documents, 27 items"), under the badge's setting and never while it is
+//!   renamed, whether or not the chip shows, as Strata's label is always there to read.
 //!
 //! # Decisions and deviations
 //!
@@ -106,13 +126,34 @@
 //! - **The header's actions are a slot**: Refresh, sort, Sort by, the filter field and Empty
 //!   Trash are the host's ([`ColumnsView::header_actions`]); the view adds the close button in
 //!   the targeted column after the first.
-//! - **The badges (92–107) and the width polish (79, 83, 87, 89, 90) are C2b's** (coordinator
-//!   ruling): the spread of a dragged width to the other columns, autofit, a text-size change.
-//!   C2b also takes the header title's weight (Strata's 700; the kit has no bold UI weight
-//!   token, so it is `ui_medium` here) and the accent on the resize line's hover.
+//! - **The header title is bold**, as Strata's (700): the kit's type scale stops at medium, so
+//!   the weight is a slot token (`columns.header.title_weight`).
+//! - **The badge's text is the row's accessible description** (C2b, owner ruling), where Strata
+//!   leaves a GTK label for the screen reader; the chip itself is hidden from it.
+//! - **Widths ease on a 0.22 s spring** (a spread, an autofit), as the lifecycle does, rather
+//!   than Strata's 220 ms emphasized deceleration; a narrowing to the area lands at once, as
+//!   Strata's clamp does.
+//! - **The view notices a text-size change from the look** (owner ruling), where Strata's
+//!   preference handler rescales the columns; nobody sees the difference.
+//! - **Autofit measures the rows on screen and the header's title**: the host's header actions
+//!   are elements, which can't be measured (C4's autofit is the same). The chip sits over the
+//!   name, as Strata's overlay does, so it adds no width.
+//! - **The badge's font is the kit's `small`** (11 at the default size) against Strata's 0.9 em
+//!   (11.7), and its hover is the row's content box, not the row's 4 point side padding.
+//! - **`El::hold_landing_width` isn't used** (C2b's probes, `strata-spikes/c2b-probes`): on the
+//!   strip, beside a sliding drawer, it lands the strip at its narrower width at once and leaves
+//!   a blank gap the drawer closes over its spring (281 points in the first frame); on a shell
+//!   during a spread, the column jumps to its new width and overlaps the next one while that
+//!   slides, and on its body the rows overflow the shell. Frames cost 3 to 5 % less either way,
+//!   within noise. Strata eases the widths with the rows cut anew each frame, as this does.
 //!
 //! # Known gaps
 //!
+//! - **A row scrolled under a still pointer fades its badge in**, as Strata's does (its known
+//!   gap lgse/strata#1674): Rune's hover follows the rows a scroll moves under the pointer. Not
+//!   tested here.
+//! - **A text-size change narrows at the next area the host sets, or two ticks on** with the
+//!   area it has: a host that sets a stale area in that window narrows to it.
 //! - **A change of the strip's width more than half a second after a reveal** isn't followed:
 //!   the reveal is worked out again on each tick while the strip's drawn width moves within
 //!   half a second of it (a drawer opening in the same handler, a width spring), counted from
@@ -126,7 +167,9 @@
 //!   rune-kit Table costs nothing, so four columns scroll at about 1.75× four Tables' frame time
 //!   at p50 (about 0.55 ms, steady across runs) and 1.8× to 2.2× at p95 (1.6 to 2.1 ms, with
 //!   the machine's load; `tests/perf.rs`). Four bare C1e collections in a row cost the same,
-//!   so it is C1e's, open for a C1e follow-up.
+//!   so it is C1e's, open for a C1e follow-up. A size badge on every row (C2b) adds what its
+//!   text costs to mount: about 2.2× Table's at p50 and 2.2× to 3.3× at p95 (0.70 to 0.75 and
+//!   2.2 to 3.5 ms), with no view run and every hard bar held.
 //! - **A vertical swipe that crosses columns scrolls each of them** (Rune draft U-C24-3).
 //! - **Shift+wheel can't be tested headless** (Rune draft U-C24-7); the plain-wheel half is.
 //! - **During a width spring** (a swapped sibling's), the columns' spans the drag autoscroll and
@@ -141,8 +184,9 @@
 //!
 //! Each Behavior bullet, and what checks it. Scripts are in `tests/scripts/c2/`, on the gallery
 //! page (`crates/strata-gallery/src/scenes/c2.rs`, whose host stands in for Strata's open, close
-//! and back policy); "page" tests are in `crates/strata-gallery/tests/c2.rs`; "unit" tests in
-//! `tests.rs` and `drag_scroll/tests.rs`. *Partial* covers the half named; the rest is the
+//! and back policy); "page" tests are in `crates/strata-gallery/tests/c2.rs`, "page (c2b)" ones
+//! in `crates/strata-gallery/tests/c2b.rs`; "unit" tests in `tests.rs`, `tests/reveal.rs` and
+//! `drag_scroll/tests.rs`. *Partial* covers the half named; the rest is the
 //! host's or another work package's. Numbers are the bullets' order in `featuremap.py qa --node
 //! browser/view-modes/columns`.
 //!
@@ -168,7 +212,7 @@
 //! | 18 A closing column takes no clicks, hovers or drops | page `a_closing_column_takes_no_presses…` (Rune's presence makes it inert) |
 //! | 19 Another location or a rebuild replaces columns with no exit | page `a_rebuilt_strip_replaces…` ([`ColumnsState::replace`]) |
 //! | 20, 21 Deleting the focused open folder reveals and mirrors the next | Strata policy (deletion and mirroring) |
-//! | 22 A keyboard move reveals a column clipped by up to 4 px | page `a_keyboard_move_reveals…`, `a_keyboard_reveal_glides_the_strip`, `holding_down_glides…`, `holding_left_glides…`, `right_into_a_clipped_new_column…`, `a_column_opened_with_its_first_entry…`, `a_reveal_in_the_same_handler…`, `a_drawer_opening_in_the_same_handler…`, `a_reveal_follows_the_strips_width…`; unit `a_column_clipped_even_a_little…` |
+//! | 22 A keyboard move reveals a column clipped by up to 4 px | unit `with_animations_off_the_reveal_lands_at_once` (`tests/reveal.rs`); page `a_keyboard_move_reveals…`, `a_keyboard_reveal_glides_the_strip`, `holding_down_glides…`, `holding_left_glides…`, `right_into_a_clipped_new_column…`, `a_column_opened_with_its_first_entry…`, `a_reveal_in_the_same_handler…`, `a_drawer_opening_in_the_same_handler…`, `a_reveal_follows_the_strips_width…`; unit `a_column_clipped_even_a_little…` |
 //! | 23 A column wider than the strip that fills it stays | page `a_column_wider_than_the_strip…`; unit `a_column_wider_than_the_strip…` |
 //! | 24 Mirroring shows a folder's contents without moving focus | *partial*: [`Focus::No`] keeps the active column (page tests open with it); mirroring is Strata's |
 //! | 25–27, 29–32 Mirroring, Quick Preview, the 75 ms wait | Strata policy (the view reports [`ColumnsIntent::Cursor`]) |
@@ -177,8 +221,8 @@
 //! | 35 Back to an ancestor selects the folder you came from | `back-to-ancestor`; page `back_to_an_ancestor…`, `back_to_an_ancestor_scrolls…`, `back_to_a_clipped_ancestor…`, `forward_to_a_deeper_open_column…`, *partial*: navigation is the host's ([`ColumnsState::return_to`]) |
 //! | 36 The came-from folder's own column stays closed | `back-to-ancestor` |
 //! | 37, 38 Back to a non-ancestor; a sidebar ancestor | Strata policy |
-//! | 39 Left into a column with no cursor lands on its open folder | page `left_into_a_column_with_no_cursor…`; Right into one, its first entry: `right_into_a_child_column…` |
-//! | 40 …once the column is listed; nothing if the folder went | page `left_into_a_loading_column…`, `a_late_listing_in_a_column_left_behind…` (none once the keyboard left it), `a_late_listing_in_the_active_column…` (the strip's glide goes on); [`ColumnsState::sync`] |
+//! | 39 Left into a column with no cursor lands on its open folder | page `left_into_a_column_with_no_cursor…`, page (c2b) `left_into_a_column_with_no_cursor_reveals…` (its row scrolled into view); Right into one, its first entry: `right_into_a_child_column…` |
+//! | 40 …once the column is listed; nothing if the folder went | page `left_into_a_loading_column…`, `a_late_listing_in_a_column_left_behind…` (none once the keyboard left it), `a_late_listing_in_the_active_column…` (the strip's glide goes on), page (c2b) `a_late_listing_reveals_the_cursor_it_places`; [`ColumnsState::sync`] |
 //! | 41 F2, Delete and copy fall back only in the deepest column | Strata policy |
 //! | 42, 43 F5 keeps focus; F2 after a reload | Strata and C5/C21 (the strip keeps focus through a reload) |
 //! | 44–46 Renaming a folder whose column is open | C5 and Strata (the host keeps the column under its new name) |
@@ -207,18 +251,34 @@
 //! | 76 Columns fill the strip's height; the paste destination's header is marked | PNG goldens, *partial*: the active column's header is marked; the destination is Strata's |
 //! | 77 The horizontal bar shows no square at its leading edge | PNG `c2-overflow-*` (C24's strip bar, shown) |
 //! | 78 Dragging an edge resizes only that column, never below 300 | page `dragging_an_edge_resizes…`; unit `widths_never_draw_below…` |
-//! | 79 The release spreads the width to the other columns | C2b |
+//! | 79 The release spreads the width to the other columns | page (c2b) `the_release_eases_the_other_columns…`, `a_click_on_an_edge_spreads…` (widths aren't in the tree a script sees) |
 //! | 80 A press 6 px either side of the line resizes the left column | page `a_press_either_side_of_the_line…` |
 //! | 81 Resting 400 ms on an edge shows "Column width", following it | `resize-caption`; page `a_rest_on_a_column_edge…` |
-//! | 82 The edge meeting the preview lights its divider line | page `the_edge_of_the_column_beside_the_preview…` (with C9's `light_line`) |
-//! | 83, 87 Autofit | C2b |
-//! | 84 Drags stop at the visible browser area | page `an_edge_drag_stops_at_the_area…`, *partial*: the area is the host's ([`ColumnsState::set_width_cap`]) |
+//! | 82 The edge meeting the preview lights its divider line | page `the_edge_of_the_column_beside_the_preview…` (with C9's `light_line`); page (c2b) `the_edge_beside_the_preview_lights…_at_once` |
+//! | 83 Two presses on an edge fit that column alone, easing, never below 300 | `edge-autofit`; page (c2b) `two_presses_on_an_edge_within_400_ms…`, *partial*: the header's actions aren't measured |
+//! | 84 Drags stop at the visible browser area | page `an_edge_drag_stops_at_the_area…`, page (c2b) `an_autofit_stops_at_the_area…`, *partial*: the area is the host's ([`ColumnsState::set_width_cap`]) |
 //! | 85 The cap never goes below a standard column, scaled | page `an_edge_drag_stops…`; unit `widths_never_draw_below…` |
-//! | 86 A resize is saved; new columns open at it, open ones keep theirs | page `dragging_an_edge_resizes…`, *partial*: saving is the host's |
+//! | 86 A resize is saved; new columns open at it, open ones keep theirs | `edge-spread` (the release hands the width over); page `dragging_an_edge_resizes…`, *partial*: saving is the host's |
+//! | 87 An autofit saves its capped width | page (c2b) `an_autofit_stops_at_the_area…`, *partial*: saving is the host's |
 //! | 88 A saved width wider than the area opens narrowed; the setting stays | page `a_saved_width_wider_than_the_area…` |
-//! | 89, 90 A text-size change narrows; a window shrink doesn't | C2b |
+//! | 89 A text-size change narrows wider columns; the earlier size restores them | page (c2b) `a_text_size_change_narrows…` |
+//! | 90 A window shrink narrows none; an edge drag snaps such a column to the area | page (c2b) `a_window_shrink_narrows_no_open_column…` |
 //! | 91 A cancelled edge drag restores the width | page `a_cancelled_edge_drag…` |
-//! | 92–107 The size badge and its Appearance item | C2b (coordinator ruling); 97, 106, 107 are Strata's |
+//! | 92 A hovered, selected or open-path folder shows "N items" | `badge-sizes` (the words, as the row's description; the chip is hidden from the tree); the chip: page (c2b) `selected_and_open_path_rows_show_their_badge…`, `the_pointer_fades_a_badge_in…`; *partial*: the words are the host's ([`ColumnSources::badge`]) |
+//! | 93 Files show their size | `badge-sizes` (the words, as 92); the chip: page (c2b) `selected_and_open_path_rows…`; *partial*: as 92 |
+//! | 94 A row with nothing to show shows no badge | `badge-sizes` (no description); the chip: page (c2b) `a_folder_whose_count_is_unknown…` |
+//! | 95 An opaque surface chip, 5 px corners; the highlight on the open path | PNG `c2-badges-*` (slot tokens `columns.badge.*`) |
+//! | 96 With the setting off, no badge | `badge-setting-off` (no row described); the chip: PNG `c2-sizes-off-*`, page (c2b) `with_sizes_off_no_row_shows_a_badge…`; *partial*: every window passing the same setting is the host's |
+//! | 97 With the setting off no counts are asked for; on, shown rows fill | Strata policy (the host reads each column's `visible_range`); the view shows a count that fills (page (c2b) `with_sizes_off…`) |
+//! | 98 A count that arrives with the setting off stays hidden | page (c2b) `with_sizes_off_no_row_shows_a_badge_and_a_late_count_stays_hidden` |
+//! | 99 The pointer fades a badge in over 120 ms | page (c2b) `the_pointer_fades_a_badge_in…` |
+//! | 100 Selecting a row, or opening a folder onto the open path, shows it at once | page (c2b) `selecting_a_row_shows_its_badge_at_once…` |
+//! | 101 The selection leaving a row hides it at once | page (c2b) `selecting_a_row_shows…` |
+//! | 102 The pointer leaving a row hides it at once | page (c2b) `the_pointer_fades_a_badge_in…_leaving_hides_it_at_once` |
+//! | 103 Arrow keys hide a hovered, unselected row's badge at once | page (c2b) `arrow_keys_hide_a_hovered_rows_badge…` |
+//! | 104 Moving the pointer then fades it in again | page (c2b) `arrow_keys_hide…_the_next_move_fades_it_back` |
+//! | 105 A row being renamed hides it; it returns only with the setting on | `badge-rename` (its description goes); the chip, and its return: page (c2b) `a_renamed_row_hides_its_badge…`; *partial*: the editor is C5's (the page stands one in) |
+//! | 106, 107 The Appearance menu's "Show sizes in Columns view" | Strata policy (C21's menu, the host's setting) |
 //! | 108 A press moving less than the threshold starts no drag | `below-threshold`; page `a_press_that_moves_less…` (C1b's threshold) |
 //!
 //! `operations/drag-and-drop/column-autoscroll`:
@@ -250,14 +310,29 @@
 //!
 //! - Strata: which folder opens and when (clicks, Return, mirroring and its 75 ms wait, Quick
 //!   Preview), Back and Forward, deletion, the click on a file, saving the column width, the area
-//!   that caps it, 10xer's Escape, the paste destination.
-//! - C2b: the size badge (92–107) and the width polish (79, 83, 87, 89, 90).
+//!   that caps it, 10xer's Escape, the paste destination, the badge's words and its setting
+//!   (and asking for folder counts only while it is on), the Appearance menu's item.
+//! - C9 (follow-up): whether `El::hold_landing_width` helps the List and Icons side beside the
+//!   drawer, where rows wrap as the drawer's spring moves the edge (C2b's probe `ph1` shows it
+//!   lands the content at once and leaves a gap the drawer closes; untried there).
 //! - C5 (rename), C18 (the filter field), C21 (the menus, and [`ColumnsState::hold_target`] while
 //!   one is open), C9 (the drawer; the clipped-column reveal button is C9's area, coordinator
 //!   ruling), X2 (system drags: P1's start, zone keys, [`ColumnsState::drag_over`] from P1's
 //!   motion, [`ColumnsView::drop_target_at`]).
 //! - A drag from the blank strip beside the last column starting a band in it
 //!   (`browser/selection/marquee`): not built; the blank strip has no collection.
+//!
+//! # Rune coverage (5d421fd)
+//!
+//! What Rune covers for C2b: the badge's hover fade and its at-once hiding are hover groups
+//! (`hover_group`, `hover_motion`, `group_opacity` with an instant `opacity_motion`), and
+//! keyboard mode's hiding is a `hover_alone` cover; the line's accent is a `group_opacity` line,
+//! since Rune has no hover border colour (anomalyco/rune#328, filed upstream); autofit measures
+//! with `rune::text::measure`; the immediate drawer line and the 400 ms caption are two nested
+//! hover delays. One gap, worked around: a hover group that holds its own press stops being
+//! hovered once the pointer leaves it, so a resize holds the line lit by its rest (README says
+//! a *descendant's* press holds it). No new draft: `hold_landing_width` does what it says, it
+//! just doesn't fit a strip of fixed-width columns (see the decisions).
 //!
 //! # Rune drafts (not filed)
 //!
@@ -299,6 +374,7 @@
 
 #![warn(missing_docs)]
 
+mod badge;
 mod column;
 pub mod drag_scroll;
 mod fit;

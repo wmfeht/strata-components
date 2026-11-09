@@ -20,6 +20,11 @@ pub const EDGE_REACH: f32 = 6.0;
 /// How long the pointer rests on an edge before the "Column width" caption shows.
 pub const CAPTION_DELAY: Duration = Duration::from_millis(400);
 
+/// Two presses on one column edge within this many seconds of the host's clock fit the column
+/// to its content (Strata's `AUTOFIT_INTERVAL_US`, its own interval, not the desktop's
+/// double-click time).
+pub const AUTOFIT_WITHIN: f64 = 0.4;
+
 /// A resize of column `depth`'s edge in progress, in base points.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Resize {
@@ -56,4 +61,10 @@ pub fn dragged(start: f32, travel: f32, scale: f32, cap: Option<f32>) -> f32 {
         None => w,
     };
     w.max(STANDARD)
+}
+
+/// The width, in base points, that content `drawn` points wide fits in at `scale`, under the
+/// area's `cap` (points): one standard column at least, the cap at most (never below one).
+pub fn fitted(drawn: f32, scale: f32, cap: Option<f32>) -> f32 {
+    dragged(0.0, drawn.ceil(), scale, cap)
 }

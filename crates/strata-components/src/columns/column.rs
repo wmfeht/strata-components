@@ -5,20 +5,25 @@
 use std::rc::Rc;
 
 use rune::{
-    Cursor, Drag, El, Phase, PointerButton, Spring, SpringPair, Transition, Tx, col, el, row, text,
+    Anim, Cursor, Drag, El, Phase, PointerButton, Spring, SpringPair, Transition, Tx, col, el, row,
+    text,
 };
 use rune_kit::{ControlSize, IconButton, IconButtonVariant, Spinner};
 use strata_kit::icons::IconName;
+use strata_kit::look::Look;
 use strata_kit::slots::columns as tokens;
 
+use super::fit;
 use super::intent::ColumnsIntent;
 use super::keys;
+use super::state::ColumnsState;
 use super::state::Entrance;
 use super::view::{HeaderCx, Shared, collection, depth_of};
-use super::width::{self, CAPTION_DELAY, EDGE_REACH, Resize};
+use super::width::{self, AUTOFIT_WITHIN, CAPTION_DELAY, EDGE_REACH, Resize};
 use crate::contract::Rect;
 
-/// A column's entrance and exit, and a sibling's fade: Strata's 220 ms `COLUMN_TRANSITION`.
+/// A column's entrance and exit, a sibling's fade, and a width easing to a spread or an
+/// autofit: Strata's 220 ms `COLUMN_TRANSITION`.
 const MOTION: Spring = Spring::new(0.22, 0.0);
 
 /// How far a new column slides in from: Strata's `column-enter` keyframes.
@@ -83,7 +88,7 @@ pub(super) fn shell<S: 'static>(sh: &Rc<Shared<S>>, s: &S, depth: usize) -> El {
         .transition(shell_motion)
         .child(body)
         .child(line)
-        .child(edge(sh, c.serial, &key, scale));
+        .child(edge(sh, st, depth, c.serial, &key, scale, look));
     let resizing = st.resize.as_ref().is_some_and(|r| r.depth == depth);
     if st.edge_hover == Some(depth) || resizing {
         shell = shell.child(
@@ -129,14 +134,29 @@ pub(super) fn shell<S: 'static>(sh: &Rc<Shared<S>>, s: &S, depth: usize) -> El {
 
 /// The resize edge over the line on a column's right: it reaches [`EDGE_REACH`] either side,
 /// over the next column too (raised, so it takes the press first), and resizes this column.
-fn edge<S: 'static>(sh: &Rc<Shared<S>>, serial: u64, key: &str, scale: f32) -> El {
-    let (drag, hover) = (sh.clone(), sh.clone());
-    el().key(keys::edge(key))
-        .pin(None, Some(0.0), Some(-EDGE_REACH), Some(0.0))
-        .w(2.0 * EDGE_REACH)
-        .cursor(Cursor::ResizeColumn)
-        .a11y_hidden()
-        .raise()
+///
+/// Under the pointer, and while it resizes, the line turns the accent at once (Strata's
+/// `.column-resize-handle.resize-hover`): a line of its own over the column's, shown by the
+/// edge's hover group, since Rune has no hover border colour (anomalyco/rune#328). A group's
+/// own press doesn't hold its hover once the pointer leaves it, so a resize holds the line
+/// lit by its rest. The edge lights C9's divider line at once too, while the "Column width"
+/// caption waits [`CAPTION_DELAY`] on a child of the same size.
+fn edge<S: 'static>(
+    sh: &Rc<Shared<S>>,
+    st: &ColumnsState,
+    depth: usize,
+    serial: u64,
+    key: &str,
+    scale: f32,
+    look: &Look,
+) -> El {
+    let (drag, lit, hover) = (sh.clone(), sh.clone(), sh.clone());
+    let line = tokens::edge_width(look);
+    let resizing = st.resize.as_ref().is_some_and(|r| r.depth == depth);
+    let rest = if resizing { 1.0 } else { 0.0 };
+    let caption_hover = el()
+        .w_full()
+        .h_full()
         .hover_delays(CAPTION_DELAY, std::time::Duration::ZERO)
         .on_hover_change(move |s: &mut S, inside: bool, _tx: &mut Tx| {
             let Some(depth) = depth_of(&hover, s, serial) else {
@@ -148,15 +168,54 @@ fn edge<S: 'static>(sh: &Rc<Shared<S>>, serial: u64, key: &str, scale: f32) -> E
             } else if st.edge_hover == Some(depth) {
                 st.edge_hover = None;
             }
+        });
+    el().key(keys::edge(key))
+        .pin(None, Some(0.0), Some(-EDGE_REACH), Some(0.0))
+        .w(2.0 * EDGE_REACH)
+        .cursor(Cursor::ResizeColumn)
+        .a11y_hidden()
+        .raise()
+        .hover_group()
+        .hover_motion(Anim::INSTANT, Anim::INSTANT)
+        .on_hover_change(move |s: &mut S, inside: bool, tx: &mut Tx| {
+            let Some(depth) = depth_of(&lit, s, serial) else {
+                return;
+            };
+            let st = (lit.parts_mut)(s).state;
+            if inside {
+                st.edge_lit = Some(depth);
+            } else if st.edge_lit == Some(depth) {
+                st.edge_lit = None;
+            }
+            // Only the last column's edge lights something the view doesn't paint itself
+            // (the drawer's line, which the host reads in its poll).
+            if depth + 1 != st.columns.len() {
+                tx.live_only();
+            }
         })
         .on_drag(move |s: &mut S, d: &mut Drag, tx: &mut Tx| {
             resize(&drag, s, serial, d, scale, tx);
         })
+        .child(caption_hover)
+        .child(
+            el().key(keys::edge_accent(key))
+                .pin(Some(EDGE_REACH - line), Some(0.0), None, Some(0.0))
+                .w(line)
+                .fill(look.kit.c.bg_accent)
+                .group_opacity(rest, 1.0)
+                .opacity_motion(Anim::INSTANT)
+                .a11y_hidden()
+                .inert(),
+        )
 }
 
 /// A drag of a column's edge: only this column follows the pointer, between one standard
-/// column and the area's cap; the release hands the host the width, and a cancelled drag puts
-/// the width back.
+/// column and the area's cap; the release (a click too) gives every other open column the
+/// same width, easing once, and hands the host the width; a cancelled drag puts the width
+/// back. A second press on the same edge within [`AUTOFIT_WITHIN`] of the last fits the column to
+/// its content instead (Strata's two presses, timed by the host's clock), even one that would
+/// start a fresh drag: as Strata's `repeats_press`, any press counts, so a drag begun within
+/// 400 ms of a click or another drag on that edge fits the column and resizes nothing.
 fn resize<S: 'static>(
     sh: &Rc<Shared<S>>,
     s: &mut S,
@@ -171,19 +230,31 @@ fn resize<S: 'static>(
     let Some(depth) = depth_of(sh, s, serial) else {
         return;
     };
-    let p = (sh.parts_mut)(s);
-    let st = p.state;
     match d.phase {
         Phase::Down => {
-            let start = st.columns[depth].width;
+            let p = (sh.parts_mut)(s);
+            let st = p.state;
+            let now = st.now;
+            let again = st
+                .edge_press
+                .is_some_and(|(at, t)| at == serial && now - t <= AUTOFIT_WITHIN);
+            st.edge_press = Some((serial, now));
+            st.targeted = Some(depth);
+            if again {
+                st.resize = None;
+                autofit(sh, s, depth, scale, tx);
+                return;
+            }
+            // From the width drawn now, so a column narrowed to the area starts there.
+            let start = st.drawn_width(depth, &st.columns[depth], scale) / scale;
             st.resize = Some(Resize {
                 depth,
                 start,
                 live: start,
             });
-            st.targeted = Some(depth);
         }
         Phase::Move => {
+            let st = (sh.parts_mut)(s).state;
             let cap = st.cap();
             if let Some(r) = st.resize.as_mut().filter(|r| r.depth == depth) {
                 // The width lands with the pointer: an eased width would put rows where the
@@ -193,6 +264,7 @@ fn resize<S: 'static>(
             }
         }
         Phase::Up => {
+            let st = (sh.parts_mut)(s).state;
             let Some(r) = st.resize.take().filter(|r| r.depth == depth) else {
                 return;
             };
@@ -200,13 +272,28 @@ fn resize<S: 'static>(
                 tx.instant();
                 return;
             }
-            let moved = (r.live - r.start).abs() > f32::EPSILON;
-            st.columns[depth].width = r.live;
-            if moved {
-                sh.emit(s, ColumnsIntent::Width(r.live), tx);
-            }
+            // A click that moved nothing still settles the width under the area, and spreads.
+            let w = width::dragged(r.start, d.dx, scale, st.cap());
+            st.spread(w);
+            tx.motion(MOTION);
+            sh.emit(s, ColumnsIntent::Width(w), tx);
         }
     }
+}
+
+/// Fits column `depth` to the widest of its title and the rows on screen, within one standard
+/// column and the area, easing there; the host saves the width (Strata saves autofit's capped
+/// width). Only this column changes.
+fn autofit<S: 'static>(sh: &Rc<Shared<S>>, s: &mut S, depth: usize, scale: f32, tx: &mut Tx) {
+    let w = {
+        let p = (sh.parts)(s);
+        let drawn = fit::content_width(p.sources, p.state, p.look, depth);
+        width::fitted(drawn, scale, p.state.cap())
+    };
+    let st = (sh.parts_mut)(s).state;
+    st.set_column_width(depth, w);
+    tx.motion(MOTION);
+    sh.emit(s, ColumnsIntent::Width(w), tx);
 }
 
 /// Column `depth`'s header: its title (middle-ellipsized), a spinner while it loads, and in the
@@ -251,7 +338,7 @@ pub(super) fn header<S: 'static>(sh: &Rc<Shared<S>>, s: &S, depth: usize, serial
                 .key(keys::title(&key))
                 // The list is named by it already.
                 .a11y_hidden()
-                .font(k.ty.ui_medium)
+                .font(tokens::header_title_font(look))
                 .color(color)
                 .truncate_middle()
                 .shrink()

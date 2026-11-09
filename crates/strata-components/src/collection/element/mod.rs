@@ -938,9 +938,11 @@ impl<S: 'static> Collection<S> {
         if let Some(on_drop) = &cfg.on_drop
             && !cfg.read_only
         {
-            root = cfg
-                .dnd
-                .drop_zone(root, background_zone(&cfg, on_drop.clone()));
+            root = cfg.dnd.drop_zone_keyed(
+                root,
+                cfg.key.to_string(),
+                background_zone(&cfg, on_drop.clone()),
+            );
         }
         root
     }

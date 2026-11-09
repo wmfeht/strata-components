@@ -239,8 +239,9 @@ type ViewFn<S> = Rc<dyn Fn(&mut S, RestView) -> bool>;
 /// collection, as Strata's peek starts only from a motion enter: a row a scroll carries under
 /// a parked pointer, the row a press of the collection's own ended on, and the row a drag from
 /// elsewhere ended on (once the host calls [`CollectionState::hold_rest`]) report nothing
-/// until the pointer leaves and comes back; moving inside the row doesn't count. None counts
-/// while row hover is off after keyboard navigation ([`CollectionState::row_hover`]).
+/// until the pointer leaves it (for another row, or out of the collection) and comes back;
+/// moving inside the row doesn't count. None counts while row hover is off after keyboard
+/// navigation ([`CollectionState::row_hover`]).
 ///
 /// Rune counts a row under an overlay (a card, a menu, a scrim) as hovered too (Rune draft
 /// U-C22-1): the hook's owner decides what an overlay hides.

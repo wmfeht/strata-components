@@ -590,6 +590,15 @@ pub(super) fn on_rest<S: 'static>(
     (rest.report)(s, report, tx);
 }
 
+/// `on_hover_change` on the container of a collection with the rest hook: leaving it forgets
+/// the row the pointer was on.
+pub(super) fn on_hover<S: 'static>(cfg: &Rc<Config<S>>, s: &mut S, inside: bool, tx: &mut Tx) {
+    if !inside {
+        (cfg.get_mut)(s).1.rest_under = None;
+    }
+    tx.live_only();
+}
+
 /// `on_pointer_move_local` on the container: hover comes back once the pointer moves, and with
 /// the rest hook, the row the pointer arrives on is the one whose rest counts.
 pub(super) fn on_pointer_move<S: 'static>(

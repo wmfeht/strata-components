@@ -3373,3 +3373,39 @@ fn the_rest_hook_hears_the_entries_the_viewport_shows() {
     assert_eq!(last.visible.first(), Some(&id(100)));
     assert!(!last.visible.contains(&id(0)));
 }
+
+#[test]
+fn back_on_the_same_row_after_leaving_the_collection_is_an_arrival() {
+    let mut host = Host::new(30);
+    host.rest = true;
+    host.width = 300.0;
+    let mut rt = Runtime::new(host, view, (W, H), Env::new(false, 1.0));
+    rt.poll = Some(|s: &mut Host, t, _| {
+        s.t = t;
+        false
+    });
+    rt.frame(0.0);
+    settle(&mut rt);
+    // A drag from elsewhere ended on folder row 10: held.
+    let (x, y) = centre_of(&rt, "row-10");
+    rt.pointer_move(x, y);
+    rt.frame(1.0 / 60.0);
+    rt.update(|s, _| s.coll.hold_rest());
+    wake_until(&mut rt, 1.0, |_| false);
+    assert!(!rt.state.rests.iter().any(|r| r.inside), "held");
+    // Out of the collection for longer than the leave delay, then straight back onto row 10.
+    rt.pointer_move(W - 20.0, y);
+    rt.frame(1.0 / 60.0);
+    wake_until(&mut rt, 0.3, |_| false);
+    rt.pointer_move(x, y);
+    rt.frame(1.0 / 60.0);
+    wake_until(&mut rt, 1.0, |s| s.rests.iter().any(|r| r.inside));
+    let inside: Vec<_> = rt
+        .state
+        .rests
+        .iter()
+        .filter(|r| r.inside)
+        .map(|r| r.id)
+        .collect();
+    assert_eq!(inside, [id(10)], "an arrival");
+}

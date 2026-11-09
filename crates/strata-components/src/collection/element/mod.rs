@@ -842,6 +842,14 @@ impl<S: 'static> Collection<S> {
             .on_pointer_move_local(move |s: &mut S, p, tx| {
                 route::on_pointer_move(&move_cfg, s, p, tx)
             });
+        if cfg.rest.is_some() {
+            // The pointer leaving the collection forgets the row it was on, so coming back onto
+            // that row is an arrival.
+            let leave_cfg = cfg.clone();
+            root = root.on_hover_change(move |s: &mut S, inside, tx| {
+                route::on_hover(&leave_cfg, s, inside, tx)
+            });
+        }
         if !cfg.keys_by_host {
             root = root
                 .focusable(true)

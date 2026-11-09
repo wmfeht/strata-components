@@ -6,11 +6,11 @@ use std::rc::Rc;
 use rune::{El, Tx, el};
 use strata_kit::look::Look;
 
-use super::state::{ContextMenuState, MenuIntent};
+use super::state::{ContextMenuState, MenuIntent, MenuTarget};
 use super::view::{By, Render};
 
 type Emit<S> = Rc<dyn Fn(&mut S, MenuIntent, &mut Tx)>;
-type Dismissed<S> = Rc<dyn Fn(&mut S)>;
+type Dismissed<S> = Rc<dyn Fn(&mut S, MenuTarget)>;
 
 /// A context menu over [`ContextMenuState`]:
 ///
@@ -64,9 +64,9 @@ impl<S: 'static> ContextMenu<S> {
         self
     }
 
-    /// Hears the menu close without a choice: Escape or a press outside it. The selection
-    /// is never touched.
-    pub fn on_dismiss(mut self, f: impl Fn(&mut S) + 'static) -> Self {
+    /// Hears the menu for a target close without a choice: Escape or a press outside it. The
+    /// selection is never touched.
+    pub fn on_dismiss(mut self, f: impl Fn(&mut S, MenuTarget) + 'static) -> Self {
         self.dismissed = Some(Rc::new(f));
         self
     }
@@ -105,10 +105,10 @@ impl<S: 'static> ContextMenu<S> {
                 get_mut(s).close_submenu(depth);
             }),
             on_dismiss: Rc::new(move |s: &mut S| {
-                if get_mut(s).close().is_some()
+                if let Some(target) = get_mut(s).close()
                     && let Some(f) = &dismissed
                 {
-                    f(s);
+                    f(s, target);
                 }
             }),
         }

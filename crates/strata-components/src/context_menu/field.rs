@@ -149,7 +149,13 @@ impl<F: Copy + PartialEq> FieldMenuState<F> {
         self.open.take().map(|o| o.field)
     }
 
-    fn open(&mut self, field: F, at: Point) -> u64 {
+    /// Opens field `field`'s menu at window point `at` without reading the clipboard, so
+    /// Paste stays sensitive until [`Self::clipboard_known`]. [`FieldMenu::open`] reads it.
+    pub fn open(&mut self, field: F, at: Point) {
+        self.open_serial(field, at);
+    }
+
+    fn open_serial(&mut self, field: F, at: Point) -> u64 {
         self.serial += 1;
         self.open = Some(Open {
             field,
@@ -157,6 +163,12 @@ impl<F: Copy + PartialEq> FieldMenuState<F> {
             clipboard: Clipboard::Unknown,
         });
         self.serial
+    }
+
+    /// What the clipboard holds, as the host knows it (a scene, or P2's offers): Paste is
+    /// insensitive when it holds no text.
+    pub fn clipboard_known(&mut self, has_text: bool) {
+        self.clipboard_read(self.serial, has_text);
     }
 
     /// The clipboard read for open `serial` answered.
@@ -294,7 +306,7 @@ impl<S: 'static, F: Copy + PartialEq + 'static> FieldMenu<S, F> {
     /// Opens field `field`'s menu at window point `at`: what a host calls for C5's
     /// `RenameIntent::FieldMenu { id, at }`.
     pub fn open(&self, s: &mut S, field: F, at: Point, tx: &mut Tx) {
-        let serial = (self.get_mut)(s).open(field, at);
+        let serial = (self.get_mut)(s).open_serial(field, at);
         let get_mut = self.get_mut;
         tx.read_clipboard(move |s: &mut S, content, _| {
             get_mut(s).clipboard_read(serial, !content.text().is_empty());

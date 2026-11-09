@@ -8,7 +8,7 @@
 
 use std::rc::Rc;
 
-use rune::{El, Key, KeyEvent, Tx, el};
+use rune::{El, Key, KeyEvent, Mods, Tx, el};
 use rune_kit::{Menu, MenuEntry, MenuItem};
 use strata_kit::look::Look;
 
@@ -19,6 +19,8 @@ use crate::contract::Point;
 pub(super) const RADIUS: f32 = 9.0;
 /// rune-kit's compact menus' least width.
 pub(super) const MIN_WIDTH: f32 = 160.0;
+/// The widest a menu grows to show its rows whole; past it, labels end in an ellipsis.
+pub(super) const MAX_WIDTH: f32 = 360.0;
 
 /// What a submenu is being opened by: keys move the keyboard into it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -70,11 +72,12 @@ impl<S: 'static> Render<'_, S> {
     pub fn build(self, layer: &mut Vec<El>) -> El {
         let kit = &self.look.kit;
         let mut rows = Vec::new();
+        let widths = self.widths();
         let mut menu = Menu::new(self.key.to_owned())
             .trigger(el().size(0.0, 0.0))
             .open(true)
             .at(self.at.x, self.at.y)
-            .min_width(MIN_WIDTH);
+            .min_width(widths[0]);
         let dismiss = self.on_dismiss.clone();
         menu = menu.on_close(move |s: &mut S| dismiss(s));
         let mut entries: Vec<MenuEntry> =
@@ -106,9 +109,42 @@ impl<S: 'static> Render<'_, S> {
                 break;
             };
             let surface = std::mem::replace(slot, el());
-            *slot = self.adjust(surface, depth, rows.clone());
+            *slot = self
+                .adjust(surface, depth, rows.clone())
+                .min_w(widths[depth]);
         }
         anchor
+    }
+
+    /// The row that opened the submenu `depth` levels in.
+    fn submenu_row(&self, depth: usize) -> Option<&super::model::Item> {
+        let mut sections = self.sections;
+        let mut item = None;
+        for &i in self.open.get(..depth)? {
+            let it = super::model::items(sections).nth(i)?;
+            sections = it.submenu.as_deref()?;
+            item = Some(it);
+        }
+        item
+    }
+
+    /// Each open level's width: its widest row whole, between [`MIN_WIDTH`] and
+    /// [`MAX_WIDTH`]. rune-kit's rows shrink their labels to fit rather than widen the menu,
+    /// and it draws submenus 160 pt wide.
+    fn widths(&self) -> Vec<f32> {
+        let mut out = vec![width(self.look, self.header, self.sections)];
+        let mut sections = self.sections;
+        for &i in self.open {
+            let Some(sub) = super::model::items(sections)
+                .nth(i)
+                .and_then(|i| i.submenu.as_deref())
+            else {
+                break;
+            };
+            out.push(width(self.look, &[], sub));
+            sections = sub;
+        }
+        out
     }
 
     /// The rune-kit entries for `sections`, under item key prefix `prefix`, numbered from 0:
@@ -199,8 +235,14 @@ impl<S: 'static> Render<'_, S> {
                 look.glow.color.alpha(look.glow.opacity),
             );
         }
-        if depth == 0 {
-            e = e.label(self.name.to_owned());
+        // The menu takes the host's name; a submenu its row's label.
+        let name = if depth == 0 {
+            Some(self.name.to_owned())
+        } else {
+            self.submenu_row(depth).map(|i| i.label.clone())
+        };
+        if let Some(name) = name {
+            e = e.label(name);
         }
         let hands = Hands {
             open: self.on_submenu.clone(),
@@ -230,7 +272,9 @@ struct Hands<S> {
 
 /// The surface `depth` levels in heard `ev`: Right, Enter and Space on a submenu's row open
 /// it with the keyboard in it; Left in a submenu closes it; Escape in a submenu closes the
-/// whole menu (the top level's Escape is its modal's); Ctrl+A stays in the menu.
+/// whole menu (the top level's Escape is its modal's); Tab and Shift+Tab move as Down and Up
+/// do, wrapping, as GTK's menus move (Rune's Tab leaves a focus group whole); Ctrl+A stays in
+/// the menu.
 fn menu_key<S>(
     s: &mut S,
     ev: &KeyEvent,
@@ -242,6 +286,14 @@ fn menu_key<S>(
     let m = ev.mods;
     let plain = !(m.ctrl || m.cmd || m.alt || m.logo || m.shift);
     if ev.is_command('a') {
+        return true;
+    }
+    if ev.key == Key::Tab && !(m.ctrl || m.cmd || m.alt || m.logo) {
+        let to = if m.shift { Key::Up } else { Key::Down };
+        tx.send_key(KeyEvent {
+            key: to,
+            mods: Mods::default(),
+        });
         return true;
     }
     if !plain {
@@ -286,4 +338,44 @@ fn renumber(rows: Vec<Row>, key: &str, shift: usize) -> Vec<Row> {
             r
         })
         .collect()
+}
+
+/// How wide a compact rune-kit menu must be to show `header` and `sections` whole: each
+/// row's parts as `MenuItem::build` lays them out (5d421fd), plus the list's padding.
+fn width(look: &Look, header: &[String], sections: &[Section]) -> f32 {
+    use rune::TextStyle;
+    let k = &look.kit;
+    let measure = |t: &str, style: TextStyle| rune::text::measure(t, &[], style, None).0.ceil();
+    let hint = TextStyle {
+        line_height: 11.0,
+        ..k.ty.small_medium
+    };
+    // Rows: 12 pt before, 6 after, 8 between parts. Labels: 12 pt either side.
+    let mut w: f32 = header
+        .iter()
+        .chain(sections.iter().filter_map(|s| s.label.as_ref()))
+        .map(|l| 24.0 + measure(l, k.ty.small_medium))
+        .fold(0.0, f32::max);
+    for item in super::model::items(sections) {
+        let mut text = measure(&item.label, k.ty.ui_compact);
+        if let Some(d) = &item.description {
+            text = text.max(measure(d, k.ty.small));
+        }
+        let mut row = 18.0 + text;
+        if item.icon.is_some() {
+            row += 14.0 + 8.0;
+        }
+        if let Some(s) = &item.shortcut {
+            row += 8.0 + measure(s, hint);
+        }
+        if item.checked.is_some() {
+            row += 8.0 + 16.0;
+        }
+        if item.submenu.is_some() {
+            row += 8.0 + 16.0;
+        }
+        w = w.max(row);
+    }
+    // The list's 2 pt padding either side.
+    (w + 4.0).clamp(MIN_WIDTH, MAX_WIDTH)
 }

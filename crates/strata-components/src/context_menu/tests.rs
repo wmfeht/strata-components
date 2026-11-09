@@ -51,7 +51,7 @@ fn menu() -> ContextMenu<Host> {
                 .heard
                 .push(format!("{action} {:?}", target.entry().map(EntryId::get))),
         })
-        .on_dismiss(|s: &mut Host| s.dismissed += 1)
+        .on_dismiss(|s: &mut Host, _| s.dismissed += 1)
 }
 
 fn edit_mut(s: &mut Host, f: u8) -> Option<&mut TextEdit> {
@@ -500,6 +500,11 @@ fn layer_order_is_runekits() {
     let top = live(&rt, "m-menu").unwrap();
     let sub = live(&rt, "m-item6-sub-menu").unwrap();
     assert_eq!(top.label.as_deref(), Some("Notes.md"));
+    assert_eq!(
+        sub.label.as_deref(),
+        Some("Send to"),
+        "a submenu takes its row's name"
+    );
     assert_eq!((top.radius, sub.radius), (look.round(9.0), look.round(9.0)));
 }
 

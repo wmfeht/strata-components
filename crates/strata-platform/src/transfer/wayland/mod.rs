@@ -108,7 +108,6 @@ impl SourceProxy {
 }
 
 struct Source {
-    selection: Selection,
     spec: SourceSpec,
     proxy: SourceProxy,
 }
@@ -627,21 +626,14 @@ impl Conn {
             }
             Route::X11 => return Err(Error::NoRoute("X11")),
         };
-        state.sources.insert(
-            id.get(),
-            Source {
-                selection,
-                spec,
-                proxy,
-            },
-        );
+        state.sources.insert(id.get(), Source { spec, proxy });
         drop(state);
         self.home.flush();
         Ok(id)
     }
 
-    /// Gives up `source`'s selection, if it still holds it: the selection is set to none and
-    /// the source destroyed (which also clears it, where the compositor ignores the first).
+    /// Gives up `source`'s selection, if it still holds it: the source is destroyed, which
+    /// clears the selection if the compositor still has it as the selection.
     /// Subscribers hear [`Event::SourceCancelled`] at once. False if `source` no longer held
     /// anything. A data-device clear uses the newest input serial, as a write does.
     pub(crate) fn clear_selection(&self, source: SourceId) -> Result<bool, Error> {
@@ -655,17 +647,14 @@ impl Conn {
         let Some(held) = state.sources.remove(&source.get()) else {
             return Ok(false);
         };
-        match &held.proxy {
-            SourceProxy::Device(_) => {
-                if let (Some(device), Some(serial)) = (&state.device, state.latest_serial) {
-                    device.set_selection(None, serial);
-                }
-            }
-            SourceProxy::Control(_) => {
-                if let Some(control) = &state.control {
-                    control.clear(held.selection);
-                }
-            }
+        // Destroying the source clears the selection only while it still holds it. A data
+        // control set_selection(None) carries no serial, so it would also wipe a copy another
+        // app made since, which we haven't heard of yet. The data device's carries the newest
+        // serial, which the compositor refuses when another copy is newer.
+        if let (SourceProxy::Device(_), Some(device), Some(serial)) =
+            (&held.proxy, &state.device, state.latest_serial)
+        {
+            device.set_selection(None, serial);
         }
         held.proxy.destroy();
         drop(state);

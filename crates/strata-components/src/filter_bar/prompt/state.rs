@@ -393,6 +393,8 @@ impl<K: Copy + PartialEq + std::fmt::Debug + 'static> PromptState<K> {
         self.generation += 1;
         self.edit = TextEdit::new("");
         self.watch.reset();
+        // A hold is for this prompt alone (its field menu): the next one closes on a blur.
+        self.held = false;
         out
     }
 
@@ -474,6 +476,11 @@ impl<K: Copy + PartialEq + std::fmt::Debug + 'static> PromptState<K> {
             }
             _ => false,
         }
+    }
+
+    /// Whether the host holds the prompt open ([`PromptState::hold_open`]).
+    pub fn is_held(&self) -> bool {
+        self.held
     }
 
     /// Keeps the prompt open while its field lacks the keyboard, or lets it close again: the

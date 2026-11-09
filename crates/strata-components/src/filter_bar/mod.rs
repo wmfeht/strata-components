@@ -251,8 +251,9 @@
 //! | Bullet (opening words) | Checked by |
 //! | --- | --- |
 //! | While a text input has focus, Menu and Shift+F10 open the input's text-editing menu… | script `prompt-field-menu` (Shift+F10 in a prompt) |
-//! | Escape closes the menu…, and returns focus to the entry… | scripts `field-menu-escape` (the filter field), `prompt-field-menu` (the prompt stays open: [`prompt::PromptState::hold_open`] while the menu has the keyboard) |
-//! | Text-input menu styling covers the filter and search fields… | scripts `field-right-click`, `field-menu-delete` (a menu edit reaches the query: [`filter::FilterState::text_edited`]) |
+//! | Escape closes the menu…, and returns focus to the entry… | scripts `field-menu-escape` (the filter field), `prompt-field-menu` (the prompt stays open: [`prompt::PromptState::hold_open`] while the menu has the keyboard), `prompt-field-menu-then-blur` (the hold ends with the menu); test `a_prompt_closed_under_its_field_menu_closes_the_menu`; unit `closing_a_prompt_drops_its_hold` |
+//! | Text-input menu styling covers the filter and search fields… | scripts `field-right-click`, `field-menu-delete`, `prompt-field-menu-delete` (a menu edit reaches the query and the prompt: `text_edited`) |
+//! | A menu opens with keyboard focus on its first visible action… | scripts `field-menu-keys-stay`, `prompt-field-menu-keys-stay` (a key the menu passes on reaches no key map under it) |
 //!
 //! # Deliberate changes
 //!
@@ -264,8 +265,11 @@
 //!   answers it with C21's `FieldMenu::open`, calls `FieldMenu::check` from its poll, and passes
 //!   the menu's edits back with `text_edited` (`FieldMenu::on_change`). For a prompt it holds
 //!   the prompt open while the menu has the keyboard (`hold_open(true)` on the intent,
-//!   `hold_open(false)` from `FieldMenu::on_close`), so the menu's blur doesn't close it. The
-//!   gallery does all of this.
+//!   `hold_open(false)` from `FieldMenu::on_close`; closing a prompt drops its hold too), so the
+//!   menu's blur doesn't close it. **While a `FieldMenu` is open, the host's window-level key
+//!   handler must stand down** (take every key and do nothing): the menu passes on the keys it
+//!   doesn't use, and they would otherwise reach the host's key map under it (type to search,
+//!   a prompt or a chord). The gallery does all of this (`scenes/c18`, `on_key`).
 //! - **Keycaps are our own chip**, on Strata's keycap look, not rune-kit's `Keybind`, which
 //!   upper-cases `g` to `G` (U-C18-1; owner's ruling).
 //! - **No slide-down**: the bar appears and goes at once, where Strata's revealer slides (owner's

@@ -1313,6 +1313,11 @@ fn page_command(g: &mut Gallery, ev: &KeyEvent, tx: &mut Tx) -> bool {
 /// first frames), the pane's keys, as if it had the keyboard; from the filter field and the
 /// prompt, the page's commands (Ctrl+Shift+M, F6, F7). True consumes the key.
 pub fn on_key(g: &mut Gallery, key: &KeyEvent, tx: &mut Tx) -> bool {
+    // C21's field menu passes on the keys it doesn't use; while it is open they are the menu's,
+    // not the page's key map (no type-to-search, prompt or chord under it).
+    if g.c18.fields.is_open() {
+        return true;
+    }
     if g.c18.filter.field_focused() || g.c18.prompt.focused() {
         return page_command(g, key, tx);
     }

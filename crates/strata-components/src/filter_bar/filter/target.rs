@@ -7,8 +7,9 @@
 //! listing open their cursor, or the top result with none (`inline_search.rs`,
 //! `current_position().unwrap_or(0)`), where Down lands too; a listing narrowed in place opens
 //! its first selected result in display order (`filter_activation_position`). Deselecting
-//! everything gives the top result back. In 10xer mode nothing is outlined, so the same rules
-//! apply from the start.
+//! everything gives the top result back. In 10xer mode nothing is outlined, and before any
+//! results show for the text (the host's debounce, or after a restart) nothing is offered, so
+//! the per-mode rules apply from the start.
 
 use super::state::Shows;
 use crate::collection::selection::Selection;
@@ -82,9 +83,10 @@ impl Tracker {
     }
 
     /// What Enter opens: the top result while it is offered; else, for search results, the
-    /// cursor or the top result; in place, the first selected result in display order.
+    /// cursor or the top result; in place, the first selected result in display order. Before
+    /// any results show for the text (the host's debounce, or after a restart) nothing is
+    /// offered, so the per-mode rule applies at once, as Strata's.
     pub fn target(&self, r: Results<'_>, tenxer: bool, shows: Shows) -> Option<EntryId> {
-        self.query.as_ref()?;
         if r.source.is_empty() {
             return None;
         }

@@ -9,6 +9,8 @@
 //!   `keep_ms` is how long the exit waits for a clipboard manager (`null`: don't hand over;
 //!   absent: the default);
 //! - `{"cmd":"arm","offers":[Offer]}`: what Ctrl+C in the window copies;
+//! - `{"cmd":"copy-then-read","selection":…,"offers":[Offer],"mimes":[…]}`: a copy, then a read,
+//!   in one handler;
 //! - `{"cmd":"copy-files","uris":[…],"cut":bool,"text":"…"|null}`;
 //! - `{"cmd":"clear","copy":n}`, `{"cmd":"state","copy":n}`, `{"cmd":"offered","selection":…}`;
 //! - `{"cmd":"clear-later","copy":n,"ms":n}`: holds the UI thread `ms`, then clears;
@@ -158,6 +160,23 @@ mod demo {
                     c = c.keep_after_exit(keep.as_u64().map(Duration::from_millis));
                 }
                 copied(s.clip.copy(sel, c));
+            }
+            // A copy, then a read of the same selection in the same handler, before any echo.
+            "copy-then-read" => {
+                let offers: Vec<Offer> =
+                    serde_json::from_value(field("offers")).unwrap_or_default();
+                copied(s.clip.copy(sel, content(offers)));
+                let mimes: Vec<String> = serde_json::from_value(field("mimes")).unwrap_or_default();
+                let mimes: Vec<&str> = mimes.iter().map(String::as_str).collect();
+                let r = s
+                    .clip
+                    .read(sel, &mimes, Limits::default(), |_, r, _| match r {
+                        Ok(d) => log("read", json!({ "mime": d.mime, "text": d.text() })),
+                        Err(e) => log("read-error", json!({ "error": format!("{e:?}") })),
+                    });
+                if let Err(e) = r {
+                    log("read-error", json!({ "error": format!("{e:?}") }));
+                }
             }
             "arm" => {
                 s.armed = serde_json::from_value(field("offers")).unwrap_or_default();

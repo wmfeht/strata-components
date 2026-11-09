@@ -1072,6 +1072,43 @@ fn x11_reads_keep_their_limits_and_our_own_copy_reads_back() {
     read_limits(B::X);
 }
 
+/// A read right after a copy, before its echo, reads the copy, not the app it replaced.
+fn a_read_right_after_a_copy_reads_the_copy(b: B) {
+    let s = Session::start();
+    let Some(demo) = Demo::start(&s, b) else {
+        return;
+    };
+    let peer = s.peer(b.display());
+    let at = demo.app.line_count();
+    peer.set_selection(
+        Selection::Clipboard,
+        b.via(),
+        &[Offer::text(UTF8, "the peer's")],
+    );
+    demo.change(at, "offered", None);
+    let at = demo.send(json!({
+        "cmd": "copy-then-read", "selection": Selection::Clipboard,
+        "offers": [Offer::text(UTF8, "the app's")], "mimes": [UTF8],
+    }));
+    let got = demo.wait(at, "the read", |v| {
+        v["ev"] == "read" || v["ev"] == "read-error"
+    });
+    assert_eq!(got["text"], "the app's", "{got}");
+    demo.no_errors();
+}
+
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn wayland_data_control_a_read_right_after_a_copy_reads_the_copy() {
+    a_read_right_after_a_copy_reads_the_copy(B::W);
+}
+
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn x11_a_read_right_after_a_copy_reads_the_copy() {
+    a_read_right_after_a_copy_reads_the_copy(B::X);
+}
+
 // ---- 11. Teardown ----
 
 /// Quitting with a copy held and a large read in flight tears everything down before `run`

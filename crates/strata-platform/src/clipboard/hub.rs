@@ -365,12 +365,18 @@ impl Src {
 
 type Done = Box<dyn FnOnce(Result<Vec<u8>, ReadError>) + Send>;
 
+/// The newest copy of ours on `selection` that isn't lost, holding or still on its way, is
+/// what the selection has (or will have once the platform answers): a read right after a
+/// copy must not get the copy it replaced. Else the other app's offer.
 fn source_of(selection: Selection) -> Result<Option<Src>, ReadError> {
     with(|hub| {
-        if let Some(copy) = hub.book.offered(selection).and_then(|o| o.ours)
-            && let Some((spec, _)) = hub.specs.get(&copy)
+        if let Some(spec) = hub
+            .book
+            .live(selection)
+            .into_iter()
+            .find_map(|copy| hub.specs.get(&copy).map(|(spec, _)| spec.clone()))
         {
-            return Some(Src::Ours(spec.clone()));
+            return Some(Src::Ours(spec));
         }
         hub.offers.get(&selection).cloned().map(Src::Theirs)
     })

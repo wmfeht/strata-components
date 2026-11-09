@@ -8,8 +8,11 @@
 //! **The error is heard** as it appears: it is a polite live region, and the field is marked
 //! invalid. It isn't the field's accessible description: rune-kit's `TextInput` gives its editor
 //! no description (`name_field(.., None, ..)` at the pinned rev), and `TextField`, which can,
-//! has no `on_submit` for Enter to unlock. (rune-kit draft R-C14b-3 in `viewers`.) Whether the field takes focus when the prompt shows is the host's:
-//! with the preview closed, Space on the archive focuses it, and Right does in List and Columns
+//! has no `on_submit` for Enter to unlock. (rune-kit draft R-C14b-3 in `viewers`.) Each error
+//! is a new node (`<key>-error-<n>`), so a second wrong password is heard too.
+//!
+//! Whether the field takes focus when the prompt shows is the host's: with the preview closed,
+//! Space on the archive focuses it, and Right does in List and Columns
 //! ([`PromptState::focus`]); moving the cursor onto the archive leaves it unfocused.
 
 use std::rc::Rc;
@@ -24,6 +27,8 @@ use strata_kit::look::Look;
 pub struct PromptState {
     pub edit: TextEdit,
     error: Option<String>,
+    /// How many errors have been set: the error node's key, so each one is a new live node.
+    attempt: u64,
 }
 
 impl Default for PromptState {
@@ -31,6 +36,7 @@ impl Default for PromptState {
         PromptState {
             edit: TextEdit::new("").secure(),
             error: None,
+            attempt: 0,
         }
     }
 }
@@ -41,10 +47,12 @@ impl PromptState {
         self.edit.focused = true;
     }
 
-    /// "The password is incorrect.", or none. An error empties the field.
+    /// "The password is incorrect.", or none. An error empties the field, and each one is
+    /// announced, even with the words of the last.
     pub fn set_error(&mut self, error: Option<String>) {
         if error.is_some() {
             self.edit.clear();
+            self.attempt += 1;
         }
         self.error = error;
     }
@@ -98,7 +106,7 @@ impl<'a, S: 'static> ArchivePrompt<'a, S> {
     }
 
     /// The prompt's key ("archive-prompt" unless set): its parts are `<key>-field`,
-    /// `<key>-unlock` and `<key>-error`.
+    /// `<key>-unlock` and `<key>-error-<n>`, where `n` counts the errors set, from 1.
     pub fn key(mut self, key: impl Into<String>) -> Self {
         self.key = key.into();
         self
@@ -182,9 +190,11 @@ impl<'a, S: 'static> ArchivePrompt<'a, S> {
                     .child(button),
             );
         if let Some(error) = self.state.error() {
+            // AT-SPI announces a live region only when its node is added or its name changes
+            // (accesskit_atspi_common), so a second error with the same words is a new node.
             body = body.child(
                 text(error.to_owned())
-                    .key(format!("{key}-error"))
+                    .key(format!("{key}-error-{}", self.state.attempt))
                     .live_region(LiveRegion::Polite)
                     .font(k.ty.small)
                     .color(k.c.danger.fg)

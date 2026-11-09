@@ -231,6 +231,69 @@ fn an_error_clears_the_password_typed() {
 
 // The element, in a runtime.
 
+mod prompt {
+    use rune::accesskit::{Action, Live};
+    use rune::{Cx, El, Env, Runtime};
+    use strata_kit::look::Look;
+
+    use super::super::{ArchivePrompt, PromptState};
+
+    struct App {
+        prompt: PromptState,
+        look: Look,
+    }
+
+    fn view(s: &App, _cx: &mut Cx<App>) -> El {
+        ArchivePrompt::new(&s.prompt, |s: &mut App| &mut s.prompt)
+            .on_unlock(|s: &mut App, _, _| {
+                s.prompt
+                    .set_error(Some("The password is incorrect.".into()));
+            })
+            .build(&s.look)
+    }
+
+    /// The AccessKit ids of the live nodes in the tree.
+    fn live_nodes(rt: &Runtime<App>) -> Vec<u64> {
+        rt.accessibility_tree()
+            .nodes
+            .iter()
+            .filter(|(_, n)| n.live() == Some(Live::Polite))
+            .map(|(id, _)| id.0)
+            .collect()
+    }
+
+    fn unlock(rt: &mut Runtime<App>) -> Vec<u64> {
+        assert!(rt.accessibility_action("archive-prompt-unlock", Action::Click, None));
+        for _ in 0..3 {
+            rt.frame(1.0 / 60.0);
+        }
+        live_nodes(rt)
+    }
+
+    /// `operations/archives/preview`: "A wrong password keeps the prompt open with "The
+    /// password is incorrect."", each time. AT-SPI announces a live region only when its node
+    /// is added or its name changes, and a second error has the same words: it must be a new
+    /// node to be heard.
+    #[test]
+    fn each_wrong_password_is_a_new_live_node() {
+        let app = App {
+            prompt: PromptState::default(),
+            look: Look::fallback(false),
+        };
+        let mut rt = Runtime::new(app, view, (420.0, 400.0), Env::new(false, 1.0));
+        rt.frame(1.0 / 60.0);
+        assert!(live_nodes(&rt).is_empty(), "no error before an attempt");
+        let first = unlock(&mut rt);
+        assert_eq!(first.len(), 1, "one error after the first attempt");
+        let second = unlock(&mut rt);
+        assert_eq!(second.len(), 1, "one error after the second attempt");
+        assert_ne!(
+            first, second,
+            "the second error is a new node, so it is announced"
+        );
+    }
+}
+
 mod element {
     use std::cell::Cell;
 

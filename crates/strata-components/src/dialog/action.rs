@@ -113,6 +113,7 @@ pub struct StrataDialog<S> {
     primary_enabled: bool,
     loading: Option<String>,
     close_label: String,
+    closable: bool,
     shell: DialogShell<S>,
     dismiss: Handler<S>,
 }
@@ -146,6 +147,7 @@ impl<S: 'static> StrataDialog<S> {
             primary_enabled: true,
             loading: None,
             close_label: "Close dialog".into(),
+            closable: true,
             dismiss,
         }
     }
@@ -305,6 +307,14 @@ impl<S: 'static> StrataDialog<S> {
         self
     }
 
+    /// Draws no close button while false: a dialog the user leaves only through its footer,
+    /// such as C16's blocking progress dialog, whose one way out is Cancel. Escape still calls
+    /// `on_dismiss`. True by default.
+    pub fn closable(mut self, closable: bool) -> Self {
+        self.closable = closable;
+        self
+    }
+
     /// Pushes the dialog onto `layer`, the overlays `rune_kit::root` mounts, when open.
     pub fn build(mut self, look: &Look, layer: &mut Vec<El>) {
         if !self.primary_enabled
@@ -400,7 +410,11 @@ impl<S: 'static> StrataDialog<S> {
             .padding(space.lg)
             .px(space.xl)
             // Room for the close button pinned in the corner.
-            .pr(space.xl + look.frame.control + space.md)
+            .pr(if self.closable {
+                space.xl + look.frame.control + space.md
+            } else {
+                space.xl
+            })
             .border_sides([0.0, 0.0, 1.0, 0.0], kit.c.border_muted);
         if let Some(name) = self.icon {
             header = header.child(icon_box(look, name, danger));
@@ -457,8 +471,10 @@ impl<S: 'static> StrataDialog<S> {
             .footer_keys(footer_keys)
             .child(header)
             .child(body)
-            .child(buttons)
-            .child(close);
+            .child(buttons);
+        if self.closable {
+            shell = shell.child(close);
+        }
         if let Some(sub) = self.subtitle {
             shell = shell.description(sub);
         }

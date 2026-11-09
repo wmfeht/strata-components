@@ -19,12 +19,14 @@ use crate::thumbnails::picture;
 /// content is this much narrower than the card, so the card is [`WIDTH`] wide.
 const CARD_PADDING: f32 = 4.0;
 
-/// The body's least height, Strata's `presentation.stack.set_size_request(-1, 120)`, so the
-/// loading, empty and error states don't shrink the card to its header.
-const BODY_MIN_HEIGHT: f32 = 120.0;
+/// How many rows tall the body is at least, so the loading, empty and error states don't
+/// shrink the card to its header: Strata's `presentation.stack.set_size_request(-1, 120)` is
+/// four of its 30 pt `.file-row`s.
+const BODY_MIN_ROWS: f32 = 4.0;
 
-/// The line under the header as a share of the border colour, Strata's
-/// `.peek-popover .column-header` (`alpha(@strata_border, 0.24)`).
+/// The line under the header as a share of the border colour: Strata's
+/// `.peek-popover .column-header { border-bottom: 1px solid alpha(@strata_border, 0.24) }`
+/// (`src/style.css`).
 const HEADER_LINE_OPACITY: f32 = 0.24;
 
 /// The key of the card's group, which assistive technology names "Folder peek".
@@ -61,8 +63,9 @@ fn body<S: 'static>(sh: &Rc<Shared<S>>, s: &S, target: &PeekTarget, look: &Look)
     let labels = &sh.labels;
     let loading = *c.status == PeekStatus::Loading;
 
+    // The header and the body are plain containers: assistive technology hears the heading
+    // and the list inside them, not two unnamed groups.
     let mut header = row()
-        .key("peek-header")
         .w_full()
         .h(look.row.columns)
         .px(tokens::header_inset(look))
@@ -99,11 +102,8 @@ fn body<S: 'static>(sh: &Rc<Shared<S>>, s: &S, target: &PeekTarget, look: &Look)
 
     let n = c.entries.len();
     let shown = n.min(sh.behavior.rows);
-    let mut list = col()
-        .key("peek-body")
-        .w_full()
-        .min_h(BODY_MIN_HEIGHT)
-        .py(look.space.xs);
+    let body_min = BODY_MIN_ROWS * look.row.columns + 2.0 * look.space.xs;
+    let mut list = col().w_full().min_h(body_min).py(look.space.xs);
     if shown > 0 {
         let rows = (0..shown).map(|i| entry_row(sh, s, look, c.entries.entry(i), i, shown));
         list = list.child(col().key("peek-rows").role("list").w_full().children(rows));
@@ -127,7 +127,7 @@ fn body<S: 'static>(sh: &Rc<Shared<S>>, s: &S, target: &PeekTarget, look: &Look)
             PeekStatus::Loading => {}
             PeekStatus::Ready => {
                 list = list.child(
-                    message("peek-empty", look).child(
+                    message("peek-empty", look, body_min).child(
                         text(labels.empty.clone())
                             .font(k.ty.ui_compact)
                             .color(k.c.text_muted),
@@ -144,7 +144,7 @@ fn body<S: 'static>(sh: &Rc<Shared<S>>, s: &S, target: &PeekTarget, look: &Look)
                         .shrink()
                 };
                 list = list.child(
-                    message("peek-error", look)
+                    message("peek-error", look, body_min)
                         .child(line(labels.unreadable.clone()))
                         .child(line(why.clone())),
                 );
@@ -182,11 +182,11 @@ fn body<S: 'static>(sh: &Rc<Shared<S>>, s: &S, target: &PeekTarget, look: &Look)
 }
 
 /// A line of text centred in the body.
-fn message(key: &str, look: &Look) -> El {
+fn message(key: &str, look: &Look, body_min: f32) -> El {
     col()
         .key(key)
         .w_full()
-        .min_h(BODY_MIN_HEIGHT - 2.0 * look.space.xs)
+        .min_h(body_min - 2.0 * look.space.xs)
         .px(look.space.md)
         .gap(look.space.xxs)
         .center()

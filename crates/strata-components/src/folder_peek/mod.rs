@@ -22,6 +22,7 @@
 //!     )
 //!     .on_change(|p: &mut Pane, change, tx| p.relist(change, tx)) // start or drop a listing
 //!     .on_open(|p: &mut Pane, target, tx| p.open_folder(target.folder, tx))
+//!     .bounds(|p: &Pane| Some(p.pane_rect)) // the pane, around C4's sideways scroll
 //! }
 //!
 //! // The view: the folder rows wait on the pointer, the card goes in the root layer.
@@ -35,17 +36,31 @@
 //! rune_kit::root(page, layer)
 //! ```
 //!
-//! - Attach it to the List and Icons collections only: Columns never peeks. A view switch
-//!   unmounts the rows, which closes the peek.
-//! - Call [`PeekState::close`] on C1b's `Intent::BeginDrag`, when a system drag ends (X2),
-//!   on navigation, and first in Escape's chain (it returns whether one was open).
+//! - Attach it to the List and Icons collections only, whatever the preference: Columns never
+//!   peeks. The flag is [`PeekState::set_enabled`]; rows keep waiting while it is off, so
+//!   turning it on never peeks the folder under a parked pointer.
+//! - Pass the pane's rect in window points as [`FolderPeek::bounds`] when the collection is
+//!   wider than what shows of it: C4's List inside its sideways scroll is as wide as its
+//!   columns. Without it, a card is placed against the columns' width.
+//! - Call [`PeekState::close`] on C1b's `Intent::BeginDrag`, on navigation, on a view switch
+//!   (a keyboard peek has no pointer leave to close it), and first in Escape's chain (it
+//!   returns whether one was open).
+//! - Call `CollectionState::hold_rest` on each peeking collection when any drag that didn't
+//!   start in it ends: a sidebar row, a tab, another pane, a P1 or X2 system drag. The folder
+//!   a drag is dropped on then never peeks until the pointer arrives on a row again. (A drag of
+//!   the collection's own holds by itself.)
+//! - Call [`PeekState::set_covered`] while an overlay covers the collections and back when it
+//!   goes: a context menu (C21), a popover (`rune_kit::Popover`), a dialog (C15), the search
+//!   palette (C17), anything over the rows with or without a scrim. Rune counts the rows under
+//!   an overlay as hovered (Rune draft U-C22-1).
 //! - The file chooser never turns peeking on.
 //! - Hidden entries, the order and the 64-entry cap are the host's: it passes the rows it
 //!   wants shown, in its order. Give a capped count as [`More::AtLeast`].
 //! - Thumbnails: [`FolderPeek::thumbnails`] draws C25's handles; the host keeps a viewer of
 //!   the peek's rows in its store.
 //! - The keyboard peek (Strata's `i` in 10xer mode): [`PeekState::toggle`] at the cursor's
-//!   row, with C1e's `Collection::window_rect_of` and `CollectionState::viewport`.
+//!   row, with C1e's `Collection::window_rect_of`, and [`FolderPeek::viewport`] of
+//!   `CollectionState::viewport`.
 //!
 //! # Decisions
 //!
@@ -54,7 +69,18 @@
 //!   and 80 ms after. A peek stays open while either its row or its card reports the pointer
 //!   on it. The row a peek is open from waits no time, so the pointer coming back from the card
 //!   keeps the peek. C22 owns no timer.
-//! - **Placement is Strata's rule** ([`place`]), measured against the collection's viewport:
+//! - **A peek starts only from the pointer arriving on a folder**, as Strata's starts only from
+//!   a motion enter (C1e's rest hook): not on a folder a scroll carries under a parked pointer,
+//!   one a drag was dropped on, nor one under a parked pointer when peeking turns on; moving
+//!   inside the row doesn't count, leaving it for more than its 80 ms leave delay and coming
+//!   back does.
+//! - **A peek closes when its folder leaves the view** (scrolled out, unmounted, removed),
+//!   whether the pointer or a key opened it. Rune's `on_visible_rows` gives no transaction, so
+//!   the host's [`FolderPeek::on_change`] hears that close with one whose scrolls and wakes go
+//!   nowhere.
+//! - **Placement is Strata's rule** ([`place`]), worked out once as the peek opens (as Strata
+//!   sets its revealer's margins once), measured against the collection's viewport inside
+//!   [`FolderPeek::bounds`]:
 //!   8 pt right of the item, else 8 pt left of it, else over the viewport's trailing edge, and
 //!   no peek in a viewport narrower than the card. The card is a `HoverCard` anchored
 //!   RightStart to a zero-width part C22 pins in the item's row, at the offset that lands the
@@ -76,15 +102,21 @@
 //! 4. From an open peek onto another folder, the first closes 80 ms after the pointer left it
 //!    and the second opens at 500 ms. Strata keeps the first open until the second opens.
 //! 5. Rows under the card start no peek while the pointer is on the card, and a row the card
-//!    covers peeks only once the pointer leaves it and comes back (Rune draft U-C22-1).
+//!    covers peeks only once the pointer leaves it and comes back. Rows under the host's other
+//!    overlays (a menu's scrim, a popover, a dialog) start none while the host says they are
+//!    covered ([`PeekState::set_covered`]); without that call, Rune would peek them (Rune
+//!    draft U-C22-1).
 //! 6. No loading skeleton: a spinner in the header over an empty body. Strata shows its Miller
 //!    skeleton after a delay (owner ruling).
 //! 7. "and N more" is new (the work package's); Strata shows no such line.
 //! 8. A keyboard-opened peek is a polite live region, so it is announced (owner ruling);
 //!    Strata's popover is not.
-//! 9. A press on a folder cancels its wait (Rune), and after any press ends (a drop) no folder
-//!    peeks until the pointer moves (C1e's rest hook), so a drag never ends in a peek. Strata's
-//!    plain click leaves a pending peek running.
+//! 9. A press on a folder cancels its wait (Rune). After a press of the collection's own ends,
+//!    and after any other drag ends once the host calls `CollectionState::hold_rest`, no
+//!    folder peeks until the pointer arrives on a row again, so a drag never ends in a peek.
+//!    Strata's plain click leaves a pending peek running.
+//! 10. A quick out and back (under the 80 ms leave delay) is no leave to Rune, so it doesn't
+//!     restart a folder's wait; Strata's motion enter would.
 //!
 //! # Rune drafts (not filed)
 //!
@@ -95,8 +127,10 @@
 //!   as hovered (`runtime/input/hover.rs`, `within_next` walks every hit), as
 //!   `on_pointer_move` does (#265). Repro: rows with `hover_delays(500 ms, 80 ms)`, and a
 //!   `HoverCard` anchored over them; rest the pointer on the card: after 0.5 s the row under
-//!   it reports `true`, and its `on_pointer_move_local` hears every move. Ask: hover and its
-//!   delays stop at the topmost element hit, as presses do.
+//!   it reports `true`, and its `on_pointer_move_local` hears every move. The same with
+//!   `rune_kit::scrim` over the whole window (a menu's outside-press catcher, which takes
+//!   every press) and with any pressable layer element: the row under it reports `true`
+//!   after 0.48 s. Ask: hover and its delays stop at the topmost element hit, as presses do.
 //! - **U-C22-2: rune-kit `HoverCard` is fixed where a peek needs choices.** `Placement` has
 //!   no LeftStart, LeftEnd or RightEnd, the gap is 4 pt and the width 200 to 320 pt, the
 //!   surface takes no hover handler, and the card has no role or name: assistive technology
@@ -110,8 +144,9 @@
 //!   drawer. Ask: a boundary element for flip and clamp, as Floating UI's `boundary`. Related:
 //!   #362 (report the side a placement flipped to).
 //!
-//! Upstream past the pin (checked 2026-11-09, dev 10 commits past the pin): no change to `HoverCard`,
-//! `hover_delays` or hover input; `c650fe0` adds `Tx::clock` and `Tx::wake_at`, not adopted.
+//! Upstream past the pin (checked 2026-11-09, dev 10 commits past the pin): no change to
+//! `HoverCard`, `hover_delays` or hover input; `c650fe0` adds `Tx::clock` and `Tx::wake_at`,
+//! not adopted.
 //!
 //! Work package: C22, `docs/work/phase-1-leaves/C22-folder-peek.md`.
 //!
@@ -137,7 +172,7 @@ pub use place::{GAP, Placement, Side, WIDTH, place};
 pub use state::{Change, Origin, PeekState, PeekTarget};
 
 use crate::collection::element::Collection;
-use crate::contract::EntrySource;
+use crate::contract::{EntrySource, Rect};
 use crate::thumbnails::ThumbnailStore;
 
 /// How the peek times and fills: Strata's `PeekBehavior`.
@@ -267,6 +302,7 @@ type LookFn<S> = Rc<dyn Fn(&S) -> &Look>;
 type ChangeFn<S> = Rc<dyn Fn(&mut S, Change, &mut Tx)>;
 type OpenFn<S> = Rc<dyn Fn(&mut S, PeekTarget, &mut Tx)>;
 type ThumbsFn<S> = Rc<dyn Fn(&S) -> &ThumbnailStore>;
+type BoundsFn<S> = Rc<dyn Fn(&S) -> Option<Rect>>;
 
 /// What the peek was built with, shared by its handlers.
 pub(crate) struct Shared<S> {
@@ -277,6 +313,7 @@ pub(crate) struct Shared<S> {
     labels: PeekLabels,
     behavior: PeekBehavior,
     thumbs: Option<ThumbsFn<S>>,
+    bounds: Option<BoundsFn<S>>,
     on_change: Option<ChangeFn<S>>,
     on_open: Option<OpenFn<S>>,
 }
@@ -291,6 +328,7 @@ impl<S> Clone for Shared<S> {
             labels: self.labels.clone(),
             behavior: self.behavior,
             thumbs: self.thumbs.clone(),
+            bounds: self.bounds.clone(),
             on_change: self.on_change.clone(),
             on_open: self.on_open.clone(),
         }
@@ -338,6 +376,7 @@ impl<S: 'static> FolderPeek<S> {
                 labels: PeekLabels::default(),
                 behavior: PeekBehavior::STRATA,
                 thumbs: None,
+                bounds: None,
                 on_change: None,
                 on_open: None,
             },
@@ -363,8 +402,29 @@ impl<S: 'static> FolderPeek<S> {
         self
     }
 
-    /// Hears a peek open or close from the pointer (and a closed card's folder leave the
-    /// tree): the host starts or drops its listing of [`PeekState::target`]. A host's own
+    /// The viewport a peek of `s` measures, inside [`FolderPeek::bounds`]: pass it to
+    /// [`PeekState::open`] and [`PeekState::toggle`] with the collection's own viewport
+    /// (`CollectionState::viewport`).
+    pub fn viewport(&self, s: &S, viewport: Rect) -> Rect {
+        match self.sh.bounds.as_ref().and_then(|f| f(s)) {
+            Some(bounds) => attach::clip(viewport, bounds),
+            None => viewport,
+        }
+    }
+
+    /// The part of the window the collection shows itself in, in window points, when that is
+    /// less than its own viewport: the pane around C4's sideways scroll, whose collection is as
+    /// wide as its columns. Placement and the narrow-viewport rule measure the viewport inside
+    /// it. `None` (or none set) measures the collection's viewport.
+    pub fn bounds(mut self, f: impl Fn(&S) -> Option<Rect> + 'static) -> Self {
+        self.sh.bounds = Some(Rc::new(f));
+        self
+    }
+
+    /// Hears a peek open or close from the pointer, and close as its folder leaves the view:
+    /// the host starts or drops its listing of [`PeekState::target`]. A close from the view
+    /// comes with a transaction whose scrolls and wakes go nowhere (Rune's `on_visible_rows`
+    /// gives none). A host's own
     /// calls ([`PeekState::open`], [`PeekState::toggle`], [`PeekState::close`],
     /// [`PeekState::set_enabled`]) return their [`Change`] instead.
     pub fn on_change(mut self, f: impl Fn(&mut S, Change, &mut Tx) + 'static) -> Self {

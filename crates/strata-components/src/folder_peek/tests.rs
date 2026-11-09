@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use super::place::{CARD_GAP, MARGIN};
 use super::*;
-use crate::collection::element::RestReport;
+use crate::collection::element::{RestReport, RestView};
 use crate::contract::{EntryId, Rect};
 
 /// A viewport at x 200, 600 wide (to 800), in window points.
@@ -155,4 +155,35 @@ fn the_keyboard_peek_toggles_ignores_the_pointer_leaving_and_closes_first_on_esc
     st.toggle("files", id, tile(200.0), VIEWPORT);
     assert!(st.close(), "an Escape step");
     assert!(!st.close(), "nothing left: the next step runs");
+}
+
+// Review round 1, B2: rows under the host's overlays (a menu's scrim, a popover, a dialog).
+#[test]
+fn a_covered_collection_closes_its_peek_and_opens_none() {
+    let mut st = on();
+    st.row_rest(&report(1, true));
+    assert_eq!(st.set_covered(true), Change::Closed);
+    assert_eq!(st.row_rest(&report(2, true)), Change::None);
+    assert_eq!(st.target(), None);
+    assert_eq!(st.set_covered(false), Change::None);
+    assert_eq!(st.row_rest(&report(2, true)), Change::Opened);
+}
+
+// Review round 1, SF3: a peek whose folder leaves the view closes, a keyboard one too.
+#[test]
+fn a_peek_whose_folder_leaves_the_view_closes() {
+    let view = |collection: &str, ids: &[u64]| RestView {
+        collection: Rc::from(collection),
+        visible: ids.iter().map(|&i| EntryId::new(i)).collect(),
+    };
+    let mut st = on();
+    st.toggle("files", EntryId::new(1), tile(200.0), VIEWPORT);
+    assert_eq!(st.view(&view("files", &[1, 2, 3])), Change::None);
+    assert_eq!(
+        st.view(&view("other", &[7])),
+        Change::None,
+        "another collection"
+    );
+    assert_eq!(st.view(&view("files", &[2, 3, 4])), Change::Closed);
+    assert_eq!(st.target(), None);
 }

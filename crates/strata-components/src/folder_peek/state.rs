@@ -4,7 +4,7 @@
 use std::rc::Rc;
 
 use super::place::{Placement, place};
-use crate::collection::element::RestReport;
+use crate::collection::element::{RestReport, RestView};
 use crate::contract::{EntryId, Rect};
 
 /// How a peek opened.
@@ -64,6 +64,8 @@ pub struct PeekState {
     serial: u64,
     /// The card reports the pointer on it.
     card: bool,
+    /// The host has an overlay up (a menu, popover, dialog or palette).
+    covered: bool,
 }
 
 impl PeekState {
@@ -83,6 +85,25 @@ impl PeekState {
     /// Whether peeking is on.
     pub fn enabled(&self) -> bool {
         self.enabled
+    }
+
+    /// Says an overlay the host shows covers the collections, or no longer does: a context menu
+    /// (C21), a popover, a dialog (C15), the search palette (C17). Rune counts the rows under
+    /// any overlay as hovered (Rune draft U-C22-1), so while covered no folder peeks, and an
+    /// open peek closes. Uncovered, the folder under a parked pointer still waits for the
+    /// pointer to arrive on a row again.
+    pub fn set_covered(&mut self, covered: bool) -> Change {
+        self.covered = covered;
+        if covered && self.close() {
+            Change::Closed
+        } else {
+            Change::None
+        }
+    }
+
+    /// Whether the host said an overlay covers the collections.
+    pub fn covered(&self) -> bool {
+        self.covered
     }
 
     /// The folder peeked now, if any: the host lists it, and matches results to its
@@ -114,9 +135,9 @@ impl PeekState {
     }
 
     /// Opens a peek on folder `folder` of collection `collection`, whose row is at `item` in
-    /// `viewport` (window points: C1e's `Collection::window_rect_of` and
-    /// `CollectionState::viewport`). Nothing opens while peeking is off or when the viewport
-    /// is narrower than the card.
+    /// `viewport` (window points: C1e's `Collection::window_rect_of`, and the visible
+    /// viewport, [`FolderPeek::viewport`](super::FolderPeek::viewport)). Nothing opens while
+    /// peeking is off, while covered, or when the viewport is narrower than the card.
     pub fn open(
         &mut self,
         collection: impl Into<Rc<str>>,
@@ -125,7 +146,7 @@ impl PeekState {
         item: Rect,
         viewport: Rect,
     ) -> Change {
-        if !self.enabled {
+        if !self.enabled || self.covered {
             return Change::None;
         }
         let Some(place) = place(item, viewport) else {
@@ -164,7 +185,7 @@ impl PeekState {
 
     /// A folder row's rest report (C1e's [`RestReport`]).
     pub(super) fn row_rest(&mut self, r: &RestReport) -> Change {
-        if !self.enabled {
+        if !self.enabled || self.covered {
             return Change::None;
         }
         let mine = self.is_anchor(&r.collection, r.id);
@@ -179,6 +200,20 @@ impl PeekState {
             return Change::None;
         }
         self.open(r.collection.clone(), r.id, Origin::Hover, r.row, r.viewport)
+    }
+
+    /// What a collection's viewport shows now: a peek whose folder left it closes, whether the
+    /// pointer or a key opened it.
+    pub(super) fn view(&mut self, v: &RestView) -> Change {
+        match &self.open {
+            Some(o)
+                if o.target.collection == v.collection && !v.visible.contains(&o.target.folder) =>
+            {
+                self.close();
+                Change::Closed
+            }
+            _ => Change::None,
+        }
     }
 
     /// The card's own rest report.

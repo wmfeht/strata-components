@@ -87,10 +87,16 @@
 //! - **Keys reach the active column through the strip** (owner ruling): the strip is the one
 //!   focus stop. Strata focuses the row in GTK's list; here focus stays on the strip, with the row
 //!   as its active descendant.
+//! - **Header buttons are not Tab stops**: the close button is built unfocusable, and hosts
+//!   build their header actions the same way, so a press on one focuses the strip and the keys
+//!   go on to the active column (closing a column takes its button with it). Strata's header
+//!   buttons take no focus on a click either, but are reachable by Tab; here the header's
+//!   actions are reached by pointer, the folder menu and the shortcuts.
 //! - **Reveals and the drag autoscroll glide** on Rune springs (C1d's and C24's glide lead),
 //!   rather than stepping the adjustment each frame as Strata does; the speeds are Strata's. The
 //!   reveal's spring stands in for Strata's 220 ms emphasized deceleration, and the lifecycle's
-//!   for its 220 ms curves.
+//!   for its 220 ms curves. After a key, the strip's glide starts a frame late: the row's own
+//!   reveal would jump the strip, so the strip is held for that frame (Rune draft U-C2-4).
 //! - **In Columns the drop edge scroll is Strata's** (44 points, up to 520 points a second, with
 //!   its ramp), not C1e's row-height steps: the view replaces C1e's through `on_drag_over`.
 //! - **A swapped-in sibling's shell keeps the old column's width until it springs to the new
@@ -100,12 +106,14 @@
 //!   the targeted column after the first.
 //! - **The badges (92–107) and the width polish (79, 83, 87, 89, 90) are C2b's** (coordinator
 //!   ruling): the spread of a dragged width to the other columns, autofit, a text-size change.
+//!   C2b also takes the header title's weight (Strata's 700; the kit has no bold UI weight
+//!   token, so it is `ui_medium` here) and the accent on the resize line's hover.
 //!
 //! # Known gaps
 //!
-//! - **A reveal asked for in the same commit as a change of the strip's width** (the preview
-//!   drawer opening in the same handler) can be lost: the reveal is worked out from the width
-//!   the strip had. The host asks for it a frame later.
+//! - **A change of the strip's width more than half a second after a reveal** isn't followed:
+//!   the reveal is worked out again on each tick while the strip's drawn width moves within
+//!   that time (a drawer opening in the same handler, a width spring), not later.
 //! - **An idle collection costs about 0.14 ms a frame while another scrolls**, where an idle
 //!   rune-kit Table costs nothing, so four columns scroll at about 1.8× four Tables' frame time
 //!   (still about 0.55 ms at p50 and 1.7 ms at p95, `tests/perf.rs`). Four bare C1e collections
@@ -115,6 +123,10 @@
 //! - **During a width spring** (a swapped sibling's), the columns' spans the drag autoscroll and
 //!   [`ColumnsView::drop_target_at`] work from are where the layout ends, not where the frame
 //!   draws them (Rune draft U-C2-3).
+//! - **For the 220 ms a column comes or goes, [`ColumnsView::drop_target_at`] maps points by
+//!   the live columns where they end**: a point inside a new column's 24 pt slide maps to the
+//!   column before it, and a point over a closing column (drawn fading over the one that
+//!   replaces it, and inert) to the live column under it, as Rune routes the drop itself.
 //!
 //! # Tests
 //!
@@ -128,17 +140,17 @@
 //! | Bullet | Check |
 //! | --- | --- |
 //! | 1 A single click on a folder opens it as the next column | `open-folder`; page `a_click_on_a_folder_opens…`, *partial*: opening the listing is the host's |
-//! | 2 Each column after the first has a "Close this pane" X | `close-button`; page `the_close_button_closes…` |
+//! | 2 Each column after the first has a "Close this pane" X | `close-button`; page `the_close_button_closes…`, `after_the_close_button_the_keys…` (the keyboard goes on working) |
 //! | 3 Clicking a folder whose column is open focuses and reveals it | `reopen-open-folder`; page `a_click_on_a_folder_whose_column_is_open…` |
-//! | 4 A slow second click on a selected, open folder's name renames | `slow-click-rename`; page `a_slow_second_click…` |
+//! | 4 A slow second click on a selected, open folder's name renames | `slow-click-rename`; page `a_slow_second_click…`, `a_press_in_another_column_cancels…` |
 //! | 5 Double-clicking a closed folder ends as a single click | `double-click-closed-folder`; page `a_double_click_on_a_closed_folder…` |
 //! | 6 The same with double-click folders, from a clipped parent | page `with_double_click_folders…` |
 //! | 7 A plain click on a folder in a multi-selection collapses and opens | page `a_plain_click_on_a_folder_in_a_multi_selection…` |
 //! | 8 Single-click previews collapse to a previewable file and preview it | Strata policy (the preview); the collapse is C1b's, as 7 |
-//! | 9 A sibling fades in where the old column stood; deeper ones shrink away | unit `a_new_column_slides_in_and_a_sibling_fades…` (the motion each change takes) |
+//! | 9 A sibling fades in where the old column stood; deeper ones shrink away | page `a_sibling_fades_in_its_place…` (what is drawn); unit `a_new_column_slides_in_and_a_sibling_fades…` (the motion each change takes) |
 //! | 10 Pressing a folder doesn't shift the strip and back | page `a_double_click_on_a_closed_folder…` (the press moves no strip) |
-//! | 11 A closed column narrows and fades out over 220 ms | page `the_close_button_closes…` (it leaves on a transition, then goes) |
-//! | 12 The close animation covers X, Escape, Backspace, a file click in a parent | `close-button`, *partial*: any closed column animates; which keys close is the host's |
+//! | 11 A closed column narrows and fades out over 220 ms | page `a_closed_column_fades_as_it_narrows`, `the_close_button_closes…` (it leaves on a transition, then goes) |
+//! | 12 The close animation covers X, Escape, Backspace, a file click in a parent | page `a_closed_column_fades…`, *partial*: any closed column animates the same way; which keys close is the host's |
 //! | 13 A plain click on a file in a parent closes the deeper columns | `file-click-closes-deeper`, *partial*: Strata policy, the page stands in |
 //! | 14 With single-click previews off, that click opens no preview | Strata policy |
 //! | 15 A press on a file that becomes a drag leaves deeper columns open | `file-drag-keeps-columns`; page `a_file_drag_or_a_modified_click…` |
@@ -147,17 +159,17 @@
 //! | 18 A closing column takes no clicks, hovers or drops | page `a_closing_column_takes_no_presses…` (Rune's presence makes it inert) |
 //! | 19 Another location or a rebuild replaces columns with no exit | page `a_rebuilt_strip_replaces…` ([`ColumnsState::replace`]) |
 //! | 20, 21 Deleting the focused open folder reveals and mirrors the next | Strata policy (deletion and mirroring) |
-//! | 22 A keyboard move reveals a column clipped by up to 4 px | page `a_keyboard_move_reveals…`; unit `a_column_clipped_even_a_little…` |
+//! | 22 A keyboard move reveals a column clipped by up to 4 px | page `a_keyboard_move_reveals…`, `a_keyboard_reveal_glides_the_strip`, `a_reveal_in_the_same_handler…`, `a_drawer_opening_in_the_same_handler…`; unit `a_column_clipped_even_a_little…` |
 //! | 23 A column wider than the strip that fills it stays | page `a_column_wider_than_the_strip…`; unit `a_column_wider_than_the_strip…` |
 //! | 24 Mirroring shows a folder's contents without moving focus | *partial*: [`Focus::No`] keeps the active column (page tests open with it); mirroring is Strata's |
 //! | 25–27, 29–32 Mirroring, Quick Preview, the 75 ms wait | Strata policy (the view reports [`ColumnsIntent::Cursor`]) |
 //! | 28 With no cursor, Home/Ctrl+Up land first, End/Ctrl+Down last | `home-end-no-cursor`; page `ctrl_a_page_and_home…` |
 //! | 33, 34 Open as Administrator; the lock notice | Strata policy (the host fills the column's `empty` part) |
-//! | 35 Back to an ancestor selects the folder you came from | `back-to-ancestor`; page `back_to_an_ancestor…`, *partial*: navigation is the host's ([`ColumnsState::return_to`]) |
+//! | 35 Back to an ancestor selects the folder you came from | `back-to-ancestor`; page `back_to_an_ancestor…`, `back_to_an_ancestor_scrolls…`, *partial*: navigation is the host's ([`ColumnsState::return_to`]) |
 //! | 36 The came-from folder's own column stays closed | `back-to-ancestor` |
 //! | 37, 38 Back to a non-ancestor; a sidebar ancestor | Strata policy |
-//! | 39 Left into a column with no cursor lands on its open folder | page `left_into_a_column_with_no_cursor…` |
-//! | 40 …once the column is listed; nothing if the folder went | page `left_into_a_loading_column…`; [`ColumnsState::sync`] |
+//! | 39 Left into a column with no cursor lands on its open folder | page `left_into_a_column_with_no_cursor…`; Right into one, its first entry: `right_into_a_child_column…` |
+//! | 40 …once the column is listed; nothing if the folder went | page `left_into_a_loading_column…`, `a_late_listing_in_a_column_left_behind…` (none once the keyboard left it); [`ColumnsState::sync`] |
 //! | 41 F2, Delete and copy fall back only in the deepest column | Strata policy |
 //! | 42, 43 F5 keeps focus; F2 after a reload | Strata and C5/C21 (the strip keeps focus through a reload) |
 //! | 44–46 Renaming a folder whose column is open | C5 and Strata (the host keeps the column under its new name) |
@@ -172,15 +184,15 @@
 //! | 55 The chooser's header menu | Strata policy (the chooser's menu) |
 //! | 56 The header spinner shows only while loading | `spinner-while-loading`, `spinner-hidden-when-listed`; page `a_loading_column_shows…` |
 //! | 57 Clicking a title focuses the column, keeps its selection and deeper columns | `title-click`; page `a_click_on_a_title…` |
-//! | 58 A dialog or filter opened before a deferred refocus keeps focus | N/A by design: the view moves no focus (the strip keeps it) |
+//! | 58 A dialog or filter opened before a deferred refocus keeps focus | N/A by design: the view moves no focus, and its buttons take none, so the strip keeps it (page `after_the_close_button_the_keys_still_reach_the_strip`) |
 //! | 59–66 The filter field | C18 and Strata (the field sits in the header's slot) |
 //! | 67 The open path: strong on the active column's folder, faint before | PNG goldens (`RowMarks::active_parent`, `active_path`) |
 //! | 68 An empty-space click pulses the parent's row | Deferred (Strata marks it unverified; coordinator ruling) |
 //! | 69 Empty space in an inactive column: deeper close, first visible selected | `background-click-inactive`; page `a_click_on_empty_space_in_an_inactive_column…` |
 //! | 70 Empty space in the active column clears every column, deeper close | `background-click-active`; page `a_click_on_empty_space_in_the_active_column…` |
-//! | 71 The blank strip right of the last column clears the selection | `blank-strip-click`; page `a_click_on_the_blank_strip…` |
+//! | 71 The blank strip right of the last column clears the selection | `blank-strip-click`; page `a_click_on_the_blank_strip…`; hidden from assistive technology (`the_blank_strip_is_no_control…`) |
 //! | 72 Clicking a heading focuses the column, keeps selection and child | `title-click` |
-//! | 73 Empty space keeps the column's scroll | page `a_click_on_empty_space_keeps_the_columns_scroll` |
+//! | 73 Empty space keeps the column's scroll | page `a_click_on_empty_space_keeps_the_columns_scroll`, *partial*: a column with blank space below its rows can't scroll here, so the test checks the click lands and a scrolled column keeps its offset |
 //! | 74 Shift+wheel scrolls the strip; vertical ticks only the listing | page `a_sideways_wheel…`, *partial*: the vertical half (Rune draft U-C24-7) |
 //! | 75 Horizontal touchpad gestures scroll the strip | page `a_sideways_wheel…` |
 //! | 76 Columns fill the strip's height; the paste destination's header is marked | PNG goldens, *partial*: the active column's header is marked; the destination is Strata's |
@@ -211,16 +223,19 @@
 //! | A5 It starts at 35% and is full after 350 ms | unit `the_speed_starts_at_35_percent…` |
 //! | A6 It stops on leaving, dropping, ending, or at the limit | page `a_drag_near_the_strips_edge…`; unit `autoscroll_stops_on…` |
 //! | A7 The column under the drag is washed, one autoscroll revealed too | page `the_column_under_a_held_drag…`; unit `the_column_under_the_drag_follows…`; PNG `c2-drop-column-*` |
-//! | A8 The wash stays at the limit and clears on leaving | page `the_column_under_a_held_drag…` |
-//! | A9 A drop on a partly shown column goes there; the strip stays | `drop-on-partly-shown-column`; page `a_drop_on_a_partly_shown_column…` |
+//! | A8 The wash stays at the limit and clears on leaving | page `the_column_under_a_held_drag…`, `the_wash_clears_when_the_drag_leaves_the_column…` |
+//! | A9 A drop on a partly shown column goes there; the strip stays | `drop-on-partly-shown-column`; page `a_drop_on_a_partly_shown_column…`, `a_drop_clears_the_wash_even…` |
 //!
 //! From other nodes, which C1c and C1d left to the views: `browser/selection`'s Ctrl+A in the
 //! focused column (`ctrl-a-active-column`), returning keeps a multi-selection
 //! (`left-right-active`), Escape clears only the active column and then closes the deepest
 //! (`escape-closes-deepest`), Shift+End from the anchor (`shift-end-from-anchor`);
-//! `browser/scrolling`'s page keys in the focused column only (`page-active-column`) and the jumps
-//! with no cursor (`home-end-no-cursor`); the keyboard cursor outline in the active column only
-//! (`left-right-active`, PNG `c2-keyboard-*`). Perf: `tests/perf.rs`.
+//! `browser/scrolling`'s page keys in the focused column only (`page-active-column`, *partial*:
+//! Rune delivers the keypad's Page Up and Page Down as the same logical keys, so they aren't told
+//! apart) and the jumps with no cursor (`home-end-no-cursor`); the keyboard cursor outline in the
+//! active column only (`left-right-active`, PNG `c2-keyboard-*`); C1c's opt-in type-ahead in the
+//! active column only (page `type_ahead_finds…`); a middle press keeps the active column (page
+//! `a_middle_press…`). Perf: `tests/perf.rs`.
 //!
 //! # Left to other work packages and hosts
 //!
@@ -255,6 +270,17 @@
 //!   an animated commit: the second's `on_layout` hears x 500 at once while its drawn x goes
 //!   310, 381, 440, 473 over the next frames. Ask: the drawn rect in `on_layout` (or a drawn
 //!   counterpart), or a flag that a spring is moving it.
+//!
+//! - **U-C2-4: a scoped reveal can't be kept to its own viewport's axis.**
+//!   `Tx::scroll_into_view_in(scope, row)` scrolls the nearest vertical viewport around the row
+//!   and the nearest horizontal one too, even when that one is outside `scope`, and at once in an
+//!   animated commit, so a list inside a horizontally scrolled strip can't reveal its row
+//!   without jumping the strip, and the strip can't glide there itself in the same frame.
+//!   Repro (probe `p7`): four 300 pt columns in a 900 pt `scroll_x` strip, each a vertical
+//!   viewport of virtual rows; `scroll_into_view_in("c3", "row-3-2")` (a row already in view
+//!   vertically) puts column 3's drawn x at 900, 600, 600 over the next frames, where the
+//!   strip's own `scroll_to` to the same place glides 900, 887, 858, 823. Ask: a reveal limited
+//!   to an axis, or to the viewports inside its scope.
 //!
 //! Drafts this view leans on, already written: C15's `Tx::focus` (focus by key), U-C24-3 (a
 //! vertical gesture's latch), U-C24-7 (headless Shift+wheel), R-C4-2 (no word to a drag whose

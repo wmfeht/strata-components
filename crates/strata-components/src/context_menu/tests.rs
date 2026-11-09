@@ -24,6 +24,8 @@ struct Host {
     changed: u32,
     closed: u32,
     undo: bool,
+    /// Field 0 has gone (its entry was deleted mid-rename, say).
+    gone: bool,
 }
 
 impl Host {
@@ -39,6 +41,7 @@ impl Host {
             changed: 0,
             closed: 0,
             undo: false,
+            gone: false,
         }
     }
 }
@@ -56,6 +59,7 @@ fn menu() -> ContextMenu<Host> {
 
 fn edit_mut(s: &mut Host, f: u8) -> Option<&mut TextEdit> {
     match f {
+        0 if s.gone => None,
         0 => Some(&mut s.edit),
         1 => Some(&mut s.secret),
         _ => None,
@@ -64,6 +68,7 @@ fn edit_mut(s: &mut Host, f: u8) -> Option<&mut TextEdit> {
 
 fn edit(s: &Host, f: u8) -> Option<&TextEdit> {
     match f {
+        0 if s.gone => None,
         0 => Some(&s.edit),
         1 => Some(&s.secret),
         _ => None,
@@ -121,8 +126,14 @@ fn view(s: &Host, _: &mut Cx<Host>) -> El {
     )
 }
 
+/// The host's poll: a field menu whose field went closes.
+fn poll(s: &mut Host, _: f64, _: &mut rune::Tx) -> bool {
+    fields(s).check(s)
+}
+
 fn runtime() -> Runtime<Host> {
     let mut rt = Runtime::new(Host::new(), view, (W, H), Env::new(false, 1.0));
+    rt.poll = Some(poll);
     rt.frame(0.0);
     rt.frame(1.0 / 60.0);
     rt
@@ -810,12 +821,49 @@ fn escape_closes_the_field_menu_and_gives_the_field_the_keyboard_back() {
 }
 
 #[test]
-fn a_menu_for_a_field_that_went_closes() {
+fn a_menu_whose_field_went_closes_on_the_hosts_poll_and_stays_closed() {
+    let (mut rt, _) = with_clipboard(Some("x"));
+    secondary(&mut rt, "field");
+    assert!(rt.state.fields.is_open());
+    rt.update(|s, _| s.gone = true);
+    step(&mut rt);
+    assert!(!rt.state.fields.is_open(), "the menu closed with its field");
+    assert_eq!(rt.state.closed, 1, "on_close heard it: C5's menu_closed");
+    // The same field again (the next rename with the same `F`): no stale menu comes back.
+    rt.update(|s, _| s.gone = false);
+    step(&mut rt);
+    assert!(live(&rt, "f-menu").is_none());
+}
+
+#[test]
+fn a_menu_for_a_field_that_isnt_there_doesnt_open() {
     let (mut rt, _) = with_clipboard(Some("x"));
     rt.update(|s, tx| fields(s).open(s, 7, Point::new(10.0, 10.0), tx));
     step(&mut rt);
-    assert!(
-        live(&rt, "f-menu").is_none(),
-        "field 7 isn't there: nothing draws"
-    );
+    assert!(!rt.state.fields.is_open());
+    assert_eq!(rt.state.closed, 0, "nothing opened, so nothing closed");
+}
+
+#[test]
+fn with_a_keyboard_opened_submenu_a_parent_row_still_runs_on_a_click() {
+    let mut rt = opened();
+    key(&mut rt, Key::Down);
+    key(&mut rt, Key::Right);
+    assert_eq!(focused(&rt).as_deref(), Some("m-item6-sub-item0"));
+    tap(&mut rt, "m-item7");
+    assert_eq!(rt.state.heard, ["copy Some(4)"], "the parent's Copy runs");
+    assert!(!rt.state.menu.is_open());
+}
+
+#[test]
+fn with_a_keyboard_opened_submenu_a_press_outside_both_closes_the_whole_menu() {
+    let mut rt = opened();
+    key(&mut rt, Key::Down);
+    key(&mut rt, Key::Right);
+    rt.pointer_down(W - 10.0, H - 10.0);
+    step(&mut rt);
+    rt.pointer_up(W - 10.0, H - 10.0);
+    step(&mut rt);
+    assert!(!rt.state.menu.is_open(), "the whole menu closed");
+    assert_eq!(rt.state.dismissed, 1);
 }

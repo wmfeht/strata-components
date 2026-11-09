@@ -7,7 +7,7 @@ use rune::{El, Tx, el};
 use strata_kit::look::Look;
 
 use super::state::{ContextMenuState, MenuIntent, MenuTarget};
-use super::view::{By, Render};
+use super::view::Render;
 
 type Emit<S> = Rc<dyn Fn(&mut S, MenuIntent, &mut Tx)>;
 type Dismissed<S> = Rc<dyn Fn(&mut S, MenuTarget)>;
@@ -85,7 +85,6 @@ impl<S: 'static> ContextMenu<S> {
             header: &model.header,
             sections: &model.sections,
             open: st.submenu(),
-            keys_opened: st.keys_opened(),
             look,
             on_select: Rc::new(move |s: &mut S, path: &[usize], tx: &mut Tx| {
                 let st = get_mut(s);
@@ -98,9 +97,15 @@ impl<S: 'static> ContextMenu<S> {
                     emit(s, MenuIntent::Activate { target, action }, tx);
                 }
             }),
-            on_submenu: Rc::new(move |s: &mut S, path: Vec<usize>, by: By| {
-                get_mut(s).open_submenu_by(&path, by == By::Keys);
+            on_submenu: Rc::new(move |s: &mut S, path: Vec<usize>, keys: bool| {
+                let st = get_mut(s);
+                if keys {
+                    st.enter_submenu(&path)
+                } else {
+                    st.open_submenu(&path)
+                }
             }),
+            entering: Rc::new(move |s: &mut S| get_mut(s).take_entering()),
             close_to: Rc::new(move |s: &mut S, depth: usize| {
                 get_mut(s).close_submenu(depth);
             }),

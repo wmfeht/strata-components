@@ -297,15 +297,38 @@ impl<S: 'static, F: Copy + PartialEq + 'static> FieldMenu<S, F> {
         self
     }
 
-    /// Hears the menu close, chosen or dismissed: C5's `RenameState::menu_closed`.
+    /// Hears the menu close: an item chosen, Escape or a press outside, or its field gone
+    /// ([`FieldMenu::check`]). C5's `RenameState::menu_closed` goes here.
     pub fn on_close(mut self, f: impl Fn(&mut S, F) + 'static) -> Self {
         self.closed = Some(Rc::new(f));
         self
     }
 
+    /// Closes the menu if its field has gone (the edit ended, the entry was deleted), and
+    /// tells [`FieldMenu::on_close`], as C5's `menu_closed` needs. Call it from the host's
+    /// poll: a menu over a missing field draws nothing but stays open, and the next field with
+    /// the same `F` would bring it back. True when it closed.
+    pub fn check(&self, s: &mut S) -> bool {
+        let Some(field) = (self.get)(s).field() else {
+            return false;
+        };
+        if (self.edit)(s, field).is_some() {
+            return false;
+        }
+        (self.get_mut)(s).close();
+        if let Some(f) = &self.closed {
+            f(s, field);
+        }
+        true
+    }
+
     /// Opens field `field`'s menu at window point `at`: what a host calls for C5's
-    /// `RenameIntent::FieldMenu { id, at }`.
+    /// `RenameIntent::FieldMenu { id, at }`. A field that isn't there opens nothing.
     pub fn open(&self, s: &mut S, field: F, at: Point, tx: &mut Tx) {
+        self.check(s);
+        if (self.edit)(s, field).is_none() {
+            return;
+        }
         let serial = (self.get_mut)(s).open_serial(field, at);
         let get_mut = self.get_mut;
         tx.read_clipboard(move |s: &mut S, content, _| {
@@ -341,7 +364,6 @@ impl<S: 'static, F: Copy + PartialEq + 'static> FieldMenu<S, F> {
             header: &[],
             sections: &sections,
             open: &[],
-            keys_opened: &[],
             look,
             on_select: Rc::new(move |s: &mut S, path: &[usize], tx: &mut Tx| {
                 let command = path.first().and_then(|&i| commands.get(i)).map(|c| c.0);
@@ -349,7 +371,8 @@ impl<S: 'static, F: Copy + PartialEq + 'static> FieldMenu<S, F> {
                     select.run(s, field, c, tx);
                 }
             }),
-            on_submenu: Rc::new(|_: &mut S, _, _| {}),
+            on_submenu: Rc::new(|_: &mut S, _, _| false),
+            entering: Rc::new(|_: &mut S| false),
             close_to: Rc::new(|_: &mut S, _| {}),
             on_dismiss: Rc::new(move |s: &mut S| dismiss.finish(s, field)),
         }

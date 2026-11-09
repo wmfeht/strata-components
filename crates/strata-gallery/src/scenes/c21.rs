@@ -582,7 +582,8 @@ pub fn on_key(_g: &mut Gallery, _key: &KeyEvent, _tx: &mut Tx) -> bool {
 
 pub fn poll(g: &mut Gallery, t: f64, tx: &mut Tx) -> bool {
     g.c21.clock = t;
-    let mut changed = false;
+    // A field menu whose field went closes (the page's fields never go; C5's editor does).
+    let mut changed = field_menu().check(g);
     // The keyboard-anchor scene opens as MenuKeys opens, once the list has laid out.
     let vp = g.c21.coll.viewport();
     if g.c21.open_by_keys && vp.h > 0.0 {

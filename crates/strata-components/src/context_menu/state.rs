@@ -77,8 +77,9 @@ struct Open {
     model: MenuModel,
     /// The open submenus: the item index (as [`MenuModel::item_at`] counts) at each level.
     submenu: Vec<usize>,
-    /// Whether keys opened each: the keyboard is then in it.
-    keys: Vec<bool>,
+    /// Keys opened a submenu and sent the Tab that moves the keyboard into it: that Tab is
+    /// Rune's, not a Down (see `view.rs`).
+    entering: bool,
 }
 
 impl ContextMenuState {
@@ -95,7 +96,7 @@ impl ContextMenuState {
             at,
             model,
             submenu: Vec::new(),
-            keys: Vec::new(),
+            entering: false,
         });
     }
 
@@ -113,7 +114,6 @@ impl ContextMenuState {
                 })
                 .count();
             open.submenu.truncate(keep);
-            open.keys.truncate(keep);
             open.model = model;
         }
     }
@@ -148,38 +148,37 @@ impl ContextMenuState {
         self.open.as_ref().map_or(&[], |o| &o.submenu)
     }
 
-    /// Whether keys opened each open submenu, outermost first.
-    pub(super) fn keys_opened(&self) -> &[bool] {
-        self.open.as_ref().map_or(&[], |o| &o.keys)
-    }
-
     /// Opens the submenu at `path`, as a pointer does, closing any other: a path that names
     /// no submenu changes nothing. True when it changed.
     pub fn open_submenu(&mut self, path: &[usize]) -> bool {
-        self.open_submenu_by(path, false)
-    }
-
-    /// [`Self::open_submenu`]; `keys` when the keyboard opened it and moves into it. Levels
-    /// above it keep how they were opened, and the levels it adds take `keys`.
-    pub(super) fn open_submenu_by(&mut self, path: &[usize], keys: bool) -> bool {
         let Some(open) = &mut self.open else {
             return false;
         };
-        let same = open.submenu == path && open.keys.last() == Some(&keys);
-        if same || open.model.item_at(path).is_none_or(|i| i.submenu.is_none()) {
+        if open.submenu == path || open.model.item_at(path).is_none_or(|i| i.submenu.is_none()) {
             return false;
         }
-        let common = open
-            .submenu
-            .iter()
-            .zip(path)
-            .take_while(|(a, b)| a == b)
-            .count()
-            .min(path.len().saturating_sub(1));
-        open.keys.truncate(common);
-        open.keys.resize(path.len(), keys);
         open.submenu = path.to_vec();
         true
+    }
+
+    /// [`Self::open_submenu`] from the keys: the next Tab moves the keyboard into it. True
+    /// when the path names a submenu, open already or not.
+    pub(super) fn enter_submenu(&mut self, path: &[usize]) -> bool {
+        self.open_submenu(path);
+        match &mut self.open {
+            Some(open) if open.submenu == path => {
+                open.entering = true;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Whether the Tab arriving now is the one [`Self::enter_submenu`] sent.
+    pub(super) fn take_entering(&mut self) -> bool {
+        self.open
+            .as_mut()
+            .is_some_and(|o| std::mem::take(&mut o.entering))
     }
 
     /// Closes the submenus `depth` levels in and deeper: 0 closes them all. True when one
@@ -188,7 +187,6 @@ impl ContextMenuState {
         match &mut self.open {
             Some(open) if open.submenu.len() > depth => {
                 open.submenu.truncate(depth);
-                open.keys.truncate(depth);
                 true
             }
             _ => false,

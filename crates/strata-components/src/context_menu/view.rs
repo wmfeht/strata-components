@@ -22,15 +22,11 @@ pub(super) const MIN_WIDTH: f32 = 160.0;
 /// The widest a menu grows to show its rows whole; past it, labels end in an ellipsis.
 pub(super) const MAX_WIDTH: f32 = 360.0;
 
-/// What a submenu is being opened by: keys move the keyboard into it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum By {
-    Pointer,
-    Keys,
-}
-
 type Select<S> = Rc<dyn Fn(&mut S, &[usize], &mut Tx)>;
-type Submenu<S> = Rc<dyn Fn(&mut S, Vec<usize>, By)>;
+/// Open the submenu at a path: from the pointer (`false`), or from the keys, which then send
+/// the Tab that moves the keyboard into it (`true`; true back when it opened).
+type Submenu<S> = Rc<dyn Fn(&mut S, Vec<usize>, bool) -> bool>;
+type Entering<S> = Rc<dyn Fn(&mut S) -> bool>;
 type CloseTo<S> = Rc<dyn Fn(&mut S, usize)>;
 type Dismiss<S> = Rc<dyn Fn(&mut S)>;
 
@@ -44,14 +40,15 @@ pub(super) struct Render<'a, S> {
     pub name: &'a str,
     pub header: &'a [String],
     pub sections: &'a [Section],
-    /// The open submenus (item indices at each level), and whether keys opened each.
+    /// The open submenus: item indices at each level.
     pub open: &'a [usize],
-    pub keys_opened: &'a [bool],
     pub look: &'a Look,
     /// An item without a submenu was chosen: its path.
     pub on_select: Select<S>,
     /// Open the submenu at a path.
     pub on_submenu: Submenu<S>,
+    /// Whether this Tab is the one opening a submenu from the keys sent.
+    pub entering: Entering<S>,
     /// Close the submenus this many levels in and deeper.
     pub close_to: CloseTo<S>,
     /// Escape, or a press outside: close the whole menu.
@@ -198,7 +195,7 @@ impl<S: 'static> Render<'_, S> {
                                 if is_open {
                                     close_to(s, at.len() - 1);
                                 } else {
-                                    toggle(s, at.clone(), By::Pointer);
+                                    toggle(s, at.clone(), false);
                                 }
                             });
                     }
@@ -243,34 +240,36 @@ impl<S: 'static> Render<'_, S> {
         if let Some(name) = name {
             e = e.label(name);
         }
+        if depth > 0
+            && let Some(row) = rows.iter().find(|r| r.path == self.open[..depth])
+        {
+            // Left (or a click on its row) closes it: the keyboard goes back to its row.
+            e = e.focus_return(row.key.clone());
+        }
         let hands = Hands {
             open: self.on_submenu.clone(),
+            entering: self.entering.clone(),
             close_to: self.close_to.clone(),
             dismiss: self.on_dismiss.clone(),
         };
-        let keyed = depth > 0 && self.keys_opened.get(depth - 1).copied().unwrap_or(false);
-        e = e.on_key(move |s: &mut S, ev: &KeyEvent, tx: &mut Tx| {
+        e.on_key(move |s: &mut S, ev: &KeyEvent, tx: &mut Tx| {
             menu_key(s, ev, tx, depth, &rows, &hands)
-        });
-        if keyed {
-            // A submenu the keyboard opened holds it, as a modal of its own: the keyboard moves
-            // to its first row, and back to its row when it closes. A press outside it closes it.
-            let close = self.close_to.clone();
-            e = e.modal(true, move |s: &mut S| close(s, depth - 1));
-        }
-        e
+        })
     }
 }
 
 /// What a surface's keys can ask of the menu.
 struct Hands<S> {
     open: Submenu<S>,
+    entering: Entering<S>,
     close_to: CloseTo<S>,
     dismiss: Dismiss<S>,
 }
 
 /// The surface `depth` levels in heard `ev`: Right, Enter and Space on a submenu's row open
-/// it with the keyboard in it; Left in a submenu closes it; Escape in a submenu closes the
+/// it and send a Tab, which Rune's focus moves into it, the next focus group in the menu's
+/// modal (a submenu of its own modal would move the keyboard too, but then swallows a press
+/// outside it, so a click on the parent's rows would run nothing); Left in a submenu closes it; Escape in a submenu closes the
 /// whole menu (the top level's Escape is its modal's); Tab and Shift+Tab move as Down and Up
 /// do, wrapping, as GTK's menus move (Rune's Tab leaves a focus group whole); Ctrl+A stays in
 /// the menu.
@@ -286,6 +285,9 @@ fn menu_key<S>(
     let plain = !(m.ctrl || m.cmd || m.alt || m.logo || m.shift);
     if ev.is_command('a') {
         return true;
+    }
+    if ev.key == Key::Tab && (hands.entering)(s) {
+        return false;
     }
     if ev.key == Key::Tab && !(m.ctrl || m.cmd || m.alt || m.logo) {
         let to = if m.shift { Key::Up } else { Key::Down };
@@ -314,7 +316,12 @@ fn menu_key<S>(
     }
     match focused {
         Some(row) if row.submenu && row.path.len() == depth + 1 => {
-            (hands.open)(s, row.path.clone(), By::Keys);
+            if (hands.open)(s, row.path.clone(), true) {
+                tx.send_key(KeyEvent {
+                    key: Key::Tab,
+                    mods: Mods::default(),
+                });
+            }
             true
         }
         _ => false,

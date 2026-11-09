@@ -195,6 +195,19 @@ impl CodeBlocks {
         self.state.borrow().visits
     }
 
+    /// The running total of the current build's bytes, and the same counted afresh.
+    #[cfg(test)]
+    pub(crate) fn current_check(&self) -> (usize, usize) {
+        let s = self.state.borrow();
+        let counted = s
+            .entries
+            .values()
+            .filter(|e| e.used > s.build_start)
+            .map(|e| cost(&e.code))
+            .sum();
+        (s.current, counted)
+    }
+
     #[cfg(test)]
     pub(crate) fn entry_count(&self) -> usize {
         self.state.borrow().entries.len()

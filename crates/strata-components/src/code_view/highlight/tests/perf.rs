@@ -415,3 +415,40 @@ fn block_cache_trims_and_misses() {
     });
     block_cache_costs(80_000, |i| format!("f({i});\n"));
 }
+
+/// A build of `new` blocks of 8 KiB while an older document of `old` blocks of 30 KiB is
+/// still cached: together past the 16 MiB ceiling, so its misses evict on the way.
+fn past_the_ceiling(old: usize, new: usize) {
+    let mut pump = super::Pump::new(light());
+    let mut blocks = pump.blocks();
+    for i in 0..old {
+        blocks.highlight(
+            Some("zzz"),
+            &format!("// old {i}\n{}\n", "x".repeat(30_000)),
+        );
+    }
+    pump.run();
+    blocks.poll();
+    let codes: Vec<String> = (0..new)
+        .map(|i| format!("// new {i}\n{}\n", "y".repeat(8_000)))
+        .collect();
+    let t = Instant::now();
+    let refused = codes
+        .iter()
+        .filter(|c| blocks.highlight(Some("zzz"), c).is_some())
+        .count();
+    println!(
+        "block cache past the ceiling: {old} old blocks of 30 KiB cached, a build of {new} new \
+         blocks of 8 KiB asks them in {:.1} ms, {refused} refused, {} bytes cached",
+        ms(t.elapsed()),
+        blocks.cached_bytes()
+    );
+}
+
+#[test]
+#[ignore = "perf: run with --profile perf (see the module docs)"]
+fn block_cache_misses_past_the_ceiling() {
+    release_only();
+    past_the_ceiling(500, 1_500);
+    past_the_ceiling(500, 15_000);
+}

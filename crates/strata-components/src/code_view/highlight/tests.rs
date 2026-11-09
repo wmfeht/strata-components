@@ -2092,3 +2092,51 @@ fn tiny_blocks_count_their_entries_against_the_cap() {
         blocks.entry_count()
     );
 }
+
+#[test]
+fn a_build_past_the_ceiling_evicts_the_old_document_in_n_log_n() {
+    // Review 1 of C11 on SF5: the first test stayed under the 16 MiB ceiling, so the miss
+    // path's eviction (and its running total) went untested. Here an old document of about
+    // 15 MB from an earlier build is still cached when a new build of about 12 MB arrives:
+    // its misses go past the ceiling and must evict the old blocks, never refuse new ones,
+    // and stay n log n however many misses there are.
+    let mut pump = Pump::new(light());
+    let mut blocks = pump.blocks();
+    let old: Vec<String> = (0..500)
+        .map(|i| format!("// old {i}\n{}\n", "x".repeat(30_000)))
+        .collect();
+    for c in &old {
+        blocks.highlight(Some("zzz"), c);
+    }
+    pump.run();
+    assert!(blocks.poll(), "the old document landed");
+    let (visits, asked) = (blocks.visits(), pump.blocks_asked);
+    let new: Vec<String> = (0..1500)
+        .map(|i| format!("// new {i}\n{}\n", "y".repeat(8_000)))
+        .collect();
+    let mut refused = 0;
+    for c in &new {
+        if blocks.highlight(Some("zzz"), c).is_some() {
+            refused += 1;
+        }
+        let (running, counted) = blocks.current_check();
+        assert_eq!(running, counted, "the running total drifted");
+    }
+    pump.requests();
+    assert_eq!(
+        refused, 0,
+        "new blocks answered plain instead of evicting old ones"
+    );
+    assert_eq!(pump.blocks_asked - asked, new.len());
+    assert!(
+        blocks.cached_bytes() <= 16 << 20,
+        "{} bytes",
+        blocks.cached_bytes()
+    );
+    let looked = blocks.visits() - visits;
+    let bound = n_log_n_bound(old.len() + new.len());
+    assert!(
+        looked <= bound,
+        "the misses looked at {looked} entries (bound {bound})"
+    );
+}

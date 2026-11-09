@@ -1486,17 +1486,41 @@ fn nautilus_round_trip(display: Display) {
         .arg(&src);
     let nautilus = s.spawn("nautilus", cmd);
     let window = s.wait_window(nautilus.pid());
-    s.focus(&window);
-    std::thread::sleep(Duration::from_millis(1500));
-    // Nautilus selects by typing a name; Ctrl+C copies the selection.
-    s.input().pointer_move(window.at(0.5, 0.5));
-    s.input().key("ctrl+a");
-    let at = demo.app.line_count();
-    s.input().key("ctrl+c");
-    demo.change(at, "offered", None);
-    let files = demo.read_files(Selection::Clipboard);
-    assert_eq!(files["ev"], "files", "{files}");
+    // Nautilus lists the folder some time after its window maps, and a copy before the
+    // selection settles names no file: select all, then copy, until a read finds the file
+    // (both keys are safe to repeat).
     let uri = mime::file_uri(&src.join("alpha.txt"));
+    let deadline = Instant::now() + timeout() * 2;
+    let files = loop {
+        s.focus(&window);
+        std::thread::sleep(Duration::from_millis(1000));
+        s.input().pointer_move(window.at(0.5, 0.5));
+        s.input().key("ctrl+a");
+        std::thread::sleep(Duration::from_millis(500));
+        let at = demo.app.line_count();
+        s.input().key("ctrl+c");
+        let wait = Instant::now() + Duration::from_secs(3);
+        let heard = loop {
+            if demo.app.lines()[at..]
+                .iter()
+                .any(|l| l.contains("\"offered\""))
+            {
+                break true;
+            }
+            if Instant::now() > wait {
+                break false;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        let files = heard.then(|| demo.read_files(Selection::Clipboard));
+        if let Some(f) = files.filter(|f| f["uris"] == json!([uri])) {
+            break f;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the app never read Nautilus's copy of the file"
+        );
+    };
     assert_eq!(
         (&files["uris"], &files["cut"]),
         (&json!([uri]), &json!(false)),
@@ -1529,8 +1553,17 @@ fn nautilus_round_trip(display: Display) {
     std::thread::sleep(Duration::from_millis(1500));
     s.input().pointer_move(window.at(0.5, 0.5));
     s.input().key("ctrl+v");
+    // Once more if nothing moved: a paste before Nautilus listed the folder goes nowhere, and a
+    // second paste of a file already moved can't move it twice.
+    let again = Instant::now() + Duration::from_secs(4);
+    let mut pasted_again = false;
     let deadline = Instant::now() + timeout();
     while !(dst.join("theirs.txt").exists() && !theirs.exists()) {
+        if !pasted_again && Instant::now() > again {
+            s.focus(&window);
+            s.input().key("ctrl+v");
+            pasted_again = true;
+        }
         assert!(
             Instant::now() < deadline,
             "Nautilus didn't move the cut file: in target {}, at source {}",

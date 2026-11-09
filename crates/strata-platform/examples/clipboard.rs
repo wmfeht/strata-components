@@ -11,6 +11,7 @@
 //! - `{"cmd":"arm","offers":[Offer]}`: what Ctrl+C in the window copies;
 //! - `{"cmd":"copy-files","uris":[…],"cut":bool,"text":"…"|null}`;
 //! - `{"cmd":"clear","copy":n}`, `{"cmd":"state","copy":n}`, `{"cmd":"offered","selection":…}`;
+//! - `{"cmd":"clear-later","copy":n,"ms":n}`: holds the UI thread `ms`, then clears;
 //! - `{"cmd":"read","selection":…,"mimes":[…],"max_bytes":n}`, `{"cmd":"read-files","selection":…}`;
 //! - `{"cmd":"rune-copy","text":"…"}`: Rune's own `Tx::copy`;
 //! - `{"cmd":"break"}`: the platform ends the clipboard's connection (a test switch);
@@ -181,6 +182,17 @@ mod demo {
                 log(
                     "cleared",
                     json!({ "was": format!("{copy:?}"), "ok": r.as_ref().ok(), "error": r.err().map(|e| e.to_string()) }),
+                );
+            }
+            // Holds the UI thread first, so the platform's news (another app took the
+            // clipboard) waits behind this update: the clear can't know of it.
+            "clear-later" => {
+                std::thread::sleep(Duration::from_millis(field("ms").as_u64().unwrap_or(500)));
+                let copy = CopyId::from_raw(field("copy").as_u64().unwrap_or_default());
+                let r = s.clip.clear(copy);
+                log(
+                    "cleared",
+                    json!({ "ok": r.as_ref().ok(), "error": r.err().map(|e| e.to_string()) }),
                 );
             }
             "state" => {

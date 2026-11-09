@@ -768,6 +768,36 @@ fn x11_clear_empties_only_a_selection_the_copy_holds() {
     clearing(B::X);
 }
 
+/// Another app takes the clipboard while the app's clear is on its way (the app hasn't heard
+/// yet): the clear must leave the other app's copy alone. Data control on winit's display, so
+/// the app hears nothing while its UI thread is held.
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn wayland_data_control_a_clear_racing_another_apps_copy_leaves_that_copy() {
+    let s = Session::start();
+    let demo = Demo::start(&s, B::W).expect("data control");
+    let peer = s.peer(Display::Wayland);
+    let at = demo.app.line_count();
+    let copy = demo.copy_offers(Selection::Clipboard, &[Offer::text(UTF8, "the app's")]);
+    demo.change(at, "holding", Some(copy));
+    let at = demo.send(json!({ "cmd": "clear-later", "copy": copy, "ms": 1500 }));
+    peer.set_selection(
+        Selection::Clipboard,
+        Via::DataControl,
+        &[Offer::text(UTF8, "the peer's")],
+    );
+    demo.wait(at, "the late clear", |v| v["ev"] == "cleared");
+    peer.sync();
+    assert_eq!(
+        peer.read(Selection::Clipboard, Via::DataControl, UTF8)
+            .text
+            .as_deref(),
+        Some("the peer's"),
+        "the clear wiped the other app's copy"
+    );
+    demo.no_errors();
+}
+
 // ---- 7. The data device's serials ----
 
 /// A write with a serial older than the current selection's is dropped by the compositor:

@@ -383,6 +383,72 @@ fn wayland_window_offers_three_types_through_the_data_device() {
     });
 }
 
+/// Shared: wlroots drops a data-device write whose serial is older than the current
+/// selection's, with no error and no event (S2 Q5). The peer's data-control write takes a
+/// serial newer than the click's, so the probe's write with the click's serial is dropped:
+/// P0 reports its source cancelled and no longer owned. A write after a fresh click holds.
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn a_data_device_write_the_compositor_drops_is_reported_cancelled() {
+    let s = Session::start();
+    let probe = Probe::start(&s, Display::Wayland, &[]);
+    if !probe.shared() {
+        return;
+    }
+    let peer = s.peer(Display::Wayland);
+    let at = probe.app.line_count();
+    s.input().click_at(probe.window.at(0.5, 0.5));
+    probe.wait(at, "the click", |v| v["ev"] == "press");
+    peer.set_selection(
+        Selection::Clipboard,
+        Via::DataControl,
+        &[Offer::text(UTF8, "the peer's")],
+    );
+    probe.wait(at, "the peer's selection on the data device", |v| {
+        v["ev"] == "selection"
+            && v["via"] == "data-device"
+            && v["mimes"].as_array().is_some_and(|m| m.len() == 1)
+    });
+    let at = probe.app.line_count();
+    let dropped = probe.own(
+        Via::DataDevice,
+        Selection::Clipboard,
+        &[Offer::text(UTF8, TEXT)],
+    );
+    probe.wait(at, "the dropped write reported cancelled", |v| {
+        v["ev"] == "cancelled" && v["source"] == dropped
+    });
+    let at = probe.send(json!({ "cmd": "owns", "source": dropped }));
+    let (_, v) = probe.wait(at, "owns", |v| v["ev"] == "owns");
+    assert_eq!(v["owns"], false, "{v}");
+    let got = peer.read(Selection::Clipboard, Via::DataControl, UTF8);
+    assert_eq!(got.text.as_deref(), Some("the peer's"));
+
+    let at = probe.app.line_count();
+    s.input().click_at(probe.window.at(0.5, 0.5));
+    probe.wait(at, "the second click", |v| v["ev"] == "press");
+    let at = probe.app.line_count();
+    let held = probe.own(
+        Via::DataDevice,
+        Selection::Clipboard,
+        &[Offer::text(UTF8, TEXT)],
+    );
+    probe.wait(at, "the write echoed", |v| {
+        v["ev"] == "selection" && v["via"] == "data-device"
+    });
+    // The peer's read goes through the source, long after the sync came back.
+    let got = peer.read(Selection::Clipboard, Via::DataControl, UTF8);
+    assert_eq!(got.text.as_deref(), Some(TEXT));
+    let at2 = probe.send(json!({ "cmd": "owns", "source": held }));
+    let (_, v) = probe.wait(at2, "owns", |v| v["ev"] == "owns");
+    assert_eq!(v["owns"], true, "{v}");
+    assert!(
+        !probe.app.lines()[at..].iter().any(|l| l.contains("\"cancelled\"")),
+        "a write that took was reported cancelled"
+    );
+    probe.no_errors();
+}
+
 /// libwayland < 1.23 (Ubuntu 24.04), on any host: the probe's test switch makes the lookup
 /// of `wl_proxy_get_display` find nothing. winit's display is reported Unsupported, the data
 /// device is out of reach, and data control falls back to a connection of its own, both ways.

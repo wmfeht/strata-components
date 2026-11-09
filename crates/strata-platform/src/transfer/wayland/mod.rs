@@ -14,6 +14,7 @@
 
 mod control;
 mod display;
+mod echo;
 mod offer;
 mod reader;
 
@@ -27,6 +28,7 @@ use rune::WindowHandle;
 use rune::raw_window_handle::RawWindowHandle;
 use wayland_backend::client::ObjectId;
 use wayland_client::globals::{GlobalList, GlobalListContents, registry_queue_init};
+use wayland_client::protocol::wl_callback::{self, WlCallback};
 use wayland_client::protocol::wl_compositor::WlCompositor;
 use wayland_client::protocol::wl_data_device::{self, WlDataDevice};
 use wayland_client::protocol::wl_data_device_manager::WlDataDeviceManager;
@@ -49,6 +51,7 @@ use super::event::{Action, Event, Route, Selection, SelectionOffer, SourceId, Su
 use super::gate::Gate;
 use super::pipe;
 use control::Control;
+use echo::Echoes;
 pub use offer::DragOffer;
 use offer::{AnyOffer, Home, WlSelection};
 use reader::Reader;
@@ -128,6 +131,10 @@ pub(crate) struct State {
     latest_serial: Option<u32>,
     /// The newest left-button press serial, for a drag (P1).
     press_serial: Option<u32>,
+    /// This client has keyboard focus (our own `wl_keyboard` is entered).
+    focused: bool,
+    /// Data-device writes waiting to learn whether they took.
+    echoes: Echoes,
     /// Offers being announced: their MIME types arrive before the event that uses them.
     announced: HashMap<ObjectId, Vec<String>>,
     /// A drag offer's source actions, which also arrive before its `enter`.
@@ -160,6 +167,8 @@ impl State {
             control: None,
             latest_serial: None,
             press_serial: None,
+            focused: false,
+            echoes: Echoes::default(),
             announced: HashMap::new(),
             source_actions: HashMap::new(),
             selections: HashMap::new(),
@@ -591,6 +600,15 @@ impl Conn {
                 }
                 // No set_actions: on a selection source it is a protocol error.
                 device.set_selection(Some(&source), serial);
+                // A write the compositor drops is told by nothing but a missing echo (`echo`).
+                if state.focused
+                    && let Some(backend) = self.home.backend.upgrade()
+                {
+                    let _ = Connection::from_backend(backend)
+                        .display()
+                        .sync(&self.qh, id.get());
+                    state.echoes.arm(id.get());
+                }
                 SourceProxy::Device(source)
             }
             Route::DataControl => {
@@ -897,6 +915,8 @@ impl Dispatch<WlKeyboard, ()> for State {
             // Dropping the fd closes it.
             wl_keyboard::Event::Keymap { fd, .. } => drop(fd),
             wl_keyboard::Event::Key { serial, .. } => st.latest_serial = Some(serial),
+            wl_keyboard::Event::Enter { .. } => st.focused = true,
+            wl_keyboard::Event::Leave { .. } => st.focused = false,
             _ => {}
         }
     }
@@ -975,6 +995,7 @@ impl Dispatch<WlDataDevice, ()> for State {
                 }
             }
             wl_data_device::Event::Selection { id } => {
+                st.echoes.selection();
                 let oid = id.as_ref().map(Proxy::id);
                 st.set_selection_offer(
                     Selection::Clipboard,
@@ -1041,6 +1062,26 @@ impl Dispatch<WlDataOffer, ()> for State {
                 }
             }
             _ => {}
+        }
+    }
+}
+
+/// The sync after a data-device write (see `echo`): a write with no echo before it was
+/// dropped, and its source is reported cancelled, as a lost selection is.
+impl Dispatch<WlCallback, u64> for State {
+    fn event(
+        st: &mut Self,
+        _: &WlCallback,
+        e: wl_callback::Event,
+        id: &u64,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let wl_callback::Event::Done { .. } = e
+            && st.echoes.done(*id)
+            && st.sources.contains_key(id)
+        {
+            st.source_cancelled(*id);
         }
     }
 }

@@ -4,7 +4,7 @@
 //! and no Escape (that's the host's: Columns closes the preview). Left and Right have no
 //! neighbour in a list, so C1c reports them as edges, and the view opens a folder or goes up.
 
-use rune::{Key, PointerButton};
+use rune::PointerButton;
 
 use crate::collection::element::{
     Activation, Ctx, Effect, Flow, Intent, KeyController, KeyInput, PointerController,
@@ -121,19 +121,16 @@ pub struct ArchiveKeys {
 }
 
 impl ArchiveKeys {
+    /// Whether the key is one of the map's Left chords. `chords_for` includes the `h` alias
+    /// whatever [`Letters`] says: with `h` passed on ([`Letters::Pass`]) the inner keyboard
+    /// passes it too, so passing it here changes nothing.
     fn left(input: &KeyInput<'_>, cx: &Ctx<'_>) -> bool {
-        let settings = cx.settings::<KeySettings>();
-        let map_left = settings.is_some_and(|k| {
+        cx.settings::<KeySettings>().is_some_and(|k| {
             k.map
                 .chords_for(Command::Select(Target::Step(Direction::Left)))
                 .iter()
                 .any(|c| input.matches(c))
-        });
-        let letters = settings.is_some_and(|k| k.letters == Letters::Arrows);
-        let mods = input.event.mods;
-        let plain = !(mods.ctrl || mods.alt || mods.cmd || mods.logo || mods.shift);
-        let h = letters && plain && matches!(&input.event.key, Key::Text(t) if t == "h");
-        map_left || h
+        })
     }
 }
 

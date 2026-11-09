@@ -22,11 +22,16 @@
       "name": "Folder peek"
     },
     {
-      "key": "peek-error"
+      "key": "peek-error",
+      "name": "Unable to read this directory"
     },
     {
       "key": "peek-rows",
       "absent": true
+    },
+    {
+      "key": "peek-error-message",
+      "name": "Permission denied"
     }
   ]
 }

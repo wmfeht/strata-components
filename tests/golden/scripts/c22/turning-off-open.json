@@ -541,6 +541,57 @@
                                         "scroll-into-view"
                                       ],
                                       "key": "cell-name",
+                                      "name": "Quarterly reports for the infrastructure committee",
+                                      "role": "grid-cell"
+                                    },
+                                    {
+                                      "actions": [
+                                        "scroll-into-view"
+                                      ],
+                                      "key": "cell-mode",
+                                      "name": "drwxr-xr-x  755",
+                                      "role": "grid-cell"
+                                    },
+                                    {
+                                      "actions": [
+                                        "scroll-into-view"
+                                      ],
+                                      "key": "cell-size",
+                                      "name": "6 items",
+                                      "role": "grid-cell"
+                                    },
+                                    {
+                                      "actions": [
+                                        "scroll-into-view"
+                                      ],
+                                      "key": "cell-type",
+                                      "name": "Folder",
+                                      "role": "grid-cell"
+                                    },
+                                    {
+                                      "actions": [
+                                        "scroll-into-view"
+                                      ],
+                                      "key": "cell-modified",
+                                      "name": "2026-10-24 06:17",
+                                      "role": "grid-cell"
+                                    }
+                                  ],
+                                  "key": "row-13",
+                                  "name": "Quarterly reports for the infrastructure committee",
+                                  "position": 9,
+                                  "role": "row"
+                                },
+                                {
+                                  "actions": [
+                                    "scroll-into-view"
+                                  ],
+                                  "children": [
+                                    {
+                                      "actions": [
+                                        "scroll-into-view"
+                                      ],
+                                      "key": "cell-name",
                                       "name": "notes.md",
                                       "role": "grid-cell"
                                     },
@@ -579,7 +630,7 @@
                                   ],
                                   "key": "row-9",
                                   "name": "notes.md",
-                                  "position": 9,
+                                  "position": 10,
                                   "role": "row"
                                 },
                                 {
@@ -630,7 +681,7 @@
                                   ],
                                   "key": "row-10",
                                   "name": "budget.ods",
-                                  "position": 10,
+                                  "position": 11,
                                   "role": "row"
                                 },
                                 {
@@ -681,7 +732,7 @@
                                   ],
                                   "key": "row-11",
                                   "name": "holiday.jpg",
-                                  "position": 11,
+                                  "position": 12,
                                   "role": "row"
                                 },
                                 {
@@ -732,13 +783,13 @@
                                   ],
                                   "key": "row-12",
                                   "name": "README",
-                                  "position": 12,
+                                  "position": 13,
                                   "role": "row"
                                 }
                               ],
                               "key": "rows",
                               "role": "group",
-                              "setSize": 12
+                              "setSize": 13
                             }
                           ],
                           "key": "viewport",

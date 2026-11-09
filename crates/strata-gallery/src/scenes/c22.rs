@@ -20,9 +20,9 @@
 use std::ops::Range;
 use std::time::Duration;
 
-use rune::{Cx, El, Key, KeyEvent, Tx, col, icon, row, text};
+use rune::{Cx, El, Key, KeyEvent, Tx, col, row, text};
 use strata_components::collection::element::{
-    Collection, CollectionState, ContentSlot, Controllers, Intent, Lines, Roles, RowMarks,
+    Collection, CollectionState, Controllers, Intent, RowMarks,
 };
 use strata_components::collection::keyboard::Keyboard;
 use strata_components::collection::marquee::Marquee;
@@ -32,18 +32,17 @@ use strata_components::columns::{
     ColumnSources, ColumnsParts, ColumnsPartsMut, ColumnsState, ColumnsView, Focus, Opening,
 };
 use strata_components::contract::{
-    CollectionGeometry, Direction, EntryId, EntryKind, EntrySource, IndexRanges, ListEntry,
-    ListSource, Point, Rect, ThumbKey,
+    EntryId, EntryKind, EntrySource, ListEntry, ListSource, Rect, ThumbKey,
 };
 use strata_components::folder_peek::{
     Change, FolderPeek, More, Origin, PeekContents, PeekState, PeekStatus,
 };
+use strata_components::icons_grid::{IconsGrid, IconsGridState, IconsParts};
 use strata_components::list_table::{
     ColumnLayout, ColumnWidths, ListParts, ListTable, ListTableState,
 };
 use strata_components::scroll::Autoscroll;
 use strata_components::thumbnails::{Outcome, Settings, Step, ThumbnailStore, ViewerId, Viewport};
-use strata_kit::icons::IconName;
 use strata_kit::look::Look;
 
 use crate::{Gallery, Scene};
@@ -57,8 +56,8 @@ pub const ICONS: &str = "c22-icons";
 /// The Columns strip's key.
 pub const COLUMNS: &str = "c22-columns";
 
-/// The stand-in's tile size.
-const TILE: (f32, f32) = (120.0, 96.0);
+/// The Icons tile size, C3's default.
+const TILE: f32 = 64.0;
 
 /// How long the fake lister takes, and Slow's.
 const LIST_DELAY: f64 = 0.1;
@@ -89,20 +88,26 @@ impl Mode {
     }
 }
 
-/// Home's folders and files, folders first.
-const HOME: &[(&str, bool)] = &[
-    ("Projects", true),
-    ("Music", true),
-    ("Photos", true),
-    ("Empty", true),
-    ("Locked", true),
-    ("Slow", true),
-    ("Archive", true),
-    ("Downloads", true),
-    ("notes.md", false),
-    ("budget.ods", false),
-    ("holiday.jpg", false),
-    ("README", false),
+/// Home's entries in display order, folders first, with their ids.
+const HOME: &[(u64, &str, bool)] = &[
+    (1, "Projects", true),
+    (2, "Music", true),
+    (3, "Photos", true),
+    (4, "Empty", true),
+    (5, "Locked", true),
+    (6, "Slow", true),
+    (7, "Archive", true),
+    (8, "Downloads", true),
+    // Cut in Icons: its tile carries the whole name as a tooltip.
+    (
+        13,
+        "Quarterly reports for the infrastructure committee",
+        true,
+    ),
+    (9, "notes.md", false),
+    (10, "budget.ods", false),
+    (11, "holiday.jpg", false),
+    (12, "README", false),
 ];
 
 fn home() -> Vec<ListEntry> {
@@ -113,14 +118,13 @@ fn home() -> Vec<ListEntry> {
 /// rows out of the mounted range.
 fn home_with(extra: usize) -> Vec<ListEntry> {
     HOME.iter()
-        .enumerate()
-        .map(|(i, (name, folder))| {
+        .map(|(id, name, folder)| {
             let (kind, icon) = if *folder {
                 (EntryKind::Folder, "folder")
             } else {
                 (EntryKind::File, "file")
             };
-            ListEntry::new(EntryId::new(1 + i as u64), *name, kind, icon)
+            ListEntry::new(EntryId::new(*id), *name, kind, icon)
         })
         .chain((0..extra).map(|i| {
             ListEntry::new(
@@ -200,7 +204,12 @@ fn listing(name: &str) -> (Vec<ListEntry>, PeekStatus, Option<More>) {
                 .collect();
             (rows, PeekStatus::Ready, Some(More::AtLeast(CAP - 8)))
         }
-        "Downloads" => (names(&[("setup.iso", false)]), PeekStatus::Ready, None),
+        // A host that knows there are none past the rows says so.
+        "Downloads" => (
+            names(&[("setup.iso", false)]),
+            PeekStatus::Ready,
+            Some(More::Exactly(0)),
+        ),
         _ => (Vec::new(), PeekStatus::Ready, None),
     }
 }
@@ -257,6 +266,7 @@ pub struct Demo {
     pub home: ListSource,
     pub list: CollectionState,
     pub icons: CollectionState,
+    pub grid: IconsGridState,
     pub table: ListTableState,
     pub layout: ColumnLayout,
     pub widths: ColumnWidths,
@@ -322,6 +332,7 @@ impl Demo {
             home,
             list,
             icons,
+            grid: IconsGridState::new(),
             table: ListTableState::new(),
             layout: ColumnLayout::new(super::c4::columns().iter().map(|c| c.id().clone())),
             widths: ColumnWidths::new(),
@@ -491,90 +502,8 @@ fn list_collection(g: &Gallery) -> Collection<Gallery> {
     table().collection(g, peek().rows(list_base()))
 }
 
-/// Tiles `TILE` wide, as many to a line as fit: the Icons stand-in's packing.
-struct Tiles;
-
-impl Lines for Tiles {
-    fn per_line(&self, width: f32) -> usize {
-        ((width / TILE.0) as usize).max(1)
-    }
-
-    fn geometry(&self, len: usize, h: f32, w: f32, vh: f32) -> Box<dyn CollectionGeometry> {
-        Box::new(TileGrid {
-            len,
-            per: self.per_line(w),
-            w,
-            h,
-            vh,
-        })
-    }
-}
-
-/// `per` equal cells a line, as C1e draws a grid's lines.
-struct TileGrid {
-    len: usize,
-    per: usize,
-    w: f32,
-    h: f32,
-    vh: f32,
-}
-
-impl TileGrid {
-    fn cell_w(&self) -> f32 {
-        self.w / self.per as f32
-    }
-}
-
-impl CollectionGeometry for TileGrid {
-    fn rect_of(&self, i: usize) -> Rect {
-        let cw = self.cell_w();
-        Rect::new(
-            (i % self.per) as f32 * cw,
-            (i / self.per) as f32 * self.h,
-            cw,
-            self.h,
-        )
-    }
-    fn index_at(&self, p: Point) -> Option<usize> {
-        if p.x < 0.0 || p.y < 0.0 || p.x >= self.w {
-            return None;
-        }
-        let i = (p.y / self.h) as usize * self.per + (p.x / self.cell_w()) as usize;
-        (i < self.len).then_some(i)
-    }
-    fn range_in(&self, r: Rect) -> IndexRanges {
-        let mut out = IndexRanges::new();
-        if self.len == 0 {
-            return out;
-        }
-        let cw = self.cell_w();
-        let lines = (r.y.max(0.0) / self.h) as usize..((r.y + r.h) / self.h).ceil() as usize;
-        let cols = (r.x.max(0.0) / cw) as usize..(((r.x + r.w) / cw).ceil() as usize).min(self.per);
-        for line in lines {
-            let a = (line * self.per + cols.start).min(self.len);
-            let b = (line * self.per + cols.end).min(self.len);
-            if a < b {
-                out.push(a..b);
-            }
-        }
-        out
-    }
-    fn neighbor(&self, i: usize, d: Direction) -> Option<usize> {
-        let n = match d {
-            Direction::Left if !i.is_multiple_of(self.per) => i - 1,
-            Direction::Right if i % self.per + 1 < self.per => i + 1,
-            Direction::Up if i >= self.per => i - self.per,
-            Direction::Down => i + self.per,
-            _ => return None,
-        };
-        (n < self.len).then_some(n)
-    }
-    fn page_step(&self) -> usize {
-        ((self.vh / self.h) as usize).max(1) * self.per
-    }
-}
-
-fn icons_collection() -> Collection<Gallery> {
+/// The Icons collection, before the grid adds its parts: the peek's rows.
+fn icons_base(_: &Gallery) -> Collection<Gallery> {
     let base = Collection::new(
         ICONS,
         |g: &Gallery| (&g.c22.home, &g.c22.icons),
@@ -584,31 +513,32 @@ fn icons_collection() -> Collection<Gallery> {
     )
     .name("Home")
     .clock(|g: &Gallery| g.c22.clock)
-    .roles(Roles::GRID_CELLS)
-    .row_height(|_: &Gallery, _: &Look| TILE.1)
-    .lines(Tiles)
     .marks(marks(ICONS))
-    .on_intent(|g: &mut Gallery, intent, _| g.c22.heard(intent))
-    .content(ContentSlot::pure(|_: &Gallery, rcx, _icon, label| {
-        let look = rcx.look;
-        let glyph = look.icon(if rcx.entry.kind.is_folder_like() {
-            IconName::Folder
-        } else {
-            IconName::File
-        });
-        col()
-            .w_full()
-            .h_full()
-            .gap(look.space.xs)
-            .center()
-            .child(
-                icon(glyph, look.icon_size.lg * 1.5)
-                    .color(look.kit.c.icon_base)
-                    .a11y_hidden(),
-            )
-            .child(label)
-    }));
+    .on_intent(|g: &mut Gallery, intent, _| g.c22.heard(intent));
     peek().rows(base)
+}
+
+/// C3's IconsGrid over Home.
+fn grid() -> IconsGrid<Gallery> {
+    IconsGrid::new(
+        ICONS,
+        icons_base,
+        |g: &Gallery| IconsParts {
+            source: &g.c22.home,
+            collection: &g.c22.icons,
+            grid: &g.c22.grid,
+            size: TILE,
+            listing: 1,
+            look: g.look(),
+            thumbs: None,
+        },
+        |g: &mut Gallery| &mut g.c22.grid,
+    )
+}
+
+/// The Icons collection as the view builds it: the grid's parts and the peek's rows.
+fn icons_collection(g: &Gallery) -> Collection<Gallery> {
+    grid().collection(g)
 }
 
 fn columns_view() -> ColumnsView<Gallery> {
@@ -781,8 +711,9 @@ pub fn view(g: &Gallery, cx: &mut Cx<Gallery>) -> El {
         .child(label("c22-heard", d.heard.clone(), g))
         .child(drag_source(g));
     let body = match d.mode {
-        Mode::List => table().build(g, peek().rows(list_base()), &mut layer),
-        Mode::Icons => icons_collection().build(g),
+        // The peek follows the table's sideways scroll: moving it closes the peek.
+        Mode::List => peek().sideways(g, table().build(g, peek().rows(list_base()), &mut layer)),
+        Mode::Icons => grid().build(g),
         Mode::Columns => columns_view().build(g),
     };
     if d.mode != Mode::Columns {
@@ -839,7 +770,7 @@ fn rects(g: &Gallery, id: EntryId) -> Option<(&'static str, Rect, Rect)> {
     let index = d.home.index_of(id)?;
     let (scope, c) = match d.mode {
         Mode::List => (LIST, list_collection(g)),
-        Mode::Icons => (ICONS, icons_collection()),
+        Mode::Icons => (ICONS, icons_collection(g)),
         Mode::Columns => return None,
     };
     let viewport = peek().viewport(g, d.coll().viewport());
@@ -874,6 +805,10 @@ pub fn on_key(g: &mut Gallery, key: &KeyEvent, tx: &mut Tx) -> bool {
         if d.peek.set_enabled(on) {
             d.relist(Change::Closed, tx);
         }
+        // The host's part of "turning it off cancels a pending peek, and on peeks nothing
+        // until the pointer arrives": a rest under way when peeking changed doesn't count.
+        d.list.hold_rest();
+        d.icons.hold_rest();
         return true;
     }
     match &key.key {
@@ -985,7 +920,10 @@ pub fn poll(g: &mut Gallery, t: f64, tx: &mut Tx) -> bool {
     changed
         | match g.c22.mode {
             Mode::List => list_collection(g).tick(g, tx),
-            Mode::Icons => icons_collection().tick(g, tx),
+            Mode::Icons => {
+                let ticked = icons_collection(g).tick(g, tx);
+                grid().poll(g, tx) | ticked
+            }
             Mode::Columns => columns_view().tick(g, t, tx),
         }
 }

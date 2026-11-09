@@ -163,9 +163,18 @@
                                                   "actions": [
                                                     "scroll-into-view"
                                                   ],
+                                                  "key": "row-13",
+                                                  "name": "Quarterly reports for the infrastructure committee",
+                                                  "position": 9,
+                                                  "role": "list-box-option"
+                                                },
+                                                {
+                                                  "actions": [
+                                                    "scroll-into-view"
+                                                  ],
                                                   "key": "row-9",
                                                   "name": "notes.md",
-                                                  "position": 9,
+                                                  "position": 10,
                                                   "role": "list-box-option"
                                                 },
                                                 {
@@ -174,7 +183,7 @@
                                                   ],
                                                   "key": "row-10",
                                                   "name": "budget.ods",
-                                                  "position": 10,
+                                                  "position": 11,
                                                   "role": "list-box-option"
                                                 },
                                                 {
@@ -183,7 +192,7 @@
                                                   ],
                                                   "key": "row-11",
                                                   "name": "holiday.jpg",
-                                                  "position": 11,
+                                                  "position": 12,
                                                   "role": "list-box-option"
                                                 },
                                                 {
@@ -192,13 +201,13 @@
                                                   ],
                                                   "key": "row-12",
                                                   "name": "README",
-                                                  "position": 12,
+                                                  "position": 13,
                                                   "role": "list-box-option"
                                                 }
                                               ],
                                               "key": "rows",
                                               "role": "group",
-                                              "setSize": 12
+                                              "setSize": 13
                                             }
                                           ],
                                           "key": "viewport",

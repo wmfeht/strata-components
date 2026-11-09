@@ -96,7 +96,7 @@ mod c22 {
     }
 
     /// Home's entry ids: Projects 1, Music 2, Photos 3, Empty 4, Locked 5, Slow 6,
-    /// Archive 7, Downloads 8, then files.
+    /// Archive 7, Downloads 8, the long-named folder 13, then the files 9 to 12.
     fn id(n: u64) -> EntryId {
         EntryId::new(n)
     }
@@ -317,7 +317,7 @@ mod c22 {
         use rune::{Env, Key, KeyEvent, Mods, Runtime};
         use strata_components::collection::element::{row_key, viewport_path};
         use strata_components::contract::{EntryId, EntrySource};
-        use strata_components::folder_peek::{PeekStatus, card_key};
+        use strata_components::folder_peek::{More, PeekStatus, card_key};
         use strata_gallery::scenes::c22::{ICONS, LIST, lengthen};
         use strata_gallery::{Gallery, scenes};
 
@@ -427,6 +427,77 @@ mod c22 {
             }
         }
 
+        // B1, a keyboard peek: the host opens it with the pane-bounded viewport too.
+        #[test]
+        fn a_keyboard_peek_in_a_sideways_scrolled_pane_stays_inside_it() {
+            let mut rt = mount_with("c22-list-light", |g| {
+                g.c22.pane = Some(400.0);
+                g.c22.scroll_x = Some(150.0);
+                let d = &mut g.c22;
+                d.list.selection.select_only(&d.home, 1);
+            });
+            for _ in 0..30 {
+                rt.frame(FRAME);
+            }
+            rt.key(KeyEvent {
+                key: Key::Text("i".into()),
+                mods: Mods::default(),
+            });
+            rt.frame(FRAME);
+            rt.frame(FRAME);
+            assert_eq!(open(&rt.state), Some(EntryId::new(2)));
+            let card = element(&rt, &card_key(LIST)).expect("a card").rect;
+            assert!(
+                card[0] >= 0.0 && card[0] + card[2] <= 400.0,
+                "card {card:?}"
+            );
+        }
+
+        /// Whether any card is drawn (visible at all) past the pane `0..pane` in this frame.
+        fn card_outside(rt: &Runtime<Gallery>, pane: f32) -> Option<[f32; 4]> {
+            rt.elements()
+                .into_iter()
+                .filter(|e| e.key.as_deref() == Some(&card_key(LIST)) && e.opacity > 0.01)
+                .map(|e| e.rect)
+                .find(|r| r[0] < -0.5 || r[0] + r[2] > pane + 0.5)
+        }
+
+        // B1-r2 (coordinator ruling): a sideways scroll after the peek opened closes it, and the
+        // card is never drawn outside the pane on the way, by the wheel or from code.
+        #[test]
+        fn a_sideways_scroll_closes_the_peek_and_never_draws_it_outside_the_pane() {
+            for by_wheel in [true, false] {
+                let mut rt = mount_with("c22-list-light", |g| {
+                    g.c22.pane = Some(400.0);
+                    g.c22.scroll_x = Some(300.0);
+                });
+                for _ in 0..30 {
+                    rt.frame(FRAME);
+                }
+                point(&mut rt, &item(2));
+                wake_until(&mut rt, 1.0, |g| open(g).is_some());
+                rt.frame(FRAME);
+                assert_eq!(card_outside(&rt, 400.0), None);
+                let (x, y) = centre(&rt, &item(2));
+                let x = x.min(150.0);
+                rt.pointer_move(x, y);
+                rt.frame(FRAME);
+                for i in 0..40 {
+                    if by_wheel && i < 10 {
+                        rt.wheel_xy(x, y, 40.0, 0.0);
+                    } else if !by_wheel && i == 0 {
+                        rt.update(|_, tx| tx.scroll_to_x(format!("{LIST}-scroll"), 0.0));
+                    }
+                    rt.frame(FRAME);
+                    if let Some(r) = card_outside(&rt, 400.0) {
+                        panic!("wheel {by_wheel}, frame {i}: card drawn at {r:?}");
+                    }
+                }
+                assert_eq!(open(&rt.state), None, "wheel {by_wheel}");
+                assert!(rt.state.c22.events.iter().any(|e| e == "closed"));
+            }
+        }
+
         // B1. preview/quick-preview/folder-peek: "A viewport narrower than 256 px opens no peek."
         #[test]
         fn a_pane_narrower_than_the_card_peeks_nothing() {
@@ -468,11 +539,28 @@ mod c22 {
             }
             rt.pointer_up(tx, ty);
             rt.frame(FRAME);
+            // Moving inside the folder it was dropped on, within its wait, is no arrival.
+            rt.frame(0.1);
+            rt.pointer_move(tx + 3.0, ty);
+            rt.frame(FRAME);
             wake_until(&mut rt, 1.5, |_| false);
             assert_eq!(rt.state.c22.heard, "Dropped");
             assert_eq!(open(&rt.state), None);
-            // Moving inside the folder it was dropped on is no arrival.
-            rt.pointer_move(tx + 3.0, ty);
+        }
+
+        // A press of the collection's own on a folder, then a move inside it within its wait:
+        // no arrival either.
+        #[test]
+        fn a_click_on_a_folder_then_a_move_inside_it_peeks_nothing() {
+            let mut rt = mount_with("c22-list-light", |_| {});
+            let (x, y) = centre(&rt, &item(3));
+            rt.pointer_move(x, y);
+            rt.frame(FRAME);
+            rt.pointer_down(x, y);
+            rt.pointer_up(x, y);
+            rt.frame(FRAME);
+            rt.frame(0.1);
+            rt.pointer_move(x + 3.0, y);
             rt.frame(FRAME);
             wake_until(&mut rt, 1.5, |_| false);
             assert_eq!(open(&rt.state), None);
@@ -522,6 +610,35 @@ mod c22 {
             assert!((0.48..0.52).contains(&took), "after {took:.3} s");
         }
 
+        // Owner item 3: peeking turned on (or off and on) within a folder's wait never peeks it,
+        // even with a move inside the row before the wait ends.
+        #[test]
+        fn turning_peeking_on_within_a_wait_never_peeks_that_folder() {
+            for off_first in [true, false] {
+                let mut rt = mount_with("c22-list-light", |_| {});
+                if off_first {
+                    command(&mut rt, 'p');
+                }
+                // Arrive on Photos; peeking changes 0.2 s into its wait.
+                point(&mut rt, &item(9));
+                wake_until(&mut rt, 0.3, |_| false);
+                let (x, y) = centre(&rt, &item(3));
+                rt.pointer_move(x, y);
+                rt.frame(FRAME);
+                rt.frame(0.2);
+                if !off_first {
+                    command(&mut rt, 'p');
+                }
+                command(&mut rt, 'p');
+                rt.frame(0.1);
+                rt.pointer_move(x + 3.0, y);
+                rt.frame(FRAME);
+                wake_until(&mut rt, 1.5, |_| false);
+                assert!(rt.state.c22.peek.enabled());
+                assert_eq!(open(&rt.state), None, "off first {off_first}");
+            }
+        }
+
         // SF3. A peek whose folder's row scrolls out of view closes, with the pointer on the card
         // (the row's own leave came long before).
         #[test]
@@ -539,6 +656,11 @@ mod c22 {
             rt.frame(FRAME);
             assert!(element(&rt, &item(2)).is_some(), "still mounted");
             assert_eq!(open(&rt.state), None, "clipped out of view");
+            assert_eq!(
+                rt.state.c22.events.last().map(String::as_str),
+                Some("closed")
+            );
+            assert_eq!(rt.state.c22.heard, "Peek closed");
         }
 
         // SF3. A keyboard peek too, when the row leaves the tree.
@@ -560,6 +682,10 @@ mod c22 {
             rt.frame(FRAME);
             assert!(element(&rt, &item(2)).is_none(), "unmounted");
             assert_eq!(open(&rt.state), None);
+            assert_eq!(
+                rt.state.c22.events.last().map(String::as_str),
+                Some("closed")
+            );
         }
 
         // A result for a peek no longer open is dropped by its serial.
@@ -576,6 +702,38 @@ mod c22 {
             assert_eq!(d.peeked.name, "Music");
             assert_eq!(d.peeked.status, PeekStatus::Ready);
             assert_eq!(d.peeked.rows.len(), 3);
+        }
+
+        // A host that says there are none more gets no "and 0 more" line.
+        #[test]
+        fn no_more_line_when_the_host_says_none_more() {
+            let mut rt = mount_with("c22-list-light", |_| {});
+            point(&mut rt, &item(8));
+            wake_until(&mut rt, 1.0, |g| g.c22.peeked.status == PeekStatus::Ready);
+            rt.frame(FRAME);
+            assert_eq!(rt.state.c22.peeked.more, Some(More::Exactly(0)));
+            assert!(element(&rt, "peek-rows").is_some());
+            assert!(element(&rt, "peek-more").is_none());
+        }
+
+        // C3: a tile a peek is open from shows no name tooltip, so the card and a tooltip
+        // never cover each other.
+        #[test]
+        fn a_peeked_tile_shows_no_name_tooltip() {
+            let mut rt = mount_with("c22-icons-light", |_| {});
+            let label = rt
+                .elements()
+                .into_iter()
+                .find(|e| e.key.as_deref() == Some("label") && e.path.contains("/row-13/"))
+                .expect("the tile's name")
+                .visible;
+            let (x, y) = (label[0] + label[2] / 2.0, label[1] + label[3] / 2.0);
+            rt.pointer_move(x, y);
+            for _ in 0..90 {
+                rt.frame(FRAME);
+            }
+            assert_eq!(open(&rt.state), Some(EntryId::new(13)));
+            assert_eq!(rt.help_tooltip().map(|(t, _)| t.to_owned()), None);
         }
     }
 }

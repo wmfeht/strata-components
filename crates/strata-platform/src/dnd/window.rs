@@ -236,6 +236,16 @@ impl<S: 'static> Dnd<S> {
         el.key(key).drawn_rect_into(&rect)
     }
 
+    /// `el`, keyed `key`, as a drop target whose key is unique only inside the keyed element
+    /// `scope`, one of its ancestors: rows keyed by an id inside a list keyed by the list, so
+    /// two lists showing the same ids keep their targets apart. A drag finds it under the
+    /// nearest ancestor keyed `scope`. Otherwise as [`Dnd::drop_target`].
+    pub fn drop_target_in(&self, el: El, scope: &str, key: &str, target: DropTarget<S>) -> El {
+        let id = super::registry::scoped(scope, key);
+        let rect = self.0.registry.borrow_mut().put(&id, target);
+        el.key(key).drawn_rect_into(&rect)
+    }
+
     /// `el`, keyed `key`, as a drag source. It takes the element's `on_drag`: give the
     /// element's own handler to [`DragSource::on_drag`], which hears every phase that isn't
     /// the system drag's. For an element whose `on_drag` belongs to someone else, call

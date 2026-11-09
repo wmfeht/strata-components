@@ -249,16 +249,14 @@ pub(crate) fn land<S: 'static>(
     };
     let payload = local.map(|(_, p)| p);
     for key in registry.along(path) {
-        let Some(entry) = registry.get(key) else {
+        let Some(entry) = registry.get(&key) else {
             continue;
         };
         let t = &entry.target;
         let stops = t.on_reject.is_some();
         if !t.takes(offer, payload) {
             if stops {
-                return Landing::Rejecting {
-                    key: key.to_owned(),
-                };
+                return Landing::Rejecting { key };
             }
             continue;
         }
@@ -271,15 +269,13 @@ pub(crate) fn land<S: 'static>(
         match (action, accept) {
             (Some(action), Some(accept)) => {
                 return Landing::Accepting {
-                    key: key.to_owned(),
+                    key,
                     action,
                     accept,
                 };
             }
             _ if stops => {
-                return Landing::Rejecting {
-                    key: key.to_owned(),
-                };
+                return Landing::Rejecting { key };
             }
             _ => continue,
         }

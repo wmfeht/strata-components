@@ -58,6 +58,9 @@ Nothing is released yet. The first release is planned for milestone M1 with the 
     hover, move (in the target's points) and reject hooks, reads while hovering (`peek`), the
     action by GTK's modifier rule unless the target's `action` picks it, and asks answered
     after the drop (`on_ask`).
+  - `Dnd::drop_target_in`: a drop target whose key is unique only inside a keyed ancestor (its
+    scope), as rows keyed by entry id are inside their list. A drag finds it under the nearest
+    ancestor of that key.
   - `DragItem::local` and `DropTarget::local`: a typed payload between the app's own windows,
     with nothing serialized.
   - On Wayland, Rune's capture of the press ends once the compositor has taken the pointer

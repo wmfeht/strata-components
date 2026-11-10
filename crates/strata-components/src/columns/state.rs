@@ -903,11 +903,11 @@ impl ColumnsState {
 
     // Drags.
 
-    /// Where an accepted file drag is over the strip (window points), or that it left the
-    /// strip, was dropped, ended or was refused (`None`): what the drag autoscroll and the
-    /// drop highlight follow. Rune's binder reaches it through the view's drop zones; a binder
-    /// that hears the drag elsewhere (X2's) calls it. True when a frame is wanted: wake the
-    /// loop (`tx.wake_after(ZERO)`).
+    /// Where a file drag is over the strip (window points), accepted or refused, or that it
+    /// left the strip, was dropped or ended (`None`): what the drag autoscroll and the column
+    /// wash follow, as Strata's motion controller follows any drag. Rune's binder reaches it
+    /// through the view's drop zones; a binder that hears the drag elsewhere (X2's) calls it.
+    /// True when a frame is wanted: wake the loop (`tx.wake_after(ZERO)`).
     pub fn drag_over(&mut self, at: Option<Point>) -> bool {
         self.drag.over(at)
     }

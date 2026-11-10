@@ -355,6 +355,10 @@ impl std::fmt::Debug for Bar {
 /// whose bars aren't drawn by a collection. Size it as the viewport would be sized, and let
 /// the viewport fill it (`.w_full().h_full()`).
 ///
+/// Each bar hangs from an [`anchor`] at the viewport's top-left, not from a layer the
+/// viewport's size: the bar places its own parts, and a layer over the whole viewport would be
+/// what a hit test finds there (a system drag's, P1's) instead of the content under it.
+///
 /// Used by: C2 (its column strip), hosts.
 pub fn overlay(viewport: El, bars: impl IntoIterator<Item = El>) -> El {
     let mut out = col()
@@ -365,13 +369,23 @@ pub fn overlay(viewport: El, bars: impl IntoIterator<Item = El>) -> El {
         .clip_soft(0.0)
         .child(viewport);
     for bar in bars {
-        out = out.child(
-            col()
-                .pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
-                .child(bar),
-        );
+        out = out.child(anchor(0.0, 0.0, bar));
     }
     out
+}
+
+/// `bar` (a [`Bar::build`]) hung from a zero-size point at (`x`, `y`) in its parent: the bar
+/// lays its band, trough and thumb out in the viewport's coordinates from there, and nothing
+/// but those parts takes the parent's area. Put a bar over a viewport this way rather than in
+/// a layer pinned over the whole of it, which hit tests would find over the content.
+///
+/// Used by: C1e (`Collection::edge`), C6 (the crumbs' bar row), [`overlay`].
+pub fn anchor(x: f32, y: f32, bar: El) -> El {
+    col()
+        .pin(Some(x), Some(y), None, None)
+        .w(0.0)
+        .h(0.0)
+        .child(bar)
 }
 
 impl Inner {

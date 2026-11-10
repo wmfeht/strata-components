@@ -237,10 +237,11 @@ type ViewFn<S> = Rc<dyn Fn(&mut S, RestView) -> bool>;
 ///
 /// A `true` report counts only on the row the pointer last arrived on by moving over the
 /// collection, as Strata's peek starts only from a motion enter: a row a scroll carries under
-/// a parked pointer, the row a press of the collection's own ended on, and the row a drag from
-/// elsewhere ended on (once the host calls [`CollectionState::hold_rest`]) report nothing
-/// until the pointer leaves it (for another row, or out of the collection) and comes back;
-/// moving inside the row doesn't count. None counts while row hover is off after keyboard
+/// a parked pointer, the row a press of the collection's own ended on, a folder row a drag was
+/// dropped on (taken or refused, a system drag included, which moves the pointer there
+/// unseen), and the row a drag from elsewhere ended on (once the host calls
+/// [`CollectionState::hold_rest`]) report nothing until the pointer leaves it (for another
+/// row, or out of the collection) and comes back; moving inside the row doesn't count. None counts while row hover is off after keyboard
 /// navigation ([`CollectionState::row_hover`]).
 ///
 /// Rune counts a row under an overlay (a card, a menu, a scrim) as hovered too (Rune draft
@@ -760,7 +761,7 @@ fn row_zone<S: 'static>(cfg: &Rc<Config<S>>, on_drop: DropFn<S>, id: EntryId) ->
     let hover_cfg = cfg.clone();
     let edge = cfg.clone();
     let drop_cfg = cfg.clone();
-    DropZone::new(move |s: &mut S, dropped: crate::contract::Dropped, tx| {
+    let zone = DropZone::new(move |s: &mut S, dropped: crate::contract::Dropped, tx| {
         // Where it landed when the platform says, else where the last move was (a drop with
         // no position and no move over the stuck header goes to the row it covers).
         let under_stuck = dropped
@@ -772,28 +773,51 @@ fn row_zone<S: 'static>(cfg: &Rc<Config<S>>, on_drop: DropFn<S>, id: EntryId) ->
             (Some(true), _) | (None, Some(DropOver::Background)) => None,
             _ => Some(id),
         };
+        super::route::dropped_on_row(&drop_cfg, s, id);
         on_drop(s, target, dropped, tx);
-    })
-    .on_hover(move |s: &mut S, hover, _offer, tx| {
-        let st = (hover_cfg.get_mut)(s).1;
-        match hover {
-            DropHover::Accepting | DropHover::Rejecting => st.drop = Some(DropOver::Row(id)),
-            DropHover::Left => {
-                if st.drop == Some(DropOver::Row(id)) {
-                    st.drop = None;
-                }
-            }
+    });
+    // With the host's action, a folder row it refuses (the drag's own folder, one inside the
+    // drag) stops the drop: passed on, the background around it would take it into the folder
+    // shown.
+    let zone = match cfg.drop_action.clone() {
+        Some(f) => {
+            let reject_cfg = cfg.clone();
+            zone.action(move |s: &S, offer, mods| f(s, Some(id), offer, mods))
+                .on_reject(move |s: &mut S, _, tx| {
+                    super::route::dropped_on_row(&reject_cfg, s, id);
+                    super::note_drop_hover(
+                        &reject_cfg,
+                        s,
+                        DropOver::Row(id),
+                        DropHover::Left,
+                        None,
+                    );
+                    super::drag_over_hover(&reject_cfg, s, DropHover::Left, tx);
+                })
         }
+        None => zone,
+    };
+    zone.on_hover(move |s: &mut S, hover, offer, tx| {
+        super::note_drop_hover(&hover_cfg, s, DropOver::Row(id), hover, Some(offer));
         super::drag_over_hover(&hover_cfg, s, hover, tx);
     })
     .on_move(move |s: &mut S, point, tx| {
         let under_stuck = super::route::under_stuck_header(&edge, s, point);
         let st = (edge.get_mut)(s).1;
-        let over = Some(if under_stuck {
-            DropOver::Background
+        // A refused drag's moves (P1 sends them to a zone with on_reject) only drive the
+        // hook, and only a file drag's: no highlight.
+        let refused = st.drop_refused == Some(DropOver::Row(id));
+        if refused && !st.drop_refused_files {
+            tx.live_only();
+            return;
+        }
+        let over = if refused {
+            None
+        } else if under_stuck {
+            Some(DropOver::Background)
         } else {
-            DropOver::Row(id)
-        });
+            Some(DropOver::Row(id))
+        };
         let changed = st.drop != over;
         st.drop = over;
         match &edge.on_drag_over {

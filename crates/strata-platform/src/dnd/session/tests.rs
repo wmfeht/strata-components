@@ -205,3 +205,28 @@ fn the_escape_is_allowed_once_and_only_for_a_press_seen() {
     g.started(Release::RealUp);
     assert!(!g.take_escape(), "X11 sends none");
 }
+
+/// A target that asks by point (`action_at`) is told where the drag is, in its own points
+/// from where it was last drawn, and decides by it: Columns' strip routes a drop by point.
+#[test]
+fn a_target_asking_by_point_hears_where_the_drag_is() {
+    let mut r = Registry::<S>::default();
+    let rect = r.put(
+        "row",
+        uri_target().action_at(|_: &S, _, _, p| (p.x < 50.0).then_some(DragAction::Move)),
+    );
+    rect.set([100.0, 20.0, 200.0, 40.0]);
+    let o = offer(&["text/uri-list"], Actions::COPY | Actions::MOVE);
+    assert!(matches!(
+        land_at(&r, Some(PATH), &s(), &o, None, None, Some((130.0, 30.0))),
+        Landing::Accepting {
+            action: DragAction::Move,
+            ..
+        }
+    ));
+    assert_eq!(
+        land_at(&r, Some(PATH), &s(), &o, None, None, Some((180.0, 30.0))),
+        Landing::Nowhere,
+        "80 pt into the row: refused"
+    );
+}

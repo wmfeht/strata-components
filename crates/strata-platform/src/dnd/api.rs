@@ -435,6 +435,8 @@ pub(crate) type HoverFn<S> = Rc<dyn Fn(&mut S, Hover, &DropOffer, &mut Tx)>;
 pub(crate) type MoveFn<S> = Rc<dyn Fn(&mut S, DropPoint, &mut Tx)>;
 pub(crate) type RejectFn<S> = Rc<dyn Fn(&mut S, &DropOffer, &mut Tx)>;
 pub(crate) type ActionFn<S> = Rc<dyn Fn(&S, &DropOffer, Option<Mods>) -> Option<DragAction>>;
+pub(crate) type ActionAtFn<S> =
+    Rc<dyn Fn(&S, &DropOffer, Option<Mods>, DropPoint) -> Option<DragAction>>;
 pub(crate) type AskFn<S> = Rc<dyn Fn(&mut S, DropData, AskReply, &mut Tx)>;
 
 /// A drop target: the MIME types it reads, and its callbacks. Mirrors Rune's
@@ -456,6 +458,7 @@ pub struct DropTarget<S> {
     pub(crate) on_move: Option<MoveFn<S>>,
     pub(crate) on_reject: Option<RejectFn<S>>,
     pub(crate) action: Option<ActionFn<S>>,
+    pub(crate) action_at: Option<ActionAtFn<S>>,
     pub(crate) on_ask: Option<AskFn<S>>,
 }
 
@@ -471,6 +474,7 @@ impl<S> Clone for DropTarget<S> {
             on_move: self.on_move.clone(),
             on_reject: self.on_reject.clone(),
             action: self.action.clone(),
+            action_at: self.action_at.clone(),
             on_ask: self.on_ask.clone(),
         }
     }
@@ -489,6 +493,7 @@ impl<S: 'static> DropTarget<S> {
             on_move: None,
             on_reject: None,
             action: None,
+            action_at: None,
             on_ask: None,
         }
     }
@@ -525,7 +530,9 @@ impl<S: 'static> DropTarget<S> {
         self
     }
 
-    /// Follows a drag the target takes, on every motion, in the target's own points.
+    /// Follows a drag over the target, on every motion, in the target's own points: one it
+    /// takes, and, if the target has [`DropTarget::on_reject`], one it refuses (so a view can
+    /// autoscroll under any drag, as a file manager's does).
     pub fn on_move(mut self, f: impl Fn(&mut S, DropPoint, &mut Tx) + 'static) -> Self {
         self.on_move = Some(Rc::new(f));
         self
@@ -547,6 +554,18 @@ impl<S: 'static> DropTarget<S> {
         f: impl Fn(&S, &DropOffer, Option<Mods>) -> Option<DragAction> + 'static,
     ) -> Self {
         self.action = Some(Rc::new(f));
+        self
+    }
+
+    /// [`DropTarget::action`], told where the drag is: in the target's own points (from where
+    /// it was last drawn) and the window's, as [`DropTarget::on_move`] is told just after. For
+    /// a target that routes a drop by point, whose action depends on what is under the drag.
+    /// It replaces `action`.
+    pub fn action_at(
+        mut self,
+        f: impl Fn(&S, &DropOffer, Option<Mods>, DropPoint) -> Option<DragAction> + 'static,
+    ) -> Self {
+        self.action_at = Some(Rc::new(f));
         self
     }
 

@@ -4,8 +4,11 @@
 //! U-P1-1, not filed), so targets are registered by the key the app gives
 //! [`Dnd::drop_target`](super::Dnd::drop_target), and found from `Tx::element_at`'s path,
 //! whose keyed segments name the element and its ancestors. A key must be unique in its
-//! window. Entries are replaced each time the view builds the target; one whose element is
-//! gone is never hit, and the oldest go once there are more than [`CAP`].
+//! window, or, through [`Dnd::drop_target_in`](super::Dnd::drop_target_in), inside the
+//! keyed ancestor it names as its scope: a path segment then finds the target registered
+//! under it and the nearest ancestor segment that is its scope. Entries are replaced each
+//! time the view builds the target; one whose element is gone is never hit, and the oldest
+//! go once there are more than [`CAP`].
 
 use std::collections::HashMap;
 
@@ -75,18 +78,39 @@ impl<S: 'static> Registry<S> {
         self.entries.get(key)
     }
 
-    /// The keys of `path` that have targets, innermost first.
-    pub(crate) fn along<'p>(&self, path: &'p str) -> Vec<&'p str> {
-        keyed_segments(path)
-            .rev()
-            .filter(|k| self.entries.contains_key(*k))
-            .collect()
+    /// The registered ids of `path`'s targets, innermost first: a segment's own key, else
+    /// the segment under the nearest ancestor segment it was registered inside
+    /// ([`scoped`]).
+    pub(crate) fn along(&self, path: &str) -> Vec<String> {
+        let segs: Vec<&str> = keyed_segments(path).collect();
+        let mut out = Vec::new();
+        for (i, seg) in segs.iter().enumerate().rev() {
+            if self.entries.contains_key(*seg) {
+                out.push((*seg).to_owned());
+                continue;
+            }
+            if let Some(id) = segs[..i]
+                .iter()
+                .rev()
+                .map(|scope| scoped(scope, seg))
+                .find(|id| self.entries.contains_key(id))
+            {
+                out.push(id);
+            }
+        }
+        out
     }
 
     #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
         self.entries.len()
     }
+}
+
+/// The registry id of a target keyed `key` inside the element keyed `scope`. The separator
+/// is no character a key path uses.
+pub(crate) fn scoped(scope: &str, key: &str) -> String {
+    format!("{scope}\u{1f}{key}")
 }
 
 /// A path's keyed segments, outermost first: `#n` stands for an element without a key.

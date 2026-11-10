@@ -913,6 +913,57 @@ fn x11_cancelled_drags_transfer_nothing() {
     cancelled_drags(Display::X11);
 }
 
+/// A target with `on_reject` hears the moves of a drag it refuses (for autoscroll that follows
+/// any drag, as Strata's does), and the release drops nothing: the peer, refused, leaves.
+fn a_refusing_target_hears_moves(display: Display) {
+    let s = Session::start();
+    let demo = Demo::start(&s, display, false);
+    let (peer, from) = peer_beside(&s, display, &demo);
+    demo.zone(None, json!({ "mimes": [URI_LIST], "action": "refuse" }));
+    press_on_peer(&s, &peer, &from);
+    let mark = demo.app.line_count();
+    peer.drag_start(
+        &[Offer::text(URI_LIST, "file:///tmp/p1/x\r\n")],
+        &[Action::Copy],
+    );
+    s.input().path(demo.at(&s, "main", "zone", 0.3, 0.5));
+    let (hovered, _) = demo.wait(mark, "the zone refusing", |v| {
+        v["ev"] == "hover" && v["state"] == "rejecting"
+    });
+    s.input().path(demo.at(&s, "main", "zone", 0.7, 0.5));
+    let (_, mv) = demo.wait(hovered, "a move while refusing", |v| v["ev"] == "move");
+    let zone = demo.rects("main")["zone"];
+    let x = mv["x"].as_f64().unwrap_or(-1.0);
+    assert!(
+        (0.0..=zone[2]).contains(&x),
+        "{mv}: in the zone's own points, {zone:?}"
+    );
+    s.input().button(false);
+    demo.wait(hovered, "the drag leaving", |v| {
+        v["ev"] == "hover" && v["state"] == "left"
+    });
+    wait_peer(&peer, "the drag ending", |e| {
+        matches!(e, Event::DragFinished { .. } | Event::DragCancelled)
+    });
+    assert!(
+        !demo.lines().iter().skip(mark).any(|v| v["ev"] == "drop"),
+        "a refused drag dropped"
+    );
+    demo.quit();
+}
+
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn wayland_a_refusing_target_hears_moves() {
+    a_refusing_target_hears_moves(Display::Wayland);
+}
+
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn x11_a_refusing_target_hears_moves() {
+    a_refusing_target_hears_moves(Display::X11);
+}
+
 // ---- in-process ----
 
 /// A drag between two windows of the app carries the typed payload: nothing is read.

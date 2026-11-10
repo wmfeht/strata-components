@@ -236,6 +236,16 @@ impl<S: 'static> Dnd<S> {
         el.key(key).drawn_rect_into(&rect)
     }
 
+    /// `el`, keyed `key`, as a drop target whose key is unique only inside the keyed element
+    /// `scope`, one of its ancestors: rows keyed by an id inside a list keyed by the list, so
+    /// two lists showing the same ids keep their targets apart. A drag finds it under the
+    /// nearest ancestor keyed `scope`. Otherwise as [`Dnd::drop_target`].
+    pub fn drop_target_in(&self, el: El, scope: &str, key: &str, target: DropTarget<S>) -> El {
+        let id = super::registry::scoped(scope, key);
+        let rect = self.0.registry.borrow_mut().put(&id, target);
+        el.key(key).drawn_rect_into(&rect)
+    }
+
     /// `el`, keyed `key`, as a drag source. It takes the element's `on_drag`: give the
     /// element's own handler to [`DragSource::on_drag`], which hears every phase that isn't
     /// the system drag's. For an element whose `on_drag` belongs to someone else, call
@@ -577,7 +587,15 @@ impl<S: 'static> Core<S> {
             };
             let registry = self.registry.borrow();
             let local = d.local.as_ref().map(|(t, p)| (t.as_str(), p));
-            let landing = session::land(&registry, path, s, &d.offer, local, d.offer.mods);
+            let landing = session::land_at(
+                &registry,
+                path,
+                s,
+                &d.offer,
+                local,
+                d.offer.mods,
+                Some(d.at),
+            );
             (
                 landing,
                 d.landing.clone(),
@@ -606,11 +624,15 @@ impl<S: 'static> Core<S> {
                 f(s, landing.hover(), &offer, tx);
             }
         }
+        // A rejecting target (one with `on_reject` that refuses the drag) hears moves too:
+        // autoscroll follows any drag over a view, not only one it would take.
+        if let Landing::Accepting { key, .. } | Landing::Rejecting { key } = &landing
+            && let Some(f) = self.target(key).and_then(|t| t.on_move.clone())
+        {
+            let point = self.point(key, at);
+            f(s, point, tx);
+        }
         if let Landing::Accepting { key, .. } = &landing {
-            if let Some(f) = self.target(key).and_then(|t| t.on_move.clone()) {
-                let point = self.point(key, at);
-                f(s, point, tx);
-            }
             self.start_peeks(key);
         }
     }

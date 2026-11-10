@@ -6,7 +6,7 @@ mod tests;
 use std::collections::{HashMap, VecDeque};
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, PoisonError, Weak};
 use std::thread;
@@ -112,6 +112,9 @@ struct Common {
     /// Set when the last `IconLoader` drops: the thread runs no further job. The channel alone
     /// would have it work through the whole queue first.
     stopped: AtomicBool,
+    /// How many checks found a change on disk. A slot settled in an earlier generation is
+    /// stale: `load` looks it up again.
+    generation: AtomicU64,
     /// When `load` next asks the thread to check the themes on disk.
     next_check: Mutex<Instant>,
     revalidate_after: Duration,
@@ -155,6 +158,7 @@ impl IconLoader {
             table: Mutex::new(Table::default()),
             settled: AtomicBool::new(false),
             stopped: AtomicBool::new(false),
+            generation: AtomicU64::new(0),
             next_check: Mutex::new(Instant::now() + options.revalidate_after),
             revalidate_after: options.revalidate_after,
             cache,
@@ -191,6 +195,10 @@ impl IconLoader {
     /// The icon for `request` in the current theme. It never blocks on the file system, so a
     /// view can call it each time it runs: a request asked before, while a handle to it lives
     /// or it is among the recent ones, gets the same handle back.
+    ///
+    /// After a change on disk, an icon that was [`IconState::Ready`] is looked up again while
+    /// this keeps returning its old handle, so the view never draws a fallback in between; once
+    /// the new lookup has settled (and decoded), it returns the new handle.
     pub fn load(&self, request: &IconRequest) -> LoadedIcon {
         let theme = self.theme();
         let key = Key {
@@ -202,22 +210,26 @@ impl IconLoader {
         let common = &self.inner.common;
         self.check_due();
         let mut table = lock(&common.table);
-        if let Some(slot) = table.live.get(&key).and_then(Weak::upgrade) {
-            table.touch(&slot, common);
-            return LoadedIcon(slot);
-        }
-        table.live.retain(|_, slot| slot.strong_count() > 0);
-        let slot = Arc::new(Slot::new(request.clone(), key.theme.clone()));
-        table.live.insert(key, Arc::downgrade(&slot));
+        let (slot, lookup) = match table.live.get(&key).and_then(Weak::upgrade) {
+            Some(slot) if !common.stale(&slot) => (slot, None),
+            Some(old) => table.refresh(key, old),
+            None => {
+                table.live.retain(|_, slot| slot.strong_count() > 0);
+                let slot = Arc::new(Slot::new(request.clone(), key.theme.clone()));
+                table.live.insert(key, Arc::downgrade(&slot));
+                (slot.clone(), Some(slot))
+            }
+        };
         table.touch(&slot, common);
         drop(table);
-        if self
-            .inner
-            .jobs
-            .send(Job::Lookup(Arc::downgrade(&slot)))
-            .is_err()
+        if let Some(lookup) = lookup
+            && self
+                .inner
+                .jobs
+                .send(Job::Lookup(Arc::downgrade(&lookup)))
+                .is_err()
         {
-            slot.settle(Outcome::Refused(ImageError(
+            lookup.settle(Outcome::Refused(ImageError(
                 "the icon lookup thread stopped".into(),
             )));
         }
@@ -244,8 +256,8 @@ impl IconLoader {
 
     /// Checks the themes on disk now, on the thread, without waiting for
     /// [`Options::revalidate_after`]. Lookups asked after this call run after the check. When
-    /// something changed, the loader forgets its handles (later requests get new ones), and
-    /// [`poll`](Self::poll) turns true so the view asks again.
+    /// something changed, [`poll`](Self::poll) turns true so the view asks again, and each
+    /// icon asked for after is looked up again ([`load`](Self::load) says how).
     pub fn rescan(&self) {
         *lock(&self.inner.common.next_check) = Instant::now() + self.inner.common.revalidate_after;
         let _ = self.inner.jobs.send(Job::Revalidate);
@@ -272,7 +284,49 @@ impl std::fmt::Debug for IconLoader {
     }
 }
 
+impl Common {
+    /// Settled before the last change on disk.
+    fn stale(&self, slot: &Slot) -> bool {
+        slot.outcome.get().is_some()
+            && slot.generation.load(Ordering::Acquire) < self.generation.load(Ordering::Acquire)
+    }
+}
+
 impl Table {
+    /// The handle to return for a stale `old` and, if one is due, the slot to look up.
+    fn refresh(&mut self, key: Key, old: Arc<Slot>) -> (Arc<Slot>, Option<Arc<Slot>>) {
+        let fresh = || Arc::new(Slot::new(old.request.clone(), old.theme.clone()));
+        if !old.ready() {
+            // Nothing drawn to keep showing: replace it now.
+            let new = fresh();
+            self.swap(key, &old, &new);
+            return (new.clone(), Some(new));
+        }
+        let mut replacement = lock(&old.replacement);
+        match replacement.take() {
+            Some(new) if new.shows() => {
+                drop(replacement);
+                self.swap(key, &old, &new);
+                (new, None)
+            }
+            Some(pending) => {
+                *replacement = Some(pending);
+                (old.clone(), None)
+            }
+            None => {
+                let new = fresh();
+                *replacement = Some(new.clone());
+                drop(replacement);
+                (old, Some(new))
+            }
+        }
+    }
+
+    fn swap(&mut self, key: Key, old: &Arc<Slot>, new: &Arc<Slot>) {
+        self.live.insert(key, Arc::downgrade(new));
+        self.lru.retain(|s| !Arc::ptr_eq(s, old));
+    }
+
     /// Moves `slot` to the front of the recent icons, if its size lets it stay.
     fn touch(&mut self, slot: &Arc<Slot>, common: &Common) {
         if let Some(at) = self.lru.iter().position(|s| Arc::ptr_eq(s, slot)) {
@@ -303,10 +357,9 @@ fn run(receive: &mpsc::Receiver<Job>, common: &Common, mut resolver: IconResolve
         let slot = match job {
             Job::Revalidate => {
                 if resolver.revalidate() {
-                    let mut table = lock(&common.table);
-                    table.live.clear();
-                    table.lru.clear();
-                    drop(table);
+                    // Every settled slot is stale now. The handles stay until each is looked
+                    // up again, so a view keeps drawing its icons meanwhile.
+                    common.generation.fetch_add(1, Ordering::AcqRel);
                     common.settled.store(true, Ordering::Release);
                     (common.waker)();
                 }
@@ -322,6 +375,9 @@ fn run(receive: &mpsc::Receiver<Job>, common: &Common, mut resolver: IconResolve
         };
         let outcome = resolve(&mut resolver, common, &slot);
         let found = matches!(outcome, Outcome::Found { .. });
+        // Only this thread changes the generation, so the lookup ran against this one.
+        let generation = common.generation.load(Ordering::Acquire);
+        slot.generation.store(generation, Ordering::Release);
         slot.settle(outcome);
         if found {
             lock(&common.table).loading.push(Arc::downgrade(&slot));
@@ -386,6 +442,10 @@ struct Slot {
     request: IconRequest,
     theme: String,
     outcome: OnceLock<Outcome>,
+    /// The loader's generation the lookup ran in.
+    generation: AtomicU64,
+    /// After a change on disk, the new lookup for this stale slot, until it shows.
+    replacement: Mutex<Option<Arc<Slot>>>,
     lock: Mutex<()>,
     settled: Condvar,
 }
@@ -396,9 +456,22 @@ impl Slot {
             request,
             theme,
             outcome: OnceLock::new(),
+            generation: AtomicU64::new(0),
+            replacement: Mutex::new(None),
             lock: Mutex::new(()),
             settled: Condvar::new(),
         }
+    }
+
+    /// Found and decoded: it draws the icon.
+    fn ready(&self) -> bool {
+        matches!(self.outcome.get(), Some(Outcome::Found { image, .. })
+            if image.is_ready() && image.error().is_none())
+    }
+
+    /// Settled, and decoded if found: a view can show it in place of another.
+    fn shows(&self) -> bool {
+        self.outcome.get().is_some() && !self.decoding()
     }
 
     fn settle(&self, outcome: Outcome) {

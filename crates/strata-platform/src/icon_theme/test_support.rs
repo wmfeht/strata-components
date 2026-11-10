@@ -32,7 +32,7 @@ impl Scratch {
 
     /// Writes `text` to `path`, then moves the directory's modification time a second on, so
     /// a check sees the change even where the kernel's timestamps are coarser than the test.
-    pub(super) fn put(&self, path: &str, text: &str) {
+    pub(super) fn put(&self, path: &str, text: impl AsRef<[u8]>) {
         let path = self.0.join(path);
         let dir = path.parent().unwrap_or(&self.0);
         std::fs::create_dir_all(dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display()));

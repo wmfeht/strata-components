@@ -306,7 +306,7 @@ fn rescan_finds_a_new_icon_and_drops_stale_handles() {
     let svg = std::fs::read_to_string(fixtures().join("decode/Decode/scalable/apps/good.svg"));
     scratch.put(
         "T/scalable/apps/late.svg",
-        &svg.unwrap_or_else(|e| panic!("good.svg: {e}")),
+        svg.unwrap_or_else(|e| panic!("good.svg: {e}")),
     );
     icons.rescan();
     assert!(polled(&icons), "a change wakes the view");
@@ -314,6 +314,78 @@ fn rescan_finds_a_new_icon_and_drops_stale_handles() {
     assert_eq!(after.wait(WAIT), IconState::Ready);
     // The handle kept from before keeps what it found.
     assert_eq!(before.state(), IconState::NotFound);
+}
+
+/// Waits until the gate's waker has been called `n` times.
+fn gate_woken(gate: &Gate, n: usize) -> bool {
+    let deadline = Instant::now() + WAIT;
+    while gate.wakes() < n {
+        if Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::yield_now();
+    }
+    true
+}
+
+#[test]
+fn an_icon_shown_before_a_change_on_disk_keeps_its_pixels_until_the_new_lookup_lands() {
+    let decode = fixtures().join("decode/Decode");
+    let read = |p: &str| std::fs::read(decode.join(p)).unwrap_or_else(|e| panic!("{p}: {e}"));
+    let scratch = Scratch::new("no-flash");
+    scratch.put("T/index.theme", "[Icon Theme]\nDirectories=scalable/apps\n[scalable/apps]\nSize=16\nType=Scalable\nMinSize=1\nMaxSize=512\n");
+    scratch.put("T/scalable/apps/icon.svg", read("scalable/apps/good.svg"));
+    let (icons, gate) = gated(options(vec![scratch.root().to_path_buf()], "T"));
+    let request = IconRequest::named(["icon"], 22, 1.0);
+    let first = icons.load(&request);
+    assert_eq!(first.wait(WAIT), IconState::Ready);
+    // The lookup and the decode: nothing else will call the waker but the thread.
+    assert!(gate_woken(&gate, 2));
+    let shown = |icons: &IconLoader| {
+        let icon = icons.load(&request);
+        assert_eq!(icon.state(), IconState::Ready, "{icon:?}");
+        icon
+    };
+    // Something else in the theme changes; then `icon` itself gains a PNG, which beats its SVG.
+    let changes: [(&str, Vec<u8>, &str); 2] = [
+        (
+            "T/scalable/apps/other.svg",
+            read("scalable/apps/good.svg"),
+            "icon.svg",
+        ),
+        (
+            "T/scalable/apps/icon.png",
+            read("16x16/apps/good-png.png"),
+            "icon.png",
+        ),
+    ];
+    let mut before = first;
+    for (path, bytes, found) in changes {
+        icons.poll();
+        gate.set_shut(true);
+        scratch.put(path, bytes);
+        icons.rescan();
+        // The thread has seen the change and is held before any new lookup runs.
+        assert!(gate.holding());
+        assert!(icons.poll(), "a change wakes the view");
+        assert!(Arc::ptr_eq(&shown(&icons).0, &before.0), "{path}");
+        gate.set_shut(false);
+        let deadline = Instant::now() + WAIT;
+        let after = loop {
+            let icon = shown(&icons);
+            if !Arc::ptr_eq(&icon.0, &before.0) {
+                break icon;
+            }
+            assert!(Instant::now() < deadline, "{path}: no new handle");
+            icons.poll();
+            std::thread::yield_now();
+        };
+        assert!(
+            after.path().is_some_and(|p| p.ends_with(found)),
+            "{after:?}"
+        );
+        before = after;
+    }
 }
 
 #[test]

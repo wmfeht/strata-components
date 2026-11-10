@@ -121,9 +121,16 @@
 //! check has the thread check the modification time of every root, theme directory and
 //! `index.theme` read so far, and read again the themes where one changed. That also catches
 //! an icon installed into an existing size directory, which GTK only sees once
-//! `icon-theme.cache` is rebuilt. [`IconLoader::rescan`] checks at once. After a change the
-//! loader forgets its handles and [`IconLoader::poll`] turns true, so the view asks again and
-//! gets new ones; handles kept from before keep their icon.
+//! `icon-theme.cache` is rebuilt. [`IconLoader::rescan`] checks at once. After a change
+//! [`IconLoader::poll`] turns true, so the view asks again, and each icon it asks for is looked
+//! up again. Until that lookup has settled and decoded, [`IconLoader::load`] keeps returning
+//! the old handle of an icon that was drawn, so nothing flashes to the fallback (a package
+//! install that runs `gtk-update-icon-cache` changes `hicolor`'s directory each time); then it
+//! returns the new one. Handles kept from before keep their icon.
+//!
+//! A file rewritten in place, at the same path and size, keeps its old pixels while any
+//! handle to them lives: Rune's `ImageCache` shares decoded files by path, size and scale, and
+//! the handle drawn until the new lookup lands is one of them.
 //!
 //! # Measured
 //!

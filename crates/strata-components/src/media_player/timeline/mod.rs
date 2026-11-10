@@ -15,7 +15,7 @@ use strata_kit::look::Look;
 use strata_kit::slots::media as slot;
 
 use super::state::MediaState;
-use super::{Emit, flush};
+use super::{Emit, commit_after};
 
 /// The plain bar's track height and knob.
 const PLAIN_HEIGHT: f32 = 20.0;
@@ -80,14 +80,11 @@ pub(crate) fn timeline<S: 'static>(
             let emit = emit.clone();
             move |s: &mut S, d: &mut Drag, tx: &mut Tx| {
                 let st = access(s);
-                let changed = match d.phase {
+                match d.phase {
                     Phase::Up => st.drag_at(None, !d.cancelled()),
                     _ => st.drag_at(Some(d.x), false),
                 };
-                let sent = flush(s, access, &emit, tx);
-                if !changed && !sent {
-                    tx.live_only();
-                }
+                commit_after(s, access, &emit, tx);
             }
         })
         .on_key({
@@ -100,7 +97,7 @@ pub(crate) fn timeline<S: 'static>(
                 if !st.command(command) {
                     return false;
                 }
-                super::commit_after(s, access, &emit, tx);
+                commit_after(s, access, &emit, tx);
                 true
             }
         })
@@ -114,7 +111,7 @@ pub(crate) fn timeline<S: 'static>(
                     super::keys::Seek::Forward(by)
                 };
                 access(s).seek_by(seek);
-                super::commit_after(s, access, &emit, tx);
+                commit_after(s, access, &emit, tx);
             }
         })
         .on_step_limit({
@@ -125,14 +122,14 @@ pub(crate) fn timeline<S: 'static>(
                 } else {
                     super::keys::Seek::Start
                 });
-                super::commit_after(s, access, &emit, tx);
+                commit_after(s, access, &emit, tx);
             }
         });
     if plain {
         e = e.on_wheel(move |s: &mut S, w: WheelEvent, tx: &mut Tx| {
             let taken = access(s).wheel(w.dy, w.precise);
             if taken {
-                super::commit_after(s, access, &emit, tx);
+                commit_after(s, access, &emit, tx);
             } else {
                 tx.live_only();
             }

@@ -92,10 +92,16 @@ pub fn track_caption(
     track: Option<u32>,
     total: Option<u32>,
     position: Option<crate::viewers::layout::Position>,
+    labels: &super::labels::Labels,
 ) -> Option<String> {
     match (track, total, position) {
-        (Some(t), Some(n), _) => Some(format!("Track {t} of {n}")),
-        (Some(t), None, _) => Some(format!("Track {t}")),
+        (Some(t), Some(n), _) => Some(
+            labels
+                .track_of
+                .replace("{track}", &t.to_string())
+                .replace("{total}", &n.to_string()),
+        ),
+        (Some(t), None, _) => Some(labels.track.replace("{track}", &t.to_string())),
         (None, _, Some(p)) => Some(p.caption()),
         (None, _, None) => None,
     }

@@ -18,10 +18,8 @@ use crate::viewers::viewport::{Interaction, Viewport, ViewportState};
 const POSTER_OPACITY: f32 = 0.55;
 /// The seek cover's opacity (`video.rs`, `SEEK_COVER_OPACITY`).
 const SEEK_COVER_OPACITY: f32 = 0.9;
-/// The bubble's margin over the frame's bottom and its chrome (`BUBBLE_MARGIN`,
-/// `BUBBLE_CHROME`).
+/// The bubble's margin over the frame's bottom (`BUBBLE_MARGIN`).
 const BUBBLE_MARGIN: f32 = 10.0;
-const BUBBLE_CHROME: f32 = 8.0;
 /// A bubble with no storyboard is this wide on its long edge (`CELL_EDGE`).
 const CELL_EDGE: f32 = 128.0;
 /// Empty pills while the probe runs (`SKELETON_BADGE_WIDTHS`).
@@ -116,7 +114,7 @@ fn badge_row(st: &MediaState, key: &str, look: &Look) -> El {
             })
             .collect(),
         Details::Failed => Vec::new(),
-        Details::Ready(d) => badges(d)
+        Details::Ready(d) => badges(d, st.labels())
             .into_iter()
             .enumerate()
             .map(|(i, b)| layout::badge(format!("{key}-badge-{i}"), b.label, look))
@@ -149,11 +147,11 @@ fn frame<S: 'static>(
     if let Some(px) = pixels.filter(|_| st.has_frame()) {
         surface = surface.pixels(px);
     }
-    // The frame names itself; the surface inside is the picture it shows.
+    // The frame names itself; the surface inside is the picture it shows. A press plays or
+    // pauses, so Rune makes it a button (deviation D9: Strata's is a focusable group).
     let surface = surface.build(look, cx).a11y_hidden();
     let mut frame = el()
         .key(format!("{key}-frame"))
-        .role("group")
         .label(st.labels().video_frame.clone())
         .w_full()
         .h_full()
@@ -244,7 +242,10 @@ fn bubble(st: &MediaState, key: &str, look: &Look) -> Option<El> {
             }
         }
     };
-    st.set_bubble_width(cw + BUBBLE_CHROME);
+    // The cell, the padding and a 1 pt border on each side (Strata's `BUBBLE_CHROME`).
+    let pad = slot::bubble_pad(look);
+    let bubble_w = cw + 2.0 * (pad + 1.0);
+    st.set_bubble_width(bubble_w);
     st.place();
     let label = match chapter {
         Some(c) => format!("{} · {}", time::clock(t), c.title),
@@ -253,9 +254,9 @@ fn bubble(st: &MediaState, key: &str, look: &Look) -> Option<El> {
     let mut picture = el()
         .key(format!("{key}-bubble-cell"))
         .size(cw, ch)
-        .radius(look.round(4.0))
-        .clip_rounded(look.round(4.0))
-        .fill(k.alpha(k.c.text_muted, 0.14));
+        .radius(slot::bubble_cell_radius(look))
+        .clip_rounded(slot::bubble_cell_radius(look))
+        .fill(slot::bubble_cell_fill(look));
     if let Some((_, px)) = cell {
         picture = picture.pixels_fit(px, SurfaceFit::Fill);
     }
@@ -263,12 +264,12 @@ fn bubble(st: &MediaState, key: &str, look: &Look) -> Option<El> {
         col()
             .key(format!("{key}-bubble"))
             .pin(Some(0.0), None, None, Some(BUBBLE_MARGIN))
-            .w(cw + BUBBLE_CHROME)
-            .padding(BUBBLE_CHROME / 2.0 - 1.0)
+            .w(bubble_w)
+            .padding(pad)
             .gap(2.0)
-            .radius(look.round(6.0))
+            .radius(slot::bubble_radius(look))
             .fill(slot::bubble_fill(look))
-            .border(1.0, k.alpha(k.c.border_base, 0.5))
+            .border(1.0, slot::bubble_border(look))
             .live_offset(&st.live.bubble)
             .child(picture.a11y_hidden())
             .child(

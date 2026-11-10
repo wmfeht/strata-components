@@ -29,6 +29,8 @@ pub enum MediaIntent {
     /// trigger). Which clips get one (none under 4 s, say) is the host's.
     StoryboardWanted,
     /// Decode at this size in device pixels: the frame grew by 8 % or more past what the
-    /// decoder makes (Strata's `RESIZE_GROWTH`). Never sent for a shrink, nor for audio.
+    /// decoder makes (Strata's `RESIZE_GROWTH`). Never sent for a shrink, nor for audio. It
+    /// comes on the first tick the frame has grown, once per growth; waiting for the resize
+    /// to settle before restarting the decoder is the host's (Strata's `RESIZE_DELAY`).
     DecodeSize([u32; 2]),
 }

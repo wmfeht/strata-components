@@ -1,5 +1,8 @@
 //! A video's badges from its probe: Strata's `src/ui/preview/video/badges.rs`
-//! (lgse/strata `upstream/main` e9a8993), rule for rule.
+//! (lgse/strata `upstream/main` e9a8993), rule for rule. The words are the host's
+//! ([`Labels`]).
+
+use super::labels::Labels;
 
 /// What the probe found (Strata's `MediaMetadata`, the fields the badges read) plus the
 /// sidecar subtitle files the host counted.
@@ -51,7 +54,7 @@ fn badge(kind: BadgeKind, label: impl Into<String>) -> Badge {
 }
 
 /// The badges, in Strata's order.
-pub fn badges(d: &VideoDetails) -> Vec<Badge> {
+pub fn badges(d: &VideoDetails, labels: &Labels) -> Vec<Badge> {
     let mut out = Vec::new();
     if let Some((w, h)) = d.dimensions {
         out.push(badge(BadgeKind::Resolution, resolution_class(w, h)));
@@ -65,7 +68,9 @@ pub fn badges(d: &VideoDetails) -> Vec<Badge> {
     if let Some(rate) = d.frame_rate {
         out.push(badge(
             BadgeKind::FrameRate,
-            format!("{} fps", rate.round() as u64),
+            labels
+                .fps
+                .replace("{rate}", &(rate.round() as u64).to_string()),
         ));
     }
     if let Some(codec) = d.video_codec.as_deref() {
@@ -75,6 +80,7 @@ pub fn badges(d: &VideoDetails) -> Vec<Badge> {
         d.audio_codec.as_deref(),
         d.channels,
         d.channel_layout.as_deref(),
+        labels,
     ) {
         out.push(badge(BadgeKind::Audio, audio));
     }
@@ -83,9 +89,11 @@ pub fn badges(d: &VideoDetails) -> Vec<Badge> {
         out.push(badge(
             BadgeKind::Captions,
             if captions == 1 {
-                "CC".to_owned()
+                labels.captions.clone()
             } else {
-                format!("CC ×{captions}")
+                labels
+                    .captions_many
+                    .replace("{count}", &captions.to_string())
             },
         ));
     }
@@ -171,30 +179,39 @@ fn audio_codec_label(codec: &str) -> String {
     }
 }
 
-fn channels_label(channels: Option<u32>, layout: Option<&str>) -> Option<String> {
+fn channels_label(channels: Option<u32>, layout: Option<&str>, labels: &Labels) -> Option<String> {
     if let Some(layout) = layout {
         // "5.1(side)" and "7.1(wide)" carry the speaker count before the variant.
         let compact = layout.split('(').next().unwrap_or(layout).trim();
         if matches!(compact, "mono" | "stereo") {
-            return Some(if compact == "mono" { "Mono" } else { "Stereo" }.into());
+            return Some(if compact == "mono" {
+                labels.mono.clone()
+            } else {
+                labels.stereo.clone()
+            });
         }
         if !compact.is_empty() && compact.bytes().all(|b| b.is_ascii_digit() || b == b'.') {
             return Some(compact.to_owned());
         }
     }
     Some(match channels? {
-        1 => "Mono".into(),
-        2 => "Stereo".into(),
+        1 => labels.mono.clone(),
+        2 => labels.stereo.clone(),
         6 => "5.1".into(),
         8 => "7.1".into(),
-        other => format!("{other} ch"),
+        other => labels.channels.replace("{channels}", &other.to_string()),
     })
 }
 
-fn audio_label(codec: Option<&str>, channels: Option<u32>, layout: Option<&str>) -> Option<String> {
+fn audio_label(
+    codec: Option<&str>,
+    channels: Option<u32>,
+    layout: Option<&str>,
+    labels: &Labels,
+) -> Option<String> {
     match (
         codec.map(audio_codec_label),
-        channels_label(channels, layout),
+        channels_label(channels, layout, labels),
     ) {
         (Some(c), Some(ch)) => Some(format!("{c} {ch}")),
         (Some(c), None) => Some(c),

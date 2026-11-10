@@ -50,7 +50,12 @@ pub(crate) fn audio<S: 'static>(
         .title
         .clone()
         .unwrap_or_else(|| time::stem(&st.clip().name).to_owned());
-    let caption = time::track_caption(tags.track, tags.track_total, st.clip().position);
+    let caption = time::track_caption(
+        tags.track,
+        tags.track_total,
+        st.clip().position,
+        st.labels(),
+    );
     let byline = time::byline(tags.artist.as_deref(), tags.album.as_deref());
     // Rows keep their space while tags load, so changing tracks doesn't move the layout.
     let header = row()

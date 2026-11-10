@@ -23,6 +23,15 @@ pub enum PlaybackState {
 ///
 /// The player only reads it, once a frame from [`MediaState::tick`](super::MediaState::tick).
 /// It asks for play, pause and seeks through [`MediaIntent`]s, which the host applies.
+///
+/// **Wakes are the clock's.** The player asks for a wake each frame only while
+/// [`PlaybackState::Playing`], while the waveform grows in or the spectrum's bars fall, and
+/// while the stand-in fades. A clock that changes on its own otherwise (a seek landing, a
+/// start finishing [`PlaybackState::Loading`], an underrun, the end of a stream) must wake the
+/// host for each state change, so its poll runs the tick that shows it: P7 through the app's
+/// setup waker (or `AppHandle::update`), [`FakeClock`] through [`FakeClock::next_due`] and the
+/// host's `Tx::wake_after`. A clock that never does leaves the view on the old state in a
+/// resting window.
 pub trait PlaybackClock {
     /// Where playback is: while seeking, the seek's target.
     fn position(&self) -> Duration;

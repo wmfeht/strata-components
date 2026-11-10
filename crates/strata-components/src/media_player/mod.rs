@@ -10,11 +10,16 @@
 //!     .video(&s.frames)                     // P7's pacer writes the frames in place
 //!     .on_intent(|s: &mut App, intent, _tx| s.clock.apply(&intent))
 //!     .build(&s.look, cx)
-//! // and in the app's poll:
+//! // and in the app's poll, in this order:
 //! s.clock.advance(now);
 //! changed |= s.media.tick(&s.clock, now, tx);
 //! for intent in s.media.drain_intents() { s.clock.apply(&intent) }
 //! ```
+//!
+//! Intents from the view's handlers go to `on_intent` at once. Without it they wait for the
+//! poll's drain, which comes after the tick: a seek sent then is held on the timeline at its
+//! target until the clock reports it (or for at most a second, should the host drop it), so
+//! no frame shows the old position, and the handler asks for the wake that brings the poll.
 //!
 //! **Rune dev 5d421fd: partly.** `Pixels` updated in place (C14a's viewport), `Live`
 //! offsets, rects, opacity and gradients, `canvas` shapes, the slider role (`on_step`,
@@ -108,6 +113,8 @@
 //! - **D6**: the time labels are committed text (U-C1f-6).
 //! - **D7** (OWNER ruling): no Element glow.
 //! - **D8**: [`MediaKeys`] is a table of its own, separate from C1c's `KeyMap`.
+//! - **D9** (OWNER ruling): the video frame is a button named "Video frame", since a press
+//!   plays or pauses and Rune names a pressable element so; Strata's is a focusable group.
 //!
 //! # Bullets
 //!
@@ -118,10 +125,10 @@
 //!
 //! | Bullet | Covered by |
 //! | --- | --- |
-//! | Ctrl+Alt+Space, Ctrl+Alt+Left/Right, Up/Down, M | script `default-keys`; unit `the_window_keys_are_ctrl_alt` |
+//! | Ctrl+Alt+Space, Ctrl+Alt+Left/Right, Up/Down, M | scripts `default-keys-seek`, `default-keys-volume`, `default-keys-mute`, `default-keys-play`; unit `the_window_keys_are_ctrl_alt` |
 //! | The plain bar's play button reads "Play/Pause (…)" | script `plain-names`; golden `c13-plain` |
 //! | The mute button reads "Mute/unmute (…)" | script `mute-name` |
-//! | A focused volume slider steps 0.1 and 0.2; Home mutes, End full | script `volume-keys` |
+//! | A focused volume slider steps 0.1 and 0.2; Home mutes, End full | scripts `volume-arrows`, `volume-pages`, `volume-home`, `volume-end` |
 //! | Stepped volumes snap to the 0.1 grid | script `volume-snap`; unit |
 //! | Dragging the volume slider sets any value | script `volume-drag` |
 //! | Neither audio nor video: the seek slider steps 5 s and 30 s | script `plain-seek-keys` |
@@ -181,11 +188,11 @@
 //!
 //! | Bullet | Covered by |
 //! | --- | --- |
-//! | Left/Right 5 s; Shift+Left/Right, Page Down/Up 30 s | script `timeline-seek-keys`; unit |
+//! | Left/Right 5 s; Shift+Left/Right, Page Down/Up 30 s | scripts `timeline-seek-arrows`, `timeline-seek-shift`, `timeline-seek-page-up`, `timeline-seek-page-down` (the pages take 30 s, not Rune's 10 steps: U-C13-2); unit |
 //! | Home, `0`, Shift+0 to the start; End, `G` to the last frame | script `timeline-jumps`; unit |
 //! | They hold after the listing's keys are rebound | by construction (D8): [`MediaKeys`] reads nothing of C1c's `KeyMap` |
 //! | Caps Lock g doesn't seek | script `timeline-capslock-g`; unit |
-//! | `+`, `=`, `-` and the keypad's change the volume; 0 mutes and keeps the volume | script `timeline-volume-keys`; unit |
+//! | `+`, `=`, `-` and the keypad's change the volume; 0 mutes and keeps the volume | scripts `timeline-volume-plus`, `-equals`, `-minus`, `-keypad`, `-mute-restore`, `-restore`; unit |
 //! | No Ctrl+Alt form | script `timeline-no-ctrl-alt`; unit |
 //! | A key added to the seek-to-end command | script `timeline-seek-end-binding`; unit |
 //! | Removing `+` leaves `=` | script `timeline-volume-alias`; unit |

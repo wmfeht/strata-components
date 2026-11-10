@@ -28,6 +28,17 @@ pub struct Labels {
     pub value: String,
     /// The total when the duration isn't known.
     pub unknown_total: String,
+    /// Badges: `{rate} fps`, the channel names, `{channels} ch` for other counts, and the
+    /// captions badge for one track (`CC`) or more (`CC ×{count}`).
+    pub fps: String,
+    pub mono: String,
+    pub stereo: String,
+    pub channels: String,
+    pub captions: String,
+    pub captions_many: String,
+    /// The audio caption from tags: `Track {track} of {total}`, or `Track {track}`.
+    pub track_of: String,
+    pub track: String,
 }
 
 impl Default for Labels {
@@ -48,6 +59,14 @@ impl Default for Labels {
             artwork: "Album art".into(),
             value: "{elapsed} of {duration}".into(),
             unknown_total: "--:--".into(),
+            fps: "{rate} fps".into(),
+            mono: "Mono".into(),
+            stereo: "Stereo".into(),
+            channels: "{channels} ch".into(),
+            captions: "CC".into(),
+            captions_many: "CC ×{count}".into(),
+            track_of: "Track {track} of {total}".into(),
+            track: "Track {track}".into(),
         }
     }
 }

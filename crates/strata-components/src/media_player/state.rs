@@ -22,6 +22,12 @@ use crate::viewers::viewport::{Mode, ViewportState};
 pub const STAND_IN_FADE: f64 = 0.15;
 /// Grow-in frames commit at most this often, in seconds (OWNER ruling: 30 Hz).
 pub const GROW_INTERVAL: f64 = 1.0 / 30.0;
+/// A seek counts as reported once the clock is this close to its target (a clock that plays
+/// on from the target moves a frame or two before the next tick).
+const SEEK_REACHED: Duration = Duration::from_millis(250);
+/// A seek the clock never reports (a host that dropped it) stops holding the timeline after
+/// this long, in seconds on the host's clock.
+const SEEK_GIVE_UP: f64 = 1.0;
 /// The tick a playing player asks for.
 const FRAME: Duration = Duration::from_millis(16);
 
@@ -106,9 +112,14 @@ pub struct MediaState {
     duration: Option<Duration>,
     playback: PlaybackState,
     seekable: bool,
+    /// A seek sent but not yet reported by the clock, and the host time it was first seen
+    /// pending: the timeline holds its target until the clock reports it.
+    pending_seek: Option<(Duration, Option<f64>)>,
 
     volume: f32,
     muted: bool,
+    /// The volume and mute a volume drag started from, to put back if it's cancelled.
+    volume_drag: Option<(f32, bool)>,
 
     error: Option<MediaError>,
     chapters: Vec<Chapter>,
@@ -165,8 +176,10 @@ impl MediaState {
             duration: None,
             playback: PlaybackState::Loading,
             seekable: false,
+            pending_seek: None,
             volume: 1.0,
             muted: false,
+            volume_drag: None,
             error: None,
             chapters: Vec::new(),
             levels: Levels::default(),
@@ -212,6 +225,7 @@ impl MediaState {
         self.duration = None;
         self.playback = PlaybackState::Loading;
         self.seekable = false;
+        self.pending_seek = None;
         self.error = None;
         self.chapters.clear();
         self.levels.clear();
@@ -425,7 +439,7 @@ impl MediaState {
     pub fn tick(&mut self, clock: &dyn PlaybackClock, now: f64, tx: &mut Tx) -> bool {
         let elapsed = self.last_tick.map_or(1.0 / 60.0, |t| (now - t).max(0.0)) as f32;
         self.last_tick = Some(now);
-        self.read(clock);
+        self.read(clock, now);
         let motion = self.motion.get();
 
         if self.frame.is_some() {
@@ -469,11 +483,27 @@ impl MediaState {
         self.stale()
     }
 
-    fn read(&mut self, clock: &dyn PlaybackClock) {
-        self.position = clock.position();
+    /// Reads the clock. A seek the host hasn't applied yet (its poll drains intents after the
+    /// tick) keeps its target on the timeline until the clock reports it, so no frame shows
+    /// the old position.
+    fn read(&mut self, clock: &dyn PlaybackClock, now: f64) {
+        let position = clock.position();
         self.duration = clock.duration();
         self.playback = clock.state();
         self.seekable = clock.seekable();
+        self.position = match &mut self.pending_seek {
+            Some((target, since)) => {
+                let since = *since.get_or_insert(now);
+                let reached = position >= *target && position - *target <= SEEK_REACHED;
+                if reached || now - since > SEEK_GIVE_UP {
+                    self.pending_seek = None;
+                    position
+                } else {
+                    *target
+                }
+            }
+            None => position,
+        };
     }
 
     fn check_decode(&mut self) {
@@ -553,6 +583,7 @@ impl MediaState {
         let d = self.duration.unwrap_or_default();
         let to = to.min(time::last_frame(d));
         self.position = to;
+        self.pending_seek = Some((to, None));
         self.outbox.push(MediaIntent::Seek(to));
         self.place();
     }
@@ -575,6 +606,24 @@ impl MediaState {
             volume: self.volume,
             muted: self.muted,
         });
+    }
+
+    /// A volume drag moved to `volume`: the first move keeps where it started from.
+    pub(crate) fn drag_volume(&mut self, volume: f32) {
+        self.volume_drag.get_or_insert((self.volume, self.muted));
+        self.set_user_volume(volume);
+    }
+
+    /// A volume drag ended. A cancelled one (Escape, the window losing focus) puts the volume
+    /// it started from back.
+    pub(crate) fn end_volume_drag(&mut self, cancelled: bool) {
+        if let Some((volume, muted)) = self.volume_drag.take()
+            && cancelled
+        {
+            self.volume = volume;
+            self.muted = muted;
+            self.outbox.push(MediaIntent::SetVolume { volume, muted });
+        }
     }
 
     pub fn toggle_mute(&mut self) {

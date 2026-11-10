@@ -233,8 +233,8 @@ pub(crate) fn volume<S: 'static>(
     let slider = el()
         .key(format!("{key}-volume"))
         .label(labels.volume.clone())
-        .range_value(f64::from(value), 0.0, 1.0)
-        .range_step(f64::from(VOLUME_STEP))
+        .range_value((f64::from(value) * 1000.0).round() / 1000.0, 0.0, 1.0)
+        .range_step((f64::from(VOLUME_STEP) * 1000.0).round() / 1000.0)
         .a11y_value(format!("{}%", (value * 100.0).round() as u32))
         .w(VOLUME_WIDTH)
         .h(VOLUME_HEIGHT)
@@ -275,13 +275,14 @@ pub(crate) fn volume<S: 'static>(
                 commit_after(s, access, &emit, tx);
             }
         })
-        // A drag sets any value, without snapping.
+        // A drag sets any value, without snapping; a cancelled one puts the volume back.
         .on_drag(move |s: &mut S, d: &mut Drag, tx: &mut Tx| {
-            if d.phase == Phase::Up && d.cancelled() {
-                tx.live_only();
-                return;
+            let st = access(s);
+            if d.phase == Phase::Up {
+                st.end_volume_drag(d.cancelled());
+            } else {
+                st.drag_volume(set_at(d.w, d.x));
             }
-            access(s).set_user_volume(set_at(d.w, d.x));
             commit_after(s, access, &emit, tx);
         })
         .child(

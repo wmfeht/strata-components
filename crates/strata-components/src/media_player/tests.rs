@@ -120,15 +120,18 @@ fn captions_prefer_the_tagged_track_then_the_listing() {
         results: false,
     });
     assert_eq!(
-        track_caption(Some(3), Some(12), p).as_deref(),
+        track_caption(Some(3), Some(12), p, &Labels::default()).as_deref(),
         Some("Track 3 of 12")
     );
-    assert_eq!(track_caption(Some(3), None, p).as_deref(), Some("Track 3"));
     assert_eq!(
-        track_caption(None, Some(9), p).as_deref(),
+        track_caption(Some(3), None, p, &Labels::default()).as_deref(),
+        Some("Track 3")
+    );
+    assert_eq!(
+        track_caption(None, Some(9), p, &Labels::default()).as_deref(),
         Some("3 of 12 in folder")
     );
-    assert_eq!(track_caption(None, None, None), None);
+    assert_eq!(track_caption(None, None, None, &Labels::default()), None);
     assert_eq!(stem("01 Low Tide.flac"), "01 Low Tide");
     assert_eq!(stem(".hidden"), ".hidden");
 }
@@ -311,7 +314,10 @@ fn badges_follow_stratas_rules() {
         subtitle_tracks: 1,
         sidecar_captions: 0,
     };
-    let labels: Vec<String> = badges(&d).into_iter().map(|b| b.label).collect();
+    let labels: Vec<String> = badges(&d, &Labels::default())
+        .into_iter()
+        .map(|b| b.label)
+        .collect();
     assert_eq!(
         labels,
         [
@@ -325,12 +331,12 @@ fn badges_follow_stratas_rules() {
         sidecar_captions: 1,
         ..VideoDetails::default()
     };
-    let b = badges(&more);
+    let b = badges(&more, &Labels::default());
     assert_eq!(b[0].label, "8K");
     assert_eq!(b[1].kind, BadgeKind::Audio);
     assert_eq!(b[1].label, "3 ch");
     assert_eq!(b[2].label, "CC ×3");
-    assert!(badges(&VideoDetails::default()).is_empty());
+    assert!(badges(&VideoDetails::default(), &Labels::default()).is_empty());
 }
 
 // Storyboard.
@@ -609,4 +615,195 @@ fn an_error_turns_play_off() {
     }));
     st.toggle();
     assert!(st.drain_intents().is_empty());
+}
+
+// A host with no `on_intent`, polling in the documented order: advance, tick, drain.
+
+mod host {
+    use std::time::Duration;
+
+    use rune::{Cx, El, Env, Runtime, Tx};
+    use strata_kit::look::Look;
+
+    use super::super::*;
+
+    pub(super) struct Host {
+        pub(super) media: MediaState,
+        pub(super) clock: FakeClock,
+        pub(super) look: Look,
+    }
+
+    fn view(h: &Host, cx: &mut Cx<Host>) -> El {
+        MediaPlayer::new(
+            &h.media,
+            |h: &mut Host| &mut h.media,
+            |h: &mut Host| &mut h.media.viewport,
+        )
+        .build(&h.look, cx)
+    }
+
+    fn poll(h: &mut Host, t: f64, tx: &mut Tx) -> bool {
+        h.clock.advance(t);
+        let changed = h.media.tick(&h.clock, t, tx);
+        for i in h.media.drain_intents() {
+            h.clock.apply(&i);
+        }
+        changed
+    }
+
+    pub(super) const DT: f64 = 1.0 / 60.0;
+
+    /// A paused 100 s plain clip at 40 s, laid out.
+    pub(super) fn mount() -> Runtime<Host> {
+        let mut media = MediaState::new(Clip {
+            kind: MediaKind::Plain,
+            name: "waves.gif".into(),
+            position: None,
+            has_previous: false,
+            has_next: false,
+        });
+        media.set_volume(0.6, false);
+        let mut clock = FakeClock::new(Some(Duration::from_secs(100)));
+        clock.set_position(Duration::from_secs(40));
+        let host = Host {
+            media,
+            clock,
+            look: Look::fallback(false),
+        };
+        let mut rt = Runtime::new(host, view, (640.0, 480.0), Env::new(false, 1.0));
+        rt.poll = Some(poll);
+        for _ in 0..10 {
+            rt.frame(DT);
+        }
+        rt
+    }
+
+    pub(super) fn rect(rt: &Runtime<Host>, key: &str) -> [f32; 4] {
+        rt.elements()
+            .into_iter()
+            .find(|e| e.key.as_deref() == Some(key))
+            .unwrap_or_else(|| panic!("no {key}"))
+            .rect
+    }
+}
+
+/// Review 1, SF1: after a click on the timeline, no frame shows the old position while the
+/// intent waits for the host's drain.
+#[test]
+fn a_seek_never_shows_the_old_position_while_the_host_drains_after_the_tick() {
+    let mut rt = host::mount();
+    let r = host::rect(&rt, "media-timeline");
+    let (x, y) = (r[0] + r[2] * 0.75, r[1] + r[3] / 2.0);
+    rt.pointer_move(x, y);
+    rt.pointer_down(x, y);
+    rt.frame(host::DT);
+    rt.pointer_up(x, y);
+    for frame in 0..6 {
+        rt.frame(host::DT);
+        let p = rt.state.media.position();
+        assert!(p >= secs(74), "frame {frame} after the click shows {p:?}");
+    }
+    assert_eq!(rt.state.clock.position(), secs(75));
+}
+
+/// Review 1, SF2: a click on the timeline with no callback asks for the wake that brings the
+/// host's poll, so its seek is applied in a resting window.
+#[test]
+fn a_timeline_click_without_a_callback_asks_for_a_wake() {
+    let mut rt = host::mount();
+    for _ in 0..30 {
+        rt.frame(host::DT);
+    }
+    assert_eq!(rt.wake_deadline(), None, "at rest");
+    let r = host::rect(&rt, "media-timeline");
+    let (x, y) = (r[0] + r[2] * 0.25, r[1] + r[3] / 2.0);
+    rt.pointer_move(x, y);
+    rt.pointer_down(x, y);
+    rt.frame(host::DT);
+    rt.pointer_up(x, y);
+    rt.frame(host::DT);
+    assert!(
+        rt.wake_deadline().is_some(),
+        "the release asks for the poll"
+    );
+}
+
+/// Review 1, nit: the volume slider's range value is the volume as a clean decimal (0.6, not
+/// 0.6000000238 from the f32).
+#[test]
+fn the_volume_range_value_is_a_clean_decimal() {
+    let rt = host::mount();
+    let tree = rt.accessibility_tree();
+    let value = tree
+        .nodes
+        .iter()
+        .find(|(_, n)| n.author_id() == Some("media-volume"))
+        .and_then(|(_, n)| n.numeric_value());
+    assert_eq!(value, Some(0.6));
+}
+
+/// Review 1, nit: a cancelled volume drag puts the volume back.
+#[test]
+fn a_cancelled_volume_drag_restores_the_volume() {
+    let mut rt = host::mount();
+    let r = host::rect(&rt, "media-volume");
+    let y = r[1] + r[3] / 2.0;
+    rt.pointer_move(r[0] + r[2] * 0.5, y);
+    rt.pointer_down(r[0] + r[2] * 0.5, y);
+    rt.frame(host::DT);
+    for i in 1..=5 {
+        rt.pointer_move(r[0] + r[2] * (0.5 - 0.08 * i as f32), y);
+        rt.frame(host::DT);
+    }
+    assert!(rt.state.media.volume() < 0.2, "{}", rt.state.media.volume());
+    rt.window_focus(false);
+    rt.frame(host::DT);
+    rt.frame(host::DT);
+    assert!(!rt.state.media.muted());
+    assert!(
+        (rt.state.media.volume() - 0.6).abs() < 1e-6,
+        "{}",
+        rt.state.media.volume()
+    );
+}
+
+/// Review 1, nit: the badges' and caption's words come from `Labels`, so a host translates
+/// them.
+#[test]
+fn badge_and_caption_words_come_from_the_labels() {
+    let fr = Labels {
+        fps: "{rate} i/s".into(),
+        mono: "Mono FR".into(),
+        stereo: "Stéréo".into(),
+        channels: "{channels} canaux".into(),
+        captions: "ST".into(),
+        captions_many: "ST ×{count}".into(),
+        track_of: "Piste {track} / {total}".into(),
+        track: "Piste {track}".into(),
+        ..Labels::default()
+    };
+    let d = VideoDetails {
+        frame_rate: Some(25.0),
+        audio_codec: Some("aac".into()),
+        channels: Some(2),
+        subtitle_tracks: 2,
+        ..VideoDetails::default()
+    };
+    let words: Vec<String> = badges(&d, &fr).into_iter().map(|b| b.label).collect();
+    assert_eq!(words, ["25 i/s", "AAC Stéréo", "ST ×2"]);
+    let one = VideoDetails {
+        channels: Some(3),
+        subtitle_tracks: 1,
+        ..VideoDetails::default()
+    };
+    let words: Vec<String> = badges(&one, &fr).into_iter().map(|b| b.label).collect();
+    assert_eq!(words, ["3 canaux", "ST"]);
+    assert_eq!(
+        track_caption(Some(3), Some(12), None, &fr).as_deref(),
+        Some("Piste 3 / 12")
+    );
+    assert_eq!(
+        track_caption(Some(3), None, None, &fr).as_deref(),
+        Some("Piste 3")
+    );
 }

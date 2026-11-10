@@ -281,14 +281,16 @@ pub(crate) struct Config<S> {
     header: Option<PartFn<S>>,
     overlay: Option<PartFn<S>>,
     empty: Option<PartFn<S>>,
-    edge: Option<PartFn<S>>,
+    /// Every part [`Collection::edge`] added, in order.
+    edge: Vec<PartFn<S>>,
     on_intent: Option<IntentFn<S>>,
     on_press: Option<PressFn<S>>,
     on_cursor: Option<CursorFn<S>>,
     on_selection: Option<SelectionFn<S>>,
     on_visible: Option<VisibleFn<S>>,
     announce: Option<AnnounceFn<S>>,
-    on_scroll: Option<ScrollFn>,
+    /// Every handler [`Collection::on_scroll`] added, in order.
+    on_scroll: Vec<ScrollFn>,
     keys_by_host: bool,
     on_drag_over: Option<DragOverFn<S>>,
     on_drag_phase: Option<DragPhaseFn<S>>,
@@ -365,14 +367,14 @@ impl<S: 'static> Collection<S> {
                 header: None,
                 overlay: None,
                 empty: None,
-                edge: None,
+                edge: Vec::new(),
                 on_intent: None,
                 on_press: None,
                 on_cursor: None,
                 on_selection: None,
                 on_visible: None,
                 announce: None,
-                on_scroll: None,
+                on_scroll: Vec::new(),
                 keys_by_host: false,
                 on_drag_over: None,
                 on_drag_phase: None,
@@ -558,17 +560,29 @@ impl<S: 'static> Collection<S> {
     /// (`scroll::anchor`), so only its own parts cover the rows. Drawn above the overlay. A press on an element of
     /// it with a press or drag handler is that element's, not the collection's (Rune gives a
     /// press to its innermost handler); elsewhere presses reach the rows.
+    ///
+    /// Each call adds a part (a view's bar, then a host's), drawn in the order added; none
+    /// replaces another.
     pub fn edge(mut self, f: impl Fn(&S) -> Option<El> + 'static) -> Self {
-        self.cfg.edge = Some(Rc::new(f));
+        self.cfg.edge.push(Rc::new(f));
         self
     }
 
     /// Hears the viewport's scroll position on every frame it changes (Rune's
     /// `El::on_scroll_offset`), with no view commit: C24's scroll bar and autoscroll follow it
     /// through live values. It reads no state.
+    ///
+    /// Each call adds a handler, heard in the order added: a view that follows its own scroll
+    /// (C3's and C4's bars) never drops a host's, nor the host's the view's.
     pub fn on_scroll(mut self, f: impl Fn(ScrollPos) + 'static) -> Self {
-        self.cfg.on_scroll = Some(Rc::new(f));
+        self.cfg.on_scroll.push(Rc::new(f));
         self
+    }
+
+    /// The collection's key, the scope of its key paths ([`viewport_path`] of it is its
+    /// viewport's).
+    pub fn scope(&self) -> &str {
+        &self.cfg.key
     }
 
     /// Keys reach this collection from the host, not from Rune's focus: the collection is no
@@ -866,7 +880,7 @@ impl<S: 'static> Collection<S> {
                 if let Some(stuck) = &stuck {
                     stuck.follow(p.offset[1]);
                 }
-                if let Some(f) = &on_scroll {
+                for f in on_scroll.iter() {
                     f(p);
                 }
             })
@@ -991,7 +1005,7 @@ impl<S: 'static> Collection<S> {
         if let Some(overlay) = cfg.overlay.as_ref().and_then(|f| f(s)) {
             over = over.child(pinned(overlay).inert());
         }
-        if let Some(edge) = cfg.edge.as_ref().and_then(|f| f(s)) {
+        for edge in cfg.edge.iter().filter_map(|f| f(s)) {
             // Hung from the viewport's top-left, not pinned over all of it: a layer the
             // viewport's size would be what a system drag's hit test (P1's) finds over the rows.
             over = over.child(crate::scroll::anchor(0.0, 0.0, edge));

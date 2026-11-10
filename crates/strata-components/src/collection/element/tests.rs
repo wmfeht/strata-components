@@ -73,7 +73,13 @@ struct Host {
     t: f64,
     /// Entries marked vanished (`RowMarks::vanished`).
     vanished: Vec<EntryId>,
+    /// With it, two `on_scroll` handlers and two `edge` parts, each logging its name and the
+    /// offset heard.
+    followers: Option<FollowerLog>,
 }
+
+/// What each `on_scroll` follower heard: its name and the offset.
+type FollowerLog = Rc<RefCell<Vec<(&'static str, f32)>>>;
 
 impl Host {
     fn new(n: usize) -> Self {
@@ -107,6 +113,7 @@ impl Host {
             views: Vec::new(),
             t: 0.0,
             vanished: Vec::new(),
+            followers: None,
         }
     }
 }
@@ -279,6 +286,14 @@ fn collection(s: &Host) -> Collection<Host> {
             ..RowMarks::default()
         });
     }
+    if let Some(log) = &s.followers {
+        for name in ["first", "second"] {
+            let log = log.clone();
+            c = c
+                .on_scroll(move |p| log.borrow_mut().push((name, p.offset[1])))
+                .edge(move |_: &Host| Some(rune::el().key(format!("edge-{name}")).size(4.0, 4.0)));
+        }
+    }
     c.settings(7u32)
 }
 
@@ -384,6 +399,27 @@ fn a_press_selects_only_that_entry_and_a_press_on_empty_space_clears() {
         "clearing keeps the cursor"
     );
     assert_eq!(s.selections, 3);
+}
+
+#[test]
+fn every_scroll_handler_and_edge_part_added_is_kept() {
+    // A view's own bar (C3, C4) and a host's follower both set these: neither may drop the other.
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let mut rt = runtime(Host {
+        followers: Some(log.clone()),
+        ..Host::new(1_000)
+    });
+    assert!(element(&rt, "edge-first").is_some() && element(&rt, "edge-second").is_some());
+    log.borrow_mut().clear();
+    rt.wheel(W / 2.0, H / 2.0, -120.0);
+    rt.frame(1.0 / 60.0);
+    let heard = log.borrow().clone();
+    let at = rt.state.coll.scroll_offset();
+    assert!(at > 0.0);
+    assert!(
+        heard.contains(&("first", at)) && heard.contains(&("second", at)),
+        "{heard:?}"
+    );
 }
 
 #[test]

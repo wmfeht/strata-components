@@ -38,10 +38,16 @@
 //! override reaches it. [`syntect_theme`] builds C10a's syntect theme from both (K1b), and
 //! [`editor`] gives the colours around the code.
 //!
-//! Known gaps, where one selector can't follow Strata in every grammar: Rust's `const` and
-//! `Self` (`storage.type.rust`, which also holds the primitive types) draw as types, C's
-//! number suffixes (`storage.type.numeric` inside a number) as types, and TypeScript's
-//! declaration keywords aren't mapped as JavaScript's are.
+//! Known gaps, where these selectors don't follow Strata:
+//!
+//! - Rust's `let`, `const` and `Self` draw as types: the grammar scopes them
+//!   `storage.type.rust`, as it does the primitive types, so no selector tells them apart.
+//! - C's number suffixes (`storage.type.numeric` inside a number) draw as types.
+//! - TypeScript's declaration keywords aren't mapped as JavaScript's are.
+//! - A variable or command substitution inside a shell string (`"$dir"`) draws as the
+//!   string; sh.lang draws it as an identifier, in the text colour. Following it would need
+//!   text-role rows that override an enclosing string.
+//! - A Markdown fence's language name (`constant.other.language-name`) draws as a constant.
 
 use std::str::FromStr;
 

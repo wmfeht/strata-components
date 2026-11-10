@@ -70,7 +70,6 @@ mod c23 {
             .expect("row 4's icon")
             .rect;
         ask(&mut rt, 3, Op::Trash);
-        rt.frame(FRAME);
         let id = rt.state.c23.owed.as_ref().expect("a flight plays").0;
         let launch = rect(&rt, &launch_key(id, 0));
         assert!(

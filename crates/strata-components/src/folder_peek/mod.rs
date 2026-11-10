@@ -51,9 +51,10 @@
 //!   the collection's own holds by itself.)
 //! - Call `CollectionState::hold_rest` on each peeking collection when the preference turns
 //!   peeking on or off, so a rest under way then never opens a peek.
-//! - Wrap the sideways scroll around the collection (what C4's `ListTable::build` returns)
-//!   in [`FolderPeek::sideways`]: a sideways scroll closes the peek, and its card is never drawn
-//!   moved.
+//! - Follow C4's sideways scroll with [`FolderPeek::follow_sideways`], through
+//!   `ListTable::follow_sideways`: a sideways scroll closes the peek, and its card is never
+//!   drawn moved. The table keeps the scroll's one handler and calls every follower from it,
+//!   after its own scroll bars, so neither drops the other.
 //! - Call [`PeekState::set_covered`] while an overlay covers the collections and back when it
 //!   goes: a context menu (C21), a popover (`rune_kit::Popover`), a dialog (C15), the search
 //!   palette (C17), anything over the rows with or without a scrim. Rune counts the rows under
@@ -125,7 +126,7 @@
 //! 10. A quick out and back (under the 80 ms leave delay) is no leave to Rune, so it doesn't
 //!     restart a folder's wait; Strata's motion enter would.
 //! 11. A sideways scroll of the list closes the peek (owner ruling): the card is hidden in the
-//!     frame the scroll moves the folder's row ([`FolderPeek::sideways`]), and the peek closes
+//!     frame the scroll moves the folder's row ([`FolderPeek::follow_sideways`]), and the peek closes
 //!     on the next. Strata's card stays where it opened, in its overlay.
 //!
 //! # Rune drafts (not filed)
@@ -423,23 +424,26 @@ impl<S: 'static> FolderPeek<S> {
         }
     }
 
-    /// Follows the sideways scroll `scroll` around the collection (the element C4's
-    /// `ListTable::build` returns): from the frame a sideways scroll moves the peeked folder,
+    /// A follower of the sideways scroll around the collection, for C4's
+    /// `ListTable::follow_sideways`: from the frame a sideways scroll moves the peeked folder,
     /// its card is hidden, and the peek closes on the next frame (owner ruling; Strata's card
     /// stays where it opened, in its overlay). Without it a sideways scroll still closes the
-    /// peek, a frame late, with the card drawn moved in that frame. It sets the scroll's
-    /// `on_scroll_offset`.
-    pub fn sideways(&self, s: &S, scroll: El) -> El {
+    /// peek, a frame late, with the card drawn moved in that frame.
+    ///
+    /// ```ignore
+    /// ListTable::new(/* … */).follow_sideways(|p: &Pane| peek().follow_sideways(p))
+    /// ```
+    pub fn follow_sideways(&self, s: &S) -> impl Fn(rune::ScrollPos) + use<S> {
         let st = (self.sh.get)(s);
         let lives = st.lives.clone();
         let at = st.sideways_at();
-        scroll.on_scroll_offset(move |p: rune::ScrollPos| {
+        move |p: rune::ScrollPos| {
             let x = p.offset[0];
             lives.sideways.set(x);
             if at.is_some_and(|at| (x - at).abs() > 0.5) {
                 lives.shown.set(0.0);
             }
-        })
+        }
     }
 
     /// The part of the window the collection shows itself in, in window points, when that is

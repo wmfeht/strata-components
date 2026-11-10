@@ -70,7 +70,7 @@ pub(super) fn rows<S: 'static>(sh: &Rc<Shared<S>>, base: Collection<S>) -> Colle
                         .pin(Some(dx), Some(0.0), None, Some(0.0))
                         .w(0.0)
                         // A row carried sideways (C4's sideways scroll) closes the peek, a frame
-                        // after; [`FolderPeek::sideways`] hides the card in the frame itself.
+                        // after; [`FolderPeek::follow_sideways`] hides the card in the frame itself.
                         .on_drawn_layout_tx(move |s: &mut S, r, tx| {
                             let change = (drawn.get_mut)(s).anchor_drawn(r[0]);
                             drawn.changed(s, change, tx);

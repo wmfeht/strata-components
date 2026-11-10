@@ -712,7 +712,9 @@ pub fn view(g: &Gallery, cx: &mut Cx<Gallery>) -> El {
         .child(drag_source(g));
     let body = match d.mode {
         // The peek follows the table's sideways scroll: moving it closes the peek.
-        Mode::List => peek().sideways(g, table().build(g, peek().rows(list_base()), &mut layer)),
+        Mode::List => table()
+            .follow_sideways(|g: &Gallery| peek().follow_sideways(g))
+            .build(g, peek().rows(list_base()), &mut layer),
         Mode::Icons => grid().build(g),
         Mode::Columns => columns_view().build(g),
     };

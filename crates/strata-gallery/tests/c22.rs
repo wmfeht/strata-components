@@ -498,6 +498,48 @@ mod c22 {
             }
         }
 
+        // C24b: C4 keeps its sideways scroll's one `on_scroll_offset` (Rune's replaces) and
+        // calls the peek's follower from it after its own bars, so neither drops the other: in
+        // the frame a sideways scroll moves the peeked folder, the card is hidden (the peek's
+        // follower) and the table's sideways bar shows (C4's own).
+        #[test]
+        fn one_sideways_frame_hides_the_card_and_shows_the_tables_sideways_bar() {
+            let mut rt = mount_with("c22-list-light", |g| {
+                g.c22.pane = Some(400.0);
+                g.c22.scroll_x = Some(300.0);
+            });
+            for _ in 0..90 {
+                rt.frame(FRAME);
+            }
+            point(&mut rt, &item(2));
+            wake_until(&mut rt, 1.0, |g| open(g).is_some());
+            rt.frame(FRAME);
+            let shown =
+                |rt: &Runtime<Gallery>, key: &str| element(rt, key).map_or(0.0, |e| e.opacity);
+            let thumb = format!("{LIST}-sideways-bar/trough/thumb");
+            let thumb_x = |rt: &Runtime<Gallery>| {
+                rt.elements()
+                    .into_iter()
+                    .find(|e| !e.exiting && e.path.ends_with(&thumb))
+                    .expect("the sideways bar's thumb")
+                    .rect[0]
+            };
+            assert!(shown(&rt, &card_key(LIST)) > 0.5, "the card is up");
+            let before = thumb_x(&rt);
+            let (x, y) = centre(&rt, &item(2));
+            rt.wheel_xy(x.min(150.0), y, 40.0, 0.0);
+            rt.frame(FRAME);
+            assert_eq!(
+                shown(&rt, &card_key(LIST)),
+                0.0,
+                "the card hid in that frame"
+            );
+            assert!(
+                thumb_x(&rt) < before,
+                "the table's sideways bar followed in it"
+            );
+        }
+
         // B1. preview/quick-preview/folder-peek: "A viewport narrower than 256 px opens no peek."
         #[test]
         fn a_pane_narrower_than_the_card_peeks_nothing() {

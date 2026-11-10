@@ -230,3 +230,30 @@ fn moves_the_hook_takes_start_nothing() {
     step(&mut rt);
     assert_eq!(rt.state.began, 0, "{:?}", rt.state.intents);
 }
+
+/// With the host's action, a folder row stops a drop it refuses (its own folder, here) instead
+/// of passing it to the background around it, which would take it into the folder shown; a
+/// refused row draws no drop highlight. The background, refusing, still passes it on.
+#[test]
+fn a_folder_row_the_action_refuses_stops_the_drop() {
+    let mut rt = runtime();
+    let refused = zone("row-0");
+    assert!(refused.rejects(), "row 0 passes a refused drop on");
+    assert!(!zone(SCOPE).rejects());
+    let files = DropOffer::new(vec![URI_LIST.into()], DropActions::MOVE);
+    rt.update(|s, tx| {
+        refused.hover(s, crate::contract::DropHover::Rejecting, &files, tx);
+    });
+    step(&mut rt);
+    assert_eq!(
+        rt.state.coll.drop_over(),
+        None,
+        "no highlight on a refused row"
+    );
+    rt.update(|s, tx| {
+        refused.hover(s, crate::contract::DropHover::Accepting, &files, tx);
+        refused.reject(s, files.clone(), tx);
+    });
+    step(&mut rt);
+    assert_eq!(rt.state.coll.drop_over(), None, "a refused drop clears it");
+}

@@ -9,24 +9,17 @@ use strata_kit::look::Look;
 /// How long a flash shows (Strata's 2 s).
 pub const FLASH_FOR: f64 = 2.0;
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum Since {
-    /// Shown; the next tick stamps the time (a key handler has no clock: Rune draft U-C1e-6).
-    Pending,
-    At(f64),
-}
-
 /// The footer's flash, held by the host. A new flash replaces the one showing and starts its
 /// 2 s again.
 ///
-/// The host calls [`Flash::tick`] from its poll each frame. It asks for a wake when the flash
-/// is due to go, so the flash goes in a window at rest too, which polls only at the wakes it
-/// asked for.
+/// [`Flash::show`] asks for a wake when the flash is due to go, so it goes in a window at rest
+/// too, and the host's poll calls [`Flash::tick`] to end it.
 ///
 /// Used by: hosts, C19 (which places it).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Flash {
-    shown: Option<(String, Since)>,
+    /// The words and when they showed, on `Tx::clock`.
+    shown: Option<(String, f64)>,
 }
 
 impl Flash {
@@ -40,14 +33,13 @@ impl Flash {
         self.shown.as_ref().map(|(t, _)| t.as_str())
     }
 
-    /// Shows `words` for [`FLASH_FOR`] from the next tick, and asks for a wake on `tx` so that
-    /// tick comes in a window at rest too: a key handler has no clock, and without a wake no
-    /// poll would follow it to stamp the time. Empty words clear it.
+    /// Shows `words` for [`FLASH_FOR`] from now, and asks for a wake on `tx` when they're due
+    /// to go. Empty words clear it.
     pub fn show(&mut self, words: impl Into<String>, tx: &mut Tx) {
         let words = words.into();
-        self.shown = (!words.is_empty()).then_some((words, Since::Pending));
+        self.shown = (!words.is_empty()).then_some((words, tx.clock()));
         if self.shown.is_some() {
-            tx.wake_after(Duration::ZERO);
+            tx.wake_at(tx.clock() + FLASH_FOR);
         }
     }
 
@@ -56,8 +48,8 @@ impl Flash {
         self.shown = None;
     }
 
-    /// One frame at `now` seconds on the host's clock: stamps a new flash and asks for a wake
-    /// when it is due, asks again for the time left, and ends it once due. True when it ended.
+    /// One frame at `now` seconds on the window's clock: asks again for the time left, and ends
+    /// the flash once due. True when it ended.
     pub fn tick(&mut self, now: f64, tx: &mut Tx) -> bool {
         match self.left(now) {
             Some(left) if left <= 1e-6 => {
@@ -72,16 +64,9 @@ impl Flash {
         }
     }
 
-    /// The seconds left at `now`, stamping a new flash: `None` with nothing showing.
-    fn left(&mut self, now: f64) -> Option<f64> {
-        let (_, since) = self.shown.as_mut()?;
-        let at = match *since {
-            Since::Pending => {
-                *since = Since::At(now);
-                now
-            }
-            Since::At(t) => t,
-        };
+    /// The seconds left at `now`: `None` with nothing showing.
+    fn left(&self, now: f64) -> Option<f64> {
+        let (_, at) = self.shown.as_ref()?;
         Some(FLASH_FOR - (now - at))
     }
 }

@@ -308,10 +308,10 @@
 //!   `--tree` on a view holding `Keybind::new(&["g"]).build(&kit)` shows a text "G". A fix: an
 //!   opt-out (`.keep_case()`), or upper-case only when the key is named as a letter key rather
 //!   than a typed character. Searched upstream issues ("keybind", "uppercase", "keycap"): none.
-//! - Reused: U-C21-2 (rune-kit's text inputs take no secondary press), #106 and U-C6-3 (no focus-change hook), U-C1e-6 (no
-//!   clock in `Tx`: the host's `tick`), U-C6-1 (an input is always a text box: the combobox
-//!   group), U-C6-4 (`PopupItem` has no rich label), U-C6-7 (scripts have no input-method
-//!   event: tests use `Runtime::ime`).
+//! - Reused: U-C21-2 (rune-kit's text inputs take no secondary press), #106 and U-C6-3 (no
+//!   focus-change hook), U-C6-1 (an input is always a text box: the combobox group), U-C6-4
+//!   (`PopupItem` has no rich label), U-C6-7 (scripts have no input-method event: tests use
+//!   `Runtime::ime`).
 
 pub mod chord;
 pub(crate) mod field;

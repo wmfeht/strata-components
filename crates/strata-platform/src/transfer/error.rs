@@ -46,7 +46,7 @@ pub enum Error {
     /// The connection failed.
     Connection(String),
     /// A call failed and the connection lives on: the compositor stopped reading for a
-    /// while, say.
+    /// while, or sent an event this client couldn't parse.
     Busy(String),
 }
 

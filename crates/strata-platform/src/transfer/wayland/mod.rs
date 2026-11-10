@@ -811,8 +811,8 @@ impl Conn {
     ///
     /// Only libwayland's own error ([`Failure::Dead`]) marks the connection dead. A full
     /// socket buffer is waited out ([`BUSY_TRIES`] times, [`BUSY_WAIT`] each), then reported
-    /// as [`Error::Busy`] with the connection alive, as is any other error libwayland didn't
-    /// keep.
+    /// as [`Error::Busy`] with the connection alive. So is an event this client couldn't parse
+    /// ([`Failure::Other`]), named as such.
     ///
     /// The reader thread may hold a read intent meanwhile: libwayland's read protocol lets two
     /// threads prepare and read at once, and the reader never waits on the UI thread while it
@@ -859,7 +859,11 @@ impl Conn {
                             "the compositor isn't reading: the socket stayed full".into(),
                         ));
                     }
-                    Some(Failure::Other(message)) => break Err(Error::Busy(message)),
+                    Some(Failure::Other(message)) => {
+                        break Err(Error::Busy(format!(
+                            "an event from the compositor didn't parse: {message}"
+                        )));
+                    }
                     Some(Failure::Dead(message)) => break Ok(Some(message)),
                     None => break Ok(None),
                 }
@@ -885,16 +889,19 @@ impl Conn {
 enum Failure {
     /// libwayland has an error: the connection is dead, for good.
     Dead(String),
-    /// The socket's buffer was full (`EAGAIN` on the flush) or a call was interrupted: wait
-    /// for the socket and try again.
+    /// The socket's buffer was full (`EAGAIN` on the flush): wait for the socket and try
+    /// again.
     Busy,
-    /// Anything else: this round trip failed, and the connection lives on.
+    /// Anything else libwayland didn't keep, in practice `DispatchError::BadMessage` (an event
+    /// wayland-client couldn't parse): this round trip failed, and the connection lives on.
     Other(String),
 }
 
-/// `last_error` is the backend's: wayland-backend keeps an error there only once libwayland
-/// has one, and never for `EAGAIN` from `wl_display_flush`, which `blocking_dispatch` passes
-/// on as it is.
+/// `last_error` is the backend's: wayland-backend (0.3.17) keeps every I/O error of
+/// `wl_display_flush` and `wl_display_read_events` there except `EAGAIN`, which
+/// `blocking_dispatch` passes on as it is. `EINTR` included: libwayland counts it fatal in
+/// both, and wayland-client's `blocking_read` retries it in its own poll. So an I/O error
+/// with no last error is `EAGAIN` from the flush.
 #[cfg(feature = "foreign-parent")]
 fn classify(e: &wayland_client::DispatchError, last_error: Option<String>) -> Failure {
     use std::io::ErrorKind;
@@ -905,9 +912,7 @@ fn classify(e: &wayland_client::DispatchError, last_error: Option<String>) -> Fa
         return Failure::Dead(message);
     }
     match e {
-        DispatchError::Backend(WaylandError::Io(io))
-            if matches!(io.kind(), ErrorKind::WouldBlock | ErrorKind::Interrupted) =>
-        {
+        DispatchError::Backend(WaylandError::Io(io)) if io.kind() == ErrorKind::WouldBlock => {
             Failure::Busy
         }
         e => Failure::Other(e.to_string()),

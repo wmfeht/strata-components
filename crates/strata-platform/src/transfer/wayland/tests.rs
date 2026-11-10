@@ -40,8 +40,8 @@ fn a_dead_connection_forgets_drags_and_dropped_offers() {
     assert!(st.selections.is_empty());
 }
 
-/// Review 1 of P4, should-fix 1: a full socket buffer (`EAGAIN` on the flush) or an
-/// interrupted call leaves the connection alive, and only libwayland's own error kills it.
+/// Review 1 of P4, should-fix 1: a full socket buffer (`EAGAIN` on the flush) leaves the
+/// connection alive, and only libwayland's own error kills it.
 #[cfg(feature = "foreign-parent")]
 #[test]
 fn only_libwaylands_own_error_counts_a_round_trip_failure_as_death() {
@@ -52,7 +52,6 @@ fn only_libwaylands_own_error_counts_a_round_trip_failure_as_death() {
 
     let io = |k: ErrorKind| DispatchError::Backend(WaylandError::Io(IoError::from(k)));
     assert_eq!(classify(&io(ErrorKind::WouldBlock), None), Failure::Busy);
-    assert_eq!(classify(&io(ErrorKind::Interrupted), None), Failure::Busy);
     assert!(matches!(
         classify(&io(ErrorKind::InvalidData), None),
         Failure::Other(_)

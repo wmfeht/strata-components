@@ -71,6 +71,8 @@ struct Host {
     views: Vec<RestView>,
     /// The runtime's clock, from its poll ([`rest_runtime`]).
     t: f64,
+    /// Entries marked vanished (`RowMarks::vanished`).
+    vanished: Vec<EntryId>,
 }
 
 impl Host {
@@ -104,6 +106,7 @@ impl Host {
             rests: Vec::new(),
             views: Vec::new(),
             t: 0.0,
+            vanished: Vec::new(),
         }
     }
 }
@@ -270,6 +273,12 @@ fn collection(s: &Host) -> Collection<Host> {
             ),
         );
     }
+    if !s.vanished.is_empty() {
+        c = c.marks(|s: &Host, id| RowMarks {
+            vanished: s.vanished.contains(&id),
+            ..RowMarks::default()
+        });
+    }
     c.settings(7u32)
 }
 
@@ -395,6 +404,69 @@ fn a_press_after_scrolling_hits_the_row_under_the_pointer() {
     click(&mut rt, &key);
     let cursor = rt.state.coll.selection.cursor().unwrap();
     assert_eq!(row_key(cursor), key);
+}
+
+#[test]
+fn a_vanished_row_keeps_its_slot_but_draws_and_announces_nothing_and_takes_no_press() {
+    let mut rt = runtime(Host::new(5));
+    let before = element(&rt, "row-3").unwrap().visible;
+    rt.state.vanished = vec![id(2)];
+    rt.invalidate();
+    rt.frame(1.0 / 60.0);
+    settle(&mut rt);
+    let slot = element(&rt, "row-2").expect("the slot stays, keyed");
+    assert!(slot.visible[3] > 0.0, "it keeps its height");
+    assert_eq!(
+        element(&rt, "row-3").unwrap().visible,
+        before,
+        "the rows after it stay put"
+    );
+    assert!(a11y_node(&rt, "row-2").is_none(), "it leaves the tree");
+    assert!(a11y_node(&rt, "row-3").is_some());
+    click(&mut rt, "row-1");
+    click(&mut rt, "row-2");
+    let s = &rt.state;
+    assert!(
+        s.coll.selection.is_empty(),
+        "a press on it is on empty space, which clears"
+    );
+    assert_eq!(s.coll.selection.cursor(), Some(id(1)));
+}
+
+#[test]
+fn a_vanished_cursor_row_is_not_the_active_descendant() {
+    // AccessKit's own update: the JSON dump leaves out a reference it can't resolve.
+    let dangling = |rt: &Runtime<Host>| {
+        let tree = rt.accessibility_tree();
+        let present = |a| tree.nodes.iter().any(|(id, _)| *id == a);
+        tree.nodes
+            .iter()
+            .filter_map(|(_, n)| n.active_descendant())
+            .filter(|&a| !present(a))
+            .count()
+    };
+    let mut rt = runtime(Host::new(5));
+    click(&mut rt, "row-2");
+    let tree = rt.accessibility_json().to_string();
+    assert!(tree.contains(r#""activeDescendant":"row-2""#), "{tree}");
+    rt.state.vanished = vec![id(2)];
+    rt.invalidate();
+    rt.frame(1.0 / 60.0);
+    settle(&mut rt);
+    assert_eq!(
+        dangling(&rt),
+        0,
+        "nothing points at the cursor's row once it leaves the tree"
+    );
+    rt.state.vanished.clear();
+    rt.invalidate();
+    rt.frame(1.0 / 60.0);
+    settle(&mut rt);
+    let tree = rt.accessibility_json().to_string();
+    assert!(
+        tree.contains(r#""activeDescendant":"row-2""#),
+        "it is back once the row shows: {tree}"
+    );
 }
 
 // Controllers.

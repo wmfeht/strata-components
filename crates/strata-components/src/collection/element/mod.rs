@@ -547,8 +547,9 @@ impl<S: 'static> Collection<S> {
         self
     }
 
-    /// A part over the viewport, pinned to it below any header, in its coordinates, that takes
-    /// input: C24's scroll bar along its edge. Drawn above the overlay. A press on an element of
+    /// A part over the viewport, below any header, in its coordinates, that takes input: C24's
+    /// scroll bar along its edge. It hangs from a zero-size anchor at the viewport's top-left
+    /// (`scroll::anchor`), so only its own parts cover the rows. Drawn above the overlay. A press on an element of
     /// it with a press or drag handler is that element's, not the collection's (Rune gives a
     /// press to its innermost handler); elsewhere presses reach the rows.
     pub fn edge(mut self, f: impl Fn(&S) -> Option<El> + 'static) -> Self {
@@ -973,7 +974,9 @@ impl<S: 'static> Collection<S> {
             over = over.child(pinned(overlay).inert());
         }
         if let Some(edge) = cfg.edge.as_ref().and_then(|f| f(s)) {
-            over = over.child(pinned(edge));
+            // Hung from the viewport's top-left, not pinned over all of it: a layer the
+            // viewport's size would be what a system drag's hit test (P1's) finds over the rows.
+            over = over.child(crate::scroll::anchor(0.0, 0.0, edge));
         }
         root = root.child(over);
         let announcement = st.announcement();

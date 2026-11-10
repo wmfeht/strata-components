@@ -1,6 +1,4 @@
-use rune::text::TextSystem;
 use rune::{Cx, El, Env, Runtime, col, row};
-use strata_kit::fonts;
 use strata_kit::look::Look;
 use strata_kit::shape::LookParams;
 
@@ -193,14 +191,10 @@ fn a_content_sized_menu_reserves_the_snap_labels_width() {
         slider: SliderState::new(0.0, frame()),
         look,
     };
-    let text = TextSystem::new(fonts::FONTS, fonts::FAMILIES);
-    let mut rt = Runtime::with_text(
-        host,
-        shrink_wrapped,
-        (900.0, 400.0),
-        Env::new(false, 1.0),
-        text,
-    );
+    // Rune's own font: a text system built here would move the fonts the crate's other tests
+    // measure with (docs/testing.md, R-K6-1).
+    // The label's width comes from the same shared measure, so the claim holds in any font.
+    let mut rt = Runtime::new(host, shrink_wrapped, (900.0, 400.0), Env::new(false, 1.0));
     rt.frame(0.0);
     for _ in 0..5 {
         rt.frame(1.0 / 60.0);

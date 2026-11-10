@@ -52,6 +52,8 @@ pub struct TabbedFormState {
     /// Counts page changes: a rebuilt page's body is keyed by it, so each visit mounts afresh.
     pub(super) visits: u64,
     pub(super) hop: Hop,
+    /// The page [`TabbedFormState::show_error`] shows when its hop drops its leaf.
+    pending: Option<usize>,
 }
 
 impl TabbedFormState {
@@ -74,16 +76,23 @@ impl TabbedFormState {
     }
 
     /// After a failed save (Strata's `invalid_field`): choose page `i` and move the keyboard to
-    /// the element keyed `field` on it, once [`super::TabbedForm::hop`]'s leaf has been drawn
-    /// and dropped. The host also sets the page's [`FormPage::has_errors`] and keeps every edit:
-    /// the form holds none of them.
+    /// the element keyed `field` on it, two frames on, once [`super::TabbedForm::hop`]'s leaf
+    /// has been drawn and dropped. The page changes in the commit that moves the keyboard, so
+    /// a keyboard inside the page being hidden (Return in one of its fields pressed Save) still
+    /// moves. The host also sets the page's [`FormPage::has_errors`] and keeps every edit: the
+    /// form holds none of them.
     pub fn show_error(&mut self, i: usize, field: impl Into<String>, tx: &mut Tx) {
-        self.select(i);
+        self.pending = Some(i);
         self.hop.request(field.into(), tx);
     }
 
     /// From the host's poll, every frame: runs a pending focus hop. True when the view changes.
     pub fn tick(&mut self, tx: &mut Tx) -> bool {
+        if self.hop.dropping()
+            && let Some(i) = self.pending.take()
+        {
+            self.select(i);
+        }
         self.hop.tick(tx)
     }
 }

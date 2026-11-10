@@ -16,6 +16,8 @@ struct Host {
     name: TextEdit,
     look: Look,
     heard: Vec<usize>,
+    /// Ask for the error from the next poll, before the form's tick runs.
+    error_from_poll: bool,
 }
 
 fn form(h: &Host) -> TabbedForm<Host> {
@@ -83,7 +85,11 @@ fn view(h: &Host, _: &mut Cx<Host>) -> El {
 }
 
 fn poll(h: &mut Host, _: f64, tx: &mut Tx) -> bool {
-    h.tabs.tick(tx)
+    let asked = std::mem::take(&mut h.error_from_poll);
+    if asked {
+        h.tabs.show_error(0, "name", tx);
+    }
+    h.tabs.tick(tx) || asked
 }
 
 fn on_key(h: &mut Host, ev: &KeyEvent, tx: &mut Tx) -> bool {
@@ -98,6 +104,7 @@ fn mount(mounting: Mounting, name: &str) -> Runtime<Host> {
         name: TextEdit::new(name),
         look: Look::fallback(false),
         heard: Vec::new(),
+        error_from_poll: false,
     };
     let text = TextSystem::new(fonts::FONTS, fonts::FAMILIES);
     let mut rt = Runtime::with_text(host, view, (500.0, 400.0), Env::new(false, 1.0), text);
@@ -296,4 +303,21 @@ fn arrows_choose_as_they_move_and_wrap() {
     }
     let want = [1, 2, 0, 2, 2, 0].map(|i| (Some(format!("f-tab-{i}")), i));
     assert_eq!(seen, want);
+}
+
+/// The keyboard is on the page being hidden, and the host asks from its poll before the
+/// form's tick: the leaf still gets a frame, and the page changes as it goes, so the keyboard
+/// still moves.
+#[test]
+fn an_error_asked_for_from_inside_the_hidden_page_still_moves_the_keyboard() {
+    let mut rt = mount(Mounting::Kept, "");
+    tap(&mut rt, "f-tab-2");
+    tap(&mut rt, "save");
+    run(&mut rt, 3);
+    tap(&mut rt, "f-tab-2");
+    press(&mut rt, Key::Tab, Mods::default());
+    assert_eq!(focused(&rt).as_deref(), Some("behavior-button"));
+    rt.state.error_from_poll = true;
+    run(&mut rt, 4);
+    assert_eq!(focused(&rt).as_deref(), Some("name"));
 }

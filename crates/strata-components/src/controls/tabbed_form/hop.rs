@@ -10,6 +10,11 @@
 //! around a form and its buttons. Probe P1 (C20c plan): it moves the keyboard from a focused
 //! core `text_input` to a button, and from a focused button to a `text_input`.
 //!
+//! The keyboard must still be somewhere when the leaf goes: Rune forgets the last focused
+//! element once focus drops (a focused control turning `inert`, `runtime/input/focus.rs`), and
+//! then moves it nowhere. So an owner that hides the focused control (a form's page) does it in
+//! the commit that drops the leaf, where the target is shown and the old focus still counts.
+//!
 //! Used by: [`super::TabbedFormState::show_error`], C20c's settings search (Enter).
 
 use std::time::Duration;
@@ -44,8 +49,14 @@ impl Hop {
         )
     }
 
+    /// Whether the next [`Hop::tick`] drops the leaf: the commit that moves the keyboard.
+    pub(crate) fn dropping(&self) -> bool {
+        self.target.is_some() && self.drawn
+    }
+
     /// From the owner's poll: the first tick after a request keeps the leaf for a frame that
-    /// draws it; the next drops it, which moves the keyboard. True when the view changes.
+    /// draws it (a request made in a poll before this tick still gets that frame); the next
+    /// drops it, which moves the keyboard. True when the view changes.
     pub(crate) fn tick(&mut self, tx: &mut Tx) -> bool {
         if self.target.is_none() {
             return false;

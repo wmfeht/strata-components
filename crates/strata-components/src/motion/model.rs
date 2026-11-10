@@ -13,14 +13,18 @@ pub(super) use super::pulse::Pulses;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct EffectId(pub(super) u64);
 
-/// What an effect tells its host, from [`Effects::tick`].
+/// What an effect tells its host, from [`Effects::tick`] and [`Effects::settle`].
+///
+/// A flight that [`Effects::fly`] started sends `Launched`, `Landed` and `Done`, once each
+/// and in that order, whether or not anything flew (reduced motion, no layer, every leg or the
+/// target out of sight), and however it ends (on time, its target gone, or settled). Two or
+/// all three can come in one tick. A dissolve sends `Done` only.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Event {
     /// A flight's icons have left their sources: remove the rows they left now, in the commit
-    /// this poll makes (and not an instant one: see the module docs). Every flight sends it,
-    /// even one whose icons were all out of sight.
+    /// this poll makes (and not an instant one: see the module docs).
     Launched(EffectId),
-    /// A flight's icons have landed: show the rows a restore flew onto.
+    /// A flight's icons have landed, or nothing flew: show the rows a restore flew onto.
     Landed(EffectId),
     /// The effect is over: remove a dissolve's rows now. Every effect ends with it.
     Done(EffectId),

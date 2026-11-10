@@ -256,6 +256,9 @@ impl FlightRun {
                     .filter(|&i| self.legs[i].seen.get().is_some())
                     .collect();
                 if self.flying.is_empty() {
+                    // Nothing flies (no layer, reduced motion, every leg or the target out of
+                    // sight): a restore's rows still show at Landed.
+                    events.push(Event::Landed(self.id));
                     events.push(Event::Done(self.id));
                     return false;
                 }

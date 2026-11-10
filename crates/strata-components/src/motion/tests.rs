@@ -17,6 +17,17 @@ const H: f32 = 400.0;
 const ROW_H: f32 = 26.0;
 const DT: f64 = 1.0 / 60.0;
 
+/// What the host owes an effect's rows, and at which event.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Owe {
+    /// Move to Trash, or a release: the rows go at Launched.
+    RemoveAtLaunch,
+    /// A restore: the rows are listed and vanished, and show at Landed.
+    ShowAtLanded,
+    /// A dissolve: the rows are vanished, and go at Done.
+    RemoveAtDone,
+}
+
 struct Host {
     fx: Effects,
     look: Look,
@@ -27,8 +38,8 @@ struct Host {
     target_y: f32,
     /// The side panel's own height: a target below it is scrolled out of it.
     side_h: f32,
-    /// Rows the host removes at an effect's event.
-    leaving: Option<(EffectId, Vec<u64>)>,
+    /// The rows each playing effect is owed.
+    owed: Vec<(EffectId, Owe, Vec<u64>)>,
     events: Vec<(f64, Event)>,
     t: f64,
     /// Answer Launched with an instant commit.
@@ -52,7 +63,7 @@ impl Host {
             target: true,
             target_y: 100.0,
             side_h: H,
-            leaving: None,
+            owed: Vec::new(),
             events: Vec::new(),
             t: 0.0,
             instant: false,
@@ -151,30 +162,47 @@ fn poll(s: &mut Host, t: f64, tx: &mut rune::Tx) -> bool {
     let changed = !events.is_empty();
     for e in events {
         s.events.push((t, e));
-        let owner = s.leaving.as_ref().map(|(id, _)| *id);
-        match e {
-            Event::Launched(id) if owner == Some(id) => {
-                let gone = s.leaving.as_ref().unwrap().1.clone();
-                if !s.vanished.is_empty() {
-                    continue;
-                }
-                s.rows.retain(|r| !gone.contains(r));
+        let (id, at) = match e {
+            Event::Launched(id) => (id, Owe::RemoveAtLaunch),
+            Event::Landed(id) => (id, Owe::ShowAtLanded),
+            Event::Done(id) => (id, Owe::RemoveAtDone),
+        };
+        // Each event acts only on the rows its own effect is owed, so a skipped one can't
+        // be hidden by a later event clearing them.
+        let rows: Vec<u64> = s
+            .owed
+            .iter()
+            .filter(|o| o.0 == id && o.1 == at)
+            .flat_map(|o| o.2.clone())
+            .collect();
+        match at {
+            Owe::RemoveAtLaunch if !rows.is_empty() => {
+                s.rows.retain(|r| !rows.contains(r));
                 if s.instant {
                     tx.instant();
                 }
             }
-            Event::Landed(_) => s.vanished.clear(),
-            Event::Done(id) if owner == Some(id) => {
-                let gone = s.leaving.take().unwrap().1;
-                if s.fx.dissolving() || s.vanished.iter().any(|v| gone.contains(v)) {
-                    s.rows.retain(|r| !gone.contains(r));
-                    s.vanished.clear();
-                }
+            Owe::ShowAtLanded => s.vanished.retain(|v| !rows.contains(v)),
+            Owe::RemoveAtDone => {
+                s.rows.retain(|r| !rows.contains(r));
+                s.vanished.retain(|v| !rows.contains(v));
             }
-            _ => {}
+            Owe::RemoveAtLaunch => {}
+        }
+        if matches!(e, Event::Done(_)) {
+            s.owed.retain(|o| o.0 != id);
         }
     }
     changed
+}
+
+/// The rows the host still shows: listed and not vanished.
+fn shown(s: &Host) -> Vec<u64> {
+    s.rows
+        .iter()
+        .copied()
+        .filter(|r| !s.vanished.contains(r))
+        .collect()
 }
 
 fn runtime(host: Host) -> Runtime<Host> {
@@ -202,8 +230,31 @@ fn trash(rt: &mut Runtime<Host>, rows: &[u64]) -> Option<EffectId> {
         let Host { fx, look, .. } = s;
         out = fx.fly(flight, look, tx);
         match out {
-            Some(id) => s.leaving = Some((id, rows.to_vec())),
+            Some(id) => s.owed.push((id, Owe::RemoveAtLaunch, rows.to_vec())),
             None => s.rows.retain(|r| !rows.contains(r)),
+        }
+    });
+    rt.frame(DT);
+    out
+}
+
+/// Restores `rows` (listed now, as the host lists them at the restore) and flies their icons
+/// out of the target onto them, keeping them vanished until Landed.
+fn restore(rt: &mut Runtime<Host>, rows: &[u64]) -> Option<EffectId> {
+    let mut out = None;
+    rt.update(|s, tx| {
+        for &r in rows {
+            if !s.rows.contains(&r) {
+                s.rows.push(r);
+            }
+        }
+        s.rows.sort_unstable();
+        let flight = Flight::out_of_target("trash", icons(s, rows, "")).target_in("side");
+        let Host { fx, look, .. } = s;
+        out = fx.fly(flight, look, tx);
+        if let Some(id) = out {
+            s.vanished.extend_from_slice(rows);
+            s.owed.push((id, Owe::ShowAtLanded, rows.to_vec()));
         }
     });
     rt.frame(DT);
@@ -218,11 +269,11 @@ fn dissolve(rt: &mut Runtime<Host>, rows: &[u64]) -> Option<EffectId> {
         out = fx.dissolve(d, look, tx);
         match out {
             Some(id) => {
-                s.leaving = Some((id, rows.to_vec()));
+                s.owed.push((id, Owe::RemoveAtDone, rows.to_vec()));
                 s.vanished.extend_from_slice(rows);
             }
-            None if s.leaving.is_none() => s.rows.retain(|r| !rows.contains(r)),
-            None => {}
+            // Nothing plays: the end state at once.
+            None => s.rows.retain(|r| !rows.contains(r)),
         }
     });
     rt.frame(DT);
@@ -389,7 +440,7 @@ fn an_effect_started_before_the_tick_in_the_same_poll_still_plays() {
     });
     rt.frame(DT);
     let id = id.unwrap();
-    rt.state.leaving = Some((id, vec![2]));
+    rt.state.owed.push((id, Owe::RemoveAtLaunch, vec![2]));
     frames(&mut rt, 1.0, launched);
     assert!(has(&rt, &flyer_key(id, 0)), "it flies");
 
@@ -445,51 +496,96 @@ fn animations_off_play_nothing() {
 #[test]
 fn reduced_motion_draws_nothing_and_each_effect_ends_at_once() {
     let mut rt = runtime(Host::new(5));
+    rt.state.rows.retain(|&r| r != 2);
     rt.set_system_reduced_motion(true);
     rt.frame(DT);
     trash(&mut rt, &[1]).unwrap();
+    restore(&mut rt, &[2]).unwrap();
     dissolve(&mut rt, &[3]).unwrap();
     assert!(keys_with(&rt, "c23-").iter().all(|k| k == LAYER));
     wake_to_wake(&mut rt, 0.2, |s| {
-        s.kinds().iter().filter(|k| **k == "done").count() == 2
+        s.kinds().iter().filter(|k| **k == "done").count() == 3
     });
-    assert_eq!(rt.state.kinds(), ["launched", "done", "done"]);
+    assert_eq!(
+        rt.state.kinds(),
+        [
+            "launched", "landed", "done", "launched", "landed", "done", "done"
+        ]
+    );
     assert!(!rt.state.fx.playing());
+    assert_eq!(shown(&rt.state), [0, 2, 4], "every end state reached");
 }
 
 #[test]
-fn a_leg_or_target_out_of_sight_flies_nothing_but_still_launches_and_ends() {
+fn a_leg_or_target_out_of_sight_flies_nothing_but_still_launches_lands_and_ends() {
     type Setup = fn(&mut Host);
-    let cases: [(&str, Setup, &[u64]); 5] = [
-        ("an unmounted row", |_| {}, &[99]),
+    // (case, setup, whether it is a restore, the rows)
+    let cases: [(&str, Setup, bool, &[u64]); 8] = [
+        ("an unmounted row", |_| {}, false, &[99]),
         (
             "a row scrolled out of its list",
             |s| {
                 s.rows_in = true;
                 s.list_h = 100.0;
             },
+            false,
             &[6],
         ),
-        ("the sidebar hidden", |s| s.target = false, &[1]),
-        ("a target off the window", |s| s.target_y = H + 40.0, &[1]),
+        ("the sidebar hidden", |s| s.target = false, false, &[1]),
+        (
+            "a target off the window",
+            |s| s.target_y = H + 40.0,
+            false,
+            &[1],
+        ),
         (
             "a target scrolled out of its viewport",
             |s| s.side_h = 80.0,
+            false,
             &[1],
         ),
+        // A restore that flies nothing still shows its rows.
+        (
+            "a restore with the target unmounted",
+            |s| s.target = false,
+            true,
+            &[2],
+        ),
+        (
+            "a restore with the target out of its viewport",
+            |s| s.side_h = 50.0,
+            true,
+            &[2],
+        ),
+        ("a restore onto an unmounted row", |_| {}, true, &[99]),
     ];
-    for (case, setup, rows) in cases {
+    for (case, setup, restoring, rows) in cases {
         let mut host = Host::new(30);
+        if restoring {
+            host.rows.retain(|r| !rows.contains(r));
+        }
         setup(&mut host);
         let mut rt = runtime(host);
-        trash(&mut rt, rows).unwrap();
+        if restoring {
+            restore(&mut rt, rows).unwrap();
+        } else {
+            trash(&mut rt, rows).unwrap();
+        }
         assert!(
             keys_with(&rt, "c23-launch").is_empty(),
             "{case}: nothing launches"
         );
         wake_to_wake(&mut rt, 0.2, finished);
-        assert_eq!(rt.state.kinds(), ["launched", "done"], "{case}");
+        assert_eq!(
+            rt.state.kinds(),
+            ["launched", "landed", "done"],
+            "{case}: once each, in order"
+        );
         assert!(!has(&rt, "c23-pulse-1"), "{case}: no pulse");
+        assert!(rt.state.vanished.is_empty(), "{case}: nothing stays hidden");
+        if restoring {
+            assert!(shown(&rt.state).contains(&rows[0]), "{case}: it shows");
+        }
     }
 }
 
@@ -552,17 +648,9 @@ fn an_instant_flip_flies_nothing_at_the_pin() {
 #[test]
 fn a_restore_flies_out_onto_the_rows_and_lands_before_they_show() {
     let mut host = Host::new(6);
-    host.vanished = vec![2, 4];
+    host.rows.retain(|&r| r != 2 && r != 4);
     let mut rt = runtime(host);
-    let mut id = None;
-    rt.update(|s, tx| {
-        let f = Flight::out_of_target("trash", icons(s, &[2, 4], "")).target_in("side");
-        let Host { fx, look, .. } = s;
-        id = fx.fly(f, look, tx);
-        s.leaving = Some((id.unwrap(), vec![2, 4]));
-    });
-    rt.frame(DT);
-    let id = id.unwrap();
+    let id = restore(&mut rt, &[2, 4]).unwrap();
     let launch = middle(rt.presented(&launch_key(id, 0)).unwrap().0);
     assert!(
         distance(launch, target_middle(&rt)) < 1.0,

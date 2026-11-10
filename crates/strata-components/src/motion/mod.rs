@@ -43,8 +43,9 @@
 //!   rows restored in the target's own view while it shakes. At most 7 icons fly, picked
 //!   evenly. A leg whose row side is unmounted, off the window or outside `rows_in` flies
 //!   nothing; a target that is absent (the sidebar hidden), off the window or outside
-//!   `target_in` flies nothing at all. Either way the flight still sends
-//!   [`Event::Launched`], then [`Event::Done`].
+//!   `target_in` flies nothing at all. Every flight [`Effects::fly`] starts sends
+//!   [`Event::Launched`], [`Event::Landed`] and [`Event::Done`], once each and in order, even
+//!   when nothing flies (then all three in one tick), so a restore's hidden rows always show.
 //! - **The dissolve.** [`Dissolve::rows`] breaks the rows (C1e's `row_path`) into fragments
 //!   that scatter and fade. Mark them vanished in the same handler and keep them listed until
 //!   [`Event::Done`], so the rows around them hold still, then remove them (an instant commit
@@ -52,7 +53,7 @@
 //!   a second returns `None`. The layer takes no input, so clicks reach the view under it.
 //! - **Off.** With `look.animations` false, [`Effects::fly`] and [`Effects::dissolve`] return
 //!   `None` and the host applies the end state at once. Under Rune's reduced motion the layer
-//!   draws nothing and each effect ends at its next ticks.
+//!   draws nothing and each effect ends at its next ticks, with all its events.
 //! - **Assistive technology** hears nothing of the effects: the layer is hidden from it and
 //!   takes no focus. A vanished row leaves the tree; the rows' removal is the host's listing.
 //! - **Commits.** A flight commits the host's own call, its flip (with the host's row removal

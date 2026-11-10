@@ -247,11 +247,7 @@ impl<S: 'static> NumberField<S> {
     fn stepper(&self, look: &Look, up: bool, at_end: bool, tell: Tell<S>) -> El {
         let k = &look.kit;
         let side = look.frame.control;
-        let glyph = look.icon(if up {
-            IconName::Plus
-        } else {
-            IconName::Minimize
-        });
+        let glyph = look.icon(if up { IconName::Plus } else { IconName::Minus });
         let off = self.disabled || at_end;
         let mut b = el()
             .key(format!(

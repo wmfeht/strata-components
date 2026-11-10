@@ -36,6 +36,11 @@ futures-channel = "0.3"
 gio = { version = "0.22", default-features = false }
 glib = { version = "0.22", default-features = false }
 
+# strata-platform media-audio (P7): PCM through GStreamer's appsrc into the default audio sink.
+# No version features: the calls it makes are in GStreamer 1.14, the bindings' floor.
+gstreamer = { version = "0.25", default-features = false }
+gstreamer-app = { version = "0.25", default-features = false }
+
 # strata-platform settings (P5) and single-instance (P8): the majors Rune's `dbus` feature already
 # builds (zbus 6 on tokio). Each dependent line names its own features.
 futures-util = { version = "0.3", default-features = false }

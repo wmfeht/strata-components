@@ -268,7 +268,15 @@ fn begin_marquee<S: 'static>(
 fn hit<S: 'static>(cfg: &Rc<Config<S>>, s: &S, p: Point, press: Option<Hit>) -> Hit {
     let src = (cfg.get)(s).0;
     let geometry = geometry(cfg, s);
-    let index = geometry.index_at(p).filter(|_| !in_stuck_header(cfg, s, p));
+    // A vanished row (`RowMarks::vanished`) takes no input: a press there is on empty space.
+    let vanished = |i: usize| {
+        cfg.marks
+            .as_ref()
+            .is_some_and(|f| f(s, src.id_at(i)).vanished)
+    };
+    let index = geometry
+        .index_at(p)
+        .filter(|&i| !in_stuck_header(cfg, s, p) && !vanished(i));
     let Some(index) = index else {
         return Hit {
             index: None,

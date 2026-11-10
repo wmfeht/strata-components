@@ -5,7 +5,7 @@ use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 use std::time::Duration;
 
-use rune::{El, Tx, icon, memo, row, text};
+use rune::{El, Tx, el, icon, memo, row, text};
 use strata_kit::icons::IconName;
 use strata_kit::look::Look;
 use strata_kit::slots::collection as tokens;
@@ -36,6 +36,10 @@ pub struct RowMarks {
     pub active_parent: bool,
     /// The row a folder peek is open from.
     pub peek_anchor: bool,
+    /// Gone from view while its entry stays listed: the row draws nothing, leaves the
+    /// accessibility tree and takes no input (a press there is on empty space), but keeps its
+    /// slot. C23 hides the rows it dissolves this way, and the rows a restore flies onto.
+    pub vanished: bool,
 }
 
 /// What a row draws from: its entry's place in the selection, and the host's marks.
@@ -539,6 +543,19 @@ fn item<S: 'static>(cfg: &Rc<Config<S>>, frame: &Frame, s: &S, rcx: &RowCx<'_>) 
     let state = rcx.state;
     let entry = rcx.entry;
     let id = entry.id;
+    if state.marks.vanished {
+        // Keyed, so the slot keeps its place and a motion effect can still find it.
+        let slot = el()
+            .key(row_key(id))
+            .h(frame.row_height)
+            .a11y_hidden()
+            .inert();
+        return if frame.per_line > 1 {
+            slot.w(0.0).grow(1.0)
+        } else {
+            slot.w_full()
+        };
+    }
 
     let icon_el = match &cfg.icon {
         Some(slot) => (slot.build)(s, rcx),

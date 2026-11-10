@@ -5,8 +5,6 @@
 //! which provides `Demo` (its field in [`Gallery`]), `SCENES`, `REVIEW`, `view`, and the
 //! `on_key` and `poll` hooks the app runs while the page is open.
 
-use rune::{El, text};
-
 use crate::{Gallery, KeyHook, PollHook, Scene, View};
 
 pub mod c1;
@@ -446,19 +444,4 @@ pub fn all_scenes() -> Vec<Scene> {
 /// The page `g` has open: the index when no page is, or when the id is unknown.
 pub fn open_page(g: &Gallery) -> &'static Page {
     g.page.and_then(find).unwrap_or(&INDEX)
-}
-
-/// What a page shows before its work package builds it.
-pub(crate) fn placeholder(g: &Gallery, id: &str) -> El {
-    let kit = g.kit();
-    let label = find(id).map_or_else(
-        || id.to_owned(),
-        |p| format!("{} {}: not built yet", p.wp, p.name),
-    );
-    rune::col().w_full().h_full().center().child(
-        text(label)
-            .key(format!("{id}-placeholder"))
-            .font(kit.ty.ui_medium)
-            .color(kit.c.text_base),
-    )
 }

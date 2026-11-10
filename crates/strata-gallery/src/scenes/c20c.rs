@@ -137,8 +137,10 @@ pub const REVIEW: &[Scene] = &[
         editor(g, true, Mounting::Rebuilt)
     }),
     ("c20c-highlight-animated-light", |g| {
-        highlight(g, false);
-        g.look.animations = true;
+        highlight_animated(g, false)
+    }),
+    ("c20c-highlight-animated-dark", |g| {
+        highlight_animated(g, true)
     }),
 ];
 
@@ -166,6 +168,12 @@ fn highlight(g: &mut Gallery, dark: bool) {
     search(g, dark, "thumbnail workers");
     g.look.animations = false;
     g.c20c.jump_on_start = true;
+}
+
+/// The highlight with its fade (animations on).
+fn highlight_animated(g: &mut Gallery, dark: bool) {
+    highlight(g, dark);
+    g.look.animations = true;
 }
 
 fn settings() -> SettingsSearch<Gallery> {

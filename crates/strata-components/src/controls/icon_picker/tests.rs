@@ -178,8 +178,19 @@ fn a_recent_tab_comes_first_once_there_are_recents_and_opens_first() {
     assert_eq!(st.results(), Some(2));
     st.set_recent(&[]);
     st.set_query("");
+    assert_eq!(
+        st.page(),
+        Page::Category(0),
+        "clearing the query never lands on a Recent page with no tab"
+    );
     st.open();
     assert_eq!(st.page(), Page::Category(0));
+    // Emptying the recents while their tab shows moves to the first category, grid and all.
+    st.set_recent(&[Choice::emoji("🪐")]);
+    st.open();
+    st.set_recent(&[]);
+    assert_eq!(st.page(), Page::Category(0));
+    assert_eq!(st.cursor_choice(), Some(&Choice::emoji("😀")));
 }
 
 #[test]

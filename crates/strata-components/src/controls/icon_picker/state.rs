@@ -182,11 +182,18 @@ impl IconPickerState {
             return;
         }
         self.recent = items;
-        if self.recent.is_empty() && self.page == Page::Recent {
-            self.page = self.first_page();
-            self.browse = self.page;
+        let showing = self.page == Page::Recent;
+        if self.recent.is_empty() {
+            // During a search `page` is Results and `browse` may still be Recent.
+            let first = self.first_page();
+            if self.page == Page::Recent {
+                self.page = first;
+            }
+            if self.browse == Page::Recent {
+                self.browse = first;
+            }
         }
-        if self.page == Page::Recent {
+        if showing {
             self.refresh(None);
         }
     }

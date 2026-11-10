@@ -8,6 +8,11 @@
 | Repros | Headless repros compiled against `78d22ed` and run here, from a scratch crate (never merged). Compositor repros keep the S1–S3 measurements and weren't re-run. |
 | Not done here | Nothing was filed, posted, reserved, tagged or pushed. Every issue below is a draft for the owner, and the release workflow hasn't run on GitHub. |
 
+> **Filing packet (2026-11-10).** Every draft below, and those the later work packages wrote,
+> is now in [`docs/upstream/rune/`](../upstream/rune/README.md): one ready-to-paste file per issue or
+> comment, ranked by value, de-duplicated against upstream at `dev` `04b38ae`, with a mapping
+> from each draft id to its entry. File from the packet; this record keeps the history.
+
 ## Verdicts
 
 - **M0, Rune half.** None of P1–P5 is "Rune shipped" at `78d22ed` or at `dev` head. Each is

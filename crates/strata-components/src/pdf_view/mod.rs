@@ -212,11 +212,11 @@
 //!   `Cursor::Text` and a hover handler inside the draggable pages shows the parent's grab
 //!   (probe P3). Ask: the cursor of the innermost element that sets one under the pointer.
 //!
-//! Upstream issues met: #173 (`Tx::focus`: the Open button's focus moves by a `focus_return`
-//! stub), #163 (each image page keeps a CPU copy, which doubles the pages' memory), C14a's
-//! scale-only draft (the rescale element), C25's U-C25-1 (streamed `Pixels` have no mips: a
-//! page zoomed out draws its larger image until the new one lands). Past the pin, rune-kit's
-//! `image_zoom` and `Tx::focus` (dev 00cca3c7, 22aa8cde) are noted, not adopted.
+//! Upstream issues met: #163 (each image page keeps a CPU copy, which doubles the pages'
+//! memory), C14a's scale-only draft (the rescale element), C25's U-C25-1 (streamed `Pixels`
+//! have no mips: a page zoomed out draws its larger image until the new one lands). rune-kit's
+//! `image_zoom` (00cca3c7) measures zoom from fit with no fitted-width levels, so the view
+//! keeps C14a's zoom.
 
 mod find;
 mod layer;

@@ -4,14 +4,12 @@
 //!
 //! The content box takes focus; Down or Right (`j` or `l` with [`PdfView::letters`]) moves it
 //! to Open. On Open, Return opens, Left (`h`) hands the keys back to the listing
-//! ([`PdfIntent::Leave`]), and Up, Down and Right (`j`, `k`, `l`) keep focus there. Moving focus
-//! uses a zero-size `focus_return` stub, as C9's drawer does: Rune can't focus an element from
-//! code at the pinned rev (upstream #173).
+//! ([`PdfIntent::Leave`]), and Up, Down and Right (`j`, `k`, `l`) keep focus there.
 //!
 //! [`PdfView::letters`]: super::PdfView::letters
 //! [`PdfIntent::Leave`]: super::PdfIntent::Leave
 
-use rune::{El, Key, KeyEvent, Transition, Tx, col, el, text};
+use rune::{El, Key, KeyEvent, Tx, col, text};
 use rune_kit::{Button, ButtonVariant};
 use strata_kit::look::Look;
 
@@ -28,7 +26,6 @@ pub(crate) fn build<S: 'static>(
 ) -> El {
     let k = &look.kit;
     let key = st.key().to_owned();
-    let get_mut = ctx.get_mut;
     let letters = ctx.letters;
     let mut body = col()
         .key(key.clone())
@@ -58,14 +55,15 @@ pub(crate) fn build<S: 'static>(
     if !open {
         return body;
     }
-    body = body.on_key(move |s: &mut S, ev: &KeyEvent, _tx: &mut Tx| {
+    let open_key = format!("{key}-open");
+    body = body.on_key(move |_: &mut S, ev: &KeyEvent, tx: &mut Tx| {
         if !plain(ev) {
             return false;
         }
         let to_open = matches!(ev.key, Key::Down | Key::Right)
             || letters && matches!(&ev.key, Key::Text(t) if t == "j" || t == "l");
         if to_open {
-            get_mut(s).focus_open_button();
+            tx.focus(open_key.clone(), true);
         }
         to_open
     });
@@ -103,13 +101,7 @@ pub(crate) fn build<S: 'static>(
             }
             true
         });
-    body.child(button).child(
-        el().key(format!("{key}-open-focus-{}", st.focus_open))
-            .size(0.0, 0.0)
-            .a11y_hidden()
-            .transition(Transition::none())
-            .focus_return(format!("{key}-open")),
-    )
+    body.child(button)
 }
 
 fn plain(ev: &KeyEvent) -> bool {

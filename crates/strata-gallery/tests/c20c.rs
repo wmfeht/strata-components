@@ -2,9 +2,21 @@
 //! highlight and its timing in a window at rest, a reveal's scroll). The scripts in
 //! `tests/scripts/c20c/` check the rest, and strata-components' own tests the matcher and the
 //! form's kept and rebuilt pages. Each test names what it covers.
+//!
+//! Coverage notes for the scripts:
+//!
+//! - No feature-map bullet covers the tabs' keyboard (arrows, Home and End, Ctrl+Page Up and
+//!   Down). `tabs-arrows`, `tabs-wrap`, `tabs-ctrl-page` and `tabs-ctrl-page-rebuilt` cite the
+//!   bullet the tabs exist for ("New action… opens an editor with General, Script, and
+//!   Behavior tabs") and check GtkNotebook's keys and its `real_switch_page` focus rule.
+//! - `error-mark` checks the switch to the invalid field's tab, and the edits on the page that
+//!   shows; the edit on the hidden page and "writes nothing" are checked here
+//!   (`a_save_with_an_invalid_field_keeps_every_edit_and_writes_nothing`).
+//! - `select-all` takes "any keyboard layout" as US and Russian: the Russian Ctrl+A is the
+//!   physical A with the base "ф", as a window sends it off macOS (`Key::Command('a')`).
 
 mod c20c {
-    use rune::{ElementInfo, Env, Key, KeyEvent, Mods, Runtime};
+    use rune::{ElementInfo, Env, Key, KeyEvent, Mods, Runtime, TextEdit};
     use strata_components::controls::settings_search::{IndexPage, IndexRow, SearchIndex};
     use strata_gallery::{Gallery, scenes};
 
@@ -271,5 +283,29 @@ mod c20c {
             "no jump: {:?}",
             rt.state.c20c.heard
         );
+    }
+
+    /// `integration/custom-actions`: "If a field is invalid, the editor switches to that
+    /// field's tab, keeps the edits, and writes nothing". The tree shows the switch and the
+    /// fields on the page that shows; the hidden page's switch and the write it would make are
+    /// in the state.
+    #[test]
+    fn a_save_with_an_invalid_field_keeps_every_edit_and_writes_nothing() {
+        let mut rt = mount_with("c20c-editor-light", |g| g.c20c.name = TextEdit::new(""));
+        tap(&mut rt, "c20c-editor-tab-2");
+        assert!(!rt.state.c20c.folders);
+        tap(&mut rt, "c20c-folders");
+        tap(&mut rt, "c20c-save");
+        run(&mut rt, 0.1);
+        let d = &rt.state.c20c;
+        assert_eq!(d.tabs.selected(), 0, "General, the name's page, shows");
+        assert_eq!(focused(&rt).as_deref(), Some("c20c-name"));
+        assert_eq!(d.saved, 0, "nothing written");
+        assert!(d.folders, "the Folders edit on the hidden page is kept");
+        assert_eq!(d.description.text, "Scale pictures to a width");
+        assert_eq!(d.error, "Enter a name");
+        typ(&mut rt, "Resize");
+        tap(&mut rt, "c20c-save");
+        assert_eq!(rt.state.c20c.saved, 1, "a valid Save writes");
     }
 }

@@ -1,6 +1,6 @@
 {
   "bullets": [
-    "integration/custom-actions: If a field is invalid, the editor switches to that field's tab, keeps the edits, and writes nothing"
+    "integration/custom-actions: If a field is invalid, the editor switches to that field's tab"
   ],
   "scene": "c20c-editor-light",
   "events": [

@@ -13,7 +13,9 @@
 //! The page stands in for Strata's policy: it keeps one size (Remember sort and icon size per
 //! folder off), so a reset goes back to the look's default, 64; it describes each entry by its
 //! kind (Strata's `entry_kind_name`); and it sets the tooltip delay to Strata's 900 ms for the
-//! whole window, as Rune's delay is the window's (`Cx::help_look`).
+//! whole window, as Rune's delay is the window's (`Cx::help_look`). C24's autoscroll runs on
+//! the grid from its background (no tile, or a tile's blank space; the shield mounts last on
+//! the page), and `c3-bar` shows the grid's scroll bar.
 //!
 //! | Key | Does |
 //! | --- | --- |
@@ -35,7 +37,11 @@ use strata_components::contract::{
     EntryId, EntryKind, EntrySource, ListEntry, ListSource, ThumbKey,
 };
 use strata_components::icons_grid::{
-    IconsGrid, IconsGridState, IconsParts, SizeKeyed, SizeKeys, SizeRequest, size_command,
+    IconsGrid, IconsGridState, IconsParts, SizeKeyed, SizeKeys, SizeRequest, autoscroll_background,
+    size_command,
+};
+use strata_components::scroll::{
+    Autoscroll, AutoscrollPointer, AutoscrollSettings, BarMode, Shield,
 };
 use strata_components::thumbnails::{
     Landed, Outcome, Request, Settings, State, ThumbnailStore, ViewerId,
@@ -259,19 +265,24 @@ pub struct Demo {
     pub renaming: Option<EntryId>,
     /// The host's marks on tiles (cut, dragging, the filter's Enter target).
     pub marks: HashMap<EntryId, RowMarks>,
+    /// The window's autoscroll (C24).
+    pub auto: Autoscroll,
 }
 
 impl Default for Demo {
     fn default() -> Self {
         let mut coll = CollectionState::new();
-        install(&mut coll.controllers);
+        let grid = IconsGridState::new();
+        let auto = Autoscroll::new();
+        install(&mut coll.controllers, &auto, &grid);
         let mut store = ThumbnailStore::new(Settings::default());
         let viewer = store.viewer();
         Self {
             folder: Folder::Pictures,
             listing: ListSource::new(Vec::new()),
             coll,
-            grid: IconsGridState::new(),
+            grid,
+            auto,
             store,
             viewer,
             jobs: Vec::new(),
@@ -296,9 +307,19 @@ impl Default for Demo {
     }
 }
 
-fn install(controllers: &mut Controllers) {
+/// C1b's pointer intent behind C24's autoscroll (a tile's blank space is background), C3's
+/// size keys over C1c's, and C1d's marquee.
+fn install(controllers: &mut Controllers, auto: &Autoscroll, grid: &IconsGridState) {
     controllers.pointer = Some(Box::new(
-        strata_components::collection::pointer::PointerIntent::new(),
+        AutoscrollPointer::new(
+            Some(Box::new(
+                strata_components::collection::pointer::PointerIntent::new(),
+            )),
+            auto.clone(),
+            SCOPE,
+            grid.feed().clone(),
+        )
+        .background(autoscroll_background),
     ));
     controllers.keyboard = Some(Box::new(SizeKeyed::new(Box::<Keyboard>::default())));
     controllers.marquee = Some(Box::new(
@@ -336,6 +357,11 @@ impl Demo {
                 Some(id) => format!("Menu on {}", self.name_of(*id)),
                 None => "Menu on the background".to_owned(),
             },
+            Intent::OpenInNew { id, window } => format!(
+                "Opened {} in a new {}",
+                self.name_of(*id),
+                if *window { "window" } else { "tab" }
+            ),
             Intent::Edge(d) => format!("Edge {d:?}"),
             Intent::Other(_) => return Some(intent),
             _ => "Other".to_owned(),
@@ -499,6 +525,13 @@ fn default_scene(g: &mut Gallery, dark: bool) {
     open(g, dark, Folder::Pictures);
 }
 
+/// 100,000 tiles with the scroll bar shown (`BarMode::Always`), at the top.
+fn bar(g: &mut Gallery, dark: bool) {
+    open(g, dark, Folder::Archive)
+        .grid
+        .set_bar_mode(BarMode::Always);
+}
+
 fn loading(g: &mut Gallery, dark: bool) {
     let d = open(g, dark, Folder::Pictures);
     d.store.set_enabled(false);
@@ -631,6 +664,8 @@ pub const SCENES: &[Scene] = &[
     ("c3-hundred-k-dark", |g| hundred_k(g, true)),
     ("c3-empty-light", |g| empty(g, false)),
     ("c3-empty-dark", |g| empty(g, true)),
+    ("c3-bar-light", |g| bar(g, false)),
+    ("c3-bar-dark", |g| bar(g, true)),
 ];
 
 /// Scenes for review with `--scene` only, kept out of the goldens: a size between two steps
@@ -661,6 +696,11 @@ pub fn collection(g: &Gallery) -> Collection<Gallery> {
     .clock(|g: &Gallery| g.c3.clock)
     .marks(|g: &Gallery, id| g.c3.marks.get(&id).copied().unwrap_or_default())
     .settings(KeySettings::default().wrap_rows(true))
+    .settings({
+        let mut auto = AutoscrollSettings::default();
+        auto.margin = strata_kit::slots::collection::row_inset(g.look());
+        auto
+    })
     .settings(SizeKeys::default_map().with_tenxer(d.tenxer))
     .on_intent(|g: &mut Gallery, intent, tx| {
         if let Some(intent) = g.c3.heard(intent)
@@ -786,14 +826,18 @@ pub fn view(g: &Gallery, cx: &mut Cx<Gallery>) -> El {
         Some(w) => col().w(w).h_full().min_h(0.0).child(body),
         None => col().w_full().h_full().min_h(0.0).child(body),
     };
-    col().key("c3-page").w_full().h_full().child(header).child(
+    let mut page = col().key("c3-page").w_full().h_full().child(header).child(
         col()
             .w_full()
             .grow(1.0)
             .min_h(0.0)
             .py(look.content.pad)
             .child(pane),
-    )
+    );
+    if let Some(shield) = Shield::new(|g: &Gallery| &g.c3.auto, |g: &Gallery| g.look()).build(g) {
+        page = page.child(shield);
+    }
+    page
 }
 
 pub fn on_key(g: &mut Gallery, key: &KeyEvent, tx: &mut Tx) -> bool {
@@ -812,6 +856,7 @@ pub fn on_key(g: &mut Gallery, key: &KeyEvent, tx: &mut Tx) -> bool {
 }
 
 pub fn poll(g: &mut Gallery, t: f64, tx: &mut Tx) -> bool {
+    let animations = g.look().animations;
     let d = &mut g.c3;
     d.clock = t;
     if d.coll.viewport().h > 0.0
@@ -823,6 +868,7 @@ pub fn poll(g: &mut Gallery, t: f64, tx: &mut Tx) -> bool {
             y,
         );
     }
+    let driven = d.auto.drive(t, animations, tx);
     let landed = d.deliver_details(t);
     if d.thumbs_on {
         d.work(t);
@@ -836,5 +882,5 @@ pub fn poll(g: &mut Gallery, t: f64, tx: &mut Tx) -> bool {
     let grid = grid();
     let ticked = grid.collection(g).tick(g, tx);
     grid.poll(g, tx);
-    landed || settled || ticked
+    landed || settled || ticked || driven
 }

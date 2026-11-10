@@ -476,4 +476,52 @@ mod c3 {
             }
         }
     }
+
+    /// browser/scrolling: "Scrollbars fade in on hover or scrolling and stay hidden at rest; the
+    /// trough strengthens on hover and while dragging." On the grid (C24b): its bar is hidden at
+    /// rest, shows as the grid scrolls, and its thumb drags the grid.
+    #[test]
+    fn the_grids_bar_shows_as_it_scrolls_and_its_thumb_drags_it() {
+        let mut rt = mount("c3-default-light");
+        run(&mut rt, 1.5);
+        let bar = |rt: &Runtime<Gallery>| {
+            rt.elements()
+                .into_iter()
+                .find(|e| !e.exiting && e.key.as_deref() == Some("c3-grid-bar"))
+                .expect("the grid's bar")
+        };
+        assert_eq!(bar(&rt).opacity, 0.0, "hidden at rest");
+        let v = rt.state.c3.coll.viewport();
+        rt.pointer_move(v.x + v.w / 2.0, v.y + v.h / 2.0);
+        rt.frame(FRAME);
+        rt.wheel(v.x + v.w / 2.0, v.y + v.h / 2.0, -100.0);
+        run(&mut rt, 0.1);
+        let scrolled = rt.state.c3.grid.feed().get().offset[1];
+        assert!(scrolled > 0.0);
+        assert!(bar(&rt).opacity > 0.0, "shown as it scrolls");
+        let thumb = rt
+            .elements()
+            .into_iter()
+            .find(|e| !e.exiting && e.path.ends_with("c3-grid-bar/trough/thumb"))
+            .expect("the thumb")
+            .visible;
+        let (tx, ty) = (thumb[0] + thumb[2] / 2.0, thumb[1] + thumb[3] / 2.0);
+        rt.pointer_move(tx, ty);
+        rt.frame(FRAME);
+        rt.pointer_down(tx, ty);
+        rt.frame(FRAME);
+        // Pictures barely overflows: the wheel took it to its end, so drag back up.
+        rt.pointer_move(tx, ty - 60.0);
+        rt.frame(FRAME);
+        rt.pointer_up(tx, ty - 60.0);
+        run(&mut rt, 0.1);
+        assert!(
+            rt.state.c3.grid.feed().get().offset[1] < scrolled,
+            "the drag scrolled back"
+        );
+        assert!(
+            rt.state.c3.coll.selection.is_empty(),
+            "and selected nothing"
+        );
+    }
 }

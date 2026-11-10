@@ -157,9 +157,10 @@
 //! - Drag and drop wiring (X2): folder tiles take C1e's drop zones; [`IconsGrid::tile_path`]
 //!   finds a tile's path at the current count.
 //! - Position restore's focus rules (C1e's Decisions: Rune can't move focus).
-//! - C24's scroll bar and autoscroll on the grid (C24b retrofits bars onto listings): a host
-//!   installing C24's `AutoscrollPointer` passes [`autoscroll_background`], which counts a
-//!   tile's blank space as the background.
+//! - Autoscroll on the grid: the host installs C24's `AutoscrollPointer` with
+//!   [`IconsGridState::feed`] and passes [`autoscroll_background`], which counts a tile's blank
+//!   space as the background. The grid draws C24's listing bar itself (C24b): the pointer over
+//!   the grid shows it, and [`IconsGridState::set_bar_mode`] shows it always.
 //!
 //! # Tests
 //!
@@ -217,6 +218,11 @@
 //! | pointer-intent: On an unselected entry, a drag from blank row space beside the filename starts a marquee | gallery `beside_a_short_name_is_blank_space_and_its_drawn_box_is_the_name` |
 //! | pointer-intent: On an unselected entry, a drag from the icon or rendered filename starts a file drag | `thumbnail-drag`, `name-drag`; gallery `beside_a_short_name…` (the name box's edge) |
 //! | rename: Clicking the name text of the only selected item again, after the double-click interval, opens the editor | `caption-hits` (on the name's box) |
+//! | scrolling: Middle-clicking the empty background or gutter of a scrollable… Icons… listing starts autoscroll | `autoscroll-gutter` (a tile's blank space) |
+//! | scrolling: Middle-clicking an entry row starts no autoscroll; the row's open-in-new-tab… runs instead | `autoscroll-tile` (a folder's thumbnail) |
+//! | scrolling: Scrollbars fade in on hover or scrolling and stay hidden at rest… | gallery `the_grids_bar_shows_as_it_scrolls_and_its_thumb_drags_it` |
+//! | scrolling: The vertical scrollbar of an Icons or List listing is 9 px wide, with a 7 px fully rounded thumb on a fainter trough | PNG golden `c3-bar` |
+//! | marquee: A press on a… scrollbar… keeps that control's own behavior and starts no marquee | `bar-press` (a trough press jumps, no band) |
 //!
 //! The thumbnail-size bullets on the popover, the notice, saving and the chooser, and every
 //! `folder-views` bullet but the one above, are Strata's policy (N/A here). Perf:
@@ -305,9 +311,10 @@ pub use tile::DETAILS;
 
 use crate::collection::element::{
     Collection, CollectionState, Ctx, PointerInput, Region, Roles, RowCx, RowState, entry_path,
+    viewport_path,
 };
 use crate::contract::{EntryId, EntrySource, Point};
-use crate::scroll::AutoscrollSettings;
+use crate::scroll::{AutoscrollSettings, BarLook};
 use crate::thumbnails::{Step, ThumbnailStore, ViewerId, Viewport};
 use tile::Built;
 
@@ -541,7 +548,8 @@ impl<S: 'static> IconsGrid<S> {
         }
         let list = collection_with(&shared, s).build(s);
         let grid_mut = shared.grid_mut.clone();
-        col()
+        let bar = (shared.parts)(s).grid.bar.clone();
+        let grid = col()
             .w_full()
             .h_full()
             .min_h(0.0)
@@ -555,7 +563,9 @@ impl<S: 'static> IconsGrid<S> {
                     grid.width.set(r[2]);
                 }
             })
-            .child(list)
+            .child(list);
+        // The pointer over the grid shows its scroll bar.
+        bar.area(grid)
     }
 
     /// Steps or resets the size: the host hears the request ([`IconsGrid::on_size`]), sets
@@ -612,36 +622,49 @@ fn collection_with<S: 'static>(shared: &Rc<Shared<S>>, s: &S) -> Collection<S> {
     let region_shared = shared.clone();
     let visible_shared = shared.clone();
     let wheel_shared = shared.clone();
-    (shared.base)(s)
-        .roles(Roles::GRID_CELLS)
-        .bare_items()
-        .row_height(move |_: &S, _: &Look| m.height)
-        .lines(GridLines::new(m))
-        .icon(tile::icon_slot(shared, b))
-        .label(tile::label_slot(shared, b))
-        .content(tile::content_slot(shared, b))
-        .regions(move |s: &S, index, local: Point| {
-            let p = (region_shared.parts)(s);
-            if index >= p.source.len() {
-                return Region::Gutter;
-            }
-            let entry = p.source.entry(index);
-            let cut = b.cut(&region_shared, s, entry.name);
-            let details_w = region_shared
-                .details
-                .as_ref()
-                .and_then(|(_, f)| {
-                    let rcx = row_cx(p.look, entry, index, &region_shared.key);
-                    f(s, &rcx)
-                })
-                .filter(|d| !d.is_empty())
-                .map_or(0.0, |d| {
-                    rune::text::measure(&d, &[], m.details_font, None).0 + 2.0 * m.caption_pad
-                });
-            regions::region(&m, b.cell_w, &cut, details_w, local)
-        })
-        .on_visible(move |s: &mut S, range| on_visible(&visible_shared, s, range))
-        .on_wheel(move |s: &mut S, e: WheelEvent, tx: &mut Tx| on_wheel(&wheel_shared, s, e, tx))
+    let base = (shared.base)(s);
+    let grid = (shared.parts)(s).grid;
+    let (bar, feed) = (grid.bar.clone(), grid.feed.clone());
+    let edge_bar = bar.clone();
+    let (bar_key, target) = (format!("{}-bar", shared.key), viewport_path(base.scope()));
+    let edge_shared = shared.clone();
+    base.on_scroll(move |p| {
+        feed.set(p);
+        bar.follow(p);
+    })
+    .edge(move |s: &S| {
+        let look = BarLook::listing((edge_shared.parts)(s).look);
+        Some(edge_bar.build::<S>(&bar_key, &target, look))
+    })
+    .roles(Roles::GRID_CELLS)
+    .bare_items()
+    .row_height(move |_: &S, _: &Look| m.height)
+    .lines(GridLines::new(m))
+    .icon(tile::icon_slot(shared, b))
+    .label(tile::label_slot(shared, b))
+    .content(tile::content_slot(shared, b))
+    .regions(move |s: &S, index, local: Point| {
+        let p = (region_shared.parts)(s);
+        if index >= p.source.len() {
+            return Region::Gutter;
+        }
+        let entry = p.source.entry(index);
+        let cut = b.cut(&region_shared, s, entry.name);
+        let details_w = region_shared
+            .details
+            .as_ref()
+            .and_then(|(_, f)| {
+                let rcx = row_cx(p.look, entry, index, &region_shared.key);
+                f(s, &rcx)
+            })
+            .filter(|d| !d.is_empty())
+            .map_or(0.0, |d| {
+                rune::text::measure(&d, &[], m.details_font, None).0 + 2.0 * m.caption_pad
+            });
+        regions::region(&m, b.cell_w, &cut, details_w, local)
+    })
+    .on_visible(move |s: &mut S, range| on_visible(&visible_shared, s, range))
+    .on_wheel(move |s: &mut S, e: WheelEvent, tx: &mut Tx| on_wheel(&wheel_shared, s, e, tx))
 }
 
 /// A [`RowCx`] for reading the host's details outside a build (the regions).

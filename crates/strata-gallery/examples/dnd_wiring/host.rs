@@ -181,6 +181,9 @@ pub struct Win {
     peek_ids: Ids,
     spring: Option<(SpringAt, f64, bool)>,
     out: Option<Out>,
+    /// Whether the drag over Columns' strip gaps is one the strip refuses (no highlight), and
+    /// if so whether it offers files (only those autoscroll).
+    strip_refused: Option<bool>,
     /// Whether the drag with this serial opens tabs (all its items are folders): asked on
     /// every motion over the strip, so the folders are checked once per drag.
     opens: Cell<Option<(u64, bool)>>,
@@ -260,6 +263,7 @@ impl Win {
             peek_ids: Ids::default(),
             spring: None,
             out: None,
+            strip_refused: None,
             opens: Cell::new(None),
             covered: false,
             layout: ColumnLayout::new(columns().iter().map(|c| c.id().clone())),
@@ -1351,13 +1355,25 @@ impl Win {
                 None => w.log("strip-miss", json!({})),
             }
         })
-        .on_hover(move |w: &mut Win, h, _, tx| {
-            if h != strata_components::contract::dnd::DropHover::Accepting {
+        // A refused drag over a gap stops there (no outer target takes it) and keeps
+        // driving the autoscroll and the column wash, with no drop highlight.
+        .on_hover(move |w: &mut Win, h, offer: &DropOffer, tx| {
+            use strata_components::contract::dnd::DropHover;
+            w.strip_refused =
+                (h == DropHover::Rejecting).then(|| offer.mime_types.iter().any(|m| m == URI_LIST));
+            if h == DropHover::Left {
                 w.strip_over(tab, None, tx);
             }
         })
+        .on_reject(move |w: &mut Win, _, tx| {
+            w.strip_refused = None;
+            w.strip_over(tab, None, tx);
+        })
         .on_move(move |w: &mut Win, p, tx| {
-            w.strip_over(tab, Some(Point::new(p.window_x, p.window_y)), tx);
+            // Only a file drag autoscrolls (column-autoscroll).
+            if w.strip_refused != Some(false) {
+                w.strip_over(tab, Some(Point::new(p.window_x, p.window_y)), tx);
+            }
         })
     }
 
@@ -1378,9 +1394,11 @@ impl Win {
         Win::columns_view(tab, &self.wiring).drop_target_at(self, at)
     }
 
-    /// Where a drag over the strip's gaps is now (`None`: it left, dropped or was refused).
+    /// Where a drag over the strip's gaps is now, taken or refused (`None`: it left or dropped).
     fn strip_over(&mut self, tab: TabId, at: Option<Point>, tx: &mut Tx) {
-        let target = at.and_then(|at| self.strip_target(tab, at));
+        let target = at
+            .filter(|_| self.strip_refused.is_none())
+            .and_then(|at| self.strip_target(tab, at));
         if let Pane::Columns { state, .. } = &mut self.tab_mut(tab).pane {
             let mut wake = state.drag_over(at);
             for depth in 0..state.len() {

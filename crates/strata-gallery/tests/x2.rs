@@ -1041,6 +1041,104 @@ mod x2 {
         demo.quit();
     }
 
+    /// column-autoscroll and List's edge scroll follow a file drag every target refuses, as
+    /// Strata's motion controller does: `Deep/a` held at the strip's left edge, over columns
+    /// inside it (each refuses it), scrolls the strip; `Music/track00.ogg` held at the bottom
+    /// edge of List showing Music (its own folder) scrolls the list.
+    fn refused_drags_autoscroll(display: Display) {
+        let s = Session::start();
+        let demo = Demo::start(&s, display, false, false);
+        let (peer, from) = peer_beside(&s, display, &demo);
+        let root = demo.root.clone();
+        select_tab(&demo, "main", 1);
+        for p in ["Deep", "Deep/a", "Deep/a/b", "Deep/a/b/c", "Deep/a/b/c/d"] {
+            demo.command(
+                "main",
+                json!({ "cmd": "open", "tab": 1, "path": p }),
+                "navigate",
+            );
+        }
+        let strip = demo.at(&s, "main", json!({ "tab": 1, "pane": true }), 0.0, 0.5);
+        let first = || {
+            demo.locate(
+                &s,
+                "main",
+                &[json!({ "name": "c0", "tab": 1, "column": 0 })],
+            )["c0"][0]
+        };
+        let before = first();
+        let mark = rest_on(
+            &s,
+            &demo,
+            &peer,
+            &from,
+            &[files(&root, &["Deep/a"])],
+            (strip.0 + 10.0, strip.1),
+            Duration::from_millis(1500),
+        );
+        let after = first();
+        assert!(
+            after > before + 20.0,
+            "a refused drag scrolls the strip: {before} → {after}"
+        );
+        assert!(!demo.saw(mark, Duration::ZERO, |v| v["ev"] == "transfer"));
+        // List, in Music: the top row moves on under a refused drag at the bottom edge.
+        select_tab(&demo, "main", 2);
+        demo.command(
+            "main",
+            json!({ "cmd": "open", "tab": 2, "path": "Music" }),
+            "navigate",
+        );
+        let w = demo.window(&s, "main");
+        let pane = demo.locate(
+            &s,
+            "main",
+            &[json!({ "name": "p", "tab": 2, "pane": true })],
+        )["p"];
+        let (px, py, ph) = (pane[0], pane[1], pane[3]);
+        let top_row = || {
+            let v = demo.command(
+                "main",
+                json!({ "cmd": "pick", "x": px + 60.0 - w.content.x, "y": py + 40.0 - w.content.y }),
+                "picked",
+            );
+            let path = v["path"].as_str().unwrap_or_default().to_owned();
+            path.split('/')
+                .find_map(|seg| seg.strip_prefix("row-")?.parse::<u64>().ok())
+                .unwrap_or_else(|| panic!("no row at the top: {path}"))
+        };
+        let before = top_row();
+        let mark = rest_on(
+            &s,
+            &demo,
+            &peer,
+            &from,
+            &[files(&root, &["Music/track00.ogg"])],
+            (px + 120.0, py + ph - 8.0),
+            Duration::from_millis(1500),
+        );
+        std::thread::sleep(Duration::from_millis(300));
+        let after = top_row();
+        assert!(
+            after > before,
+            "a refused drag scrolls List: row {before} → {after}"
+        );
+        assert!(!demo.saw(mark, Duration::ZERO, |v| v["ev"] == "transfer"));
+        demo.quit();
+    }
+
+    #[test]
+    #[ignore = "needs a private session: mise run test-platform"]
+    fn wayland_refused_drags_autoscroll() {
+        refused_drags_autoscroll(Display::Wayland);
+    }
+
+    #[test]
+    #[ignore = "needs a private session: mise run test-platform"]
+    fn x11_refused_drags_autoscroll() {
+        refused_drags_autoscroll(Display::X11);
+    }
+
     #[test]
     #[ignore = "needs a private session: mise run test-platform"]
     fn wayland_springs_and_column_autoscroll() {

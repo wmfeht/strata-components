@@ -172,7 +172,7 @@ enum Backend {
 }
 
 /// Runs at [`Transfer::shutdown`], on the UI thread, before anything is torn down.
-#[cfg(any(feature = "dnd", feature = "clipboard"))]
+#[cfg(any(feature = "dnd", feature = "clipboard", feature = "foreign-parent"))]
 pub(crate) type BeforeShutdown = Box<dyn FnOnce(&Transfer) + Send>;
 
 struct Hub {
@@ -185,7 +185,7 @@ struct Hub {
     /// What modules built on the substrate (P1, P2) must do first: tear down their own objects
     /// on winit's display, undo properties they set on the app's windows, hand a selection to
     /// a clipboard manager.
-    #[cfg(any(feature = "dnd", feature = "clipboard"))]
+    #[cfg(any(feature = "dnd", feature = "clipboard", feature = "foreign-parent"))]
     before_shutdown: Mutex<Vec<BeforeShutdown>>,
 }
 
@@ -247,7 +247,7 @@ impl Transfer {
             windows,
             subs,
             backend,
-            #[cfg(any(feature = "dnd", feature = "clipboard"))]
+            #[cfg(any(feature = "dnd", feature = "clipboard", feature = "foreign-parent"))]
             before_shutdown: Mutex::new(Vec::new()),
         });
         *hub = Some(h.clone());
@@ -446,7 +446,7 @@ impl Transfer {
             return Ok(false);
         };
         drop(slot);
-        #[cfg(any(feature = "dnd", feature = "clipboard"))]
+        #[cfg(any(feature = "dnd", feature = "clipboard", feature = "foreign-parent"))]
         {
             let hooks = std::mem::take(&mut *lock(&hub.before_shutdown));
             let t = Transfer(hub.clone());
@@ -469,14 +469,18 @@ impl Transfer {
     }
 }
 
-/// What P1 (`dnd`) builds on: the connection on winit's display and the X11 actor.
-#[cfg(feature = "dnd")]
+/// What P1 (`dnd`) and P4 (`foreign-parent`) build on: the connection on winit's display.
+#[cfg(any(feature = "dnd", feature = "foreign-parent"))]
 impl Transfer {
     /// The Wayland connection on winit's display, if bound.
     pub(crate) fn shared_conn(&self) -> Option<&Arc<wayland::Conn>> {
         self.shared()
     }
+}
 
+/// What P1 (`dnd`) builds on: the X11 actor.
+#[cfg(feature = "dnd")]
+impl Transfer {
     /// The X11 side, on X11.
     pub(crate) fn x11(&self) -> Option<&x11::X11> {
         match &self.0.backend {
@@ -486,8 +490,9 @@ impl Transfer {
     }
 }
 
-/// What P1 (`dnd`) and P2 (`clipboard`) build on: a hook before the teardown.
-#[cfg(any(feature = "dnd", feature = "clipboard"))]
+/// What P1 (`dnd`), P2 (`clipboard`) and P4 (`foreign-parent`) build on: a hook before the
+/// teardown.
+#[cfg(any(feature = "dnd", feature = "clipboard", feature = "foreign-parent"))]
 impl Transfer {
     /// Runs `f` at [`Transfer::shutdown`], on the UI thread, before the substrate tears down.
     pub(crate) fn before_shutdown(&self, f: BeforeShutdown) {

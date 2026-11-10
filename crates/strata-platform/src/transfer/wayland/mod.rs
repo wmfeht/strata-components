@@ -182,10 +182,10 @@ impl State {
     /// The extension state of type `T`, made with `Default` on first use. For other modules'
     /// handlers on this queue; see [`Conn::with_globals`].
     #[cfg_attr(
-        not(feature = "dnd"),
+        not(any(feature = "dnd", feature = "foreign-parent")),
         expect(
             dead_code,
-            reason = "the extension point for P1 and P4; only P1 (dnd) uses it yet"
+            reason = "the extension point for P1 (dnd) and P4 (foreign-parent)"
         )
     )]
     pub(crate) fn extension<T: Any + Send + Default>(&mut self) -> &mut T {
@@ -522,10 +522,10 @@ impl Conn {
     /// objects and keeps its state in [`State::extension`]. None after shutdown, or off the
     /// UI thread on winit's display.
     #[cfg_attr(
-        not(feature = "dnd"),
+        not(any(feature = "dnd", feature = "foreign-parent")),
         expect(
             dead_code,
-            reason = "the extension point for P1 and P4; only P1 (dnd) uses it yet"
+            reason = "the extension point for P1 (dnd) and P4 (foreign-parent)"
         )
     )]
     pub(crate) fn with_globals<R>(
@@ -753,9 +753,9 @@ impl State {
     }
 }
 
-#[cfg(feature = "dnd")]
+#[cfg(any(feature = "dnd", feature = "foreign-parent"))]
 impl Conn {
-    /// Sends what was queued. Requests P1 makes through [`Conn::with_globals`] need it.
+    /// Sends what was queued. Requests P1 and P4 make through [`Conn::with_globals`] need it.
     pub(crate) fn flush(&self) {
         self.home.flush();
     }
@@ -780,6 +780,58 @@ impl Conn {
         }
         let backend = self.home.backend.upgrade().ok_or(Error::Shutdown)?;
         display::with_surface(&Connection::from_backend(backend), window, f)
+    }
+}
+
+/// What P4 (`foreign-parent`) builds on: a round trip, to learn at once whether the compositor
+/// destroyed an import.
+#[cfg(feature = "foreign-parent")]
+impl Conn {
+    /// Sends what is queued, waits for the compositor to answer a `wl_display.sync`, and runs
+    /// every handler on the queue meanwhile, P0's included: their events reach subscribers as
+    /// [`Conn::dispatch`]'s do. Winit's display only, on the UI thread, never inside
+    /// [`Conn::with_globals`] (both lock the state). It blocks the UI thread for one round trip.
+    ///
+    /// The reader thread may hold a read intent meanwhile: libwayland's read protocol lets two
+    /// threads prepare and read at once, and the reader never waits on the UI thread while it
+    /// holds one (see `reader`).
+    pub(crate) fn roundtrip(&self) -> Result<(), Error> {
+        if self.home.ui.is_none() {
+            return Err(Error::Refused("a round trip is for winit's display"));
+        }
+        if !self.home.here() {
+            return Err(Error::Refused(ON_UI));
+        }
+        if self.failed.load(Ordering::Acquire) {
+            return Err(Error::Connection("the connection failed".into()));
+        }
+        let (events, dead) = {
+            let mut queue = lock(&self.queue);
+            let Some(queue) = queue.as_mut() else {
+                return Err(Error::Shutdown);
+            };
+            let mut state = lock(&self.state);
+            let result = queue.roundtrip(&mut state);
+            let dead = match result {
+                Err(e) => Some(e.to_string()),
+                Ok(_) => self
+                    .home
+                    .backend
+                    .upgrade()
+                    .and_then(|b| b.last_error())
+                    .map(|e| e.to_string()),
+            };
+            (std::mem::take(&mut state.events), dead)
+        };
+        self.subs.emit(events);
+        self.gate.turned();
+        match dead {
+            Some(message) => {
+                self.report_failure(message.clone());
+                Err(Error::Connection(message))
+            }
+            None => Ok(()),
+        }
     }
 }
 

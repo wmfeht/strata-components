@@ -5,6 +5,7 @@ use std::cell::Cell;
 use super::column::ColumnId;
 use super::layout::DropSite;
 use crate::contract::Rect;
+use crate::scroll::{Bar, BarMode, ScrollFeed};
 
 /// Where the columns menu is open.
 ///
@@ -55,6 +56,12 @@ pub struct ListTableState {
     pub(super) suppress_press: Cell<bool>,
     pub(super) resize: Option<Resize>,
     pub(super) menu: Option<MenuAt>,
+    /// The rows' scroll bar (C24) and where the rows stand.
+    pub(super) bar: Bar,
+    pub(super) feed: ScrollFeed,
+    /// The sideways scroll's bar and where it stands.
+    pub(super) sideways_bar: Bar,
+    pub(super) sideways_feed: ScrollFeed,
 }
 
 impl ListTableState {
@@ -111,6 +118,22 @@ impl ListTableState {
             active: true,
             site,
         });
+    }
+
+    /// Where the rows stand: give it to C24's `AutoscrollPointer::new` for the collection.
+    pub fn feed(&self) -> &ScrollFeed {
+        &self.feed
+    }
+
+    /// Where the sideways scroll stands (see [`super::ListTable::sideways_target`]).
+    pub fn sideways_feed(&self) -> &ScrollFeed {
+        &self.sideways_feed
+    }
+
+    /// When both scroll bars show: overlay (Strata's, the default) or always.
+    pub fn set_bar_mode(&mut self, mode: BarMode) {
+        self.bar.set_mode(mode);
+        self.sideways_bar.set_mode(mode);
     }
 
     /// The column being resized and its width now, in base points.

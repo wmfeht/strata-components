@@ -9,7 +9,9 @@
 //! column layout and how many changes it heard (`c4-layout`), the widths (`c4-widths`) and the
 //! last intent (`c4-intent`). The page stands in for Strata's policy: it sorts on a sort
 //! intent (folders first), groups by its fake file types (Folder first, then A–Z, Other last),
-//! and keeps the layout and widths it hears.
+//! and keeps the layout and widths it hears. C24's autoscroll runs on the rows and the
+//! sideways scroll (the shield mounts in the root layer), and `c4-bars` shows both of the
+//! table's scroll bars in a pane narrower than its columns.
 //!
 //! | Key | Does |
 //! | --- | --- |
@@ -33,6 +35,9 @@ use strata_components::contract::{EntryId, EntryKind, EntrySource, ListEntry, Li
 use strata_components::list_table::{
     Cell, Column, ColumnId, ColumnLayout, ColumnWidths, DropSite, LayoutChange, ListParts,
     ListTable, ListTableState, MenuAt, SortDir, SortIntent, SortShown, groups_from_runs,
+};
+use strata_components::scroll::{
+    Autoscroll, AutoscrollPointer, AutoscrollSettings, BarMode, Shield, Target,
 };
 
 use crate::{Gallery, Scene};
@@ -309,17 +314,22 @@ pub struct Demo {
     pub last_layout: String,
     pub intent: String,
     pub polls: u32,
+    /// The window's autoscroll (C24), on the table's rows and its sideways scroll.
+    pub auto: Autoscroll,
 }
 
 impl Default for Demo {
     fn default() -> Self {
         let mut coll = CollectionState::new();
-        install(&mut coll.controllers);
+        let table = ListTableState::new();
+        let auto = Autoscroll::new();
+        install(&mut coll.controllers, &auto, &table);
         Self {
             folder: Folder::Documents,
             listing: ListSource::new(Vec::new()),
             coll,
-            table: ListTableState::new(),
+            table,
+            auto,
             layout: ColumnLayout::new(columns().iter().map(|c| c.id().clone())),
             widths: ColumnWidths::new(),
             field: Field::Name,
@@ -339,9 +349,23 @@ impl Default for Demo {
     }
 }
 
-fn install(controllers: &mut Controllers) {
+/// C1b's pointer intent behind C24's autoscroll, which moves the rows and the table's sideways
+/// scroll (`{SCOPE}-scroll`, as `ListTable::sideways_target` names it), C1c's keys and C1d's
+/// marquee.
+fn install(controllers: &mut Controllers, auto: &Autoscroll, table: &ListTableState) {
     controllers.pointer = Some(Box::new(
-        strata_components::collection::pointer::PointerIntent::new(),
+        AutoscrollPointer::new(
+            Some(Box::new(
+                strata_components::collection::pointer::PointerIntent::new(),
+            )),
+            auto.clone(),
+            SCOPE,
+            table.feed().clone(),
+        )
+        .sideways(Target::horizontal(
+            format!("{SCOPE}-scroll"),
+            table.sideways_feed().clone(),
+        )),
     ));
     controllers.keyboard =
         Some(Box::<strata_components::collection::keyboard::Keyboard>::default());
@@ -464,6 +488,11 @@ impl Demo {
                 Some(id) => format!("Menu on {}", self.name_of(id)),
                 None => "Menu on the background".to_owned(),
             },
+            Intent::OpenInNew { id, window } => format!(
+                "Opened {} in a new {}",
+                self.name_of(id),
+                if window { "window" } else { "tab" }
+            ),
             Intent::Edge(d) => format!("Edge {d:?}"),
             _ => "Other".to_owned(),
         };
@@ -584,6 +613,17 @@ fn hundred_k(g: &mut Gallery, dark: bool) {
     scene(g, dark, Folder::Archive);
 }
 
+/// A narrow pane over 600 rows, scrolled both ways, with both bars shown (`BarMode::Always`):
+/// the rows' bar at the pane's visible right edge, not the columns'.
+fn bars(g: &mut Gallery, dark: bool) {
+    let h = strata_kit::slots::list::row_height(g.look());
+    let d = scene(g, dark, Folder::Mixed);
+    d.pane = Some(480.0);
+    d.scroll_x = Some(160.0);
+    d.scroll_y = Some(100.0 * h);
+    d.table.set_bar_mode(BarMode::Always);
+}
+
 fn empty(g: &mut Gallery, dark: bool) {
     scene(g, dark, Folder::Empty);
 }
@@ -609,6 +649,8 @@ pub const SCENES: &[Scene] = &[
     ("c4-hundred-k-dark", |g| hundred_k(g, true)),
     ("c4-empty-light", |g| empty(g, false)),
     ("c4-empty-dark", |g| empty(g, true)),
+    ("c4-bars-light", |g| bars(g, false)),
+    ("c4-bars-dark", |g| bars(g, true)),
 ];
 
 /// Scenes for review with `--scene` only, kept out of the goldens.
@@ -667,6 +709,13 @@ fn marquee_settings() -> strata_components::collection::marquee::MarqueeSettings
     strata_components::collection::marquee::MarqueeSettings::default()
 }
 
+/// The page's collection with autoscroll's settings, whose row margin is the look's.
+pub fn base(g: &Gallery) -> Collection<Gallery> {
+    let mut auto = AutoscrollSettings::default();
+    auto.margin = strata_kit::slots::collection::row_inset(g.look());
+    collection().settings(auto)
+}
+
 fn label(key: &str, t: String, g: &Gallery) -> El {
     let kit = g.kit();
     text(t).key(key).font(kit.ty.ui).color(kit.c.text_muted)
@@ -708,7 +757,7 @@ pub fn view(g: &Gallery, cx: &mut Cx<Gallery>) -> El {
                 .child(label("c4-widths", d.widths_label(), g)),
         );
     let body = if d.shown {
-        table.build(g, collection().name(d.folder.title()), &mut layer)
+        table.build(g, base(g).name(d.folder.title()), &mut layer)
     } else {
         text("Icons view")
             .key("c4-elsewhere")
@@ -726,6 +775,9 @@ pub fn view(g: &Gallery, cx: &mut Cx<Gallery>) -> El {
             .py(look.content.pad)
             .child(pane),
     );
+    if let Some(shield) = Shield::new(|g: &Gallery| &g.c4.auto, |g: &Gallery| g.look()).build(g) {
+        layer.push(shield);
+    }
     rune_kit::root(page, layer)
 }
 
@@ -747,6 +799,8 @@ pub fn on_key(g: &mut Gallery, key: &KeyEvent, tx: &mut Tx) -> bool {
             d.shown = !d.shown;
             if !d.shown {
                 d.table.reset();
+                // The host stops the autoscroll of a listing it hides.
+                d.auto.stop_gone(Some(SCOPE));
             }
         }
         _ => return false,
@@ -774,9 +828,11 @@ pub fn poll(g: &mut Gallery, t: f64, tx: &mut Tx) -> bool {
             );
         }
     }
+    let animations = g.look().animations;
+    let driven = g.c4.auto.drive(t, animations, tx);
     if !g.c4.shown {
-        return false;
+        return driven;
     }
-    let base = collection();
-    table().collection(g, base).tick(g, tx)
+    let base = base(g);
+    table().collection(g, base).tick(g, tx) | driven
 }

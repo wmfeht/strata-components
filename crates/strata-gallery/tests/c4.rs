@@ -189,4 +189,46 @@ mod c4 {
             over.join("\n")
         );
     }
+
+    /// browser/scrolling: "Moving the pointer away from the anchor scrolls toward it, faster the
+    /// further away, on both axes the listing can scroll." In List the axes are the rows' and
+    /// the table's sideways scroll (`AutoscrollPointer::sideways`, which this drives end to end).
+    #[test]
+    fn autoscroll_in_a_narrow_list_moves_the_rows_and_the_columns() {
+        use rune::PointerButton;
+        let mut rt = mount("c4-bars-light");
+        rt.update(|_, tx| tx.scroll_to_x(format!("{SCOPE}-scroll"), 0.0));
+        run(&mut rt, 0.2);
+        let at = |rt: &Runtime<Gallery>| {
+            let t = &rt.state.c4.table;
+            (t.sideways_feed().get().offset[0], t.feed().get().offset[1])
+        };
+        let (x0, y0) = at(&rt);
+        assert_eq!(x0, 0.0);
+        let v = rt.state.c4.coll.viewport();
+        let (ax, ay) = (v.x + 2.0, v.y + v.h / 2.0);
+        rt.pointer_move(ax, ay);
+        rt.frame(FRAME);
+        rt.button_down(ax, ay, PointerButton::Middle);
+        rt.frame(FRAME);
+        rt.button_up(ax, ay, PointerButton::Middle);
+        rt.frame(FRAME);
+        assert!(
+            rt.state.c4.auto.active(),
+            "the row's margin starts autoscroll"
+        );
+        rt.pointer_move(ax + 200.0, ay + 200.0);
+        run(&mut rt, 0.5);
+        let (x1, y1) = at(&rt);
+        assert!(
+            x1 > x0 && y1 > y0,
+            "both axes moved: ({x0}, {y0}) to ({x1}, {y1})"
+        );
+        rt.key(KeyEvent {
+            key: Key::Escape,
+            mods: Mods::default(),
+        });
+        run(&mut rt, 0.2);
+        assert!(!rt.state.c4.auto.active());
+    }
 }

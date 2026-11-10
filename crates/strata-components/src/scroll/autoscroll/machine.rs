@@ -28,10 +28,10 @@ pub enum Stop {
 /// Used by: C24's collection adapter, C4 (its sideways viewport), hosts.
 #[derive(Clone, Debug)]
 pub struct Target {
-    pub(super) path: String,
-    pub(super) feed: ScrollFeed,
-    pub(super) x: bool,
-    pub(super) y: bool,
+    pub(crate) path: String,
+    pub(crate) feed: ScrollFeed,
+    pub(crate) x: bool,
+    pub(crate) y: bool,
 }
 
 impl Target {
@@ -119,6 +119,9 @@ pub(super) struct Run {
     last: Option<f64>,
     /// The last step moved a viewport (and asked for the next frame).
     moving: bool,
+    /// Which targets the last step moved, one per target: a target that stopped (at its end, or
+    /// in the dead zone on its axes) is stopped once, not on every frame another moves.
+    moved: Vec<bool>,
 }
 
 #[derive(Debug, Default)]
@@ -144,7 +147,9 @@ impl Machine {
         if !matches!(self.state, State::Idle) || !start.targets.iter().any(Target::scrollable) {
             return false;
         }
+        let moved = vec![false; start.targets.len()];
         self.state = State::Running(Run {
+            moved,
             owner: start.owner,
             anchor: start.anchor,
             pointer: start.anchor,
@@ -263,17 +268,19 @@ impl Run {
             .clamp(1.0 / 240.0, 0.1);
         let spring = self.settings.glide;
         let mut moved = false;
-        for (t, (vx, vy)) in self.targets.iter().zip(self.speeds()) {
+        let speeds = self.speeds();
+        for ((t, (vx, vy)), was) in self.targets.iter().zip(speeds).zip(self.moved.iter_mut()) {
             let p = t.feed.get();
             let [ox, oy] = p.offset;
             if vx == 0.0 && vy == 0.0 {
                 // Into the dead zone or at an end: stop the glide where the view is, as
-                // Strata's step does nothing then.
-                if self.moving {
+                // Strata's step does nothing then; once, as it stops.
+                if std::mem::take(was) {
                     out.jump(&t.path, ox, oy);
                 }
                 continue;
             }
+            *was = true;
             moved = true;
             let to = |o: f32, v: f32, max: f32| {
                 let ahead = if animations {
@@ -303,12 +310,9 @@ impl Run {
         }
     }
 
-    /// Stops every viewport where it is.
+    /// Stops every viewport that is moving where it is.
     fn halt(&self, out: &mut dyn Out) {
-        if !self.moving {
-            return;
-        }
-        for t in &self.targets {
+        for (t, _) in self.targets.iter().zip(&self.moved).filter(|(_, m)| **m) {
             let [x, y] = t.feed.get().offset;
             out.jump(&t.path, x, y);
         }

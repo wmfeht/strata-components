@@ -52,9 +52,9 @@ struct Open {
     place: Placement,
     /// The folder's row reports the pointer resting on it.
     row: bool,
-    /// The sideways scroll's offset as the peek opened ([`FolderPeek::sideways`]).
+    /// The sideways scroll's offset as the peek opened ([`FolderPeek::follow_sideways`]).
     ///
-    /// [`FolderPeek::sideways`]: super::FolderPeek::sideways
+    /// [`FolderPeek::follow_sideways`]: super::FolderPeek::follow_sideways
     sideways_at: f32,
 }
 
@@ -62,9 +62,9 @@ struct Open {
 /// run.
 #[derive(Clone)]
 pub(super) struct Lives {
-    /// The sideways scroll's offset, where the host follows one ([`FolderPeek::sideways`]).
+    /// The sideways scroll's offset, where the host follows one ([`FolderPeek::follow_sideways`]).
     ///
-    /// [`FolderPeek::sideways`]: super::FolderPeek::sideways
+    /// [`FolderPeek::follow_sideways`]: super::FolderPeek::follow_sideways
     pub(super) sideways: Live<f32>,
     /// The card's opacity: 0 from the frame a sideways scroll moves its folder until the peek
     /// closes, so the card is never drawn where it no longer belongs.

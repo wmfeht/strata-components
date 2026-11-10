@@ -189,4 +189,96 @@ mod c4 {
             over.join("\n")
         );
     }
+
+    /// browser/scrolling: "Moving the pointer away from the anchor scrolls toward it, faster the
+    /// further away, on both axes the listing can scroll." In List the axes are the rows' and
+    /// the table's sideways scroll (`AutoscrollPointer::sideways`, which this drives end to end).
+    #[test]
+    fn autoscroll_in_a_narrow_list_moves_the_rows_and_the_columns() {
+        use rune::PointerButton;
+        let mut rt = mount("c4-bars-light");
+        rt.update(|_, tx| tx.scroll_to_x(format!("{SCOPE}-scroll"), 0.0));
+        run(&mut rt, 0.2);
+        let at = |rt: &Runtime<Gallery>| {
+            let t = &rt.state.c4.table;
+            (t.sideways_feed().get().offset[0], t.feed().get().offset[1])
+        };
+        let (x0, y0) = at(&rt);
+        assert_eq!(x0, 0.0);
+        let v = rt.state.c4.coll.viewport();
+        let (ax, ay) = (v.x + 2.0, v.y + v.h / 2.0);
+        rt.pointer_move(ax, ay);
+        rt.frame(FRAME);
+        rt.button_down(ax, ay, PointerButton::Middle);
+        rt.frame(FRAME);
+        rt.button_up(ax, ay, PointerButton::Middle);
+        rt.frame(FRAME);
+        assert!(
+            rt.state.c4.auto.active(),
+            "the row's margin starts autoscroll"
+        );
+        rt.pointer_move(ax + 200.0, ay + 200.0);
+        run(&mut rt, 0.5);
+        let (x1, y1) = at(&rt);
+        assert!(
+            x1 > x0 && y1 > y0,
+            "both axes moved: ({x0}, {y0}) to ({x1}, {y1})"
+        );
+        rt.key(KeyEvent {
+            key: Key::Escape,
+            mods: Mods::default(),
+        });
+        run(&mut rt, 0.2);
+        assert!(!rt.state.c4.auto.active());
+    }
+
+    /// The rows' bar's band, as drawn.
+    fn rows_bar(rt: &Runtime<Gallery>) -> ElementInfo {
+        element(rt, &format!("{SCOPE}-bar")).expect("the rows' bar")
+    }
+
+    /// browser/scrolling: "Scrollbars fade in on hover or scrolling and stay hidden at rest".
+    /// A thumb drag cut off by a view switch (Ctrl+1 hides the table) leaves the bar hidden at
+    /// rest once the table is back: Rune tells the removed bar nothing (Rune draft R-C4-2), so
+    /// `ListTableState::reset` lets go of it (review round 1, SF1).
+    #[test]
+    fn a_bar_drag_cut_off_by_a_view_switch_leaves_the_bar_hidden_at_rest() {
+        let ctrl_1 = KeyEvent {
+            key: Key::Command('1'),
+            mods: Mods {
+                cmd: true,
+                ..Mods::default()
+            },
+        };
+        let mut rt = mount("c4-hundred-k-light");
+        let v = rt.state.c4.coll.viewport();
+        rt.pointer_move(v.x + v.w / 2.0, v.y + v.h / 2.0);
+        rt.frame(FRAME);
+        rt.wheel(v.x + v.w / 2.0, v.y + v.h / 2.0, -100.0);
+        run(&mut rt, 0.1);
+        let [x, y, w, h] = element(&rt, &format!("{SCOPE}-bar/trough/thumb"))
+            .expect("the thumb")
+            .visible;
+        let (tx, ty) = (x + w / 2.0, y + h / 2.0);
+        rt.pointer_move(tx, ty);
+        rt.frame(FRAME);
+        rt.pointer_down(tx, ty);
+        rt.frame(FRAME);
+        rt.pointer_move(tx, ty + 30.0);
+        rt.frame(FRAME);
+        rt.key(ctrl_1.clone());
+        run(&mut rt, 0.2);
+        assert!(!rt.state.c4.shown);
+        rt.pointer_up(tx, ty + 30.0);
+        run(&mut rt, 0.2);
+        rt.pointer_move(5.0, 5.0);
+        rt.key(ctrl_1);
+        run(&mut rt, 3.0);
+        assert!(rt.state.c4.shown);
+        assert_eq!(
+            rows_bar(&rt).opacity,
+            0.0,
+            "the rows' bar is hidden at rest"
+        );
+    }
 }

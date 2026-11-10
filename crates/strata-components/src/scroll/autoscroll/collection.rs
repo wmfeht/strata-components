@@ -99,12 +99,11 @@ impl PointerController for AutoscrollPointer {
             self.taken = false;
             if self.auto.active() {
                 // The shield takes every press while autoscroll runs; this is a host without
-                // one. Stop dead where the view is, and keep the press from the controller.
-                self.auto.stop_gone(None);
-                cx.emit(Effect::ScrollTo {
-                    y: cx.visible.y,
-                    glide: false,
-                });
+                // one. Stop dead where the views are on the next drive, which has the
+                // transaction to stop every target's glide (another collection's, a sideways
+                // scroll's), and keep the press from the controller.
+                self.auto.request_stop();
+                cx.emit(Effect::WakeAfter(std::time::Duration::ZERO));
                 cx.repaint();
                 self.taken = true;
                 return Flow::Handled;
@@ -124,6 +123,13 @@ impl PointerController for AutoscrollPointer {
                 };
                 if self.auto.start(start, settings) {
                     cx.repaint();
+                    self.taken = true;
+                    return Flow::Handled;
+                }
+                if input.hit.index.is_some() {
+                    // Background beside or within an entry's row (its margin, a tile's blank
+                    // space) in a listing that fits: Strata's start declines and the press
+                    // reaches no row there, so it does nothing (no new tab).
                     self.taken = true;
                     return Flow::Handled;
                 }

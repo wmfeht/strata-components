@@ -147,8 +147,14 @@ impl<S: 'static> Shield<S> {
             }
         };
         let mover = auto.clone();
+        // The presses are a layer's under the dialog, not the dialog's own: a secondary-press
+        // handler on the dialog would give it a context-menu action for assistive technology.
+        let window = self
+            .presses(col())
+            .pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
+            .a11y_hidden();
         Some(
-            self.presses(col())
+            col()
                 .key(KEY)
                 .pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
                 // A modal reads as a dialog, and hides the window behind it from assistive
@@ -161,6 +167,7 @@ impl<S: 'static> Shield<S> {
                         tx.wake_after(Duration::ZERO);
                     }
                 })
+                .child(window)
                 .child(listing),
         )
     }

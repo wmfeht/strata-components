@@ -2,8 +2,11 @@
 //! the scripts check stay there; these check state the tree doesn't show (a width mid-drag, the
 //! cursor shape, base units), two tables over one layout, and assistive technology's press.
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use rune::runtime::ElementInfo;
-use rune::{Cursor, Cx, El, Env, Runtime, col};
+use rune::{Cursor, Cx, El, Env, Runtime, WheelEvent, col};
 use strata_kit::look::Look;
 use strata_kit::shape::LookParams;
 
@@ -30,6 +33,8 @@ struct Host {
     layouts: Vec<LayoutChange>,
     widths_heard: Vec<ColumnWidths>,
     shown: bool,
+    /// What two host followers of each table's sideways scroll heard: (follower, pane, x).
+    sideways: Rc<RefCell<Vec<(u8, usize, f32)>>>,
 }
 
 fn types(i: u64) -> &'static str {
@@ -107,6 +112,7 @@ impl Host {
             layouts: Vec::new(),
             widths_heard: Vec::new(),
             shown: true,
+            sideways: Rc::default(),
         }
     }
 }
@@ -134,6 +140,14 @@ fn table(i: usize) -> ListTable<Host> {
     .on_widths(move |s: &mut Host, widths, _| {
         s.panes[i].widths = widths.clone();
         s.widths_heard.push(widths);
+    })
+    .follow_sideways(move |s: &Host| {
+        let log = s.sideways.clone();
+        move |p: rune::ScrollPos| log.borrow_mut().push((1, i, p.offset[0]))
+    })
+    .follow_sideways(move |s: &Host| {
+        let log = s.sideways.clone();
+        move |p: rune::ScrollPos| log.borrow_mut().push((2, i, p.offset[0]))
     })
 }
 
@@ -586,4 +600,59 @@ fn an_assistive_press_after_a_release_over_a_clipped_heading_sorts() {
     assert!(rt.state.sorts.is_empty());
     at_press(&mut rt, "size");
     assert_eq!(rt.state.sorts.len(), 1, "the press on Size sorts");
+}
+
+/// marquee: "A press on a button, text entry, label, image, slider, scrollbar, or sidebar place
+/// keeps that control's own behavior and starts no marquee" (C24b: the table's bars). One
+/// sideways scroll reaches the table's own bars and every host follower in the same frame
+/// (Rune's `on_scroll_offset` replaces a handler, so the table keeps the one and calls the
+/// rest: C22's peek is a follower), and the rows' bar stays at the pane's visible right edge,
+/// where a drag on it scrolls the rows, not at the columns' edge off screen (C24 review 2 SF2).
+#[test]
+fn a_sideways_scroll_reaches_both_bars_and_every_follower_and_the_rows_bar_stays_in_reach() {
+    let mut rt = runtime(Host::new(3, Look::fallback(false)));
+    let [px, py, pw, ph] = rect(&rt, "pane0");
+    assert!(
+        rt.state.panes[0].table.feed().get().max[1] > 0.0,
+        "the rows overflow"
+    );
+    let thumb_x = |rt: &Runtime<Host>| rect(rt, "t0-sideways-bar/trough/thumb")[0];
+    let before = thumb_x(&rt);
+    rt.state.sideways.borrow_mut().clear();
+    rt.pointer_move(px + pw / 2.0, py + ph / 2.0);
+    rt.frame(1.0 / 60.0);
+    rt.wheel_event(WheelEvent::new(-200.0, 0.0).at(px + pw / 2.0, py + ph / 2.0));
+    rt.frame(1.0 / 60.0);
+    let x = rt.state.panes[0].table.sideways_feed().get().offset[0];
+    assert!(x > 100.0, "the table scrolled sideways: {x}");
+    let heard = rt.state.sideways.borrow().clone();
+    assert!(
+        heard.contains(&(1, 0, x)) && heard.contains(&(2, 0, x)),
+        "both followers heard {x}: {heard:?}"
+    );
+    assert!(thumb_x(&rt) > before, "the sideways bar's thumb followed");
+    settle(&mut rt);
+
+    // The rows' bar, at the pane's right edge: a drag down on it scrolls the rows.
+    rt.pointer_move(px + pw / 2.0, py + ph / 2.0);
+    rt.frame(1.0 / 60.0);
+    let (bx, by) = (px + pw - 3.0, py + ph / 2.0);
+    rt.pointer_move(bx, by);
+    rt.frame(1.0 / 60.0);
+    rt.pointer_down(bx, by);
+    rt.frame(1.0 / 60.0);
+    for k in 1..=5 {
+        rt.pointer_move(bx, by + 20.0 * k as f32);
+        rt.frame(1.0 / 60.0);
+    }
+    rt.pointer_up(bx, by + 100.0);
+    settle(&mut rt);
+    assert!(
+        rt.state.panes[0].table.feed().get().offset[1] > 0.0,
+        "the drag at the visible edge scrolled the rows"
+    );
+    assert!(
+        rt.state.panes[0].coll.selection.is_empty(),
+        "and selected nothing"
+    );
 }

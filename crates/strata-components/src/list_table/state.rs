@@ -5,6 +5,7 @@ use std::cell::Cell;
 use super::column::ColumnId;
 use super::layout::DropSite;
 use crate::contract::Rect;
+use crate::scroll::{Bar, BarMode, ScrollFeed};
 
 /// Where the columns menu is open.
 ///
@@ -55,6 +56,12 @@ pub struct ListTableState {
     pub(super) suppress_press: Cell<bool>,
     pub(super) resize: Option<Resize>,
     pub(super) menu: Option<MenuAt>,
+    /// The rows' scroll bar (C24) and where the rows stand.
+    pub(super) bar: Bar,
+    pub(super) feed: ScrollFeed,
+    /// The sideways scroll's bar and where it stands.
+    pub(super) sideways_bar: Bar,
+    pub(super) sideways_feed: ScrollFeed,
 }
 
 impl ListTableState {
@@ -63,13 +70,16 @@ impl ListTableState {
         Self::default()
     }
 
-    /// Drops a heading drag or resize in progress, as Strata does when its headings unmap. Call
-    /// it when the table leaves the view (a view switch) mid-gesture: Rune tells an element
-    /// removed under a drag nothing (Rune draft R-C4-2).
+    /// Drops a heading drag or resize in progress, as Strata does when its headings unmap, and
+    /// lets go of both scroll bars (C24's `Bar::release`: a thumb drag cut off, or the pointer
+    /// over a bar). Call it when the table leaves the view (a view switch) mid-gesture: Rune
+    /// tells an element removed under a drag nothing (Rune draft R-C4-2).
     pub fn reset(&mut self) {
         self.drag = None;
         self.resize = None;
         self.suppress_press.set(false);
+        self.bar.release();
+        self.sideways_bar.release();
     }
 
     /// The end of the frame's input, as the view builds: a sort click a reorder drag's release
@@ -111,6 +121,22 @@ impl ListTableState {
             active: true,
             site,
         });
+    }
+
+    /// Where the rows stand: give it to C24's `AutoscrollPointer::new` for the collection.
+    pub fn feed(&self) -> &ScrollFeed {
+        &self.feed
+    }
+
+    /// Where the sideways scroll stands (see [`super::ListTable::sideways_target`]).
+    pub fn sideways_feed(&self) -> &ScrollFeed {
+        &self.sideways_feed
+    }
+
+    /// When both scroll bars show: overlay (Strata's, the default) or always.
+    pub fn set_bar_mode(&mut self, mode: BarMode) {
+        self.bar.set_mode(mode);
+        self.sideways_bar.set_mode(mode);
     }
 
     /// The column being resized and its width now, in base points.

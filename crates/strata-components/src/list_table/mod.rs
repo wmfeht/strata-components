@@ -111,11 +111,21 @@
 //!   would only read as a "Resize …" splitter under every column header. Rune could make
 //!   them adjustable (`El::range_value` and `El::on_step`, as rune-kit's pane grip does), an
 //!   assistive resize Strata doesn't have; left for a later change.
-//! - **Known interaction: C24's edge bar.** In a List narrower than its columns, C24's bar on
-//!   the viewport's edge sits inside this sideways scroll, so it can be scrolled out of view;
-//!   it is settled where C24 and X1 merge, not here.
+//! - **C24's scroll bars (C24b).** The rows' bar ([`BarLook::list`]) is the collection's edge
+//!   part, inside the sideways scroll, kept to the scroll's visible right edge
+//!   (`Bar::follow_across`), so a List narrower than its columns still shows it at the pane's
+//!   edge. The sideways scroll's bar (the app-wide one) runs along its bottom. The pointer over
+//!   the table shows both; [`ListTableState::set_bar_mode`] shows them always.
+//! - **One handler on the sideways scroll.** Rune's `on_scroll_offset` replaces a handler (Rune
+//!   draft U-C24b-1), so the table keeps the scroll's one and calls every host follower from it
+//!   after its bars ([`ListTable::follow_sideways`]: C22's peek). [`ListTable::build`] returns a
+//!   wrapper around the scroll, so a host can't replace the handler by accident.
+//! - **Autoscroll** is the host's to install: `AutoscrollPointer` with
+//!   [`ListTableState::feed`] and [`ListTable::sideways_target`].
 //! - **A view switch mid-drag**: Rune tells an element removed under a drag nothing (Rune draft
-//!   [R-C4-2]), so the host calls [`ListTableState::reset`] when the table leaves the view.
+//!   [R-C4-2]), so the host calls [`ListTableState::reset`] when the table leaves the view. It
+//!   drops a heading drag or resize and lets go of both scroll bars, which would otherwise
+//!   come back held and stay on screen after a thumb drag the switch cut off.
 //! - **Cells don't know their column** to assistive technology: Rune has no column index or
 //!   count (Rune draft [R-C4-3]).
 //! - **A resize commits each move**, rebuilding the rows on screen, as rune-kit's Table does
@@ -136,7 +146,6 @@
 //! - Which groups there are and their order, and the first row on a first visit: the host's.
 //!   The first row shown is entry 0, since groups are runs in display order.
 //! - The loading skeleton: the host's, from [`ColumnLayout::visible`].
-//! - The view's scroll bar (a marquee bullet): C24.
 //!
 //! # Tests
 //!
@@ -192,6 +201,11 @@
 //! | view-modes: Long filenames are middle-ellipsized in… the List Name column | PNG golden `c4-default` (the tree keeps the whole name, so no script can see the cut) |
 //! | selection: A plain click on an entry selects only that entry and replaces the previous selection | `cell-click` (on a cell, through C4's regions); `scroll-100k` (100,000 rows) |
 //! | keyboard-navigation: In Icons and List, Up and Down move focus and selection…; In List, Right keeps focus on the current entry… | `keyboard-grid` (Down, Down, Up, then Right) |
+//! | marquee: A press on a… scrollbar… keeps that control's own behavior and starts no marquee | `bar-press` (a trough press jumps, no band); runtime `a_sideways_scroll_reaches_both_bars…` (a drag on the rows' bar at the pane's visible edge in a table wider than it) |
+//! | scrolling: Middle-clicking the empty background or gutter of a scrollable… List listing starts autoscroll | `autoscroll-start` (a row's margin) |
+//! | scrolling: Middle-clicking an entry row starts no autoscroll; the row's open-in-new-tab… runs instead | `autoscroll-row` |
+//! | scrolling: Moving the pointer away from the anchor scrolls toward it… on both axes the listing can scroll | gallery `autoscroll_in_a_narrow_list_moves_the_rows_and_the_columns` |
+//! | scrolling: The vertical scrollbar of an Icons or List listing is 9 px wide…; The List vertical scrollbar has no gaps at its ends | PNG golden `c4-bars` |
 //!
 //! The sticky group header has no feature-map bullet (Strata's GTK headers don't stick; the
 //! plan adds it), and its stuck copy is hidden from assistive technology, so no script can
@@ -276,7 +290,7 @@ mod tests;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use rune::{El, Tx, col};
+use rune::{El, ScrollPos, Tx, col};
 use strata_kit::look::Look;
 
 pub use column::{Cell, Column, ColumnId, WIDTH_CEILING};
@@ -287,8 +301,9 @@ pub use rows::cell_key;
 pub use sort::{SortDir, SortIntent, SortShown, next_direction};
 pub use state::{ListTableState, MenuAt};
 
-use crate::collection::element::{Collection, CollectionState, Roles, RowCx, Slot};
+use crate::collection::element::{Collection, CollectionState, Roles, RowCx, Slot, viewport_path};
 use crate::contract::EntrySource;
+use crate::scroll::{BarLook, Target, overlay};
 use resolve::{Inputs, Resolved, resolve};
 
 /// What the table reads from the host's state, in one accessor.
@@ -317,6 +332,7 @@ type VersionFn<S> = Rc<dyn Fn(&S, &RowCx<'_>) -> u64>;
 type SortFn<S> = Rc<dyn Fn(&mut S, SortIntent, &mut Tx)>;
 type LayoutFn<S> = Rc<dyn Fn(&mut S, LayoutChange, &mut Tx)>;
 type WidthsFn<S> = Rc<dyn Fn(&mut S, ColumnWidths, &mut Tx)>;
+type SidewaysFn<S> = Rc<dyn Fn(&S) -> Box<dyn Fn(ScrollPos)>>;
 
 /// What the table was built with, shared by its parts' handlers.
 pub(crate) struct Shared<S> {
@@ -329,6 +345,7 @@ pub(crate) struct Shared<S> {
     on_sort: Option<SortFn<S>>,
     on_layout: Option<LayoutFn<S>>,
     on_widths: Option<WidthsFn<S>>,
+    sideways: Vec<SidewaysFn<S>>,
 }
 
 impl<S> Clone for Shared<S> {
@@ -343,6 +360,7 @@ impl<S> Clone for Shared<S> {
             on_sort: self.on_sort.clone(),
             on_layout: self.on_layout.clone(),
             on_widths: self.on_widths.clone(),
+            sideways: self.sideways.clone(),
         }
     }
 }
@@ -384,6 +402,7 @@ impl<S: 'static> ListTable<S> {
                 on_sort: None,
                 on_layout: None,
                 on_widths: None,
+                sideways: Vec::new(),
             },
         }
     }
@@ -418,6 +437,35 @@ impl<S: 'static> ListTable<S> {
     pub fn on_widths(mut self, f: impl Fn(&mut S, ColumnWidths, &mut Tx) + 'static) -> Self {
         self.shared.on_widths = Some(Rc::new(f));
         self
+    }
+
+    /// Hears the sideways scroll's position on every frame it moves, with no view commit, as
+    /// `El::on_scroll_offset` would: `f` makes the handler from the state at each build (C22's
+    /// `FolderPeek::follow_sideways`). Each call adds one; the table's own scroll bars follow
+    /// the scroll too. The element [`ListTable::build`] returns isn't the sideways scroll, so
+    /// this is the only way to follow it.
+    pub fn follow_sideways<F: Fn(ScrollPos) + 'static>(
+        mut self,
+        f: impl Fn(&S) -> F + 'static,
+    ) -> Self {
+        self.shared.sideways.push(Rc::new(move |s: &S| {
+            Box::new(f(s)) as Box<dyn Fn(ScrollPos)>
+        }));
+        self
+    }
+
+    /// The sideways scroll as C24's autoscroll moves it: pass it to
+    /// `AutoscrollPointer::sideways` so autoscroll moves the table on both axes.
+    pub fn sideways_target(&self, s: &S) -> Target {
+        Target::horizontal(
+            self.scroll_key(),
+            (self.shared.parts)(s).table.sideways_feed.clone(),
+        )
+    }
+
+    /// The sideways scroll's key.
+    fn scroll_key(&self) -> String {
+        format!("{}-scroll", self.shared.key)
     }
 
     /// The columns, in their default order.
@@ -485,7 +533,24 @@ impl<S: 'static> ListTable<S> {
     ) -> Collection<S> {
         let region_shared = shared.clone();
         let region_resolved = resolved.clone();
+        let table = (self.shared.parts)(s).table;
+        let (bar, feed) = (table.bar.clone(), table.feed.clone());
+        let edge_bar = bar.clone();
+        let (bar_key, target) = (
+            format!("{}-bar", self.shared.key),
+            viewport_path(base.scope()),
+        );
+        let edge_shared = shared.clone();
         base.roles(Roles::GRID_ROWS)
+            .on_scroll(move |p| {
+                feed.set(p);
+                bar.follow(p);
+            })
+            // Inside the sideways scroll, kept to its visible edge (`Bar::follow_across`).
+            .edge(move |s: &S| {
+                let look = BarLook::list((edge_shared.parts)(s).look);
+                Some(edge_bar.build::<S>(&bar_key, &target, look))
+            })
             .row_height(|_: &S, look: &Look| strata_kit::slots::list::row_height(look))
             .label(self.shared.label.clone().unwrap_or_else(rows::label))
             .content(rows::content(
@@ -504,7 +569,12 @@ impl<S: 'static> ListTable<S> {
     }
 
     /// The table: `base` with its parts and the heading strip, in a viewport that scrolls
-    /// sideways when the columns are wider than it. The columns menu mounts into `layer`.
+    /// sideways when the columns are wider than it, with C24's scroll bars: the rows' down the
+    /// visible right edge, the sideways scroll's along its bottom. The columns menu mounts
+    /// into `layer`.
+    ///
+    /// What it returns wraps the sideways scroll (keyed `{key}-scroll`) rather than being it:
+    /// follow that scroll with [`ListTable::follow_sideways`].
     pub fn build(&self, s: &S, base: Collection<S>, layer: &mut Vec<El>) -> El {
         (self.shared.parts)(s).table.end_frame();
         let shared = Rc::new(self.shared.clone());
@@ -516,14 +586,34 @@ impl<S: 'static> ListTable<S> {
             .collection_with(s, base, &shared, &resolved)
             .header(move |_: &S| header.borrow_mut().take())
             .build(s);
-        let width = (shared.parts)(s).table.width;
+        let parts = (shared.parts)(s);
+        let width = parts.table.width;
+        let (bar, sideways_bar) = (parts.table.bar.clone(), parts.table.sideways_bar.clone());
+        let sideways_feed = parts.table.sideways_feed.clone();
+        let sideways = sideways_bar.build::<S>(
+            &format!("{}-sideways-bar", self.shared.key),
+            &self.scroll_key(),
+            BarLook::app(parts.look).horizontal(),
+        );
+        // The one handler on the sideways scroll (Rune's `on_scroll_offset` replaces, U-C24b-1):
+        // the table's bars, then every host follower.
+        let followers: Vec<Box<dyn Fn(ScrollPos)>> = shared.sideways.iter().map(|f| f(s)).collect();
+        let (follow_bar, follow_sideways) = (bar.clone(), sideways_bar.clone());
         let layout_shared = shared.clone();
-        col()
-            .key(format!("{}-scroll", self.shared.key))
+        let scroll = col()
+            .key(self.scroll_key())
             .w_full()
             .h_full()
             .min_h(0.0)
             .scroll_x()
+            .on_scroll_offset(move |p: ScrollPos| {
+                sideways_feed.set(p);
+                follow_sideways.follow(p);
+                follow_bar.follow_across(p);
+                for f in &followers {
+                    f(p);
+                }
+            })
             // Columns land at their widths at once, as Strata's do: a width that sprang would
             // put cells where the hit regions don't, and a press mid-spring would miss.
             .instant_changes()
@@ -540,7 +630,10 @@ impl<S: 'static> ListTable<S> {
                     .w(resolved.row_width().max(width))
                     .h_full()
                     .child(list),
-            )
+            );
+        // The sideways bar over the scroll, along its bottom; the pointer over the table shows
+        // both.
+        bar.area(sideways_bar.area(overlay(scroll, [sideways])))
     }
 
     /// The Columns button for the pane header, with the columns menu under it (mounted into

@@ -1469,7 +1469,9 @@ impl Win {
                 } else {
                     base
                 };
-                peek().sideways(self, table.build(self, rows, layer))
+                table
+                    .follow_sideways(|w: &Win| peek().follow_sideways(w))
+                    .build(self, rows, layer)
             }
             Pane::Icons(f) => {
                 let key = f.key.clone();

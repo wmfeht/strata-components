@@ -15,7 +15,11 @@
 //! | `autoscroll-click` | a click outside the list stops it (the click half of the stop bullet) |
 //! | `autoscroll-click-row` | the click on a row that stops it opens and selects nothing |
 //! | `autoscroll-fits` | a list that fits starts none |
-//! | `autoscroll-rename` | a middle click on a text field inside the listing (an inline rename) starts none (not the paste half) |
+//! | `autoscroll-rename` | a middle click on C5's rename field inside the listing starts none, and opens nothing (not the paste half, Rune draft U-C24b-3) |
+//! | `autoscroll-margin-fits` | in a list that fits, a middle click on a row's margin starts none and opens nothing |
+//! | `panel-wheel-outside` | a tick outside the stand-in Sort by panel closes it and scrolls the list under the pointer |
+//! | `panel-wheel-inside` | a tick inside it keeps it open and scrolls nothing under it |
+//! | `panel-wheel-chrome` | a tick over the sidebar only closes it |
 //! | `history-back`, `history-forward` | buttons 8 and 9 reach the host |
 //! | `autoscroll-navigate` | another folder stops it (the navigating half; hiding is in process) |
 //! | `bar-drag` | a thumb drag scrolls and starts no band (Alt held: in process) |
@@ -202,15 +206,53 @@ mod c24 {
     #[test]
     fn a_middle_click_on_a_text_field_inside_the_list_starts_no_autoscroll() {
         // browser/scrolling: Middle-clicking a text field, such as the filter field, pastes as usual and starts no autoscroll.
-        // (Half: no autoscroll, for a field inside the listing, an inline rename, which is
-        // where Strata's `is_text_target` matters. The paste is Rune's text field's, not checked
-        // here.)
+        // (Half: no autoscroll, and nothing else, for a field inside the listing: C5's rename
+        // editor on a folder's row. The paste is Rune's to add: it has no middle-click paste,
+        // draft U-C24b-3. Review 2 SF1: the old stand-in field let the press reach the row.)
         let mut rt = mount("c24-rename-light");
-        let [x, y, w, h] = element(&rt, "c24-rename")
-            .expect("the rename field")
+        assert!(rt.state.c24.rename.has_keyboard());
+        let [x, y, w, h] = element(&rt, "rename-field")
+            .expect("C5's rename field")
             .visible;
         press(&mut rt, x + w / 2.0, y + h / 2.0, PointerButton::Middle);
         assert!(!running(&rt));
+        assert_eq!(
+            rt.state.c24.intent, "Nothing yet",
+            "the row under it opened nothing"
+        );
+        assert!(rt.state.c24.rename.has_keyboard(), "the edit goes on");
+        // Not vacuous: on the same row, the margin starts autoscroll, so the field is what
+        // keeps its press from the listing.
+        let [rx, ry, _, rh] = element(&rt, "row-11").expect("row 11").visible;
+        press(&mut rt, rx + 2.0, ry + rh / 2.0, PointerButton::Middle);
+        assert!(running(&rt), "the row's margin is background");
+    }
+
+    #[test]
+    fn after_autoscroll_stops_the_keyboard_is_back_in_the_list() {
+        // browser/scrolling: Escape, or another click with any button anywhere in the window, stops autoscroll.
+        // (Deviation, review 2 SF3: the shield, a modal, takes the keyboard while it runs; Rune
+        // gives it back to the list as it goes, so keys move the cursor again.)
+        let mut rt = mount("c24-ten-k-light");
+        let [x, y, _, h] = element(&rt, "row-3").expect("row 3").visible;
+        press(&mut rt, x + 120.0, y + h / 2.0, PointerButton::Primary);
+        let before = focused(&rt);
+        assert!(before.is_some(), "the list has the keyboard");
+        start(&mut rt);
+        assert_ne!(focused(&rt), before, "the shield took it");
+        rt.key(KeyEvent {
+            key: Key::Escape,
+            mods: Mods::default(),
+        });
+        run(&mut rt, 0.2);
+        assert!(!running(&rt));
+        assert_eq!(focused(&rt), before);
+        rt.key(KeyEvent {
+            key: Key::Down,
+            mods: Mods::default(),
+        });
+        run(&mut rt, 0.1);
+        assert_eq!(selected(&rt), vec![4], "Down moves the cursor");
     }
 
     #[test]
@@ -830,5 +872,100 @@ mod c24 {
                 over.join("\n")
             );
         }
+    }
+
+    // The stand-in Sort by panel and C24's OutsideWheel.
+
+    use strata_gallery::scenes::c24::{PANEL, SIDEBAR};
+
+    fn panel_open(rt: &Runtime<Gallery>) -> bool {
+        element(rt, PANEL).is_some()
+    }
+
+    fn side_offset(rt: &Runtime<Gallery>) -> f32 {
+        rt.state.c24.side_feed.get().offset[1]
+    }
+
+    fn tick(rt: &mut Runtime<Gallery>, x: f32, y: f32, ev: WheelEvent) {
+        rt.pointer_move(x, y);
+        rt.frame(FRAME);
+        rt.wheel_event(ev.at(x, y));
+        run(rt, 0.1);
+    }
+
+    fn notch() -> WheelEvent {
+        WheelEvent::new(0.0, -120.0).precise(false)
+    }
+
+    /// A point over the list, clear of the panel.
+    fn over_list(rt: &Runtime<Gallery>) -> (f32, f32) {
+        let v = viewport(rt);
+        (v.x + 100.0, v.y + v.h - 60.0)
+    }
+
+    #[test]
+    fn a_wheel_tick_outside_the_panel_closes_it_and_scrolls_the_list_under_the_pointer() {
+        // browser/scrolling: A wheel tick outside an open Sort by, Appearance, or Icons Thumbnail size panel closes it.
+        // browser/scrolling: The tick that closes a panel also scrolls the listing under the pointer, and no other; over the sidebar or chrome it only closes the panel.
+        let mut rt = mount("c24-panel-light");
+        assert!(panel_open(&rt));
+        let (x, y) = over_list(&rt);
+        tick(&mut rt, x, y, notch());
+        assert!(!panel_open(&rt));
+        assert!(offset(&rt) > 0.0, "the list scrolled");
+        assert_eq!(side_offset(&rt), 0.0, "the sidebar didn't");
+    }
+
+    #[test]
+    fn the_forwarded_tick_moves_the_list_as_far_as_a_plain_tick() {
+        // browser/scrolling: That forwarded tick moves the listing by the step a wheel notch normally moves it.
+        let mut rt = mount("c24-panel-light");
+        let (x, y) = over_list(&rt);
+        tick(&mut rt, x, y, notch());
+        let forwarded = offset(&rt);
+        tick(&mut rt, x, y, notch());
+        let plain = offset(&rt) - forwarded;
+        assert!(forwarded > 0.0);
+        assert!((forwarded - plain).abs() < 0.5, "{forwarded} then {plain}");
+    }
+
+    #[test]
+    fn over_the_sidebar_or_the_header_a_tick_only_closes_the_panel() {
+        // browser/scrolling: The tick that closes a panel also scrolls the listing under the pointer, and no other; over the sidebar or chrome it only closes the panel.
+        for over in [SIDEBAR, "c24-title"] {
+            let mut rt = mount("c24-panel-light");
+            let [x, y, w, h] = element(&rt, over).expect(over).visible;
+            tick(&mut rt, x + w / 2.0, y + h.min(200.0) / 2.0, notch());
+            assert!(!panel_open(&rt), "{over}");
+            assert_eq!(offset(&rt), 0.0, "{over}: the list stays");
+            assert_eq!(side_offset(&rt), 0.0, "{over}: the sidebar stays");
+        }
+    }
+
+    #[test]
+    fn a_press_outside_the_panel_closes_it_and_selects_nothing_under_it() {
+        // Review round 1, SF3: the scrim is the panel's outside press too, in place of the
+        // popover's own: a press there over a row closes the panel and leaves the row alone.
+        use strata_gallery::scenes::c24::PANEL_SCRIM;
+        let mut rt = mount("c24-panel-light");
+        assert!(element(&rt, PANEL_SCRIM).is_some());
+        let [rx, ry, rw, rh] = element(&rt, "row-3").expect("row 3").visible;
+        let (x, y) = (viewport(&rt).x + 100.0, ry + rh / 2.0);
+        assert!((rx..rx + rw).contains(&x), "the press lands on row 3");
+        press(&mut rt, x, y, PointerButton::Primary);
+        run(&mut rt, 0.3);
+        assert!(!panel_open(&rt));
+        assert!(element(&rt, PANEL_SCRIM).is_none(), "the scrim is gone");
+        assert_eq!(selected(&rt), Vec::<u64>::new(), "nothing is selected");
+    }
+
+    #[test]
+    fn a_wheel_inside_the_panel_keeps_it_open_and_scrolls_nothing_under_it() {
+        // browser/scrolling: Wheel scrolling inside an open panel keeps it open.
+        let mut rt = mount("c24-panel-light");
+        let [x, y, w, h] = element(&rt, PANEL).expect("the panel").visible;
+        tick(&mut rt, x + w / 2.0, y + h / 2.0, notch());
+        assert!(panel_open(&rt));
+        assert_eq!(offset(&rt), 0.0, "the list under the panel stays put");
     }
 }

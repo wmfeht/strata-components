@@ -7,7 +7,7 @@
     {
       "t": 0.3,
       "type": "tap",
-      "key": "c24-rename",
+      "key": "rename-field",
       "button": "middle"
     },
     {
@@ -23,11 +23,15 @@
       "name": "Autoscroll: off"
     },
     {
+      "key": "c24-intent",
+      "name": "Nothing yet"
+    },
+    {
       "key": "autoscroll-shield",
       "absent": true
     },
     {
-      "key": "c24-rename"
+      "key": "rename-field"
     }
   ]
 }

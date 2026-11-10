@@ -43,7 +43,7 @@
 //! | --- | --- | --- | --- |
 //! | `DataControl` | sway, Hyprland, KWin (ext only): Wayland data control, on winit's display or a connection of its own | at once, focused or not | at any time |
 //! | `DataDevice` | mutter: `wl_data_device` on winit's display (libwayland ≥ 1.23) | at the app's next keyboard focus | with the serial of the key or click that asked |
-//! | `X11` | X11; or a Wayland window with neither of the others (mutter with libwayland < 1.23, Ubuntu 24.04's GNOME), through Xwayland | at once | at any time |
+//! | `X11` | X11; or a Wayland window with neither of the others (mutter with libwayland < 1.23, Ubuntu 24.04's GNOME: unsupported), through Xwayland | at once | at any time |
 //!
 //! [`Status`] says which one the app got. With none of them (a Wayland window with no route
 //! and no Xwayland) [`Clipboard::attach`] returns [`Error::Unsupported`].
@@ -93,11 +93,16 @@
 //!   route reaches Wayland apps only through the compositor's bridge between X11 and
 //!   Wayland selections. wlroots bridges the clipboard only while an Xwayland window has
 //!   keyboard focus; wlroots compositors have data control, so they never take this route.
-//!   Whether mutter's bridge carries every type faithfully (`x-special/gnome-copied-files`,
-//!   `text/uri-list`) is a hand test pending. Wayland apps' UTF-8 text arrives there as
+//!   mutter takes this route only with libwayland < 1.23, which is unsupported (below), so
+//!   whether its bridge carries every type faithfully (`x-special/gnome-copied-files`,
+//!   `text/uri-list`) is no longer a hand test. Wayland apps' UTF-8 text arrives there as
 //!   `UTF8_STRING` ([`TEXT_TYPES`] lists every name text goes by).
 //! - **libwayland < 1.23 with data control** (Ubuntu 24.04 on KDE, say) takes data control on
 //!   a connection of its own: everything works but the data device, which isn't needed.
+//!
+//! libwayland below 1.23 is unsupported: 1.23 is the minimum (the owner's ruling on S3's
+//! decision 1). The routes above still serve it, so the clipboard degrades rather than
+//! fails there, but those paths get no hand test.
 //!
 //! # Hand tests pending
 //!
@@ -106,7 +111,6 @@
 //! | Where | What to check |
 //! | --- | --- |
 //! | GNOME (mutter), libwayland ≥ 1.23 | the data-device route: copy and paste with Nautilus; another app's copy heard at focus; a copy made unfocused (Pending, or Refused?) |
-//! | GNOME on Ubuntu 24.04 (libwayland 1.22) | the Xwayland route: does mutter's bridge carry `x-special/gnome-copied-files` and `text/uri-list` both ways, focused or not |
 //! | GNOME on X11 (gsd-clipboard), Xfce (xfsettingsd) | the copy outlives the app ([`HandOff::Saved`], then paste elsewhere) |
 //! | KDE Plasma (KWin, Klipper) | data control (ext only); Dolphin copy, cut and paste both ways; on X11, whether Klipper takes a hand-off at all |
 //! | Hyprland | data control; Nautilus and Dolphin both ways |

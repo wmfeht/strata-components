@@ -34,6 +34,14 @@ once filed.
 
 Each module's own docs say what Rune lacks in detail, and the limits of the shim.
 
+## Supported systems
+
+On Wayland, libwayland-client 1.23 or later. `dnd`, `clipboard` and `foreign-parent` reach
+winit's display through `wl_proxy_get_display`, which 1.23 added. An older libwayland (Ubuntu
+24.04 ships 1.22) is unsupported. The shims still degrade there rather than fail: no Wayland
+drag and drop, the clipboard through data control or Xwayland, and a parentless window
+(`Reason::NoDisplay`).
+
 ## Supported Rune revs
 
 Each release tag supports exactly one Rune rev. Pin that rev, in full, beside the tag.

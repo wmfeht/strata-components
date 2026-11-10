@@ -4,7 +4,8 @@ use std::fmt;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Unsupported {
     /// libwayland-client has no `wl_proxy_get_display` (it arrived in 1.23; Ubuntu 24.04
-    /// ships 1.22), so winit's display can't be reached from a Rune window.
+    /// ships 1.22), so winit's display can't be reached from a Rune window. Below 1.23 is
+    /// unsupported (S3 decision 1).
     LibwaylandBelow1_23,
     /// The window is neither Wayland nor X11.
     NotLinux(String),

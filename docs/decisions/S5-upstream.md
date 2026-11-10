@@ -39,9 +39,10 @@
     (`clipboard/native.rs:136–150`; arboard 3.7.0). Rune's README still says "Copies don't write
     images yet" (README line 1283). [U5](#u5) asks for what is really missing.
   - S1 R1's ask for diagonal cursors is upstream #145, so [U6](#u6) leaves it out.
-- **The crate's name is open.** `strata-platform` is taken on crates.io by an unrelated crate, so
-  this crate can never be published under it. The options and a recommendation are under
-  [Crate name](#crate-name). The code keeps `strata-platform`.
+- **The crate keeps the name `strata-platform`** (the owner's ruling on question 1).
+  `strata-platform` is taken on crates.io by an unrelated crate, so this crate can never be
+  published there under it, and releases are git tags only. The options S5 weighed are under
+  [Crate name](#crate-name).
 - **`rune` is taken on crates.io too**, by the rune-rs scripting language (v0.14.2). Anomaly's
   Rune would need another name there, so plan §8's "publish once Rune is on crates.io" is
   further off than it reads.
@@ -1133,8 +1134,10 @@ Each gap at `dev` `17adede`, read in the clone:
 
 ## Crate name
 
-Plan §10 question 1. The owner decides. Availability on crates.io, read on 2026-11-07; a free
-name can be taken at any time:
+Plan §10 question 1. **Ruled by the owner: the crate keeps the name `strata-platform`.** No
+rename, so the rename list below doesn't apply, and with the name taken on crates.io there is
+nothing to hold there. The options as S5 put them, with availability on crates.io read on
+2026-11-07:
 
 | Option | crates.io | For | Against |
 | --- | --- | --- | --- |
@@ -1161,7 +1164,8 @@ The tag format becomes `transom-v<semver>+rune.<rev7>`.
 
 **Holding the name** means publishing an empty `0.0.0` crate with no git dependencies from the
 owner's crates.io account. That is outward-facing, and crates.io discourages squatting, so it's
-the owner's call. M0's "crate name held" is pending.
+the owner's call. With the name kept, M0's "crate name held" reads as "crate name settled"
+(plan §7), and it is.
 
 ## Release workflow
 
@@ -1320,7 +1324,7 @@ libraries are installed). A fake `gh` first on `PATH` recorded the release call.
 - actionlint;
 - creating the draft release, and how its `contents: write` behaves;
 - the issue links;
-- the crate name and holding it.
+- the crate name and holding it (ruled since: the crate keeps `strata-platform`).
 
 ## Owner questions
 
@@ -1328,7 +1332,7 @@ S5 decides none of these. Each has a recommendation.
 
 1. **Crate name.** `strata-platform` can't go on crates.io. Options are under
    [Crate name](#crate-name). Recommendation: `transom`, renamed before the first tag. Also
-   whether to publish a `0.0.0` placeholder to hold it.
+   whether to publish a `0.0.0` placeholder to hold it. **Ruled: keep `strata-platform`.**
 2. **Tag format.** `strata-platform-v<semver>+rune.<rev7>`, which the workflow uses; the
    name-only `strata-platform-v<semver>`, with the rev only in the changelog; or
    `strata-platform/v<semver>+rune.<rev7>`. Recommendation: the first, since a tag that names

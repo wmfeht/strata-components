@@ -163,7 +163,7 @@ The plan's §7 exit checks, with the WPs each one needs. Parity sweeps and the G
 
 | Milestone | Plan §7 exit check | Needs |
 | --- | --- | --- |
-| M0 | Each of P1–P5 has a "Rune shipped" or "shim here" decision. Crate name held. | S1–S5 |
+| M0 | Each of P1–P5 has a "Rune shipped" or "shim here" decision. Crate name settled (it keeps `strata-platform`). | S1–S5 |
 | M1 | A themed empty window with the header, a second launch forwarded | X1 (P3, P5, P8, P9, K1–K4, C15) |
 | M2 | A 100k-entry folder at 60 Hz. Selection and rename scripts pass. | C1a–C1e, C2–C5, C24, C25 |
 | M3 | Navigation, tabs, sidebar, search and 10xer scripts pass headless | C6–C8, C17–C19, C21, C22 |

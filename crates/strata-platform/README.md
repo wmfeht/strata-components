@@ -9,8 +9,9 @@ Each shim is a module behind its own cargo feature, so an app builds only what i
 asked of Rune upstream, and a shim is deprecated once Rune ships its feature (see
 [Shim lifecycle](#shim-lifecycle)). One isn't: the GLib bridge is outside Rune's scope.
 
-The crate's name is still under review (`docs/decisions/S5-upstream.md`, owner questions). A
-rename, if any, happens before the first release tag.
+The crate keeps the name `strata-platform` (the owner's ruling; `docs/decisions/S5-upstream.md`,
+"Crate name"). The name is taken on crates.io by an unrelated crate, so releases are git tags
+only (see [Pinning a release](#pinning-a-release)).
 
 ## Features
 

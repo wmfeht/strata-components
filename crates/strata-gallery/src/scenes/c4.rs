@@ -37,7 +37,7 @@ use strata_components::list_table::{
     ListTable, ListTableState, MenuAt, SortDir, SortIntent, SortShown, groups_from_runs,
 };
 use strata_components::scroll::{
-    Autoscroll, AutoscrollPointer, AutoscrollSettings, BarMode, Shield, Target,
+    Autoscroll, AutoscrollPointer, AutoscrollSettings, BarMode, Shield,
 };
 
 use crate::{Gallery, Scene};
@@ -323,7 +323,7 @@ impl Default for Demo {
         let mut coll = CollectionState::new();
         let table = ListTableState::new();
         let auto = Autoscroll::new();
-        install(&mut coll.controllers, &auto, &table);
+        install(&mut coll.controllers);
         Self {
             folder: Folder::Documents,
             listing: ListSource::new(Vec::new()),
@@ -349,28 +349,33 @@ impl Default for Demo {
     }
 }
 
-/// C1b's pointer intent behind C24's autoscroll, which moves the rows and the table's sideways
-/// scroll (`{SCOPE}-scroll`, as `ListTable::sideways_target` names it), C1c's keys and C1d's
-/// marquee.
-fn install(controllers: &mut Controllers, auto: &Autoscroll, table: &ListTableState) {
-    controllers.pointer = Some(Box::new(
-        AutoscrollPointer::new(
-            Some(Box::new(
-                strata_components::collection::pointer::PointerIntent::new(),
-            )),
-            auto.clone(),
-            SCOPE,
-            table.feed().clone(),
-        )
-        .sideways(Target::horizontal(
-            format!("{SCOPE}-scroll"),
-            table.sideways_feed().clone(),
-        )),
-    ));
+/// C1c's keys and C1d's marquee. The pointer comes with the page's first poll
+/// ([`install_pointer`]).
+fn install(controllers: &mut Controllers) {
     controllers.keyboard =
         Some(Box::<strata_components::collection::keyboard::Keyboard>::default());
     controllers.marquee = Some(Box::new(
         strata_components::collection::marquee::Marquee::new(),
+    ));
+}
+
+/// C1b's pointer intent behind C24's autoscroll, which moves the rows and the table's sideways
+/// scroll (`ListTable::sideways_target`). The target reads the table's state through the
+/// page's accessor, so it is made once the gallery exists: on the page's first poll, which
+/// Rune runs before the frame's input.
+fn install_pointer(g: &mut Gallery) {
+    let sideways = table().sideways_target(g);
+    let d = &mut g.c4;
+    d.coll.controllers.pointer = Some(Box::new(
+        AutoscrollPointer::new(
+            Some(Box::new(
+                strata_components::collection::pointer::PointerIntent::new(),
+            )),
+            d.auto.clone(),
+            SCOPE,
+            d.table.feed().clone(),
+        )
+        .sideways(sideways),
     ));
 }
 
@@ -809,6 +814,9 @@ pub fn on_key(g: &mut Gallery, key: &KeyEvent, tx: &mut Tx) -> bool {
 }
 
 pub fn poll(g: &mut Gallery, t: f64, tx: &mut Tx) -> bool {
+    if g.c4.coll.controllers.pointer.is_none() {
+        install_pointer(g);
+    }
     let d = &mut g.c4;
     d.clock = t;
     d.polls = d.polls.saturating_add(1);

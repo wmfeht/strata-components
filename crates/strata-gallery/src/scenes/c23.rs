@@ -52,8 +52,9 @@ pub struct Demo {
     pub version: u64,
     /// What the Trash holds, to restore.
     pub trashed: Vec<ListEntry>,
-    /// The playing effect the page owes rows to, and what it does with them.
-    pub owed: Option<(EffectId, Op, Vec<EntryId>)>,
+    /// Each playing effect the page owes rows to, and what it does with them: effects
+    /// overlap (a Move to Trash while a restore's icons are in the air).
+    pub owed: Vec<(EffectId, Op, Vec<EntryId>)>,
     pub vanished: Vec<EntryId>,
     /// An operation asked for, and the clock time it may start (scenes time theirs).
     pub ask: Option<(Op, f64)>,
@@ -80,7 +81,7 @@ impl Default for Demo {
             coll: CollectionState::new(),
             version: 1,
             trashed: Vec::new(),
-            owed: None,
+            owed: Vec::new(),
             vanished: Vec::new(),
             ask: None,
             clock: 0.0,
@@ -218,11 +219,12 @@ impl Demo {
                     self.vanished.extend_from_slice(&back);
                 }
                 self.log = "Restored".into();
-                return self.owed = started.map(|id| (id, op, back));
+                self.owed.extend(started.map(|id| (id, op, back)));
+                return;
             }
         };
         match started {
-            Some(id) => self.owed = Some((id, op, ids)),
+            Some(id) => self.owed.push((id, op, ids)),
             // Nothing plays (animations off): the end state at once.
             None => self.finish(op, &ids, tx),
         }
@@ -255,24 +257,26 @@ impl Demo {
         self.places[4] = Place::trash("Trash", !self.trashed.is_empty());
     }
 
-    /// One effect event: the rows the page owes it.
+    /// One effect event: the rows the page owes its effect.
     fn heard(&mut self, event: Event, tx: &mut Tx) {
-        let Some((id, op, ids)) = self.owed.clone() else {
+        let (Event::Launched(id) | Event::Landed(id) | Event::Done(id)) = event;
+        let Some(i) = self.owed.iter().position(|o| o.0 == id) else {
             return;
         };
+        let (_, op, ids) = self.owed[i].clone();
         match (event, op) {
             // Not an instant commit: it carries the flight's swap (motion module docs).
-            (Event::Launched(e), Op::Trash | Op::Release) if e == id => self.finish(op, &ids, tx),
-            (Event::Landed(e), Op::Restore) if e == id => self.finish(op, &ids, tx),
-            (Event::Done(e), Op::Delete) if e == id => {
+            (Event::Launched(_), Op::Trash | Op::Release) => self.finish(op, &ids, tx),
+            (Event::Landed(_), Op::Restore) => self.finish(op, &ids, tx),
+            (Event::Done(_), Op::Delete) => {
                 // The survivors land in their new places at once.
                 tx.instant();
                 self.finish(op, &ids, tx);
             }
             _ => {}
         }
-        if event == Event::Done(id) {
-            self.owed = None;
+        if matches!(event, Event::Done(_)) {
+            self.owed.remove(i);
         }
     }
 }

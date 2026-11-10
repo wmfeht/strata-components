@@ -25,7 +25,8 @@
 //!     .target_in(format!("{SIDEBAR}-scroll"))
 //!     .rows_in(viewport_path(scope));
 //! match s.fx.fly(flight, &s.look, tx) {
-//!     Some(id) => s.leaving = Some(id),       // remove the rows at Launched
+//!     // Remove the rows at Launched. Effects overlap: keep what each one is owed by its id.
+//!     Some(id) => s.owed.push((id, Owed::RemoveAtLaunch(trashed_ids))),
 //!     None => s.remove_trashed(),             // nothing plays: the end state now
 //! }
 //! // poll:

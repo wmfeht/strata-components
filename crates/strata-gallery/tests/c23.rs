@@ -70,7 +70,7 @@ mod c23 {
             .expect("row 4's icon")
             .rect;
         ask(&mut rt, 3, Op::Trash);
-        let id = rt.state.c23.owed.as_ref().expect("a flight plays").0;
+        let id = rt.state.c23.owed.first().expect("a flight plays").0;
         let launch = rect(&rt, &launch_key(id, 0));
         assert!(
             distance(middle(launch), middle(icon)) < 1.0,
@@ -97,8 +97,37 @@ mod c23 {
         for _ in 0..30 {
             rt.frame(FRAME);
         }
-        assert!(rt.state.c23.owed.is_none(), "the flight ended");
+        assert!(rt.state.c23.owed.is_empty(), "the flight ended");
         assert_eq!(rt.state.c23.trashed.len(), 1);
+    }
+
+    #[test]
+    fn a_trash_before_a_restore_lands_still_shows_the_restored_row() {
+        let mut rt = mount("c23-rest-light");
+        ask(&mut rt, 3, Op::Trash);
+        for _ in 0..60 {
+            rt.frame(FRAME);
+        }
+        let back = rt.state.c23.trashed[0].id;
+        rt.update(|g, _| g.c23.ask = Some((Op::Restore, 0.0)));
+        rt.frame(FRAME);
+        assert!(
+            rt.state.c23.vanished.contains(&back),
+            "hidden until its icon lands"
+        );
+        // A second operation while the restore's icon is still in the air.
+        ask(&mut rt, 0, Op::Trash);
+        for _ in 0..60 {
+            rt.frame(FRAME);
+        }
+        let d = &rt.state.c23;
+        assert!(
+            d.vanished.is_empty(),
+            "the restored row shows: {:?}",
+            d.vanished
+        );
+        assert!(d.listing.entries().iter().any(|e| e.id == back));
+        assert!(d.owed.is_empty(), "both effects ended");
     }
 
     #[test]
@@ -111,11 +140,11 @@ mod c23 {
             rt.frame(FRAME);
             assert_eq!(rect(&rt, below), before, "the rows below hold still");
         }
-        assert!(rt.state.c23.owed.is_some(), "still dissolving");
+        assert!(!rt.state.c23.owed.is_empty(), "still dissolving");
         for _ in 0..10 {
             rt.frame(FRAME);
         }
-        assert!(rt.state.c23.owed.is_none());
+        assert!(rt.state.c23.owed.is_empty());
         let after = rect(&rt, below);
         assert!(
             after[1] < before[1] - 1.0,

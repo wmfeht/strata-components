@@ -1816,16 +1816,16 @@ mod c2_drop_action {
         static ASKED: RefCell<Vec<Asked>> = const { RefCell::new(Vec::new()) };
     }
 
+    /// Records each zone the binder attaches, the latest for each key and scope: rows are
+    /// memoised, so a view run that rebuilds none attaches none.
     fn view(g: &Gallery, _: &mut Cx<Gallery>) -> El {
-        ZONES.with(|z| z.borrow_mut().clear());
         let dnd = Dnd::custom_keyed(
             |el, key, zone| {
                 ZONES.with(|z| {
-                    z.borrow_mut().push((
-                        key.key().to_owned(),
-                        key.scope().map(str::to_owned),
-                        zone,
-                    ))
+                    let mut z = z.borrow_mut();
+                    let (k, s) = (key.key().to_owned(), key.scope().map(str::to_owned));
+                    z.retain(|(k2, s2, _)| !(*k2 == k && *s2 == s));
+                    z.push((k, s, zone));
                 });
                 el
             },

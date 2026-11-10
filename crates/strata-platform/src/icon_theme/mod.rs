@@ -1,7 +1,7 @@
 //! Freedesktop icon theme lookup, delivered as `rune::Pixels`: application and MIME icons by
 //! name, at a size and scale, the way GTK 4's `GtkIconTheme` finds them.
 //!
-//! Rune lacks, at the pinned rev (`5d421fd`):
+//! Rune lacks, at the pinned rev (`2a44156`):
 //!
 //! - **The user's icon theme.** `ImageCache::app_icon` on Linux resolves a `.desktop` entry's
 //!   `Icon=` from hicolor only: no current theme and no `Inherits`. It reads sizes from
@@ -10,11 +10,11 @@
 //! - **Lookups by icon name**, so MIME icons and a GIO icon's names, with fallback names.
 //! - **"Not found" apart from a broken file.** `app_icon` fails both with `Image::error`.
 //!
-//! **Rune dev 5d421fd: partly.** `ImageCache` covers the rest: decoding PNG and rasterizing SVG
+//! **Rune 2a44156: partly.** `ImageCache` covers the rest: decoding PNG and rasterizing SVG
 //! with resvg on its worker threads, mips, a decoder panic failing one image, sharing handles and
-//! waking the app. This module looks the file up and hands it to `ImageCache::file`. Past the
-//! pin and not adopted: GIF, WebP, BMP, ICO and AVIF decoding (`d7946ee3`); nothing on icon
-//! themes.
+//! waking the app. This module looks the file up and hands it to `ImageCache::file`. Rune's GIF,
+//! WebP, BMP, ICO and AVIF decoding (`d7946ee3`) adds nothing for icon themes, which use PNG,
+//! SVG and XPM (no XPM decoder yet), and nothing in Rune looks up an icon theme.
 //!
 //! Rune issue: upstream [#21](https://github.com/anomalyco/rune/issues/21) (open; PR #29, a
 //! theme-chain lookup, was closed unmerged). Drafts, not filed:

@@ -273,10 +273,13 @@ pub(crate) fn attach(
             sink,
             core,
         });
+        let turn_poster = poster.clone();
         hub.posters.set(&key, poster);
         if !fresh {
-            // P0 tracks the windows a drag can enter.
-            let _ = Transfer::attach(window, Arc::new(|_| {}), Wants::default());
+            // P0 tracks the windows a drag can enter, and its reader's turns go through any
+            // window's app that still runs.
+            let turn: Turn = Arc::new(move |f| turn_poster(Job::Run(f)));
+            let _ = Transfer::attach(window, turn, Wants::default());
         }
         if let (Some(x), Some(xid)) = (hub.transfer.x11(), xid) {
             x11::add_window(x, &key, xid);

@@ -475,7 +475,9 @@ internal, so `lib.rs` declares it `#[doc(hidden)] pub mod transfer` behind the i
 `_transfer` feature: it is no public API and outside semver, and only strata-platform's own
 examples and tests use it. `examples/transfer-probe.rs` is a Rune window with the substrate
 attached, driven by JSON lines on stdin; `tests/session/p0.rs` runs it against the peer. P1, P2
-and P4 test through their own public APIs.
+and P4 test through their own public APIs. P4's probe, `examples/foreign-parent.rs`, opens a
+window per `open` command hidden, parents it from `App::on_window` and shows it, as a portal
+backend opens its dialog; `tests/session/p4.rs` parents it to the peer's exported window.
 
 P0's tests that need winit's own Wayland display ("shared" in `p0.rs`) need libwayland 1.23 or
 later (`wl_proxy_get_display`). On an older host, Ubuntu 24.04 among them, they check only that

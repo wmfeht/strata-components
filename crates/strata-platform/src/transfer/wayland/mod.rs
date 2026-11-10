@@ -44,12 +44,12 @@ use wayland_client::{
     Connection, Dispatch, EventQueue, Proxy, QueueHandle, WEnum, event_created_child,
 };
 
-use super::Turn;
 use super::data::SourceSpec;
 use super::error::{Error, Unsupported};
 use super::event::{Action, Event, Route, Selection, SelectionOffer, SourceId, Subscribers};
 use super::gate::Gate;
 use super::pipe;
+use super::windows::Windows;
 use control::Control;
 use echo::Echoes;
 pub use offer::DragOffer;
@@ -116,7 +116,7 @@ struct Source {
 pub(crate) struct State {
     kind: Kind,
     home: Home,
-    windows: Arc<Mutex<Vec<WindowHandle>>>,
+    windows: Arc<Windows>,
     seat: Option<WlSeat>,
     /// For P1's drag icons, bound on winit's display only.
     compositor: Option<WlCompositor>,
@@ -151,7 +151,7 @@ pub(crate) struct State {
 }
 
 impl State {
-    fn new(kind: Kind, home: Home, windows: Arc<Mutex<Vec<WindowHandle>>>) -> State {
+    fn new(kind: Kind, home: Home, windows: Arc<Windows>) -> State {
         State {
             kind,
             home,
@@ -182,10 +182,10 @@ impl State {
     /// The extension state of type `T`, made with `Default` on first use. For other modules'
     /// handlers on this queue; see [`Conn::with_globals`].
     #[cfg_attr(
-        not(feature = "dnd"),
+        not(any(feature = "dnd", feature = "foreign-parent")),
         expect(
             dead_code,
-            reason = "the extension point for P1 and P4; only P1 (dnd) uses it yet"
+            reason = "the extension point for P1 (dnd) and P4 (foreign-parent)"
         )
     )]
     pub(crate) fn extension<T: Any + Send + Default>(&mut self) -> &mut T {
@@ -251,14 +251,12 @@ impl State {
     /// the event's surface may be stale by now, so no request is ever sent on it.
     fn window_of(&self, surface: &WlSurface) -> Option<String> {
         let ptr = surface.id().as_ptr().cast::<c_void>();
-        let windows = lock(&self.windows);
-        windows
-            .iter()
-            .find(|w| {
-                w.with_raw_handle(|h| matches!(h.as_raw(), RawWindowHandle::Wayland(s) if s.surface.as_ptr() == ptr))
-                    .unwrap_or(false)
-            })
-            .map(|w| w.key().to_owned())
+        self.windows.find(|w| {
+            w.with_raw_handle(
+                |h| matches!(h.as_raw(), RawWindowHandle::Wayland(s) if s.surface.as_ptr() == ptr),
+            )
+            .unwrap_or(false)
+        })
     }
 
     /// The connection is dead: nothing is held or heard on it. owns() turns false for every
@@ -306,6 +304,8 @@ pub(crate) struct Conn {
     gate: Arc<Gate>,
     reader: Mutex<Option<Reader>>,
     subs: Subscribers,
+    /// The attached windows (winit's display): the reader's turns go through them.
+    windows: Arc<Windows>,
     /// A dispatch failed: the connection is dead, and that was reported once.
     failed: AtomicBool,
     /// A Turn ran dispatch off the UI thread, and that was reported once.
@@ -314,18 +314,18 @@ pub(crate) struct Conn {
 
 impl Conn {
     /// Binds on winit's display, found from `window`'s surface. Call it on the UI thread.
+    /// The reader's turns go to `windows`' turns.
     pub(crate) fn shared(
         window: &WindowHandle,
-        windows: Arc<Mutex<Vec<WindowHandle>>>,
+        windows: Arc<Windows>,
         subs: Subscribers,
-        turn: Turn,
         data_control: Option<Prefer>,
         as_if_old: bool,
     ) -> Result<Arc<Conn>, Error> {
         let display = display::winit_display(window, as_if_old)?;
         let backend = display::foreign_backend(display);
         let conn = Connection::from_backend(backend);
-        Conn::bind(Kind::Shared, conn, windows, subs, data_control, Some(turn))
+        Conn::bind(Kind::Shared, conn, windows, subs, data_control)
     }
 
     /// Connects to the compositor on a connection of our own, for data control alone.
@@ -338,16 +338,15 @@ impl Conn {
     ) -> Result<Arc<Conn>, Error> {
         let conn = Connection::connect_to_env().map_err(|e| Error::Connection(e.to_string()))?;
         let control = (!as_if_none).then_some(prefer);
-        Conn::bind(Kind::Own, conn, Arc::default(), subs, control, None)
+        Conn::bind(Kind::Own, conn, Arc::default(), subs, control)
     }
 
     fn bind(
         kind: Kind,
         conn: Connection,
-        windows: Arc<Mutex<Vec<WindowHandle>>>,
+        windows: Arc<Windows>,
         subs: Subscribers,
         data_control: Option<Prefer>,
-        turn: Option<Turn>,
     ) -> Result<Arc<Conn>, Error> {
         let (globals, mut queue) =
             registry_queue_init::<State>(&conn).map_err(|e| Error::Connection(e.to_string()))?;
@@ -356,7 +355,7 @@ impl Conn {
             backend: conn.backend().downgrade(),
             ui: (kind == Kind::Shared).then(|| std::thread::current().id()),
         };
-        let mut state = State::new(kind, home.clone(), windows);
+        let mut state = State::new(kind, home.clone(), windows.clone());
         state.seat = globals.bind::<WlSeat, _, _>(&qh, 1..=8, ()).ok();
         if kind == Kind::Shared {
             state.compositor = globals.bind::<WlCompositor, _, _>(&qh, 1..=6, ()).ok();
@@ -392,6 +391,7 @@ impl Conn {
             gate: gate.clone(),
             reader: Mutex::new(None),
             subs: subs.clone(),
+            windows: windows.clone(),
         });
         let weak = Arc::downgrade(&c);
         let failed = {
@@ -402,32 +402,36 @@ impl Conn {
                 }
             }
         };
-        let reader = match turn {
-            Some(turn) => {
+        let reader = match kind {
+            Kind::Shared => {
                 let gate = gate.clone();
                 Reader::spawn(
                     "transfer-wl",
                     conn,
                     gate.clone(),
                     move || {
-                        // Ask the UI thread to dispatch, then wait for it with no read intent held.
+                        // Ask the UI thread to dispatch, through every attached window's app
+                        // with no turn outstanding (see `windows`), then wait for it with no
+                        // read intent held.
                         let before = gate.turns();
-                        let weak: Weak<Conn> = weak.clone();
-                        turn(Box::new(move || {
-                            // On the UI thread, where Turn runs it; refused anywhere else, and the
-                            // reader then waits for a turn that never comes: say so, once.
-                            if let Some(c) = weak.upgrade()
-                                && let Err(e) = c.dispatch()
-                            {
-                                c.report_misrouted_turn(e);
-                            }
-                        }));
+                        windows.post(|| {
+                            let weak: Weak<Conn> = weak.clone();
+                            Box::new(move || {
+                                // On the UI thread, where Turn runs it; refused anywhere else, and
+                                // the reader then waits for a turn that never comes: say so, once.
+                                if let Some(c) = weak.upgrade()
+                                    && let Err(e) = c.dispatch()
+                                {
+                                    c.report_misrouted_turn(e);
+                                }
+                            })
+                        });
                         gate.wait(before);
                     },
                     failed,
                 )
             }
-            None => Reader::spawn(
+            Kind::Own => Reader::spawn(
                 "transfer-wl-own",
                 conn,
                 gate,
@@ -462,7 +466,14 @@ impl Conn {
         }
         let any = self.dispatch_here();
         self.gate.turned();
+        self.windows.prune();
         Ok(any)
+    }
+
+    /// Releases a reader waiting for a turn, so it asks again: the windows it asked through
+    /// may have closed since. A no-op when it isn't waiting.
+    pub(crate) fn wake_reader(&self) {
+        self.gate.turned();
     }
 
     fn dispatch_here(&self) -> bool {
@@ -522,10 +533,10 @@ impl Conn {
     /// objects and keeps its state in [`State::extension`]. None after shutdown, or off the
     /// UI thread on winit's display.
     #[cfg_attr(
-        not(feature = "dnd"),
+        not(any(feature = "dnd", feature = "foreign-parent")),
         expect(
             dead_code,
-            reason = "the extension point for P1 and P4; only P1 (dnd) uses it yet"
+            reason = "the extension point for P1 (dnd) and P4 (foreign-parent)"
         )
     )]
     pub(crate) fn with_globals<R>(
@@ -753,9 +764,9 @@ impl State {
     }
 }
 
-#[cfg(feature = "dnd")]
+#[cfg(any(feature = "dnd", feature = "foreign-parent"))]
 impl Conn {
-    /// Sends what was queued. Requests P1 makes through [`Conn::with_globals`] need it.
+    /// Sends what was queued. Requests P1 and P4 make through [`Conn::with_globals`] need it.
     pub(crate) fn flush(&self) {
         self.home.flush();
     }
@@ -782,6 +793,137 @@ impl Conn {
         display::with_surface(&Connection::from_backend(backend), window, f)
     }
 }
+
+/// What P4 (`foreign-parent`) builds on: a round trip, to learn at once whether the compositor
+/// destroyed an import.
+#[cfg(feature = "foreign-parent")]
+impl Conn {
+    /// Sends what is queued, waits for the compositor to answer a `wl_display.sync`, and runs
+    /// every handler on the queue meanwhile, P0's included: their events reach subscribers as
+    /// [`Conn::dispatch`]'s do. Winit's display only, on the UI thread, never inside
+    /// [`Conn::with_globals`] (both lock the state).
+    ///
+    /// It blocks the UI thread for one round trip, **with no limit**: a compositor that stops
+    /// answering holds the UI thread until it answers or the connection ends. That is left
+    /// unbounded on purpose: such a compositor stalls winit's own frames and requests on the
+    /// same connection anyway, and a round trip given up midway would leave its import
+    /// half made, its answer due later.
+    ///
+    /// Only libwayland's own error ([`Failure::Dead`]) marks the connection dead. A full
+    /// socket buffer is waited out ([`BUSY_TRIES`] times, [`BUSY_WAIT`] each), then reported
+    /// as [`Error::Busy`] with the connection alive. So is an event this client couldn't parse
+    /// ([`Failure::Other`]), named as such.
+    ///
+    /// The reader thread may hold a read intent meanwhile: libwayland's read protocol lets two
+    /// threads prepare and read at once, and the reader never waits on the UI thread while it
+    /// holds one (see `reader`).
+    pub(crate) fn roundtrip(&self) -> Result<(), Error> {
+        if self.home.ui.is_none() {
+            return Err(Error::Refused("a round trip is for winit's display"));
+        }
+        if !self.home.here() {
+            return Err(Error::Refused(ON_UI));
+        }
+        if self.failed.load(Ordering::Acquire) {
+            return Err(Error::Connection("the connection failed".into()));
+        }
+        let (events, dead) = {
+            let mut queue = lock(&self.queue);
+            let Some(queue) = queue.as_mut() else {
+                return Err(Error::Shutdown);
+            };
+            let mut state = lock(&self.state);
+            let mut tries = 0;
+            let outcome = loop {
+                let result = queue.roundtrip(&mut state);
+                let backend = self.home.backend.upgrade();
+                let last_error = backend
+                    .as_ref()
+                    .and_then(|b| b.last_error())
+                    .map(|e| e.to_string());
+                let failure = match result {
+                    Ok(_) => last_error.map(Failure::Dead),
+                    Err(e) => Some(classify(&e, last_error)),
+                };
+                match failure {
+                    Some(Failure::Busy) if tries < BUSY_TRIES => {
+                        tries += 1;
+                        // Wait until the compositor reads, then send the sync again: the
+                        // first one's answer, if it comes, is ignored.
+                        if let Some(b) = &backend {
+                            let _ = pipe::poll(&[(b.poll_fd(), libc::POLLOUT)], Some(BUSY_WAIT));
+                        }
+                    }
+                    Some(Failure::Busy) => {
+                        break Err(Error::Busy(
+                            "the compositor isn't reading: the socket stayed full".into(),
+                        ));
+                    }
+                    Some(Failure::Other(message)) => {
+                        break Err(Error::Busy(format!(
+                            "an event from the compositor didn't parse: {message}"
+                        )));
+                    }
+                    Some(Failure::Dead(message)) => break Ok(Some(message)),
+                    None => break Ok(None),
+                }
+            };
+            (std::mem::take(&mut state.events), outcome)
+        };
+        self.subs.emit(events);
+        self.gate.turned();
+        match dead {
+            Ok(Some(message)) => {
+                self.report_failure(message.clone());
+                Err(Error::Connection(message))
+            }
+            Ok(None) => Ok(()),
+            Err(e) => Err(e),
+        }
+    }
+}
+
+/// How a failed round trip leaves the connection.
+#[cfg(feature = "foreign-parent")]
+#[derive(Debug, PartialEq, Eq)]
+enum Failure {
+    /// libwayland has an error: the connection is dead, for good.
+    Dead(String),
+    /// The socket's buffer was full (`EAGAIN` on the flush): wait for the socket and try
+    /// again.
+    Busy,
+    /// Anything else libwayland didn't keep, in practice `DispatchError::BadMessage` (an event
+    /// wayland-client couldn't parse): this round trip failed, and the connection lives on.
+    Other(String),
+}
+
+/// `last_error` is the backend's: wayland-backend (0.3.17) keeps every I/O error of
+/// `wl_display_flush` and `wl_display_read_events` there except `EAGAIN`, which
+/// `blocking_dispatch` passes on as it is. `EINTR` included: libwayland counts it fatal in
+/// both, and wayland-client's `blocking_read` retries it in its own poll. So an I/O error
+/// with no last error is `EAGAIN` from the flush.
+#[cfg(feature = "foreign-parent")]
+fn classify(e: &wayland_client::DispatchError, last_error: Option<String>) -> Failure {
+    use std::io::ErrorKind;
+    use wayland_backend::client::WaylandError;
+    use wayland_client::DispatchError;
+
+    if let Some(message) = last_error {
+        return Failure::Dead(message);
+    }
+    match e {
+        DispatchError::Backend(WaylandError::Io(io)) if io.kind() == ErrorKind::WouldBlock => {
+            Failure::Busy
+        }
+        e => Failure::Other(e.to_string()),
+    }
+}
+
+/// How often a round trip waits for a full socket to drain, and how long each time.
+#[cfg(feature = "foreign-parent")]
+const BUSY_TRIES: u32 = 4;
+#[cfg(feature = "foreign-parent")]
+const BUSY_WAIT: std::time::Duration = std::time::Duration::from_millis(250);
 
 #[cfg(test)]
 mod tests;

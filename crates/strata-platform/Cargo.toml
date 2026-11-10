@@ -31,7 +31,7 @@ clipboard = ["_transfer"]
 csd = ["dep:x11rb"]
 
 # P4 foreign parenting: src/foreign_parent/
-foreign-parent = ["_transfer"]
+foreign-parent = ["_transfer", "wayland-protocols/unstable"]
 
 # P5 desktop settings: src/settings/
 settings = [

@@ -35,6 +35,11 @@
 //! subscriber's notify and a read's `done` hand them over with `AppHandle::update`.
 //! A [`Subscription`] dropped unsubscribes.
 //!
+//! Each window keeps the [`Turn`] it attached with, so pass a real one on every attach, built
+//! from that window's app: the reader's turns go to every attached window with none
+//! outstanding, so they keep running when the first window to attach closes, as long as any
+//! attached window lives (`windows`). A window attached again replaces its turn.
+//!
 //! # Threads
 //!
 //! On winit's display, everything that sends a request or dispatches runs on the UI thread,
@@ -74,6 +79,7 @@ mod gate;
 pub mod mime;
 pub(crate) mod pipe;
 pub(crate) mod wayland;
+mod windows;
 pub(crate) mod x11;
 
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -88,10 +94,12 @@ pub use wayland::{DragOffer, Prefer};
 pub use x11::HandOff;
 
 use event::Subscribers;
+use windows::Windows;
 
-/// Runs a closure on the UI thread soon. Build it from the app's handle:
+/// Runs a closure on the UI thread soon. Build it from the attaching window's app handle:
 /// `Arc::new(move |f| handle.update_if(move |_, _| { f(); false }))`. Returning false keeps
-/// the turn from redrawing, whose frame callback would wake the reader again.
+/// the turn from redrawing, whose frame callback would wake the reader again. A turn of a
+/// window whose app has closed never runs (see the module docs).
 pub type Turn = Arc<dyn Fn(Box<dyn FnOnce() + Send>) + Send + Sync>;
 
 /// Where data control goes on Wayland.
@@ -172,20 +180,21 @@ enum Backend {
 }
 
 /// Runs at [`Transfer::shutdown`], on the UI thread, before anything is torn down.
-#[cfg(any(feature = "dnd", feature = "clipboard"))]
+#[cfg(any(feature = "dnd", feature = "clipboard", feature = "foreign-parent"))]
 pub(crate) type BeforeShutdown = Box<dyn FnOnce(&Transfer) + Send>;
 
 struct Hub {
     /// The thread that attached: the UI thread.
     ui: std::thread::ThreadId,
     status: Status,
-    windows: Arc<Mutex<Vec<WindowHandle>>>,
+    /// Every attached window, with its turn.
+    windows: Arc<Windows>,
     subs: Subscribers,
     backend: Backend,
     /// What modules built on the substrate (P1, P2) must do first: tear down their own objects
     /// on winit's display, undo properties they set on the app's windows, hand a selection to
     /// a clipboard manager.
-    #[cfg(any(feature = "dnd", feature = "clipboard"))]
+    #[cfg(any(feature = "dnd", feature = "clipboard", feature = "foreign-parent"))]
     before_shutdown: Mutex<Vec<BeforeShutdown>>,
 }
 
@@ -201,9 +210,10 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 pub struct Transfer(Arc<Hub>);
 
 impl Transfer {
-    /// Binds the substrate for the process, or adds `window` to the one already bound; true
-    /// when this call bound it. Call it on the UI thread, from `App::on_window` (which runs
-    /// again after Rune recreates a window).
+    /// Binds the substrate for the process, or adds `window` and its `turn` to the one
+    /// already bound; true when this call bound it. Call it on the UI thread, from
+    /// `App::on_window` (which runs again after Rune recreates a window), with a turn built
+    /// from `window`'s own app ([`Turn`]).
     pub fn attach(
         window: &WindowHandle,
         turn: Turn,
@@ -211,9 +221,13 @@ impl Transfer {
     ) -> Result<(Transfer, bool), Error> {
         let mut hub = lock(&HUB);
         if let Some(h) = hub.as_ref() {
-            let mut windows = lock(&h.windows);
-            if !windows.iter().any(|w| w.key() == window.key()) {
-                windows.push(window.clone());
+            h.windows.attach(window.clone(), turn);
+            // The reader may be waiting on turns posted only to windows that closed since.
+            if let Backend::Wayland {
+                shared: Some(c), ..
+            } = &h.backend
+            {
+                c.wake_reader();
             }
             return Ok((Transfer(h.clone()), false));
         }
@@ -225,10 +239,11 @@ impl Transfer {
             })
             .map_err(Error::WindowClosed)?
             .map_err(|k| Error::Unsupported(Unsupported::NotLinux(k)))?;
-        let windows = Arc::new(Mutex::new(vec![window.clone()]));
+        let windows = Arc::new(Windows::default());
+        windows.attach(window.clone(), turn);
         let subs = Subscribers::default();
         let (backend, status) = match kind {
-            "wayland" => wayland_backend(window, &windows, &subs, turn, wants)?,
+            "wayland" => wayland_backend(window, &windows, &subs, wants)?,
             _ => (
                 Backend::X11(x11::X11::start(subs.clone())?),
                 Status {
@@ -247,7 +262,7 @@ impl Transfer {
             windows,
             subs,
             backend,
-            #[cfg(any(feature = "dnd", feature = "clipboard"))]
+            #[cfg(any(feature = "dnd", feature = "clipboard", feature = "foreign-parent"))]
             before_shutdown: Mutex::new(Vec::new()),
         });
         *hub = Some(h.clone());
@@ -300,6 +315,12 @@ impl Transfer {
             Some(x) => x.provoke_connection_failure(),
             None => false,
         }
+    }
+
+    /// A test hook for strata-platform's own tests: how many windows the substrate tracks.
+    #[doc(hidden)]
+    pub fn attached_windows(&self) -> usize {
+        self.0.windows.len()
     }
 
     /// The newest key or button serial on winit's display.
@@ -446,7 +467,7 @@ impl Transfer {
             return Ok(false);
         };
         drop(slot);
-        #[cfg(any(feature = "dnd", feature = "clipboard"))]
+        #[cfg(any(feature = "dnd", feature = "clipboard", feature = "foreign-parent"))]
         {
             let hooks = std::mem::take(&mut *lock(&hub.before_shutdown));
             let t = Transfer(hub.clone());
@@ -469,14 +490,29 @@ impl Transfer {
     }
 }
 
-/// What P1 (`dnd`) builds on: the connection on winit's display and the X11 actor.
-#[cfg(feature = "dnd")]
+/// What P1 (`dnd`) and P4 (`foreign-parent`) build on: the connection on winit's display.
+#[cfg(any(feature = "dnd", feature = "foreign-parent"))]
 impl Transfer {
     /// The Wayland connection on winit's display, if bound.
     pub(crate) fn shared_conn(&self) -> Option<&Arc<wayland::Conn>> {
         self.shared()
     }
+}
 
+/// What P4 (`foreign-parent`) builds on: dropping a window as it closes.
+#[cfg(feature = "foreign-parent")]
+impl Transfer {
+    /// Forgets the window keyed `key` and its turn: call it as the window closes, from its
+    /// `on_close`. True if it was attached. A window that closes without it is set aside
+    /// later, and dropped once a few more pile up (see `windows`).
+    pub(crate) fn detach(&self, key: &str) -> bool {
+        self.0.windows.detach(key)
+    }
+}
+
+/// What P1 (`dnd`) builds on: the X11 actor.
+#[cfg(feature = "dnd")]
+impl Transfer {
     /// The X11 side, on X11.
     pub(crate) fn x11(&self) -> Option<&x11::X11> {
         match &self.0.backend {
@@ -486,8 +522,9 @@ impl Transfer {
     }
 }
 
-/// What P1 (`dnd`) and P2 (`clipboard`) build on: a hook before the teardown.
-#[cfg(any(feature = "dnd", feature = "clipboard"))]
+/// What P1 (`dnd`), P2 (`clipboard`) and P4 (`foreign-parent`) build on: a hook before the
+/// teardown.
+#[cfg(any(feature = "dnd", feature = "clipboard", feature = "foreign-parent"))]
 impl Transfer {
     /// Runs `f` at [`Transfer::shutdown`], on the UI thread, before the substrate tears down.
     pub(crate) fn before_shutdown(&self, f: BeforeShutdown) {
@@ -497,9 +534,8 @@ impl Transfer {
 
 fn wayland_backend(
     window: &WindowHandle,
-    windows: &Arc<Mutex<Vec<WindowHandle>>>,
+    windows: &Arc<Windows>,
     subs: &Subscribers,
-    turn: Turn,
     wants: Wants,
 ) -> Result<(Backend, Status), Error> {
     let on_shared = matches!(
@@ -515,7 +551,6 @@ fn wayland_backend(
             window,
             windows.clone(),
             subs.clone(),
-            turn,
             control,
             wants.as_if_libwayland_below_1_23,
         ) {

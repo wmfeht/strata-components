@@ -1159,6 +1159,103 @@ fn closing_the_last_window_tears_the_wayland_binding_down() {
     );
 }
 
+/// Shared. The only attached window closes, the reader then waits on a turn posted to its
+/// app, which is gone, and a later window attaches as P1 and P2 attach a later window: no
+/// dispatch, no round trip. Its attach must release the reader, or nothing on winit's
+/// display is dispatched again (P4's review 2, should-fix B).
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn a_window_attached_after_the_only_attached_one_closed_hears_the_clipboard() {
+    let s = Session::start();
+    if !libwayland_has_get_display() {
+        eprintln!("libwayland < 1.23 here: no winit's display, so no reader; nothing ran");
+        return;
+    }
+    let mut cmd = s.command(example("transfer-probe"), Display::Wayland);
+    cmd.args(["--title", "p0 host", "--host"]);
+    let app = s.spawn("probe", cmd);
+    app.wait_json("the host's first frame", |v| v["ev"] == "frame");
+    let peer = s.peer(Display::Wayland);
+    let open = |key: &str| {
+        let at = app.line_count();
+        app.send_line(&json!({ "cmd": "open-window", "key": key }).to_string());
+        app.wait_json_from(at, &format!("{key}'s attach"), |v| {
+            (v["ev"] == "attached" && v["key"] == key) || v["ev"] == "attach-error"
+        })
+        .1
+    };
+    let offer = |name: &str| {
+        let mime = format!("text/x-p0-{name}");
+        let at = app.line_count();
+        peer.set_selection(
+            Selection::Clipboard,
+            Via::DataControl,
+            &[Offer::text(&mime, name)],
+        );
+        (at, mime)
+    };
+    let heard = |v: &Value, mime: &str| {
+        v["ev"] == "selection"
+            && v["mimes"]
+                .as_array()
+                .is_some_and(|m| m.iter().any(|x| x == mime))
+    };
+
+    let first = open("w1");
+    assert_eq!(
+        (&first["fresh"], &first["shared"]),
+        (&json!(true), &json!(true)),
+        "{first}"
+    );
+    let (at, mime) = offer("one");
+    app.wait_json_from(at, "the peer's first selection", |v| heard(v, &mime));
+
+    let at = app.line_count();
+    app.send_line(&json!({ "cmd": "close-window", "key": "w1" }).to_string());
+    app.wait_json_from(at, "w1's on_close", |v| v["ev"] == "window-closed");
+    let deadline = std::time::Instant::now() + timeout();
+    while has_title(&s.tree(), "p0 w1") {
+        assert!(std::time::Instant::now() < deadline, "w1 never went");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    // The reader reads it, asks w1's app, and waits: with no live window attached, nothing
+    // dispatches it. Checked, or this test would prove nothing.
+    let (at, two) = offer("two");
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    assert!(
+        !app.lines()[at..]
+            .iter()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .any(|v| heard(&v, &two)),
+        "heard with no live window attached: the reader wasn't waiting"
+    );
+
+    let second = open("w2");
+    assert_eq!(second["fresh"], false, "{second}");
+    app.wait_json_from(at, "the selection queued while no window lived", |v| {
+        heard(v, &two)
+    });
+    let (at, mime) = offer("three");
+    app.wait_json_from(at, "a selection after w2 attached", |v| heard(v, &mime));
+    let at = app.line_count();
+    app.send_line(&json!({ "cmd": "quit" }).to_string());
+    app.wait_json_from(at, "the shutdown", |v| v["ev"] == "shutdown");
+    let mut app = app;
+    assert!(app.wait_exit().success());
+}
+
+/// Whether any node of sway's tree is named `title`.
+fn has_title(node: &Value, title: &str) -> bool {
+    match node {
+        Value::Object(map) => {
+            map.get("name").and_then(Value::as_str) == Some(title)
+                || map.values().any(|v| has_title(v, title))
+        }
+        Value::Array(items) => items.iter().any(|v| has_title(v, title)),
+        _ => false,
+    }
+}
+
 /// Whether any node of sway's tree belongs to `pid`.
 fn has_pid(node: &Value, pid: u32) -> bool {
     match node {

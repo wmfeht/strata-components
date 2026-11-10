@@ -7,7 +7,11 @@
 //! - `{"cmd":"own","via":"data-control"|"data-device"|"x11","selection":"clipboard"|"primary","offers":[Offer]}`:
 //!   takes the selection with lazy writers that log `writer` when they run;
 //! - `{"cmd":"targets","via":…,"selection":…}` and `{"cmd":"read","via":…,"selection":…,"mime":…}`;
-//! - `{"cmd":"hide"}`, `{"cmd":"show"}`, `{"cmd":"quit"}`.
+//! - `{"cmd":"hide"}`, `{"cmd":"show"}`, `{"cmd":"quit"}`;
+//! - `{"cmd":"open-window","key":k}` opens window `k` (title `p0 k`), its own app, which
+//!   attaches from `App::on_window` with a turn from that app, as a later P1 or P2 window does
+//!   (`attached` carries its `key`); `{"cmd":"close-window","key":k}` closes it
+//!   (`window-closed`, from its `on_close`).
 //!
 //! Drags into the window are accepted with their first type and Copy; on the drop every type
 //! is read, then the drop is finished.
@@ -18,7 +22,8 @@
 //! Xwayland when Wayland has no route, as the clipboard asks), `--no-shared` (don't bind on
 //! winit's display), `--as-if-libwayland-1-22` (behave as on libwayland < 1.23, which has no route to
 //! winit's display: a test switch), `--answer-ask-with-move` (prefer ask on enter, answer the
-//! drop with move), `--clear-actions-after-drop` (set no actions once dropped). The `break-own` command makes the compositor end the Wayland connection
+//! drop with move), `--clear-actions-after-drop` (set no actions once dropped), `--host` (the
+//! main window attaches nothing: only the windows `open-window` opens do). The `break-own` command makes the compositor end the Wayland connection
 //! of our own with a protocol error (a test switch); `shutdown-elsewhere` calls the shutdown
 //! from another thread, which must refuse; `break-x11` has the X server end the X11
 //! connection (a test switch).
@@ -35,12 +40,14 @@ fn main() {
 
 #[cfg(feature = "_transfer")]
 mod probe {
+    use std::cell::RefCell;
+    use std::collections::HashMap;
     use std::io::{BufRead, Write};
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex, OnceLock};
     use std::time::Instant;
 
-    use rune::{App, AppHandle, AppSpec, Cx, El, Tx, WindowHandle, col, text};
+    use rune::{App, AppHandle, AppSpec, Cx, El, Tx, WindowHandle, WindowSpec, col, text};
     use serde_json::{Value, json};
     use strata_platform::transfer::{
         Action, DataControl, DragOffer, Event, Prefer, ReadLimits, Route, Selection, SourceId,
@@ -134,7 +141,14 @@ mod probe {
         Transfer::current()
     }
 
-    fn attach(w: &WindowHandle, handle: &AppHandle<State>, wants: Wants) {
+    /// Attaches `w` with a turn from its own app, `handle`. Events reach the main window's app
+    /// whichever window bound the substrate, so they outlive any window `open-window` opened.
+    fn attach<S: 'static>(
+        w: &WindowHandle,
+        handle: &AppHandle<S>,
+        wants: Wants,
+        key: Option<&str>,
+    ) {
         let turn_handle = handle.clone();
         let turn: Turn = Arc::new(move |f| {
             turn_handle.update_if(move |_, _| {
@@ -155,11 +169,12 @@ mod probe {
                         "data_control": s.data_control,
                         "unsupported": s.unsupported.as_ref().map(ToString::to_string),
                         "x11": s.x11,
+                        "key": key,
                     }),
                 );
                 if fresh {
                     *LATE.lock().unwrap_or_else(|e| e.into_inner()) = Some((t.clone(), None));
-                    let notify = handle.clone();
+                    let notify = HANDLE.get().expect("set before the event loop").clone();
                     let sub = t.subscribe(move || notify.update_if(|_, _| events()));
                     let _ = ATTACHED.set(sub);
                     // Events heard while binding wait for a dispatch.
@@ -324,6 +339,9 @@ mod probe {
         let sel = serde_json::from_value::<protocol::Selection>(field("selection"))
             .map(selection)
             .unwrap_or(Selection::Clipboard);
+        if cmd["cmd"] == "open-window" {
+            return open_window(cmd["key"].as_str().unwrap_or("w1"));
+        }
         let Some(t) = transfer() else {
             return log("command-error", json!({ "error": "not attached" }));
         };
@@ -393,6 +411,16 @@ mod probe {
                     json!({ "refused": refused, "still_bound": Transfer::current().is_some() }),
                 );
             }
+            "close-window" => {
+                let key = cmd["key"].as_str().unwrap_or("w1");
+                match WINDOWS.with(|w| w.borrow_mut().remove(key)) {
+                    Some(w) => w.close(),
+                    None => log(
+                        "command-error",
+                        json!({ "error": format!("no window {key}") }),
+                    ),
+                }
+            }
             "hide" => handle.hide(),
             "show" => handle.show(),
             "quit" => {
@@ -401,6 +429,52 @@ mod probe {
             }
             other => log("bad-command", json!({ "cmd": other })),
         }
+    }
+
+    thread_local! {
+        /// The windows `open-window` opened, by key.
+        static WINDOWS: RefCell<HashMap<String, WindowHandle>> = RefCell::new(HashMap::new());
+    }
+
+    /// The wants of the main window, for the windows `open-window` opens.
+    static WANTS: OnceLock<Wants> = OnceLock::new();
+
+    struct Extra {
+        key: String,
+    }
+
+    fn extra_view(s: &Extra, _: &mut Cx<Extra>) -> El {
+        col()
+            .w_full()
+            .h_full()
+            .center()
+            .child(text(format!("window {}", s.key)))
+    }
+
+    fn open_window(key: &str) {
+        if WINDOWS.with(|w| w.borrow().contains_key(key)) {
+            return log(
+                "command-error",
+                json!({ "error": format!("window {key} is open") }),
+            );
+        }
+        let title: &'static str = Box::leak(format!("p0 {key}").into_boxed_str());
+        let app = App::new(AppSpec::new(
+            title,
+            (320.0, 200.0),
+            || Extra { key: String::new() },
+            extra_view,
+        ))
+        .on_close(|s: &mut Extra, _: &mut Tx| log("window-closed", json!({ "key": s.key })));
+        let handle = app.handle();
+        let k = key.to_owned();
+        let wants = WANTS.get().copied().unwrap_or_default();
+        let app = app.on_window(move |w: &WindowHandle| attach(w, &handle, wants, Some(&k)));
+        let spec = WindowSpec::from_app(key, app).state(Extra {
+            key: key.to_owned(),
+        });
+        let window = rune::open_window(spec);
+        WINDOWS.with(|w| w.borrow_mut().insert(key.to_owned(), window));
     }
 
     fn view(s: &State, _: &mut Cx<State>) -> El {
@@ -471,9 +545,15 @@ mod probe {
             }
         });
         let attach_handle = handle.clone();
+        let _ = WANTS.set(wants);
+        let host = flag("--host");
         static DRAWN: AtomicBool = AtomicBool::new(false);
         let result = app
-            .on_window(move |w: &WindowHandle| attach(w, &attach_handle, wants))
+            .on_window(move |w: &WindowHandle| {
+                if !host {
+                    attach(w, &attach_handle, wants, None);
+                }
+            })
             .on_ready(|_: &WindowHandle| log("ready", json!({})))
             .on_frame_drawn(|_| {
                 if !DRAWN.swap(true, Ordering::Relaxed) {

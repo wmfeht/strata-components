@@ -78,6 +78,22 @@
 //! - Under Rune's reduced motion with [`Look::animations`](strata_kit::look::Look) on, the
 //!   highlight's `Sequence` lands its final pose at once, so it doesn't show: set the Look's
 //!   animations from the same switch (Rune draft U-C20c-3).
+//!
+//! # Rune
+//!
+//! Rune dev 5d421fd: partly. It has the searchbox and status roles, polite live regions,
+//! `scroll_into_view` (which lands on a row mounted by the same commit, probe P3), `Sequence`
+//! and `focus_return`; it lacks `Tx::focus` (#173). Past the pin and not adopted: `Tx::focus`
+//! for web focus (#384) and `Tx::focused` in every handler (#441); nothing on listboxes,
+//! scroll-into-view or sequences (checked to upstream `0fba24cd`, 2026-11-09).
+//!
+//! # Rune drafts (not filed)
+//!
+//! - **U-C20c-3, a `Sequence` has no reduced pose.** Under reduced motion (or a settle) a
+//!   sequence lands its final pose at once, so a highlight that fades out never shows. Ask:
+//!   `Sequence::reduced(pose, hold)`, a pose held for a time instead of the final one. Here:
+//!   with the Look's animations off the highlight is a static fill the host's tick removes.
+//! - The jump's focus uses `tabbed_form`'s hop: see its #173 comment draft.
 
 #[doc(hidden)]
 pub mod fixture;

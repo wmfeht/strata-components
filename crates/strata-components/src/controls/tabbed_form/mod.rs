@@ -47,7 +47,7 @@
 //!   label only, so it can neither be a tablist nor carry a mark (Rune draft U-C20c-1). The
 //!   tabs are our own elements with tab roles, in Strata's underline look (bullets 43, 44 of
 //!   `integration/custom-actions`).
-//! - **D5:** the keyboard moves to the invalid field by a one-frame focus hop ([`hop`]), as
+//! - **D5:** the keyboard moves to the invalid field by a one-frame focus hop (`hop.rs`), as
 //!   Rune 5d421fd has no `Tx::focus` (upstream #173). Past the pin Rune adds `Tx::focus` for
 //!   web focus (#384) and `Tx::focused` in every handler (#441); not adopted.
 //! - **D6:** a kept page is hidden by opacity 0, `inert` and `a11y_hidden` in a shared grid
@@ -55,6 +55,41 @@
 //!   layout (Rune draft U-C20c-2).
 //! - The panels' changes land at once (`instant_changes`): Strata's notebook switches pages
 //!   with no transition.
+//! - A rebuilt page's body is keyed by a visit count, so each visit mounts afresh (U-C20c-4).
+//!
+//! # Rune
+//!
+//! Rune dev 5d421fd: partly. It has the tab, tablist and tabpanel roles, arrow, Home and End
+//! movement in a `focus_group` (wrapping, with `focus_follows` choosing), `inert`,
+//! `instant_changes` and `focus_return`; it lacks a tab-style SegmentedControl, `Tx::focus`
+//! (#173) and an offstage subtree. Rune dev past the pin changes none of these for tabs or
+//! segments (checked to upstream `0fba24cd`, 2026-11-09).
+//!
+//! # Rune drafts (not filed)
+//!
+//! - **U-C20c-1, SegmentedControl can't be a tablist.** At 5d421fd it builds a `radiogroup` of
+//!   `radio` segments from text labels only. Ask: a tab mode (`tablist`, `tab` with
+//!   `selected`, a `tabpanel` it names), and a per-segment trailing slot (a badge or an error
+//!   dot) that the segment's accessible description can name. Here: own tab elements.
+//! - **U-C20c-2, no offstage subtree.** Nothing keeps a subtree mounted (its scroll offsets,
+//!   focus memory, measured rows) while taking it out of layout, hit testing, Tab order and
+//!   the tree. Here: opacity 0, `inert` and `a11y_hidden` in a shared grid cell, which still
+//!   lays the hidden pages out every frame. Ask: `El::offstage(bool)` (SwiftUI's hidden
+//!   `TabView` pages, a web `display: none` that keeps state).
+//! - **U-C20c-4, an offset survives an instant removal.** A scroll viewport removed in an
+//!   `instant_changes` (or `Tx::instant`) commit, then mounted again at the same path, comes
+//!   back at its old offset; removed with the default exit fade, it comes back at 0. Repro: a
+//!   row with `instant_changes` holding one of two keyed scroll columns by a flag; wheel the
+//!   first down, flip the flag, run 30 frames, flip it back: its content's `scrolled` is the
+//!   old offset (without `instant_changes`: 0). Ask: one rule, a removed viewport forgets its
+//!   offset (or an explicit keep). Here: a per-visit key.
+//! - **A #173 comment draft (anomalyco/rune#173, `Tx::focus`).** Two more uses: a form's Save
+//!   that moves the keyboard to the invalid field on another page, and a settings search whose
+//!   Enter moves it to the found row's control. The workaround (a zero-size leaf with
+//!   `focus_return`, drawn for a frame and dropped) breaks when the focused control turns
+//!   `inert` in the same commit that draws the leaf: focus drops, `last_focused` is cleared at
+//!   the end of `sync_requested_focus`, and the leaf's removal then has no focus to move. A
+//!   `Tx::focus(key)` resolved after the commit would cover both.
 
 pub(crate) mod hop;
 mod state;

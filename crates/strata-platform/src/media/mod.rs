@@ -5,7 +5,8 @@
 //! "unsupported"), and Rune has no API that plays PCM or reports a playback clock. Video needs
 //! nothing new: `Pixels::set` replaces an image from any thread without a view commit.
 //!
-//! Rune issue: none of its own. Related: upstream
+//! Rune issue: draft U-P7-1 (`docs/decisions/S5-upstream.md`), not filed; U-P7-2 asks for a
+//! `Pixels::set` that hands back the buffer it replaces. Related: upstream
 //! [#30](https://github.com/anomalyco/rune/issues/30),
 //! [#100](https://github.com/anomalyco/rune/issues/100) and
 //! [#112](https://github.com/anomalyco/rune/issues/112) (a Linux `Player`). This module is a

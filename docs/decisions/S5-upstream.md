@@ -1472,3 +1472,40 @@ startup id for `_NET_ACTIVE_WINDOW`, and broadcasts the startup id's "remove" me
 
 Related: upstream [#22](https://github.com/anomalyco/rune/issues/22) (single instance), which
 forwards these ids.
+
+### U-P7-1
+
+From P7 (`media-audio`), cited by `crates/strata-platform/src/media/mod.rs`.
+
+**Title:** Linux: play app-decoded PCM with a playback clock, without `Player`
+
+**Context.** A file manager decodes media in a sandboxed helper, which streams RGBA frames and
+PCM back. The frames already work: `Pixels::set` from any thread, no view commit. The sound has
+nowhere to go on Linux: `Player` takes a file or URL and has no Linux backend (#30, #100, #112),
+and Rune has no API that takes PCM.
+
+**Steps.** At `dev` `5d421fd`, look for a way to play a buffer of interleaved S16 stereo at
+48 kHz and read back how much of it has been heard: there is none outside `Player`, whose Linux
+backend reports "unsupported".
+
+**Ask.** A small output: open it with a sample format, rate and channel count; push
+interleaved PCM; play, pause and flush; read a position that follows the device (what has been
+heard, its delay counted); and a callback or waker for underruns, the end and a lost device.
+Video then paces on that position, as the strata-platform shim does on GStreamer's `appsrc`.
+A `Player` with a Linux backend wouldn't cover it: the app has PCM, not a file.
+
+Related: upstream [#30](https://github.com/anomalyco/rune/issues/30) and
+[#112](https://github.com/anomalyco/rune/issues/112).
+
+### U-P7-2
+
+From P7 (`media-audio`).
+
+**Title:** `Pixels::set` drops the image it replaces, so a stream allocates every frame
+
+**Steps.** At `dev` `5d421fd`, stream 1280×720 RGBA at 30 fps into one `Pixels` with
+`set(w, h, rgba)`: each call takes a new `Vec<u8>` and drops the previous one under the lock, so
+a producer allocates and frees 3.7 MB a frame and can't reuse a buffer.
+
+**Ask.** A way to get the replaced buffer back, `Pixels::replace(w, h, rgba) -> Vec<u8>` say, or
+to fill a buffer in place (`Pixels::update(w, h, |rgba| …)`), so a pacer recycles its frames.

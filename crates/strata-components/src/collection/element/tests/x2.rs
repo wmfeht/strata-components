@@ -27,14 +27,20 @@ struct Host {
 }
 
 thread_local! {
-    /// The zones the recording binder attached, by key, in the last build.
+    /// The zones the recording binder attached, by key.
     static ZONES: RefCell<Vec<(String, DropZone<Host>)>> = const { RefCell::new(Vec::new()) };
 }
 
+/// Records each zone attached, the latest for each key: rows are memoised, so a view run that
+/// rebuilds none attaches none.
 fn binder() -> Dnd<Host> {
     Dnd::custom_keyed(
         |el, key, zone| {
-            ZONES.with(|z| z.borrow_mut().push((key.key().to_owned(), zone)));
+            ZONES.with(|z| {
+                let mut z = z.borrow_mut();
+                z.retain(|(k, _)| k != key.key());
+                z.push((key.key().to_owned(), zone));
+            });
             el
         },
         |el, _, _| el,
@@ -42,7 +48,6 @@ fn binder() -> Dnd<Host> {
 }
 
 fn view(s: &Host, _: &mut Cx<Host>) -> El {
-    ZONES.with(|z| z.borrow_mut().clear());
     let c = Collection::new(
         SCOPE,
         |s: &Host| (&s.src, &s.coll),

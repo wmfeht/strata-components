@@ -86,6 +86,9 @@ pub struct Pasted {
     pub conflicts: Vec<(String, String)>,
     /// Sources left alone, and why.
     pub skipped: Vec<(String, &'static str)>,
+    /// The source the paste stopped at, and why: what came before it is done (and listed
+    /// above), what came after it is untouched.
+    pub failed: Option<(String, String)>,
 }
 
 /// Pastes `sources` into `dest`, copying or `moving`. Refuses the whole paste if `dest` or any
@@ -94,6 +97,9 @@ pub struct Pasted {
 /// itself or one of its descendants, does nothing. A name taken in `dest` is kept beside
 /// under the first free numbered name (Keep Both). A link is copied or moved as the link
 /// (never followed out of the root), and nothing is created over an existing entry.
+///
+/// A source that fails stops the paste there, in [`Pasted::failed`]; the Ok still says what
+/// was done before it, so a cut's moved sources still leave the clipboard.
 pub fn paste(
     root: &Path,
     sources: &[PathBuf],
@@ -120,14 +126,20 @@ pub fn paste(
             continue;
         }
         let is_dir = src.symlink_metadata().is_ok_and(|m| m.is_dir());
-        let to = place(&dest, &name, is_dir, !own_folder, |to| {
+        let placed = place(&dest, &name, is_dir, !own_folder, |to| {
             if moving {
                 move_all(&src, to)
             } else {
                 copy_all(&src, to)
             }
-        })
-        .map_err(|e| format!("{}: {e}", src.display()))?;
+        });
+        let to = match placed {
+            Ok(to) => to,
+            Err(e) => {
+                done.failed = Some((shown, e.to_string()));
+                break;
+            }
+        };
         let written = to
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
@@ -201,7 +213,7 @@ fn names(name: &OsStr, is_dir: bool, plain: bool) -> impl Iterator<Item = OsStri
     plain
         .then(|| name.to_owned())
         .into_iter()
-        .chain((start..start.saturating_add(10_000)).map(move |n| {
+        .chain((start..=start.saturating_add(9_999)).map(move |n| {
             let mut out = base.as_bytes().to_vec();
             out.extend_from_slice(format!(" ({n})").as_bytes());
             out.extend_from_slice(ext.as_bytes());
@@ -219,7 +231,8 @@ fn parts(name: &OsStr, is_dir: bool) -> (&OsStr, &OsStr) {
     (stem, OsStr::from_bytes(&name.as_bytes()[stem.len()..]))
 }
 
-/// A stem's ` (n)` suffix, as Strata reads it: digits, no leading zero.
+/// A stem's ` (n)` suffix, as Strata reads it (`parse_copy_suffix`): digits, no leading zero,
+/// and below `u64::MAX`, so one past it is a number too.
 fn number_of(stem: &OsStr) -> (&OsStr, Option<u64>) {
     let bytes = stem.as_bytes();
     if let Some(open) = bytes.strip_suffix(b")")
@@ -232,6 +245,7 @@ fn number_of(stem: &OsStr) -> (&OsStr, Option<u64>) {
             && let Some(n) = std::str::from_utf8(digits)
                 .ok()
                 .and_then(|d| d.parse::<u64>().ok())
+            && n < u64::MAX
         {
             return (OsStr::from_bytes(&bytes[..at]), Some(n));
         }
@@ -302,7 +316,8 @@ fn copy_all(from: &Path, to: &Path) -> io::Result<()> {
 
 /// Moves `from` to `to`, which must not exist, never replacing an entry there. Copies and
 /// removes only across devices: any other failure is reported, with the source untouched.
-/// (X2's, with its review-2 fix.)
+/// A file whose source can't be removed once its new name is made loses the new name again,
+/// so nothing is left in both places. (X2's, with its review-2 fix and that.)
 fn move_all(from: &Path, to: &Path) -> io::Result<()> {
     if from.symlink_metadata()?.file_type().is_dir() {
         // Reserve the name with an empty folder of our own, which `rename` replaces (it only
@@ -322,13 +337,17 @@ fn move_all(from: &Path, to: &Path) -> io::Result<()> {
     }
     // A hard link fails if `to` exists (and links a link itself, not what it points at).
     match std::fs::hard_link(from, to) {
-        Ok(()) => std::fs::remove_file(from).map_err(below),
-        Err(e) if e.kind() == io::ErrorKind::CrossesDevices => {
-            copy_all(from, to)?;
-            std::fs::remove_file(from).map_err(below)
-        }
-        Err(e) => Err(e),
+        Ok(()) => {}
+        Err(e) if e.kind() == io::ErrorKind::CrossesDevices => copy_all(from, to)?,
+        Err(e) => return Err(e),
     }
+    std::fs::remove_file(from).map_err(|e| {
+        // Only while the source is still there: else the new name is the only one left.
+        if from.symlink_metadata().is_ok() {
+            let _ = std::fs::remove_file(to);
+        }
+        below(e)
+    })
 }
 
 #[cfg(test)]

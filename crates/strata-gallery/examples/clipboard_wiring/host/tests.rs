@@ -50,20 +50,37 @@ fn owned(names: &[&str]) -> Vec<String> {
     names.iter().map(|n| (*n).to_owned()).collect()
 }
 
-#[test]
-fn the_clipboard_keys_reach_the_host_past_the_focused_list() {
-    let mut rt = mount("keys");
-    let id = rt.state.ids.of(&rt.state.root.join("notes.txt"));
+/// Clicks the row of `name`, in the folder shown.
+fn click(rt: &mut Runtime<Win>, name: &str) {
+    let id = rt.state.ids.of(&rt.state.folder.join(name));
     let rect = rt
         .elements()
         .into_iter()
         .find(|e| e.key.as_deref() == Some(row_key(id).as_str()))
-        .expect("the notes.txt row")
+        .unwrap_or_else(|| panic!("the {name} row"))
         .rect;
     let at = (rect[0] + rect[2] / 2.0, rect[1] + rect[3] / 2.0);
     rt.pointer_down(at.0, at.1);
     rt.pointer_up(at.0, at.1);
     rt.frame(0.1);
+}
+
+fn press(rt: &mut Runtime<Win>, key: Key, mods: Mods) {
+    rt.key(KeyEvent { key, mods });
+    rt.frame(0.1);
+}
+
+fn alt() -> Mods {
+    Mods {
+        alt: true,
+        ..Mods::default()
+    }
+}
+
+#[test]
+fn the_clipboard_keys_reach_the_host_past_the_focused_list() {
+    let mut rt = mount("keys");
+    click(&mut rt, "notes.txt");
     assert!(
         rt.elements()
             .iter()
@@ -104,15 +121,10 @@ fn a_paste_goes_into_the_one_folder_explicitly_selected_else_the_folder_shown() 
         assert_eq!(w.paste_destination(), root, "{picked:?}");
     }
     // operations/clipboard: After going to a parent folder, Ctrl+V pastes into the parent, not into the folder selected on arrival, restored or first.
-    rt.update(|w, tx| w.open(w.root.join("Documents"), tx));
-    rt.key(KeyEvent {
-        key: Key::Up,
-        mods: Mods {
-            alt: true,
-            ..Mods::default()
-        },
+    rt.update(|w, tx| {
+        w.open(&w.root.join("Documents"), tx);
     });
-    rt.frame(0.1);
+    press(&mut rt, Key::Up, alt());
     let w = &rt.state;
     assert_eq!(w.folder, root);
     assert_eq!(
@@ -121,4 +133,38 @@ fn a_paste_goes_into_the_one_folder_explicitly_selected_else_the_folder_shown() 
         "the folder we came from is picked"
     );
     assert_eq!(w.paste_destination(), root);
+}
+
+#[test]
+fn a_folder_reached_through_a_link_is_shown_resolved_and_a_link_out_of_the_root_is_refused() {
+    let mut rt = mount("links");
+    let root = rt.state.root.clone();
+    let outside = root.with_file_name("links-outside");
+    std::fs::create_dir_all(&outside).expect("a folder outside");
+    std::os::unix::fs::symlink(root.join("Documents"), root.join("link")).expect("a link");
+    std::os::unix::fs::symlink(&outside, root.join("out")).expect("a link out");
+    rt.update(|w, tx| w.refresh(tx));
+    rt.frame(0.1);
+    // Shown under the paths a paste reports moved (fsys resolves a source's folder), so a
+    // cut made here leaves the clipboard when it moves.
+    click(&mut rt, "link");
+    press(&mut rt, Key::Enter, Mods::default());
+    assert_eq!(rt.state.folder, root.join("Documents"));
+    rt.state.select(&owned(&["Reports"]));
+    assert_eq!(rt.state.selected(), [root.join("Documents/Reports")]);
+    assert_eq!(rt.state.paste_destination(), root.join("Documents/Reports"));
+    press(&mut rt, Key::Up, alt());
+    assert_eq!(rt.state.folder, root);
+    rt.state.select(&owned(&["link"]));
+    assert_eq!(rt.state.paste_destination(), root.join("Documents"));
+    // A link out of the root isn't browsed into.
+    take_logged();
+    click(&mut rt, "out");
+    press(&mut rt, Key::Enter, Mods::default());
+    assert_eq!(rt.state.folder, root);
+    let logged = take_logged();
+    assert!(
+        logged.iter().any(|l| l["ev"] == "open-refused"),
+        "{logged:?}"
+    );
 }

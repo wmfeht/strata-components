@@ -16,9 +16,11 @@
 //!   a name taken is kept beside (Keep Both, logged `conflict`). A cut's moved entries leave
 //!   the clipboard.
 //! - **The badge** shows while the clipboard holds a non-empty file list, from any app.
-//! - Enter or a double click opens a folder; Alt+Up and Backspace go up (not above `--root`).
+//! - Enter or a double click opens a folder, a link to one shown as the folder it resolves to
+//!   (one out of `--root` doesn't open); Alt+Up and Backspace go up (not above `--root`).
 //! - Every paste is logged. `--apply` does it, inside `--root` only: a source or destination
-//!   outside it refuses the whole paste.
+//!   outside it refuses the whole paste. One that fails partway stops there (`failed` in its
+//!   `paste` line) and keeps what it did: its moves still leave the cut.
 //!
 //! Test-only flag: `--as-if-no-data-control` makes P2 behave as on a compositor without
 //! data control (mutter): the data device, whose writes take the key's serial. For the

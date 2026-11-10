@@ -37,7 +37,8 @@ use std::rc::Rc;
 
 use rune::Tx;
 use strata_platform::clipboard::{
-    Change, Clipboard, Content, CopyId, Error, Files, Limits, ReadError, Selection, TestRoute,
+    Change, Clipboard, Content, CopyId, CopyState, Error, Files, Limits, ReadError, Selection,
+    TestRoute,
     files::{FileUri, file_path},
 };
 
@@ -73,8 +74,8 @@ pub enum After<I> {
     Keep,
     /// Empty the clipboard if copy `I` still holds it.
     Clear(I),
-    /// Copy the rest again, as a cut.
-    Recut(Vec<PathBuf>),
+    /// Copy the rest again, as a cut, if copy `I` still holds the clipboard.
+    Recut(I, Vec<PathBuf>),
 }
 
 #[derive(Clone, Debug)]
@@ -183,7 +184,7 @@ impl<I: Copy + PartialEq> Board<I> {
             self.forget();
             After::Clear(copy)
         } else {
-            After::Recut(h.paths.clone())
+            After::Recut(h.copy, h.paths.clone())
         }
     }
 
@@ -287,6 +288,10 @@ impl<S: 'static> FileClipboard<S> {
 
     /// Reads what a paste takes: the files, in the file managers' formats, else an image.
     /// `f` runs once, in an update, unless this returns Err (not attached).
+    ///
+    /// A deviation from Strata, which reads any image type and also falls back to the image
+    /// when the files offered can't be read: this reads only `image/png`, and only when no
+    /// file list is offered at all (`NothingOffered`).
     pub fn paste(&self, f: impl Fn(&mut S, Paste, &mut Tx) + 'static) -> Result<(), Error> {
         let f = Rc::new(f);
         let (at, clip) = (self.at, self.clip.clone());
@@ -339,7 +344,17 @@ impl<S: 'static> FileClipboard<S> {
         match self.board.moved(moved) {
             After::Keep => Ok(false),
             After::Clear(copy) => self.clip.clear(copy),
-            After::Recut(rest) => self.copy(&rest, true).map(|_| true),
+            // Strata's check: a cut list of ours doesn't mean the clipboard is still ours (its
+            // loss may not have been heard yet).
+            After::Recut(copy, rest) => match self.clip.state(copy) {
+                Some(CopyState::Holding | CopyState::Pending) => {
+                    self.copy(&rest, true).map(|_| true)
+                }
+                _ => {
+                    self.board.lost(copy);
+                    Ok(false)
+                }
+            },
         }
     }
 

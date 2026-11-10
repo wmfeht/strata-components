@@ -1,10 +1,11 @@
 //! A paste's names and guards: Strata's numbering, the own-folder rules, Keep Both, and
 //! nothing written outside the root or read in from outside it.
 
-use std::os::unix::fs::symlink;
+use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 
 use super::{paste, paste_image};
+use crate::adapter::{After, Board};
 
 /// A fresh `root` (with folders `a` and `b`) and an `outside` beside it, under the gallery's
 /// target directory (never the desktop's /tmp).
@@ -12,6 +13,12 @@ fn fixture(name: &str) -> (PathBuf, PathBuf) {
     let base = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../target/tmp/x3-fsys")
         .join(name);
+    // A run that failed may have left a folder read-only.
+    let _ = std::fs::read_dir(base.join("root")).map(|rd| {
+        for e in rd.flatten() {
+            let _ = std::fs::set_permissions(e.path(), std::fs::Permissions::from_mode(0o755));
+        }
+    });
     let _ = std::fs::remove_dir_all(&base);
     let (root, outside) = (base.join("root"), base.join("outside"));
     for d in [root.join("a/sub"), root.join("b"), outside.clone()] {
@@ -154,4 +161,69 @@ fn a_folder_moves_whole_and_an_image_is_numbered() {
     assert_eq!(paste_image(&root, &b, b"one").unwrap(), "image.png");
     assert_eq!(paste_image(&root, &b, b"two").unwrap(), "image (1).png");
     assert_eq!(std::fs::read(b.join("image (1).png")).unwrap(), b"two");
+}
+
+fn set_mode(path: &Path, mode: u32) {
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).expect("chmod");
+}
+
+#[test]
+fn a_cut_that_fails_partway_keeps_what_it_moved_and_leaves_the_rest_cut() {
+    let (root, _) = fixture("partway");
+    let (a, b) = (root.join("a"), root.join("b"));
+    // A folder moves only with write access to it (its `..` changes): this one fails.
+    let locked = a.join("locked");
+    std::fs::create_dir(&locked).unwrap();
+    set_mode(&locked, 0o555);
+    let cut = vec![a.join("todo.txt"), locked.clone()];
+    let mut board = Board::<u32>::default();
+    board.copied(1, cut.clone(), true);
+    let done = paste(&root, &cut, &b, true);
+    set_mode(&locked, 0o755);
+    let done = done.expect("a paste that failed partway still says what it did");
+    assert_eq!(
+        (&done.written, &done.moved),
+        (&vec!["todo.txt".to_owned()], &vec![a.join("todo.txt")])
+    );
+    assert_eq!(done.failed.as_ref().map(|f| f.0.as_str()), Some("locked"));
+    assert!(b.join("todo.txt").exists() && !b.join("locked").exists());
+    // What moved leaves the cut; the rest stays cut, and pastes on its own.
+    assert_eq!(
+        board.moved(&done.moved),
+        After::Recut(1, vec![locked.clone()])
+    );
+    let again = paste(&root, std::slice::from_ref(&locked), &b, true).expect("the rest pastes");
+    assert_eq!((again.moved, again.failed), (vec![locked], None));
+}
+
+#[test]
+fn a_file_whose_source_cant_be_removed_is_not_left_in_both_places() {
+    let (root, _) = fixture("unremovable");
+    let (c, b) = (root.join("c"), root.join("b"));
+    std::fs::create_dir(&c).unwrap();
+    std::fs::write(c.join("kept.txt"), "kept").unwrap();
+    set_mode(&c, 0o555);
+    let done = paste(&root, &[c.join("kept.txt")], &b, true);
+    set_mode(&c, 0o755);
+    assert!(
+        !b.join("kept.txt").exists(),
+        "the new name is gone again: {done:?}"
+    );
+    assert_eq!(std::fs::read_to_string(c.join("kept.txt")).unwrap(), "kept");
+}
+
+#[test]
+fn the_largest_number_is_read_as_part_of_the_name() {
+    // Strata's `parse_copy_suffix`: no number past it, so it is no suffix.
+    let (root, _) = fixture("largest");
+    let (a, b) = (root.join("a"), root.join("b"));
+    let largest = format!("name ({}).ext", u64::MAX);
+    std::fs::write(a.join(&largest), "x").unwrap();
+    let done = paste(&root, &[a.join(&largest)], &a, false).unwrap();
+    assert_eq!(done.written, [format!("name ({}) (1).ext", u64::MAX)]);
+    // One below it still counts on, to it.
+    let below = format!("name ({}).ext", u64::MAX - 1);
+    std::fs::write(b.join(&below), "x").unwrap();
+    let done = paste(&root, &[b.join(&below)], &b, false).unwrap();
+    assert_eq!(done.written, [largest]);
 }

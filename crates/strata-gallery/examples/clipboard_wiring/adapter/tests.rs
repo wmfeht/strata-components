@@ -11,7 +11,7 @@ fn p(name: &str) -> PathBuf {
 
 #[test]
 fn a_copy_and_a_cut_mark_their_entries_and_show_the_badge() {
-    // operations/clipboard: Copied items show a copy icon in place of their icon or thumbnail; scissors wins when both apply.
+    // The marks only; which icon a row shows for its mark is the PNG goldens' and the eye's.
     let mut b = Board::<u32>::default();
     b.copied(1, vec![p("a"), p("b")], false);
     assert_eq!(
@@ -88,8 +88,9 @@ fn a_cut_paste_takes_the_moved_entries_off_the_clipboard() {
     let mut b = Board::<u32>::default();
     b.copied(1, vec![p("a"), p("b")], true);
     assert_eq!(b.moved(&[p("c")]), After::Keep, "none of ours");
-    // operations/clipboard/file-manager-formats: After a paste consumes part of a cut, the clipboard keeps the remaining items with the `cut` header and the KDE flag `1`.
-    assert_eq!(b.moved(&[p("a")]), After::Recut(vec![p("b")]));
+    // Part of the cut: the rest is to be cut again (the formats that copy offers are read in
+    // tests/x3.rs, `a_partial_cut_paste_keeps_the_rest_cut`).
+    assert_eq!(b.moved(&[p("a")]), After::Recut(1, vec![p("b")]));
     assert_eq!((b.mark(&p("a")), b.mark(&p("b"))), (Mark::None, Mark::Cut));
     assert_eq!(b.moved(&[p("b")]), After::Clear(1));
     assert_eq!(

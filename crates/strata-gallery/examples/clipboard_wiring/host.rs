@@ -99,13 +99,26 @@ impl Win {
             && let Some(p) = self.path_of(*id)
             && p.is_dir()
         {
-            return p;
+            // Resolved, as `open` resolves it; one outside the root the paste refuses.
+            return p.canonicalize().unwrap_or(p);
         }
         self.folder.clone()
     }
 
-    /// Shows `folder`; coming up from a child, that child is picked as a load's pick is.
-    pub fn open(&mut self, folder: PathBuf, tx: &mut Tx) {
+    /// `p` resolved, if it is a folder inside the root.
+    fn folder_in_root(&self, p: &Path) -> Option<PathBuf> {
+        p.canonicalize()
+            .ok()
+            .filter(|p| p.starts_with(&self.root) && p.is_dir())
+    }
+
+    /// Shows `folder`, resolved, so that a link to a folder lists, marks and pastes under the
+    /// paths a paste reports: false if it is no folder inside the root, as a link out of it
+    /// is. Coming up from a child, that child is picked as a load's pick is.
+    pub fn open(&mut self, folder: &Path, tx: &mut Tx) -> bool {
+        let Some(folder) = self.folder_in_root(folder) else {
+            return false;
+        };
         let from = std::mem::replace(&mut self.folder, folder);
         self.listing = fsys::list(&mut self.ids, &self.folder);
         self.version += 1;
@@ -118,6 +131,7 @@ impl Win {
             self.coll.selection.auto_select(&self.listing, i);
         }
         log("opened", json!({ "folder": self.rel(&self.folder) }));
+        true
     }
 
     /// Lists the folder again, keeping what's still there selected.
@@ -222,11 +236,17 @@ impl Win {
         for (name, kept_as) in &done.conflicts {
             log("conflict", json!({ "name": name, "kept_as": kept_as }));
         }
+        // A paste that failed partway still did what it did: its moves leave the cut, and the
+        // destination shows it.
+        let failed = done
+            .failed
+            .as_ref()
+            .map(|(name, why)| json!({ "name": name, "why": why }));
         log(
             "paste",
             json!({
                 "dest": to, "moving": moving, "sources": sources, "written": done.written,
-                "skipped": done.skipped, "moved": done.moved.len(),
+                "skipped": done.skipped, "moved": done.moved.len(), "failed": failed,
             }),
         );
         if !done.moved.is_empty() {
@@ -242,8 +262,8 @@ impl Win {
     fn show(&mut self, dest: &Path, names: &[String], tx: &mut Tx) {
         if dest == self.folder {
             self.refresh(tx);
-        } else {
-            self.open(dest.to_path_buf(), tx);
+        } else if !self.open(dest, tx) {
+            return;
         }
         self.select(names);
     }
@@ -273,9 +293,8 @@ impl Win {
         match cmd["cmd"].as_str().unwrap_or_default() {
             "open" => {
                 let to = self.root.join(cmd["path"].as_str().unwrap_or_default());
-                match to.canonicalize() {
-                    Ok(p) if p.starts_with(&self.root) && p.is_dir() => self.open(p, tx),
-                    _ => log("bad-command", json!({ "cmd": cmd })),
+                if !self.open(&to, tx) {
+                    log("bad-command", json!({ "cmd": cmd }));
                 }
             }
             "select" => {
@@ -303,7 +322,10 @@ pub fn on_key(w: &mut Win, ev: &KeyEvent, tx: &mut Tx) -> bool {
         w.paste();
     } else if UP.matches_tx(ev, tx) || (ev.key == Key::Backspace && ev.mods == Default::default()) {
         match w.folder.parent().filter(|p| p.starts_with(&w.root)) {
-            Some(up) => w.open(up.to_path_buf(), tx),
+            Some(up) => {
+                let up = up.to_path_buf();
+                w.open(&up, tx);
+            }
             None => return false,
         }
     } else {
@@ -360,8 +382,9 @@ fn collection() -> Collection<Win> {
     .on_intent(|w: &mut Win, intent, tx| {
         if let Intent::Activate { id, .. } = intent
             && let Some(p) = w.path_of(id).filter(|p| p.is_dir())
+            && !w.open(&p, tx)
         {
-            w.open(p, tx);
+            log("open-refused", json!({ "path": w.rel(&p) }));
         }
     })
 }

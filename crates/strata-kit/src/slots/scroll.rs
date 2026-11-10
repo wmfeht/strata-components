@@ -37,6 +37,7 @@ pub struct Scroll {
     pub column_top_gap: Option<f32>,
     pub strip_margin: Option<f32>,
     pub strip_ring_opacity: Option<f32>,
+    pub strip_ring_width: Option<f32>,
     pub anchor_size: Option<f32>,
     pub trough_radius: Option<f32>,
     pub thumb_radius: Option<f32>,
@@ -129,6 +130,12 @@ pub fn column_top_gap(look: &Look) -> f32 {
 /// The column strip's sideways trough's gap above and below: `scroll.strip.margin`, else 3.
 pub fn strip_margin(look: &Look) -> f32 {
     look.slots.scroll.strip_margin.unwrap_or(3.0)
+}
+
+/// The width of the ring inside the column strip's trough (Strata's `box-shadow: inset 0 0 0
+/// 1px`): `scroll.strip.ring_width`, else 1.
+pub fn strip_ring_width(look: &Look) -> f32 {
+    look.slots.scroll.strip_ring_width.unwrap_or(1.0)
 }
 
 /// The opacity of the ring inside the column strip's trough: `scroll.strip.ring_opacity`,
@@ -257,6 +264,9 @@ pub const TOKENS: &[Token] = &[
         strip_ring_opacity,
         |l, v| l.slots.scroll.strip_ring_opacity = Some(v),
     ),
+    Token::length("scroll.strip.ring_width", strip_ring_width, |l, v| {
+        l.slots.scroll.strip_ring_width = Some(v)
+    }),
     Token::length("scroll.anchor.size", anchor_size, |l, v| {
         l.slots.scroll.anchor_size = Some(v)
     }),

@@ -59,8 +59,9 @@ pub struct BarLook {
     pub trough_hover: Color,
     /// An opaque band under the trough (the column strip's), if any.
     pub base: Option<Color>,
-    /// A ring inside the trough, if any.
+    /// A ring inside the trough, if any, and its width.
     pub ring: Option<Color>,
+    pub ring_width: f32,
     /// The thumb's and the trough's corner radii (`scroll.thumb.radius`,
     /// `scroll.trough.radius`; a listing's thumb is fully rounded).
     pub thumb_radius: f32,
@@ -88,6 +89,7 @@ impl BarLook {
             trough_hover: tokens::trough_at(look, tokens::trough_hover_opacity(look)),
             base: None,
             ring: None,
+            ring_width: tokens::strip_ring_width(look),
             thumb_radius: tokens::thumb_radius(look),
             trough_radius: tokens::trough_radius(look),
             animations: look.animations,
@@ -185,6 +187,8 @@ struct Inner {
     look: Cell<Option<BarLook>>,
     mode: Cell<BarMode>,
     pos: Cell<ScrollPos>,
+    /// The scroll around the viewport, across the bar (C4's sideways scroll), once heard.
+    outer: Cell<Option<ScrollPos>>,
     target: RefCell<String>,
     over: Cell<bool>,
     dragging: Cell<bool>,
@@ -225,6 +229,7 @@ impl Bar {
             look: Cell::new(None),
             mode: Cell::new(BarMode::Overlay),
             pos: Cell::new(ScrollPos::default()),
+            outer: Cell::new(None),
             target: RefCell::new(String::new()),
             over: Cell::new(false),
             dragging: Cell::new(false),
@@ -252,6 +257,15 @@ impl Bar {
     /// `Collection::on_scroll`). A scroll shows an overlay bar, which fades [`HOLD`] after.
     pub fn follow(&self, p: ScrollPos) {
         self.0.follow(p);
+    }
+
+    /// Follows the scroll `p` around the viewport, across the bar: a vertical bar over a
+    /// viewport inside a wider sideways scroll (C4's table in its pane) keeps to the trailing
+    /// edge of what that scroll shows, not to its own viewport's, which may be off screen. Call
+    /// it from the outer scroll's `on_scroll_offset`; it moves the bar in the same frame.
+    pub fn follow_across(&self, p: ScrollPos) {
+        self.0.outer.set(Some(p));
+        self.0.layout();
     }
 
     /// A handler for `El::on_scroll_offset` that calls [`Bar::follow`].
@@ -306,7 +320,7 @@ impl Bar {
             .live_fill(inner.fill.smooth(tint))
             .child(thumb);
         if let Some(ring) = look.ring {
-            trough = trough.outline(1.0, -1.0, ring);
+            trough = trough.outline(look.ring_width, -look.ring_width, ring);
         }
         let mut band = col()
             .key(key.to_owned())
@@ -425,7 +439,7 @@ impl Inner {
         let (trough, track, shows) = self.track();
         let (trough, track) = if shows { (trough, track) } else { (0.0, 0.0) };
         let band = look.band();
-        let across = p.viewport[1 - a] - look.edge - band;
+        let across = self.width_across(a, p) - look.edge - band;
         self.band
             .snap(look.turned([across, look.start, band, trough]));
         self.trough
@@ -434,6 +448,17 @@ impl Inner {
         let inset = (look.thickness - look.thumb_width) / 2.0;
         self.thumb
             .snap(look.turned([inset, look.ends + start, look.thumb_width, len]));
+    }
+
+    /// How far across the viewport the bar's far edge is: the viewport's own size, or the
+    /// trailing edge of what a scroll around it shows ([`Bar::follow_across`]), whichever is
+    /// nearer.
+    fn width_across(&self, a: usize, p: ScrollPos) -> f32 {
+        let own = p.viewport[1 - a];
+        match self.outer.get() {
+            Some(o) => (o.offset[1 - a] + o.drawn[1 - a]).min(own),
+            None => own,
+        }
     }
 
     /// Takes the look a view built the bar with.

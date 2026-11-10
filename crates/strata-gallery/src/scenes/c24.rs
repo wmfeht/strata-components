@@ -3,7 +3,7 @@
 //!
 //! Work package: `docs/work/phase-1-leaves/C24-scroll-extras.md`.
 //!
-//! Three panes, one at a time:
+//! Four panes, one at a time:
 //!
 //! - **List**: a 10,000-entry collection (every tenth a folder) with List's overlay scroll bar
 //!   and middle-click autoscroll in front of C1b's pointer intent, with C1c's keys and C1d's
@@ -14,6 +14,10 @@
 //!   each with a column's bar, the strip with its own, one autoscroll for the window.
 //! - **Bars**: a plain viewport that scrolls both ways, with the app-wide bar on each axis and
 //!   autoscroll on both.
+//! - **Panel**: a stand-in sidebar (`c24-sidebar`, a plain scroll viewport) beside the list, and
+//!   a stand-in Sort by panel (`c24-panel`, opened and closed by `c24-panel-button`) with C24's
+//!   [`OutsideWheel`] outside it: a wheel tick outside closes it and scrolls the list under the
+//!   pointer, and nothing over the sidebar or header.
 //!
 //! | Key | Does |
 //! | --- | --- |
@@ -29,13 +33,14 @@ use rune::{
     Cx, Drag, El, Key, KeyEvent, PointerButton, ScrollPos, TextEdit, Tx, col, row, text, text_input,
 };
 use strata_components::collection::element::{
-    Collection, CollectionState, Controllers, Intent, Slot, viewport_path,
+    Collection, CollectionState, Controllers, Intent, viewport_path,
 };
 use strata_components::collection::marquee::MarqueeSettings;
 use strata_components::contract::{EntryId, EntryKind, ListEntry, ListSource, Point, Rect};
+use strata_components::rename::{Initial, RenameEditor, RenameState};
 use strata_components::scroll::{
-    Autoscroll, AutoscrollPointer, AutoscrollSettings, Bar, BarLook, BarMode, ScrollFeed, Shield,
-    Start, Stop, Target, overlay,
+    Autoscroll, AutoscrollPointer, AutoscrollSettings, Bar, BarLook, BarMode, OutsideWheel,
+    ScrollFeed, Shield, Start, Stop, Target, overlay,
 };
 
 use crate::{Gallery, Scene};
@@ -71,6 +76,7 @@ pub enum Pane {
     List,
     Nested,
     Bars,
+    Panel,
 }
 
 /// One column of the nested pane.
@@ -102,10 +108,8 @@ pub struct Demo {
     pub stopped: String,
     pub chord: bool,
     pub filter: TextEdit,
-    /// The entry whose name an inline rename field edits (the `c24-rename` scene): a text
-    /// field inside the listing.
-    pub renaming: Option<EntryId>,
-    pub rename_edit: TextEdit,
+    /// C5's rename editor (the `c24-rename` scene): a text field inside the listing.
+    pub rename: RenameState,
     pub clock: f64,
     pub hidden: bool,
     /// Which folder the list shows: 0 the first, 1 after Alt+Left.
@@ -115,6 +119,10 @@ pub struct Demo {
     /// Start an autoscroll at the list's centre once it has laid out (a scene's).
     pub demo_start: bool,
     pub polls: u32,
+    /// The stand-in Sort by panel is open (the Panel pane).
+    pub panel: bool,
+    /// Where the stand-in sidebar stands.
+    pub side_feed: ScrollFeed,
 }
 
 fn entries(n: u64, first_id: u64, prefix: &str) -> Vec<ListEntry> {
@@ -193,14 +201,15 @@ impl Default for Demo {
             stopped: String::new(),
             chord: false,
             filter: TextEdit::new(""),
-            renaming: None,
-            rename_edit: TextEdit::new(""),
+            rename: RenameState::new(),
             clock: 0.0,
             hidden: false,
             folder: 0,
             scroll_to: None,
             demo_start: false,
             polls: 0,
+            panel: false,
+            side_feed: ScrollFeed::new(),
         }
     }
 }
@@ -277,6 +286,12 @@ fn ten_k(g: &mut Gallery, dark: bool) {
     scene(g, dark, Pane::List);
 }
 
+/// The sidebar and the list with the stand-in Sort by panel open over them.
+fn panel(g: &mut Gallery, dark: bool) {
+    scene(g, dark, Pane::Panel);
+    g.c24.panel = true;
+}
+
 /// The list scrolled into its middle with the bar shown (`BarMode::Always`).
 fn ten_k_bar(g: &mut Gallery, dark: bool) {
     scene(g, dark, Pane::List);
@@ -313,12 +328,26 @@ fn bars(g: &mut Gallery, dark: bool) {
     }
 }
 
-/// An inline rename field open on the third entry: a text field inside the listing, where
-/// Strata's `is_text_target` keeps a middle click from starting autoscroll.
+/// C5's rename editor open on a folder's row (`item folder 00010`, `row-11`): a text field
+/// inside the listing, where Strata's `is_text_target` keeps a middle click from starting
+/// autoscroll, and where the row under it would open in a new tab.
 fn rename(g: &mut Gallery, dark: bool) {
     scene(g, dark, Pane::List);
-    g.c24.renaming = Some(EntryId::new(3));
-    g.c24.rename_edit = TextEdit::new("item file 00002.txt");
+    let _ = g.c24.rename.begin(
+        SCOPE,
+        EntryId::new(11),
+        "item folder 00010",
+        EntryKind::Folder,
+        Initial::Stem,
+    );
+}
+
+/// C5's editor on the list's rows.
+fn rename_editor() -> RenameEditor<Gallery> {
+    RenameEditor::new(
+        |g: &Gallery| &g.c24.rename,
+        |g: &mut Gallery| &mut g.c24.rename,
+    )
 }
 
 /// The list with animations off: autoscroll steps, the bar shows and hides at once.
@@ -342,6 +371,8 @@ pub const SCENES: &[Scene] = &[
     ("c24-nested-dark", |g| nested(g, true)),
     ("c24-bars-light", |g| bars(g, false)),
     ("c24-bars-dark", |g| bars(g, true)),
+    ("c24-panel-light", |g| panel(g, false)),
+    ("c24-panel-dark", |g| panel(g, true)),
 ];
 
 /// Scenes for review with `--scene` only, kept out of the goldens.
@@ -378,27 +409,8 @@ pub fn collection((marquee, auto): Settings) -> Collection<Gallery> {
     .settings(auto)
     .on_intent(|g: &mut Gallery, intent, _| g.c24.heard(intent))
     .rename(
-        |g: &Gallery| g.c24.renaming,
-        // A stand-in for C5's editor: a plain field over the label.
-        Slot::pure(|g: &Gallery, rcx| {
-            let kit = g.kit();
-            row()
-                .grow(1.0)
-                .h_full()
-                .px(rcx.look.space.xs)
-                .center_y()
-                .radius(kit.radius.sm)
-                .fill(kit.c.bg_base)
-                .outline(1.0, -1.0, kit.c.border_focus)
-                .child(
-                    text_input(&g.c24.rename_edit, kit.ty.ui_compact)
-                        .color(kit.c.text_base)
-                        .key("c24-rename")
-                        .label("Rename")
-                        .on_edit(|g: &mut Gallery| &mut g.c24.rename_edit)
-                        .grow(1.0),
-                )
-        }),
+        |g: &Gallery| g.c24.rename.renaming_in(SCOPE),
+        rename_editor().slot(),
     )
 }
 
@@ -599,6 +611,7 @@ pub fn view(g: &Gallery, cx: &mut Cx<Gallery>) -> El {
         Pane::List => list_view(g),
         Pane::Nested => nested_view(g),
         Pane::Bars => grid_view(g),
+        Pane::Panel => panel_view(g),
     };
     let mut page = col()
         .key("c24-page")
@@ -624,6 +637,12 @@ pub fn view(g: &Gallery, cx: &mut Cx<Gallery>) -> El {
                 .py(look.content.pad)
                 .child(body),
         );
+    if d.pane == Pane::Panel && d.panel {
+        // Over the window, under the panel, in place of a popover's own outside scrim.
+        page = page
+            .child(outside_wheel().scrim(PANEL_SCRIM))
+            .child(sort_panel(g));
+    }
     if let Some(shield) = Shield::new(|g: &Gallery| &g.c24.auto, |g: &Gallery| g.look())
         .on_stop(|g: &mut Gallery, stop| g.c24.stopped_by(stop))
         .build(g)
@@ -631,6 +650,104 @@ pub fn view(g: &Gallery, cx: &mut Cx<Gallery>) -> El {
         page = page.child(shield);
     }
     page
+}
+
+/// The stand-in panel's key.
+pub const PANEL: &str = "c24-panel";
+
+/// The layer outside the panel.
+pub const PANEL_SCRIM: &str = "c24-panel-scrim";
+
+/// The stand-in sidebar's key.
+pub const SIDEBAR: &str = "c24-sidebar";
+
+/// The stand-in panel's outside: a tick over the list scrolls the list; anywhere else (the
+/// sidebar, the header) it only closes the panel.
+fn outside_wheel() -> OutsideWheel<Gallery> {
+    OutsideWheel::new(|g: &mut Gallery, _| g.c24.panel = false).listings(|g: &Gallery, at| {
+        if g.c24.coll.viewport().contains(at) {
+            vec![Target::vertical(viewport_path(SCOPE), g.c24.feed.clone())]
+        } else {
+            Vec::new()
+        }
+    })
+}
+
+/// The stand-in Sort by panel, pinned over the list's top-right.
+fn sort_panel(g: &Gallery) -> El {
+    let kit = g.kit();
+    let look = g.look();
+    let mut rows = col().gap(look.space.xxs).padding(look.space.sm);
+    for name in ["Name", "Size", "Type", "Modified"] {
+        rows = rows.child(
+            text(name.to_owned())
+                .font(kit.ty.ui)
+                .color(kit.c.text_base)
+                .px(look.space.sm)
+                .py(look.space.xxs),
+        );
+    }
+    let panel = col()
+        .key(PANEL)
+        .role("dialog")
+        .label("Sort by")
+        .absolute(560.0, 64.0)
+        .w(220.0)
+        .radius(kit.radius.md)
+        .fill(kit.c.surface_raised)
+        .border(1.0, kit.c.std_border)
+        // A press inside is the panel's, not the scrim's.
+        .on_press(|_: &mut Gallery| {})
+        .child(rows);
+    OutsideWheel::<Gallery>::surface(panel)
+}
+
+/// The Panel pane: the stand-in sidebar and the list.
+fn panel_view(g: &Gallery) -> El {
+    let kit = g.kit();
+    let look = g.look();
+    let mut items = col().w_full().gap(look.space.xxs).padding(look.space.sm);
+    for i in 0..100 {
+        items = items.child(
+            text(format!("Place {i:02}"))
+                .font(kit.ty.ui)
+                .color(kit.c.text_muted)
+                .py(look.space.xxs),
+        );
+    }
+    let sidebar = col()
+        .key(SIDEBAR)
+        .w(180.0)
+        .h_full()
+        .min_h(0.0)
+        .fill(kit.c.layer_01)
+        .scroll(rune::ScrollSpec {
+            stick_bottom: false,
+        })
+        .on_scroll_offset(g.c24.side_feed.watch())
+        .child(items);
+    let button = text(
+        if g.c24.panel {
+            "Close Sort by"
+        } else {
+            "Sort by"
+        }
+        .to_owned(),
+    )
+    .key("c24-panel-button")
+    .role("button")
+    .font(kit.ty.ui)
+    .color(kit.c.text_base)
+    .px(look.space.sm)
+    .on_press(|g: &mut Gallery| g.c24.panel = !g.c24.panel);
+    row().w_full().h_full().min_h(0.0).child(sidebar).child(
+        col()
+            .grow(1.0)
+            .h_full()
+            .min_h(0.0)
+            .child(button)
+            .child(col().w_full().grow(1.0).min_h(0.0).child(list_view(g))),
+    )
 }
 
 /// Keys no focused element took while this page is open: shortcuts, and keys with nothing
@@ -664,6 +781,10 @@ pub fn poll(g: &mut Gallery, t: f64, tx: &mut Tx) -> bool {
         eprintln!("{WARMED}");
     }
     let mut changed = false;
+    // C5's poll: the edit ends on a blur, or its row leaving the view or the listing.
+    if d.rename.is_open() {
+        changed |= d.rename.tick(SCOPE, &d.listing, &d.coll).changed;
+    }
     if d.pane == Pane::List && d.coll.viewport().h > 0.0 {
         if let Some(y) = d.scroll_to.take() {
             tx.scroll_to_instant(viewport_path(SCOPE), 0.0, y);
@@ -682,7 +803,7 @@ pub fn poll(g: &mut Gallery, t: f64, tx: &mut Tx) -> bool {
     }
     changed |= d.auto.drive(t, animations, tx);
     match g.c24.pane {
-        Pane::List if !g.c24.hidden => changed |= collection(settings(g)).tick(g, tx),
+        Pane::List | Pane::Panel if !g.c24.hidden => changed |= collection(settings(g)).tick(g, tx),
         Pane::Nested => {
             for i in 0..COLUMNS {
                 changed |= column(settings(g), i).tick(g, tx);

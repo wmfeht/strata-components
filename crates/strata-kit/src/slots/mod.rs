@@ -54,6 +54,7 @@ pub mod collection;
 pub mod columns;
 pub mod icons;
 pub mod list;
+pub mod media;
 pub mod scroll;
 pub mod sidebar;
 pub mod tabs;
@@ -73,6 +74,8 @@ pub struct Slots {
     pub icons: icons::Icons,
     /// ListTable (C4).
     pub list: list::List,
+    /// MediaPlayer (C13).
+    pub media: media::Media,
     /// C24's overlay scroll bar and autoscroll anchor.
     pub scroll: scroll::Scroll,
     /// PlacesSidebar (C8).
@@ -88,6 +91,7 @@ pub const TOKENS: &[(&str, &[Token])] = &[
     ("columns", columns::TOKENS),
     ("icons", icons::TOKENS),
     ("list", list::TOKENS),
+    ("media", media::TOKENS),
     ("scroll", scroll::TOKENS),
     ("sidebar", sidebar::TOKENS),
     ("tabs", tabs::TOKENS),

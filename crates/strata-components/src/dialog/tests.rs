@@ -1,4 +1,4 @@
-use rune::{Cx, El, Env, Key, KeyEvent, Mods, Runtime, TextEdit, col};
+use rune::{Cx, El, Env, Key, KeyEvent, Mods, Runtime, TextEdit, col, text_input};
 use rune_kit::{Button, Kit};
 
 use super::keys::{Route, route, tab_indices};
@@ -285,4 +285,115 @@ fn a_dialog_that_is_not_closable_has_no_close_button_and_escape_still_dismisses_
             "Escape dismisses, closable({closable})"
         );
     }
+}
+
+/// A form whose single-line field has focus, over a primary that is or isn't the default button.
+struct Form {
+    name: TextEdit,
+    default_button: bool,
+    pressed: u32,
+}
+
+fn form_view(s: &Form, _cx: &mut Cx<Form>) -> El {
+    let look = strata_kit::look::Look::fallback(false);
+    let mut layer = Vec::new();
+    super::StrataDialog::new("d", "Trust this host?", |_: &mut Form| {})
+        .open(true)
+        .child(
+            text_input(&s.name, look.kit.ty.ui)
+                .single_line()
+                .key("name")
+                .label("Name")
+                .on_edit(|s: &mut Form| &mut s.name),
+        )
+        .secondary("Cancel", |_: &mut Form| {})
+        .primary("Log In Anyway", |s: &mut Form| s.pressed += 1)
+        .default_button(s.default_button)
+        .build(&look, &mut layer);
+    rune_kit::root(col(), layer)
+}
+
+#[test]
+fn enter_in_a_field_presses_the_primary_only_while_it_is_the_default_button() {
+    for default_button in [true, false] {
+        let mut name = TextEdit::new("");
+        name.focused = true;
+        let state = Form {
+            name,
+            default_button,
+            pressed: 0,
+        };
+        let mut rt = Runtime::new(state, form_view, (600.0, 400.0), Env::new(false, 1.0));
+        rt.frame(0.0);
+        rt.frame(0.3);
+        assert!(rt.state.name.focused, "the field has the keyboard");
+        rt.key(key(Key::Enter));
+        rt.frame(1.0 / 60.0);
+        rt.frame(1.0 / 60.0);
+        assert_eq!(
+            rt.state.pressed,
+            u32::from(default_button),
+            "default_button({default_button})"
+        );
+    }
+}
+
+/// A question whose footer buttons both commit, opening on the close button.
+#[derive(Default)]
+struct Commit {
+    dismissed: u32,
+    pressed: Vec<&'static str>,
+}
+
+fn commit_view(_s: &Commit, _cx: &mut Cx<Commit>) -> El {
+    let look = strata_kit::look::Look::fallback(false);
+    let mut layer = Vec::new();
+    super::StrataDialog::new("d", "Trust this host?", |s: &mut Commit| s.dismissed += 1)
+        .open(true)
+        .message("The identity sent is SHA256:abc.")
+        .action("other", "Log In Once", |s: &mut Commit| {
+            s.pressed.push("other")
+        })
+        .primary("Log In Anyway", |s: &mut Commit| s.pressed.push("primary"))
+        .default_button(false)
+        .initial_focus(super::Focus::Close)
+        .build(&look, &mut layer);
+    rune_kit::root(col(), layer)
+}
+
+#[test]
+fn a_dialog_opening_on_close_dismisses_on_enter_and_tabs_on_in_document_order() {
+    let focused = |rt: &Runtime<Commit>| {
+        rt.elements()
+            .into_iter()
+            .find(|e| e.focused)
+            .and_then(|e| e.key)
+    };
+    let open = || {
+        let mut rt = Runtime::new(
+            Commit::default(),
+            commit_view,
+            (600.0, 400.0),
+            Env::new(false, 1.0),
+        );
+        rt.frame(0.0);
+        rt.frame(0.3);
+        rt
+    };
+    let mut rt = open();
+    assert_eq!(focused(&rt).as_deref(), Some("d-close"));
+    rt.key(key(Key::Enter));
+    rt.frame(1.0 / 60.0);
+    rt.frame(1.0 / 60.0);
+    assert_eq!(rt.state.dismissed, 1, "Enter on close dismisses");
+    assert!(rt.state.pressed.is_empty(), "{:?}", rt.state.pressed);
+
+    let mut rt = open();
+    let mut cycle = Vec::new();
+    for _ in 0..3 {
+        rt.key(key(Key::Tab));
+        rt.frame(1.0 / 60.0);
+        cycle.extend(focused(&rt));
+    }
+    assert_eq!(cycle, ["d-other", "d-primary", "d-close"]);
 }

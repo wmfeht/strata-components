@@ -44,6 +44,9 @@
 //!   into a Space press, which Rune applies on the next frame.
 //! - **Enter** in a single-line field, or with focus on nothing, presses the primary button
 //!   (Rune's `default_button`). A disabled primary drops its handler, so Enter does nothing.
+//!   [`StrataDialog::default_button`]`(false)` keeps the primary from being the default
+//!   button, for one that must be pressed on purpose (C26's host-key and busy-volume
+//!   prompts): Enter then presses only a focused button.
 //! - **Enter** in a multi-line field types a newline only in a field built with
 //!   [`text_area`] (or given [`newline_on_enter`]). Rune's multi-line editor treats a plain
 //!   Return in a paragraph as submit (a chat composer's rule), and a field with nothing to
@@ -58,8 +61,9 @@
 //!   while the dialog closed stays where it is.
 //! - Initial focus is the first Tab stop in the dialog: the first body control, so the first
 //!   field. [`Focus::Primary`], [`Focus::Secondary`] or [`Focus::Action`] start on a footer
-//!   button instead. Rune has no call that focuses a button from code, so the dialog gives
-//!   that button, every footer button after it and the close button positive `tab_index`es.
+//!   button instead, and [`Focus::Close`] on the close button. Rune has no call that focuses a
+//!   button from code, so the dialog gives that button, every footer button after it and the
+//!   close button positive `tab_index`es.
 //!   Rune visits those first, then the rest in document order, which keeps Tab's cycle the
 //!   same, only starting elsewhere. A form starts on another field by setting its
 //!   `TextEdit::focused` when it opens.

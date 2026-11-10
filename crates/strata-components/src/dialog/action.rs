@@ -35,6 +35,10 @@ pub enum Focus {
     /// The extra footer button added as `action(id, …)`; ids can come at runtime (C26's GIO
     /// choices).
     Action(String),
+    /// The close button, for a dialog whose every footer button commits to something (C26's
+    /// questions when no choice declines): Enter then dismisses. Without a close button
+    /// ([`StrataDialog::closable`]`(false)`), as [`Focus::First`].
+    Close,
 }
 
 /// The parts of a dialog keyed `<key>-<part>`, which an action id can't take.
@@ -111,6 +115,7 @@ pub struct StrataDialog<S> {
     primary: Option<Action<S>>,
     initial: Focus,
     primary_enabled: bool,
+    default_button: bool,
     loading: Option<String>,
     close_label: String,
     closable: bool,
@@ -145,6 +150,7 @@ impl<S: 'static> StrataDialog<S> {
             primary: None,
             initial: Focus::First,
             primary_enabled: true,
+            default_button: true,
             loading: None,
             close_label: "Close dialog".into(),
             closable: true,
@@ -215,6 +221,16 @@ impl<S: 'static> StrataDialog<S> {
     /// Call it before or after [`StrataDialog::primary`].
     pub fn primary_enabled(mut self, enabled: bool) -> Self {
         self.primary_enabled = enabled;
+        self
+    }
+
+    /// Makes the primary the dialog's default button while true, as it is unless set: Return
+    /// presses it from a single-line field or with nothing focused. False for a primary that
+    /// must only be pressed on purpose, such as accepting an unverified SSH host key or ending
+    /// the processes that keep a volume busy (C26): Return then presses a button only when it
+    /// has focus.
+    pub fn default_button(mut self, default: bool) -> Self {
+        self.default_button = default;
         self
     }
 
@@ -346,7 +362,7 @@ impl<S: 'static> StrataDialog<S> {
             .filter(|&i| footer[i].0.on_press.is_some())
             .collect();
         let initial_key = match &self.initial {
-            Focus::First => None,
+            Focus::First | Focus::Close => None,
             Focus::Primary => self.primary.as_ref().map(|a| a.key.clone()),
             Focus::Secondary => self.secondary.as_ref().map(|a| a.key.clone()),
             Focus::Action(id) => {
@@ -361,7 +377,13 @@ impl<S: 'static> StrataDialog<S> {
         };
         let initial =
             initial_key.and_then(|k| focusable.iter().position(|&i| footer[i].0.key == k));
-        let (indices, close_index) = tab_indices(initial, focusable.len());
+        let (indices, close_index) = if self.initial == Focus::Close && self.closable {
+            // The close button is last in document order, so starting there leaves Tab's cycle
+            // document order's.
+            (vec![0; focusable.len()], 1)
+        } else {
+            tab_indices(initial, focusable.len())
+        };
         let footer_keys: Vec<String> = focusable.iter().map(|&i| footer[i].0.key.clone()).collect();
 
         let mut buttons = row()
@@ -377,7 +399,7 @@ impl<S: 'static> StrataDialog<S> {
                 .position(|&j| j == i)
                 .map_or(0, |p| indices[p]);
             let mut b = action.button(look, *variant, *ring, index);
-            if has_primary && i + 1 == footer.len() {
+            if self.default_button && has_primary && i + 1 == footer.len() {
                 // Return presses it from a single-line field or with nothing focused.
                 b = b.default_button();
             }

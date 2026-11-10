@@ -132,8 +132,9 @@
 //!    that is its 64 MiB, so the byte budget alone keeps the bound.
 //! 3. **Images are held per size class**, not as one 256 px texture: Rune draws a streamed
 //!    `Pixels` with no mipmaps (draft U-C25-1), so an image is held near the size it draws.
-//!    Strata's disk cache stays at 256 px. Until the look has classes below 128 px (W2d), a
-//!    16–48 pt list thumbnail is drawn down from 128 px and aliases.
+//!    Strata's disk cache stays at 256 px. The look's classes (32, 64, 128 and 256 px) each
+//!    double the one below, so a draw of 16 px or more is held at less than twice its size,
+//!    within what bilinear sampling averages cleanly; the host scales its 256 px renders down.
 //! 4. **Recency is drawing, not lookups**: a key is touched when its row builds and when a
 //!    sync shows it. Strata touches on every cache lookup.
 //!
@@ -165,7 +166,8 @@
 //! - After a scroll, the rows the previous sync showed stay protected (for U-C1f-5) until the
 //!   viewport changes again: a view that stands still after one scroll protects both screens.
 //! - No class covers tiles over 128 pt at scale 2: the look's largest class is 256 px, drawn
-//!   larger (W2d may add classes).
+//!   larger, as Strata renders nothing larger (W2d ruled out a 512 px class; the rule for
+//!   adding one is in `ThumbnailSteps`' docs).
 //! - [`Viewport::per_line`] from C3's own count; `sync` from `on_visible` (returning its
 //!   result), `resync` after a listing change. A reflow (another count a line) moves the
 //!   visible range's start without a scroll; the store doesn't read it as one.

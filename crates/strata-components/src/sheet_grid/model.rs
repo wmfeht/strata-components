@@ -7,7 +7,7 @@ use std::sync::Arc;
 /// `TABLE_CELL_DISPLAY_BYTES`). Copying keeps the whole text.
 pub const CELL_DISPLAY_BYTES: usize = 512;
 
-/// A column title shows at most this many characters (Strata's title cut).
+/// Strata's title cut: a column title shows this many characters, then "…".
 pub const TITLE_DISPLAY_CHARS: usize = 128;
 
 /// One worksheet, or a CSV or TSV file: Strata's `TableData` with the sheet's name. Cells are
@@ -95,8 +95,8 @@ pub(crate) fn shown(text: &str) -> (Cow<'_, str>, bool) {
     (Cow::Owned(format!("{}…", &line[..end])), true)
 }
 
-/// What a column title shows: its first line, at most [`TITLE_DISPLAY_CHARS`] characters of
-/// it, ending in "…" when anything was left out.
+/// What a column title shows: its first line, cut at [`TITLE_DISPLAY_CHARS`] characters,
+/// marked with "…" when anything was left out.
 pub(crate) fn title_shown(text: &str) -> Cow<'_, str> {
     let (line, more_lines) = first_line(text);
     match line.char_indices().nth(TITLE_DISPLAY_CHARS) {

@@ -209,7 +209,7 @@ fn an_empty_first_row_is_no_title_row_as_in_strata() {
 }
 
 #[test]
-fn a_column_title_shows_at_most_128_characters_as_stratas_do() {
+fn a_column_title_shows_stratas_128_character_cut_marked_with_an_ellipsis() {
     let title = "t".repeat(300);
     let rt = single(sheet(&[&[&title, "b"], &["1", "2"]]));
     let name = rt
@@ -701,6 +701,43 @@ fn switching_sheets_drops_the_range_and_keeps_the_cursor() {
     key(&mut rt, Key::PageDown, CMD);
     key(&mut rt, Key::PageUp, CMD);
     assert_eq!(rt.state.grid.range(), None);
+    // And by the host.
+    drag(cell(&rt, 0, 0), cell(&rt, 2, 1), &mut rt);
+    rt.update(|h, _| h.grid.set_active(1));
+    settle(&mut rt);
+    rt.update(|h, _| h.grid.set_active(0));
+    settle(&mut rt);
+    assert_eq!(rt.state.grid.range(), None);
+    assert_eq!(rt.state.grid.cursor(), Some(CellPos::new(2, 1)));
+}
+
+/// Rune takes Escape while a drag is held and ends the drag cancelled; the key reaches no
+/// handler. Strata's capture-phase key controller clears the range on it, so this does too.
+#[test]
+fn escape_during_a_range_drag_drops_the_range() {
+    let mut rt = single(people(20));
+    let (from, to) = (cell(&rt, 1, 0), cell(&rt, 3, 1));
+    rt.pointer_move(from.0, from.1);
+    rt.pointer_down(from.0, from.1);
+    step(&mut rt);
+    rt.pointer_move(to.0, to.1);
+    step(&mut rt);
+    assert_eq!(
+        rt.state.grid.range(),
+        Some(CellRange::spanning(CellPos::new(1, 0), CellPos::new(3, 1)))
+    );
+    rt.key(KeyEvent {
+        key: Key::Escape,
+        mods: Mods::default(),
+    });
+    step(&mut rt);
+    let past = cell(&rt, 5, 2);
+    rt.pointer_move(past.0, past.1);
+    step(&mut rt);
+    rt.pointer_up(past.0, past.1);
+    settle(&mut rt);
+    assert_eq!(rt.state.grid.range(), None);
+    assert!(!rt.state.grid.dragging());
 }
 
 /// A press on the sticky row numbers, at the start and scrolled far sideways: it picks no
@@ -751,6 +788,13 @@ fn a_sheet_that_failed_says_why_is_not_busy_and_asks_again_on_retry() {
     let t = rt.accessibility_json().to_string();
     assert!(t.contains("Preview unavailable"), "{t}");
     assert!(t.contains("The sandboxed preview renderer failed"), "{t}");
+    // No rowless grid around the reason and the button.
+    let root = rt
+        .elements()
+        .into_iter()
+        .find(|e| e.key.as_deref() == Some("g"))
+        .expect("the grid's root");
+    assert_eq!(root.role, "group");
     // Its tab again asks nothing; the retry button asks once more.
     tap(mid(rect(&rt, "g-sheet0")), &mut rt);
     tap(mid(rect(&rt, "g-sheet2")), &mut rt);

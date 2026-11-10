@@ -234,6 +234,9 @@ pub struct SheetGridState {
     pub(crate) viewport: Cell<[f32; 4]>,
     /// The header titles' sideways offset: the rows' scroll, negated.
     pub(crate) strip_x: Live<[f32; 2]>,
+    /// [`Self::set_active`] switched sheets with no `Tx` at hand: the next tick scrolls the
+    /// active tab into the strip.
+    reveal_tab: bool,
 }
 
 impl SheetGridState {
@@ -256,6 +259,7 @@ impl SheetGridState {
             window: None,
             viewport: Cell::new([0.0; 4]),
             strip_x: Live::new([0.0, 0.0]),
+            reveal_tab: false,
         }
     }
 
@@ -347,12 +351,17 @@ impl SheetGridState {
     }
 
     /// Shows sheet `i` as it was left, without scrolling it (for a host restoring a preview);
-    /// a tab click goes through the grid, which also keeps the scroll position.
+    /// a tab click goes through the grid, which also keeps the scroll position. The sheet
+    /// left drops its range, and the next [`Self::tick`] scrolls sheet `i`'s tab into view.
     pub fn set_active(&mut self, i: usize) {
         if i < self.sheets.len() {
+            if i != self.active {
+                self.clear_range();
+            }
             self.active = i;
             self.drag = None;
             self.window = None;
+            self.reveal_tab = true;
         }
     }
 
@@ -467,6 +476,9 @@ impl SheetGridState {
     /// view glides that way (steps, with animations off) and the range follows the pointer.
     /// True when the range changed. Call it from the host's poll while the grid shows.
     pub fn tick(&mut self, now: f64, look: &Look, tx: &mut Tx) -> bool {
+        if std::mem::take(&mut self.reveal_tab) {
+            self.reveal_active_tab(tx);
+        }
         if self.halt == Halt::Pending {
             self.halt = Halt::None;
             let p = self.feed.get();
@@ -674,7 +686,7 @@ impl SheetGridState {
     }
 
     /// Shows sheet `i`, keeping where the last one was scrolled and its cursor, but not its
-    /// range. True when the host should load it.
+    /// range, and scrolls its tab into view. True when the host should load it.
     pub(crate) fn show(&mut self, i: usize, tx: &mut Tx) -> bool {
         if i >= self.sheets.len() || i == self.active {
             return false;
@@ -693,10 +705,23 @@ impl SheetGridState {
         if back != [0.0, 0.0] {
             tx.scroll_to_instant(self.scroll_key(), back[0], back[1]);
         }
+        self.reveal_active_tab(tx);
         let v = &mut self.sheets[i];
         let load = v.data.is_none() && !v.loading && v.failed.is_none();
         v.loading |= load;
         load
+    }
+
+    /// Scrolls the active sheet's tab into the strip: `TabStrip` leaves that to the app, as
+    /// C7's tabs do. Rune's reveal stops at the strip's edge, under its fade (C7's U-C7-7).
+    fn reveal_active_tab(&self, tx: &mut Tx) {
+        if self.sheets.len() >= 2 {
+            let key = &self.key;
+            tx.scroll_into_view_in(
+                format!("{key}-tabs-scroll"),
+                format!("t-{key}-sheet{}", self.active),
+            );
+        }
     }
 
     /// Try again on the active sheet's failure: it shows loading again. The sheet the host

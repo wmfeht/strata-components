@@ -139,7 +139,7 @@
                               ],
                               "key": "sheet",
                               "name": "Inventory",
-                              "role": "grid"
+                              "role": "group"
                             },
                             {
                               "children": [

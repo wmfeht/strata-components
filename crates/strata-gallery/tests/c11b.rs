@@ -234,6 +234,107 @@ mod c11b {
         );
     }
 
+    fn rect(rt: &Runtime<Gallery>, end: &str) -> [f32; 4] {
+        rt.elements()
+            .into_iter()
+            .find(|e| e.path.ends_with(end))
+            .unwrap_or_else(|| panic!("no element ending {end}"))
+            .rect
+    }
+
+    /// Whether the active sheet's tab lies wholly inside the strip's viewport. (Rune's reveal
+    /// stops at the edge, under the edge fade: C7's draft U-C7-7.)
+    fn active_tab_shows(rt: &Runtime<Gallery>) -> Result<(), String> {
+        let strip = rect(rt, "sheet-tabs-scroll");
+        let i = rt.state.c11b.grid.active();
+        let tab = rect(rt, &format!("t-sheet-sheet{i}"));
+        let inside = tab[0] >= strip[0] - 0.5 && tab[0] + tab[2] <= strip[0] + strip[2] + 0.5;
+        inside.then_some(()).ok_or(format!(
+            "sheet {i}'s tab {tab:?} is outside the strip {strip:?}"
+        ))
+    }
+
+    /// The tabs leave revealing the active one to the app (as C7 does): each sheet switch,
+    /// by keys or by the host, scrolls its tab into the strip.
+    #[test]
+    fn every_sheet_switch_scrolls_the_active_tab_into_the_strip() {
+        let mut rt = scene("c11b-book-light");
+        let at = mid(&rt, "sheet-r0-c0");
+        tap(&mut rt, at);
+        let ctrl = Mods {
+            cmd: true,
+            ctrl: true,
+            ..Mods::default()
+        };
+        for key in [Key::PageDown, Key::PageDown, Key::PageDown] {
+            rt.key(KeyEvent { key, mods: ctrl });
+            settle(&mut rt, 30);
+        }
+        assert_eq!(rt.state.c11b.grid.active(), 3);
+        active_tab_shows(&rt).unwrap();
+        for _ in 0..3 {
+            rt.key(KeyEvent {
+                key: Key::PageUp,
+                mods: ctrl,
+            });
+            settle(&mut rt, 30);
+        }
+        assert_eq!(rt.state.c11b.grid.active(), 0);
+        active_tab_shows(&rt).unwrap();
+        // A host restoring a preview on its last sheet.
+        rt.update(|g, _| g.c11b.grid.set_active(3));
+        settle(&mut rt, 30);
+        active_tab_shows(&rt).unwrap();
+    }
+
+    /// The failed-sheet scene opens on Inventory, the last tab, past the strip's edge.
+    #[test]
+    fn a_preview_restored_on_a_sheet_past_the_strips_edge_shows_its_tab() {
+        let rt = scene("c11b-failed-light");
+        assert_eq!(rt.state.c11b.grid.active(), 3);
+        active_tab_shows(&rt).unwrap();
+    }
+
+    fn heard(g: &mut Gallery, key: &KeyEvent, _tx: &mut rune::Tx) -> bool {
+        g.c11b.last = format!("Heard {:?} {:?}", key.key, key.mods);
+        true
+    }
+
+    /// Without a range, the keys that would clear one (D16) aren't the grid's: Ctrl+Left and
+    /// Alt+Home reach the app's own listener, and the cursor stays put.
+    #[test]
+    fn ctrl_left_and_alt_home_without_a_range_pass_on_and_leave_the_cursor() {
+        let mut rt = scene("c11b-csv-light");
+        rt.on_key = Some(heard);
+        let at = mid(&rt, "sheet-r1-c1");
+        tap(&mut rt, at);
+        let cursor = rt.state.c11b.grid.cursor();
+        assert_eq!(cursor, Some(CellPos::new(1, 1)));
+        let ctrl = Mods {
+            cmd: true,
+            ctrl: true,
+            ..Mods::default()
+        };
+        let alt = Mods {
+            alt: true,
+            ..Mods::default()
+        };
+        for (key, mods) in [(Key::Left, ctrl), (Key::Home, alt)] {
+            rt.state.c11b.last.clear();
+            rt.key(KeyEvent {
+                key: key.clone(),
+                mods,
+            });
+            settle(&mut rt, 2);
+            assert_eq!(
+                rt.state.c11b.last,
+                format!("Heard {key:?} {mods:?}"),
+                "the app heard it"
+            );
+            assert_eq!(rt.state.c11b.grid.cursor(), cursor, "{key:?} {mods:?}");
+        }
+    }
+
     /// Escape is the grid's only while a range is selected: without one, the page hears it.
     #[test]
     fn escape_without_a_range_passes_on_past_the_grid() {

@@ -34,7 +34,7 @@
 //! Strata's sandboxed reader turns a file into [`Sheet`]s: plain text cells (calamine's
 //! string conversion; no cell types, formulas or merged cells), rows possibly ragged, the
 //! first row the titles unless it is empty, cut at its 100,000-value, 4 MiB and 256-column
-//! budget (`truncated`). A title shows at most 128 characters, as Strata's do.
+//! budget (`truncated`). A title shows Strata's 128-character cut, marked with "…".
 //! A CSV or TSV is one sheet ([`SheetGridState::set_single`]); a workbook gives its sheet
 //! names first ([`SheetGridState::set_workbook`]), then each sheet's data
 //! ([`SheetGridState::set_sheet`]) or why it couldn't be read
@@ -71,7 +71,10 @@
 //! - **Sheet tabs** below the grid, rune-kit's `TabStrip` without close buttons or reordering
 //!   (probe P5: without a drag state it takes no drag), shown with two or more sheets. Each
 //!   sheet keeps its sort, widths, cursor and scroll position while the preview is open; its
-//!   range is dropped when another sheet shows.
+//!   range is dropped when another sheet shows. `TabStrip` leaves revealing the active tab to
+//!   the app, as C7's tabs do: each switch (a tab, Ctrl+Page Up or Down, or
+//!   [`SheetGridState::set_active`] on its next tick) scrolls it into the strip, to the edge
+//!   and under the edge fade (C7's draft U-C7-7).
 //! - **A sheet that couldn't be read** ([`SheetGridState::set_sheet_failed`]) shows Strata's
 //!   "Preview unavailable" over the reason, in the grid's place, with a Try again button that
 //!   asks [`SheetIntent::Load`] again (Strata's failed preview has no button; picking the
@@ -105,7 +108,8 @@
 //! the primary sort column carries the sorted state. Each body row is a `row` (Rune gives its
 //! place among all the rows) holding a `rowheader` (its number) and its `gridcell`s, those in
 //! the range selected; a cell shown shortened carries Strata's description. A divider is a
-//! `separator` whose value is its column's width. The tabs are a `tablist` "Sheets".
+//! `separator` whose value is its column's width. The tabs are a `tablist` "Sheets". A sheet
+//! that couldn't be read has no rows: its place is a `group` named by the sheet.
 //!
 //! # Deviations
 //!
@@ -155,7 +159,8 @@
 //!   and the arrows, Home and End with Ctrl, Alt or Super (Strata's `ESCAPE_ANY` and its
 //!   arrows, Home and End ignoring the shortcut modifiers). Strata clears and passes the key
 //!   on, so there Escape with a range also reaches the preview; here it doesn't. Without a
-//!   range they pass on.
+//!   range they pass on. Escape during a range drag ends the drag and clears the range: Rune
+//!   takes the key to cancel the drag, so neither the grid nor the preview hears it.
 //!
 //! # Bullets
 //!
@@ -184,7 +189,7 @@
 //! | With focus on the table, Ctrl+C copies every loaded row in the current sort order… | unit: the clipboard |
 //! | With focus on the table, Ctrl+Shift+C, Ctrl+Alt+C, and Ctrl+Super+C copy nothing. | unit: the clipboard |
 //! | With a cell range selected, Ctrl+A or Ctrl+Shift+A clears the range; Ctrl+Alt+A leaves it. | `ctrl-a-clears`, `ctrl-shift-a-clears`, `ctrl-alt-a-keeps` |
-//! | With a cell range selected, Escape, an arrow key, Home, or End also clears it. | `escape-clears`, `arrow-clears`, `home-clears`, `end-clears`; gallery: with Strata's modifiers (D16) |
+//! | With a cell range selected, Escape, an arrow key, Home, or End also clears it. | `escape-clears`, `arrow-clears`, `home-clears`, `end-clears`; gallery: with Strata's modifiers (D16); unit: Escape during a drag |
 //! | With a non-Latin layout such as Russian active, Ctrl+A in a focused table cell… | **not met** (D2) |
 //! | With a non-Latin layout active and no cell range selected, Ctrl+C in a focused table cell… | **not met** (D2) |
 //! | After smooth scrolling, a click, drag selection, or link hover acts on the row under the pointer. | `click-after-scroll` |
@@ -347,13 +352,20 @@ fn grid<S: 'static>(
     }
     if let Some(reason) = &v.failed {
         let retry = intent.clone();
-        return root.child(failure(look, &key, labels, reason, move |s: &mut S, tx| {
-            if let Some(i) = get_mut(s).retry()
-                && let Some(f) = &retry
-            {
-                f(s, SheetIntent::Load(i), tx);
-            }
-        }));
+        // No rows to speak of: a group named by its sheet, around the reason and the button.
+        return root.role("group").child(failure(
+            look,
+            &key,
+            labels,
+            reason,
+            move |s: &mut S, tx| {
+                if let Some(i) = get_mut(s).retry()
+                    && let Some(f) = &retry
+                {
+                    f(s, SheetIntent::Load(i), tx);
+                }
+            },
+        ));
     }
     let Some(data) = v.data.as_ref() else {
         return root.child(placeholder(look, format!("{key}-loading"), &labels.loading));
@@ -426,6 +438,12 @@ fn grid<S: 'static>(
                     true
                 }
                 rune::Phase::Move => st.drag_to(d.x, d.y),
+                // Escape while the drag is held: Rune ends it cancelled and the key reaches
+                // no handler. Strata's capture-phase key controller clears the range on it.
+                rune::Phase::Up if d.cancelled() => {
+                    st.release();
+                    st.clear_range()
+                }
                 rune::Phase::Up => {
                     let moved = st.drag_to(d.x, d.y);
                     st.release();

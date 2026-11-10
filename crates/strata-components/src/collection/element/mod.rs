@@ -261,7 +261,6 @@ pub(crate) struct Config<S> {
     get_mut: GetMutFn<S>,
     look: LookFn<S>,
     version: ReadFn<S, u64>,
-    clock: Option<ReadFn<S, f64>>,
     settings: Rc<Settings>,
     name: Option<String>,
     roles: Roles,
@@ -306,11 +305,6 @@ impl<S> Config<S> {
     fn row_height_of(&self, s: &S) -> f32 {
         (self.row_height)(s, (self.look)(s))
     }
-
-    /// The host's clock, or 0 without one.
-    fn now(&self, s: &S) -> f64 {
-        self.clock.as_ref().map_or(0.0, |c| c(s))
-    }
 }
 
 /// The collection element's builder.
@@ -347,7 +341,6 @@ impl<S: 'static> Collection<S> {
                 get_mut: Rc::new(get_mut),
                 look: Rc::new(look),
                 version: Rc::new(listing_version),
-                clock: None,
                 settings: Rc::new(Settings::default()),
                 name: None,
                 roles: Roles::LISTBOX,
@@ -417,13 +410,6 @@ impl<S: 'static> Collection<S> {
     /// How header lines and the stuck header draw: [`GroupStyle::from_look`] by default.
     pub fn group_style(mut self, style: impl Fn(&Look) -> GroupStyle + 'static) -> Self {
         self.cfg.group_style = Rc::new(style);
-        self
-    }
-
-    /// The host's clock in seconds (virtual in tests), which controllers time clicks and
-    /// timeouts by. Rune's `Tx` has no clock (Rune draft U-C1e-6).
-    pub fn clock(mut self, clock: impl Fn(&S) -> f64 + 'static) -> Self {
-        self.cfg.clock = Some(Rc::new(clock));
         self
     }
 

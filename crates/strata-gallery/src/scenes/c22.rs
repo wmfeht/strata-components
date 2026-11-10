@@ -475,7 +475,6 @@ fn list_base() -> Collection<Gallery> {
         |_: &Gallery| 1,
     )
     .name("Home")
-    .clock(|g: &Gallery| g.c22.clock)
     .marks(marks(LIST))
     .on_intent(|g: &mut Gallery, intent, _| g.c22.heard(intent))
 }
@@ -512,7 +511,6 @@ fn icons_base(_: &Gallery) -> Collection<Gallery> {
         |_: &Gallery| 1,
     )
     .name("Home")
-    .clock(|g: &Gallery| g.c22.clock)
     .marks(marks(ICONS))
     .on_intent(|g: &mut Gallery, intent, _| g.c22.heard(intent));
     peek().rows(base)

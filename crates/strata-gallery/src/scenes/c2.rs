@@ -526,8 +526,7 @@ pub fn columns_view() -> ColumnsView<Gallery> {
         },
     )
     .collection(|g: &Gallery, depth, c| {
-        c.clock(|g: &Gallery| g.c2.clock)
-            .settings(KeySettings::default().letters(g.c2.letters))
+        c.settings(KeySettings::default().letters(g.c2.letters))
             .rename(
                 move |g: &Gallery| g.c2.renaming.filter(|(d, _)| *d == depth).map(|(_, id)| id),
                 // A stand-in for C5's editor: the name, outlined.

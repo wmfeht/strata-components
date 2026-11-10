@@ -316,7 +316,6 @@ fn collection() -> Collection<Gallery> {
         |g: &Gallery| g.c23.version,
     )
     .name("Files")
-    .clock(|g: &Gallery| g.c23.clock)
     .marks(marks)
 }
 

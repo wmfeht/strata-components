@@ -450,7 +450,6 @@ fn collection() -> Collection<Gallery> {
         |_: &Gallery| 1,
     )
     .name("Documents")
-    .clock(|g: &Gallery| g.c21.clock)
     .on_intent(|g: &mut Gallery, intent, tx| match intent {
         Intent::BeginRename { id } => g.c21.begin_rename(id, tx),
         intent => g.c21.heard(intent),

@@ -344,7 +344,6 @@ fn collection(key: &'static str, centered: bool) -> Collection<Gallery> {
         |g: &Gallery| g.look(),
         |g: &Gallery| g.c5.version,
     )
-    .clock(|g: &Gallery| g.c5.clock)
     .on_intent(|g: &mut Gallery, intent, tx| {
         if let Intent::BeginRename { id } = intent {
             g.c5.begin(id, tx);

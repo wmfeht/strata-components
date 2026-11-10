@@ -13,7 +13,7 @@
 //!     |s: &App| ColumnsParts { sources: &s.listings, state: &s.columns, look: &s.look },
 //!     |s: &mut App| ColumnsPartsMut { sources: &s.listings, state: &mut s.columns, look: &s.look },
 //! )
-//! .collection(|s, depth, c| c.clock(|s: &App| s.clock))      // the host's per-column extras
+//! .collection(|s, depth, c| c.settings(s.key_settings()))    // the host's per-column extras
 //! .pointer_settings(|s: &App| s.pointer_settings())          // P5's interval, the click modes
 //! .header_actions(|s, cx| s.header_actions(cx))              // Refresh, Sort by, the filter
 //! .show_sizes(|s: &App| s.prefs.columns_show_sizes)          // the size badge's setting

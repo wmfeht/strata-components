@@ -89,7 +89,7 @@ fn dispatch<S: 'static>(
     from: Source,
     f: impl FnOnce(&mut super::Controllers, &mut Ctx<'_>) -> Flow,
 ) -> (Flow, bool) {
-    let now = cfg.now(s);
+    let now = tx.clock();
     let animations = (cfg.look)(s).animations;
     let geometry = geometry(cfg, s);
     let (src, st) = (cfg.get_mut)(s);
@@ -413,7 +413,7 @@ pub(super) fn on_drag<S: 'static>(cfg: &Rc<Config<S>>, s: &mut S, d: &mut Drag, 
         clicks: d.clicks,
         // A release the system drag took ends the press as a cancelled one.
         cancelled: d.cancelled() || taken,
-        now: cfg.now(s),
+        now: tx.clock(),
     };
     if phase == PointerPhase::Down
         && let Some(f) = &cfg.on_press
@@ -482,7 +482,7 @@ pub(super) fn on_secondary<S: 'static>(
         mods: tx.mods(),
         clicks: 1,
         cancelled: false,
-        now: cfg.now(s),
+        now: tx.clock(),
     };
     if let Some(f) = &cfg.on_press {
         f(s, &input, tx);
@@ -544,7 +544,7 @@ pub(super) fn on_key<S: 'static>(
         base: tx.key_base(),
         repeat: tx.key_repeat(),
         platform: KeyPlatform::current(),
-        now: cfg.now(s),
+        now: tx.clock(),
         tx: Some(&keys),
     };
     let (flow, _) = dispatch(cfg, s, tx, Source::Key, |c, cx| {

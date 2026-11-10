@@ -597,7 +597,6 @@ pub fn collection() -> Collection<Gallery> {
         |g: &Gallery| g.look(),
         |g: &Gallery| g.c1.version,
     )
-    .clock(|g: &Gallery| g.c1.clock)
     .on_cursor(|g: &mut Gallery, _, _| g.c1.refresh_preview())
     .on_intent(|g: &mut Gallery, intent, _| g.c1.heard(intent))
     .on_drop(|g: &mut Gallery, target, dropped, _| {
@@ -859,7 +858,6 @@ fn grouped_collection() -> Collection<Gallery> {
         |_: &Gallery| 1,
     )
     .name("Grouped")
-    .clock(|g: &Gallery| d(g).clock)
 }
 
 fn grouped_view(g: &Gallery, _cx: &mut Cx<Gallery>) -> El {

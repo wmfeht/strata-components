@@ -51,8 +51,9 @@ type SelectFn<S> = Rc<dyn Fn(&mut S, usize, &mut Tx)>;
 /// - Ctrl+Page Up and Ctrl+Page Down choose the previous or next page from anywhere: the host
 ///   routes them from its `on_key` with [`TabbedForm::window_key`] (a focused field passes them
 ///   on to the window, never to an ancestor). As in GtkNotebook, a keyboard on a tab moves to
-///   the new tab, one on the page being hidden to the new page's first focusable element (its
-///   `focus_selected` one first; Rune keeps no last-focused child), else to its tab, and one
+///   the new tab, one on the page being hidden to the new page's first focusable element (the
+///   first in the tree, not a group's `focus_selected` one, as `Tx::focus` picks; Rune keeps no
+///   last-focused child), else to its tab, and one
 ///   elsewhere stays. The host's poll calls [`TabbedFormState::tick`] to carry it.
 /// - A page with [`FormPage::has_errors`] shows a dot in the danger colour after its title, and
 ///   its tab is described as having errors and reports itself invalid.

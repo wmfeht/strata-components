@@ -20,7 +20,8 @@
 //!   the host's [`SettingsSearch::on_escape`], which closes Settings. The clear button ("Clear
 //!   search") clears as Escape does.
 //! - **Enter** goes to the best row: its page shows (the host picks a table or tab inside it
-//!   from [`Navigate::row`]), it scrolls into view, the keyboard moves to its first control and
+//!   from [`Navigate::row`]), it scrolls into view, the keyboard moves to its first control
+//!   (the first in the tree: `Tx::focus` passes over a radio group's `focus_selected` one) and
 //!   it is highlighted at [`FLASH_ALPHA`] of the accent, full for 0.6 s and faded by 1.5 s
 //!   (static and removed at 1.5 s with animations off). With no match Enter does nothing.
 //! - **Matched text:** [`SettingsSearch::title`] draws the query's matched words in a row's

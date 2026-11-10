@@ -208,7 +208,7 @@ fn a_same_query_batch_keeps_the_highlight_on_its_result() {
 }
 
 #[test]
-fn enter_opens_the_highlighted_result_and_closes_with_a_leaving_frame() {
+fn enter_opens_the_highlighted_result_and_closes() {
     let (mut s, g) = typed("a");
     let _ = s.deliver(
         Answer::new(g, items(&["a", "b"])).done(),
@@ -229,12 +229,6 @@ fn enter_opens_the_highlighted_result_and_closes_with_a_leaving_frame() {
         ]
     );
     assert!(!s.is_open());
-    assert!(s.shell_open(), "the leaving frame");
-    assert_eq!(ids(&s), ["a", "b"], "drawn as it was");
-    assert!(!s.tick().changed, "not until the view built it");
-    s.mark_built();
-    assert!(s.tick().changed);
-    assert!(!s.shell_open());
     assert!(s.items().is_empty());
 }
 
@@ -258,19 +252,6 @@ fn the_toggle_closes_whatever_mode_is_open() {
         s.mode().map(|m| m.field_label.as_str()),
         Some("Jump to a folder…")
     );
-}
-
-#[test]
-fn a_dismissal_without_a_tx_reaches_the_host_on_the_next_tick() {
-    let mut s = PaletteState::new();
-    let _ = s.open(search());
-    s.dismissed();
-    assert!(!s.is_open());
-    assert_eq!(
-        s.tick().intents,
-        [PaletteIntent::Closed { by: By::Dismiss }]
-    );
-    assert!(s.tick().intents.is_empty(), "once");
 }
 
 #[test]

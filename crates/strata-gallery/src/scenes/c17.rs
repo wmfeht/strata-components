@@ -734,8 +734,8 @@ pub fn on_key(g: &mut Gallery, key: &KeyEvent, tx: &mut Tx) -> bool {
 pub fn poll(g: &mut Gallery, t: f64, tx: &mut Tx) -> bool {
     let d = &mut g.c17;
     d.now = t;
-    let polled = d.palette.tick();
-    let mut changed = d.route(polled, tx);
+    d.palette.tick();
+    let mut changed = false;
     let (due, later): (Vec<_>, Vec<_>) = d.worker.drain(..).partition(|(at, _)| *at <= t);
     d.worker = later;
     for (_, answer) in due {

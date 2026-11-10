@@ -45,6 +45,9 @@ pub enum Error {
     Refused(&'static str),
     /// The connection failed.
     Connection(String),
+    /// A call failed and the connection lives on: the compositor stopped reading for a
+    /// while, say.
+    Busy(String),
 }
 
 impl fmt::Display for Error {
@@ -57,6 +60,7 @@ impl fmt::Display for Error {
             Error::Shutdown => f.write_str("the transfer substrate was shut down"),
             Error::Refused(why) => write!(f, "refused: {why}"),
             Error::Connection(e) => write!(f, "connection failed: {e}"),
+            Error::Busy(e) => write!(f, "the call failed, the connection lives on: {e}"),
         }
     }
 }

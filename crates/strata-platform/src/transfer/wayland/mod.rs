@@ -801,7 +801,18 @@ impl Conn {
     /// Sends what is queued, waits for the compositor to answer a `wl_display.sync`, and runs
     /// every handler on the queue meanwhile, P0's included: their events reach subscribers as
     /// [`Conn::dispatch`]'s do. Winit's display only, on the UI thread, never inside
-    /// [`Conn::with_globals`] (both lock the state). It blocks the UI thread for one round trip.
+    /// [`Conn::with_globals`] (both lock the state).
+    ///
+    /// It blocks the UI thread for one round trip, **with no limit**: a compositor that stops
+    /// answering holds the UI thread until it answers or the connection ends. That is left
+    /// unbounded on purpose: such a compositor stalls winit's own frames and requests on the
+    /// same connection anyway, and a round trip given up midway would leave its import
+    /// half made, its answer due later.
+    ///
+    /// Only libwayland's own error ([`Failure::Dead`]) marks the connection dead. A full
+    /// socket buffer is waited out ([`BUSY_TRIES`] times, [`BUSY_WAIT`] each), then reported
+    /// as [`Error::Busy`] with the connection alive, as is any other error libwayland didn't
+    /// keep.
     ///
     /// The reader thread may hold a read intent meanwhile: libwayland's read protocol lets two
     /// threads prepare and read at once, and the reader never waits on the UI thread while it
@@ -822,29 +833,92 @@ impl Conn {
                 return Err(Error::Shutdown);
             };
             let mut state = lock(&self.state);
-            let result = queue.roundtrip(&mut state);
-            let dead = match result {
-                Err(e) => Some(e.to_string()),
-                Ok(_) => self
-                    .home
-                    .backend
-                    .upgrade()
+            let mut tries = 0;
+            let outcome = loop {
+                let result = queue.roundtrip(&mut state);
+                let backend = self.home.backend.upgrade();
+                let last_error = backend
+                    .as_ref()
                     .and_then(|b| b.last_error())
-                    .map(|e| e.to_string()),
+                    .map(|e| e.to_string());
+                let failure = match result {
+                    Ok(_) => last_error.map(Failure::Dead),
+                    Err(e) => Some(classify(&e, last_error)),
+                };
+                match failure {
+                    Some(Failure::Busy) if tries < BUSY_TRIES => {
+                        tries += 1;
+                        // Wait until the compositor reads, then send the sync again: the
+                        // first one's answer, if it comes, is ignored.
+                        if let Some(b) = &backend {
+                            let _ = pipe::poll(&[(b.poll_fd(), libc::POLLOUT)], Some(BUSY_WAIT));
+                        }
+                    }
+                    Some(Failure::Busy) => {
+                        break Err(Error::Busy(
+                            "the compositor isn't reading: the socket stayed full".into(),
+                        ));
+                    }
+                    Some(Failure::Other(message)) => break Err(Error::Busy(message)),
+                    Some(Failure::Dead(message)) => break Ok(Some(message)),
+                    None => break Ok(None),
+                }
             };
-            (std::mem::take(&mut state.events), dead)
+            (std::mem::take(&mut state.events), outcome)
         };
         self.subs.emit(events);
         self.gate.turned();
         match dead {
-            Some(message) => {
+            Ok(Some(message)) => {
                 self.report_failure(message.clone());
                 Err(Error::Connection(message))
             }
-            None => Ok(()),
+            Ok(None) => Ok(()),
+            Err(e) => Err(e),
         }
     }
 }
+
+/// How a failed round trip leaves the connection.
+#[cfg(feature = "foreign-parent")]
+#[derive(Debug, PartialEq, Eq)]
+enum Failure {
+    /// libwayland has an error: the connection is dead, for good.
+    Dead(String),
+    /// The socket's buffer was full (`EAGAIN` on the flush) or a call was interrupted: wait
+    /// for the socket and try again.
+    Busy,
+    /// Anything else: this round trip failed, and the connection lives on.
+    Other(String),
+}
+
+/// `last_error` is the backend's: wayland-backend keeps an error there only once libwayland
+/// has one, and never for `EAGAIN` from `wl_display_flush`, which `blocking_dispatch` passes
+/// on as it is.
+#[cfg(feature = "foreign-parent")]
+fn classify(e: &wayland_client::DispatchError, last_error: Option<String>) -> Failure {
+    use std::io::ErrorKind;
+    use wayland_backend::client::WaylandError;
+    use wayland_client::DispatchError;
+
+    if let Some(message) = last_error {
+        return Failure::Dead(message);
+    }
+    match e {
+        DispatchError::Backend(WaylandError::Io(io))
+            if matches!(io.kind(), ErrorKind::WouldBlock | ErrorKind::Interrupted) =>
+        {
+            Failure::Busy
+        }
+        e => Failure::Other(e.to_string()),
+    }
+}
+
+/// How often a round trip waits for a full socket to drain, and how long each time.
+#[cfg(feature = "foreign-parent")]
+const BUSY_TRIES: u32 = 4;
+#[cfg(feature = "foreign-parent")]
+const BUSY_WAIT: std::time::Duration = std::time::Duration::from_millis(250);
 
 #[cfg(test)]
 mod tests;

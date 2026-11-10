@@ -7,10 +7,10 @@ use strata_kit::look::Look;
 
 use super::state::{FormPage, Mounting, TabbedFormState};
 
-/// Strata's `.settings-action-tabs` (style.css): a 36 px tab with 6 px sides and 8 px after
-/// it, its label at 55 % until hovered, focused or chosen, a 2 px underline the label's width,
-/// a 2 px ring 2 px inside the tab at half the accent, and a rule under the strip at 35 % of
-/// the border colour.
+/// Strata's `.settings-action-tabs` (style.css): a tab at least 36 px tall (`min-height`, so
+/// it grows with a large text size) with 6 px sides and 8 px after it, its label at 55 % until
+/// hovered, focused or chosen, a 2 px underline the label's width, a 2 px ring 2 px inside the
+/// tab at half the accent, and a rule under the strip at 35 % of the border colour.
 pub const TAB_HEIGHT: f32 = 36.0;
 pub const TAB_PAD_X: f32 = 6.0;
 pub const TAB_GAP: f32 = 8.0;
@@ -274,7 +274,7 @@ impl<S: 'static> TabbedForm<S> {
             .focus_follows()
             .focus_ring(2.0, -2.0, k.alpha(accent, RING_ALPHA))
             .hover_group_focus()
-            .h(TAB_HEIGHT)
+            .min_h(TAB_HEIGHT)
             .px(TAB_PAD_X)
             .mr(TAB_GAP)
             .gap(look.space.xs)

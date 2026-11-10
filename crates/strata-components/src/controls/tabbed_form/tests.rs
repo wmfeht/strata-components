@@ -3,6 +3,7 @@ use rune::{
     text, text_input,
 };
 use strata_kit::look::Look;
+use strata_kit::shape::LookParams;
 
 use super::{FormPage, Mounting, TabbedForm, TabbedFormState};
 
@@ -96,11 +97,15 @@ fn on_key(h: &mut Host, ev: &KeyEvent, tx: &mut Tx) -> bool {
 }
 
 fn mount(mounting: Mounting, name: &str) -> Runtime<Host> {
+    mount_look(mounting, name, Look::fallback(false))
+}
+
+fn mount_look(mounting: Mounting, name: &str, look: Look) -> Runtime<Host> {
     let host = Host {
         tabs: TabbedFormState::new(),
         mounting,
         name: TextEdit::new(name),
-        look: Look::fallback(false),
+        look,
         heard: Vec::new(),
         error_from_poll: false,
     };
@@ -360,4 +365,28 @@ fn ctrl_page_keys_carry_the_keyboard_out_of_the_hidden_page() {
         );
         assert_eq!(rt.state.heard, [2, 0, 1, 2, 1, 2], "{mounting:?}");
     }
+}
+
+/// Strata's tabs are at least 36 px tall (`min-height`): at a large text size a tab grows to
+/// hold its label rather than clipping it.
+#[test]
+fn a_tab_grows_to_hold_a_large_label() {
+    let big = Look::fallback(false).with_params(&LookParams {
+        text_size: 48,
+        ..LookParams::default()
+    });
+    let rt = mount_look(Mounting::Kept, "x", big);
+    let tab = info(&rt, "f-tab-0").expect("the tab");
+    let label = rt
+        .elements()
+        .into_iter()
+        .find(|e| e.text.as_deref() == Some("General") && e.path.starts_with(&tab.path))
+        .expect("the tab's label")
+        .rect;
+    let tab = tab.rect;
+    let (top, bottom) = (tab[1], tab[1] + tab[3]);
+    assert!(
+        label[1] >= top && label[1] + label[3] <= bottom,
+        "the label {label:?} fits in the tab {tab:?}"
+    );
 }

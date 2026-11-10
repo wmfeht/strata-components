@@ -1,5 +1,7 @@
-// Matched text is a list of ranges; a one-range list is meant, not an array of its bounds.
-#![allow(clippy::single_range_in_vec_init)]
+#![expect(
+    clippy::single_range_in_vec_init,
+    reason = "matched text is a list of ranges: a one-range list is meant, not an array of its bounds"
+)]
 
 use super::fixture::{self, KEYBOARD_SHORTCUTS, SHORTCUTS};
 use super::matching::{MAX_QUERY_CHARS, Prepared, normalized, title_ranges};
@@ -447,7 +449,7 @@ fn matched_text_marks_whole_words_prefixes_and_han_runs_in_the_shown_title() {
 fn a_new_query_opens_its_best_page_and_clearing_no_results_goes_to_the_first() {
     let index = fixture::index();
     let mut st = SettingsSearchState::new();
-    let mut type_in = |st: &mut SettingsSearchState, q: &str| {
+    let type_in = |st: &mut SettingsSearchState, q: &str| {
         st.set_text(q);
         st.plan(&index).map(|r| st.store(r))
     };

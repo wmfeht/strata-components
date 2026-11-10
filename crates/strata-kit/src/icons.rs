@@ -177,10 +177,12 @@ icon_names! {
     Recent = "recent" => line!(r#"<circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/>"#),
     /// Network locations and remote servers.
     Network = "network" => line!(r#"<circle cx="8" cy="8" r="5.5"/><ellipse cx="8" cy="8" rx="2.5" ry="5.5"/><path d="M2.5 8h11"/>"#),
-    /// This computer: the file system root.
+    /// This computer: the file system root. Strata's catalogs draw its root crumb's hard
+    /// drive; their monitor stays reachable by name (`strata-monitor`).
     Computer = "computer" => line!(r#"<rect x="3.5" y="3.5" width="9" height="6.5" rx="0.5"/><path d="M1.5 12.5h13"/>"#),
 
-    // Devices (C8).
+    // Devices (C8). Strata draws every device as a hard drive, so its catalogs map all four
+    // names to one icon; the names stay for a host or a catalog that tells devices apart.
     /// An internal or external drive.
     Drive = "drive" => line!(r#"<rect x="2" y="5" width="12" height="6" rx="1.5"/><circle cx="11.5" cy="8" r="0.75" fill="currentColor" stroke="none"/>"#),
     /// A USB stick.

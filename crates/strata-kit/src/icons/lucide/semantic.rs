@@ -1,6 +1,6 @@
 //! Which icon each semantic name draws, the same in every catalog: Strata's own choice where
 //! Strata has one (read at lgse/strata `upstream/main` 35ee677ab: its context menus, sidebar
-//! and `src/ui/browser/entry.rs`; W2d's names at fb7eb0c4e,
+//! and `src/ui/browser/entry.rs`; W2d's names and the device and root rulings at fb7eb0c4e,
 //! whose icons are the same), else the closest Lucide icon.
 //!
 //! The match is exhaustive, so a name W2 adds fails to build until it has an icon here, and a
@@ -37,13 +37,17 @@ pub(super) const fn index(name: IconName) -> usize {
         IconName::Videos => i::STRATA_VIDEO,
         IconName::Recent => i::STRATA_CLOCK,
         IconName::Network => i::STRATA_NETWORK,
-        IconName::Computer => i::STRATA_MONITOR,
+        // Strata's root crumb (`src/ui/browser/location/breadcrumbs.rs`); its monitor is the
+        // Desktop chip in Settings and a custom action icon, found by name.
+        IconName::Computer => i::STRATA_HARD_DRIVE,
 
-        // Devices: Strata draws every drive, USB stick included, as a hard drive.
+        // Devices: Strata draws every device row (mount, volume or drive, a USB stick, a disc
+        // or a phone alike) as a hard drive (`src/ui/window/sidebar_devices.rs`). Its disc is
+        // for disk-image files and its smartphone for file-provider integrations.
         IconName::Drive => i::STRATA_HARD_DRIVE,
         IconName::Usb => i::STRATA_HARD_DRIVE,
-        IconName::Optical => i::STRATA_DISC,
-        IconName::Phone => i::STRATA_SMARTPHONE,
+        IconName::Optical => i::STRATA_HARD_DRIVE,
+        IconName::Phone => i::STRATA_HARD_DRIVE,
         IconName::Eject => i::STRATA_EJECT,
 
         // Pins and the trash: Strata's Unpin shows the pin (the current state), and its trash

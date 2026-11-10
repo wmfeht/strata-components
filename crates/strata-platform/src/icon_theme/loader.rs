@@ -91,7 +91,8 @@ pub enum IconState {
 /// Looks icons up on its own thread ([`THREAD_NAME`]) and hands them over as `rune::Pixels`.
 ///
 /// Cheap to clone; every clone shares the thread, the theme and the handles. The thread stops
-/// once the last clone drops, after the lookup it is running.
+/// once the last clone drops, after the lookup it is running; the lookups still queued don't
+/// run, and their handles stay [`IconState::Pending`].
 #[derive(Clone)]
 pub struct IconLoader {
     inner: Arc<Inner>,
@@ -108,6 +109,9 @@ struct Inner {
 struct Common {
     table: Mutex<Table>,
     settled: AtomicBool,
+    /// Set when the last `IconLoader` drops: the thread runs no further job. The channel alone
+    /// would have it work through the whole queue first.
+    stopped: AtomicBool,
     /// When `load` next asks the thread to check the themes on disk.
     next_check: Mutex<Instant>,
     revalidate_after: Duration,
@@ -150,6 +154,7 @@ impl IconLoader {
         let common = Arc::new(Common {
             table: Mutex::new(Table::default()),
             settled: AtomicBool::new(false),
+            stopped: AtomicBool::new(false),
             next_check: Mutex::new(Instant::now() + options.revalidate_after),
             revalidate_after: options.revalidate_after,
             cache,
@@ -284,8 +289,17 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+impl Drop for Inner {
+    fn drop(&mut self) {
+        self.common.stopped.store(true, Ordering::Release);
+    }
+}
+
 fn run(receive: &mpsc::Receiver<Job>, common: &Common, mut resolver: IconResolver) {
     while let Ok(job) = receive.recv() {
+        if common.stopped.load(Ordering::Acquire) {
+            return;
+        }
         let slot = match job {
             Job::Revalidate => {
                 if resolver.revalidate() {
@@ -298,7 +312,9 @@ fn run(receive: &mpsc::Receiver<Job>, common: &Common, mut resolver: IconResolve
                 }
                 continue;
             }
-            // Every handle dropped before its turn: nothing to look up.
+            // No handle holds it and it has left the recent icons: nothing to look up. The
+            // recent icons do hold a pending request, as a view that asks for its icons each
+            // run drops the handles at once, so a dropped handle alone doesn't skip it.
             Job::Lookup(slot) => match slot.upgrade() {
                 Some(slot) => slot,
                 None => continue,

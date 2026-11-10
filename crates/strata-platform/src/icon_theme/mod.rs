@@ -61,8 +61,14 @@
 //!
 //! Pass the app's own `ImageCache` in [`Options::cache`] to share its decoder threads; by
 //! default the loader makes one (up to 4 threads that sleep while idle). Dropping the last
-//! clone of the loader stops its thread after the lookup it is running; handles keep what
-//! they found. A request whose handles all dropped before its turn is skipped.
+//! clone of the loader stops its thread after the lookup it is running, with the queued ones
+//! left pending; handles keep what they found.
+//!
+//! A pending request stays among the recent icons (see Caching) like a settled one, since a
+//! view that asks each run drops its handle at once and still wants the icon. So dropping
+//! the handles doesn't cancel a request: it is skipped only if, at its turn, no handle holds it
+//! and it has left the recent icons. A view that scrolls past many icons queues lookups for at
+//! most [`Options::lru_entries`] it no longer shows.
 //!
 //! # The lookup
 //!

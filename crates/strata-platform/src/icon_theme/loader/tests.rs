@@ -1,8 +1,8 @@
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use super::{IconLoader, IconState, Options};
+use super::{IconLoader, IconState, LoadedIcon, Options};
 use crate::icon_theme::request::IconRequest;
 use crate::icon_theme::resolver::SearchPath;
 use crate::icon_theme::test_support::{Scratch, fixtures};
@@ -13,19 +13,110 @@ const WAIT: Duration = Duration::from_secs(10);
 fn loader(roots: Vec<std::path::PathBuf>, theme: &str) -> (IconLoader, Arc<AtomicUsize>) {
     let wakes = Arc::new(AtomicUsize::new(0));
     let counter = wakes.clone();
-    let options = Options {
+    let waker: rune::Waker = Arc::new(move || {
+        counter.fetch_add(1, Ordering::SeqCst);
+    });
+    let loader =
+        IconLoader::start(waker, options(roots, theme)).unwrap_or_else(|e| panic!("start: {e}"));
+    (loader, wakes)
+}
+
+fn options(roots: Vec<std::path::PathBuf>, theme: &str) -> Options {
+    Options {
         search_path: SearchPath {
             icon_dirs: roots,
             pixmap_dirs: Vec::new(),
         },
         theme: theme.into(),
         ..Options::default()
-    };
-    let waker: rune::Waker = Arc::new(move || {
-        counter.fetch_add(1, Ordering::SeqCst);
-    });
-    let loader = IconLoader::start(waker, options).unwrap_or_else(|e| panic!("start: {e}"));
-    (loader, wakes)
+    }
+}
+
+/// A waker that counts its calls and, while shut, holds the thread that calls it. The lookup
+/// thread calls the waker after each lookup settles, so a shut gate holds it there while a test
+/// queues work behind it or drops the loader.
+#[derive(Default)]
+struct Gate {
+    state: Mutex<GateState>,
+    changed: Condvar,
+}
+
+#[derive(Default)]
+struct GateState {
+    shut: bool,
+    held: usize,
+    wakes: usize,
+}
+
+impl Gate {
+    fn waker(self: &Arc<Self>) -> rune::Waker {
+        let gate = self.clone();
+        Arc::new(move || {
+            let mut state = gate.lock();
+            state.wakes += 1;
+            state.held += 1;
+            gate.changed.notify_all();
+            while state.shut {
+                state = gate
+                    .changed
+                    .wait(state)
+                    .unwrap_or_else(PoisonError::into_inner);
+            }
+            state.held -= 1;
+        })
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, GateState> {
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn set_shut(&self, shut: bool) {
+        self.lock().shut = shut;
+        self.changed.notify_all();
+    }
+
+    fn wakes(&self) -> usize {
+        self.lock().wakes
+    }
+
+    /// Waits until a thread is held in the waker.
+    fn holding(&self) -> bool {
+        let deadline = Instant::now() + WAIT;
+        let mut state = self.lock();
+        while state.held == 0 {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return false;
+            }
+            state = self
+                .changed
+                .wait_timeout(state, left)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+        }
+        true
+    }
+}
+
+fn gated(options: Options) -> (IconLoader, Arc<Gate>) {
+    let gate = Arc::new(Gate::default());
+    let loader = IconLoader::start(gate.waker(), options).unwrap_or_else(|e| panic!("start: {e}"));
+    (loader, gate)
+}
+
+/// Holds the lookup thread: it settles a lookup of a missing icon, then waits in the waker.
+/// Lookups run in order, so every job queued before has finished, its waker call included.
+fn hold(icons: &IconLoader, gate: &Gate) {
+    static HELD: AtomicUsize = AtomicUsize::new(0);
+    let name = format!("held-{}", HELD.fetch_add(1, Ordering::Relaxed));
+    gate.set_shut(true);
+    let held = icons.load(&IconRequest::named([name], 22, 1.0));
+    assert_eq!(held.wait(WAIT), IconState::NotFound);
+    assert!(gate.holding(), "the lookup thread reached the waker");
+}
+
+fn missing(i: usize) -> IconRequest {
+    IconRequest::named([format!("missing-{i}")], 22, 1.0)
 }
 
 fn decode_loader() -> (IconLoader, Arc<AtomicUsize>) {
@@ -226,16 +317,47 @@ fn rescan_finds_a_new_icon_and_drops_stale_handles() {
 }
 
 #[test]
-fn dropping_the_loader_stops_its_thread_and_keeps_what_was_found() {
-    let (icons, _) = decode_loader();
+fn dropping_the_loader_stops_its_thread_before_the_queued_lookups_and_keeps_what_was_found() {
+    let (icons, gate) = gated(options(vec![fixtures().join("decode")], "Decode"));
     let icon = icons.load(&IconRequest::named(["good"], 22, 1.0));
     assert_eq!(icon.wait(WAIT), IconState::Ready);
+    hold(&icons, &gate);
+    // Held handles, so only the stop can skip them.
+    let queued: Vec<LoadedIcon> = (0..50).map(|i| icons.load(&missing(i))).collect();
     let alive = Arc::downgrade(&icons.inner.common);
     drop(icons);
+    gate.set_shut(false);
     let deadline = Instant::now() + WAIT;
     while alive.strong_count() > 0 && Instant::now() < deadline {
         std::thread::yield_now();
     }
     assert_eq!(alive.strong_count(), 0, "the thread let go of its state");
+    let looked_up = queued
+        .iter()
+        .filter(|i| i.state() != IconState::Pending)
+        .count();
+    assert_eq!(looked_up, 0, "no lookup ran after the loader dropped");
     assert_eq!(icon.state(), IconState::Ready);
+}
+
+#[test]
+fn a_request_dropped_and_pushed_out_of_the_recent_icons_before_its_turn_is_skipped() {
+    let (icons, gate) = gated(Options {
+        lru_entries: 4,
+        ..options(vec![fixtures().join("decode")], "Decode")
+    });
+    hold(&icons, &gate);
+    let before = gate.wakes();
+    for i in 0..10 {
+        drop(icons.load(&missing(i)));
+    }
+    let last = icons.load(&IconRequest::named(["last"], 22, 1.0));
+    gate.set_shut(false);
+    assert_eq!(last.wait(WAIT), IconState::NotFound);
+    hold(&icons, &gate);
+    let looked_up = gate.wakes() - before - 1;
+    gate.set_shut(false);
+    // Each lookup of a missing icon wakes once: the 3 recent icons left besides `last`, and
+    // `last`. The other 7 left the recent icons with no handle before their turn.
+    assert_eq!(looked_up, 3 + 1);
 }

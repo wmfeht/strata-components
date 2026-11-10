@@ -237,10 +237,11 @@ type ViewFn<S> = Rc<dyn Fn(&mut S, RestView) -> bool>;
 ///
 /// A `true` report counts only on the row the pointer last arrived on by moving over the
 /// collection, as Strata's peek starts only from a motion enter: a row a scroll carries under
-/// a parked pointer, the row a press of the collection's own ended on, and the row a drag from
-/// elsewhere ended on (once the host calls [`CollectionState::hold_rest`]) report nothing
-/// until the pointer leaves it (for another row, or out of the collection) and comes back;
-/// moving inside the row doesn't count. None counts while row hover is off after keyboard
+/// a parked pointer, the row a press of the collection's own ended on, a folder row a drag was
+/// dropped on (taken or refused, a system drag included, which moves the pointer there
+/// unseen), and the row a drag from elsewhere ended on (once the host calls
+/// [`CollectionState::hold_rest`]) report nothing until the pointer leaves it (for another
+/// row, or out of the collection) and comes back; moving inside the row doesn't count. None counts while row hover is off after keyboard
 /// navigation ([`CollectionState::row_hover`]).
 ///
 /// Rune counts a row under an overlay (a card, a menu, a scrim) as hovered too (Rune draft
@@ -772,6 +773,7 @@ fn row_zone<S: 'static>(cfg: &Rc<Config<S>>, on_drop: DropFn<S>, id: EntryId) ->
             (Some(true), _) | (None, Some(DropOver::Background)) => None,
             _ => Some(id),
         };
+        super::route::dropped_on_row(&drop_cfg, s, id);
         on_drop(s, target, dropped, tx);
     });
     // With the host's action, a folder row it refuses (the drag's own folder, one inside the
@@ -782,6 +784,7 @@ fn row_zone<S: 'static>(cfg: &Rc<Config<S>>, on_drop: DropFn<S>, id: EntryId) ->
             let reject_cfg = cfg.clone();
             zone.action(move |s: &S, offer, mods| f(s, Some(id), offer, mods))
                 .on_reject(move |s: &mut S, _, tx| {
+                    super::route::dropped_on_row(&reject_cfg, s, id);
                     super::note_drop_hover(
                         &reject_cfg,
                         s,

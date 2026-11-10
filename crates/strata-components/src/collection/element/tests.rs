@@ -56,6 +56,8 @@ struct Host {
     /// Takes drops, recording where each went.
     drops: bool,
     dropped: Vec<Option<EntryId>>,
+    /// With `drops`, every zone refuses every drop (the host's action says `None`).
+    refuse: bool,
     /// What `on_press` and a recording controller heard, in order.
     order: Rc<RefCell<Vec<String>>>,
     /// Hears drags over the drop zones through `on_drag_over`, when set.
@@ -93,6 +95,7 @@ impl Host {
             roles: None,
             drops: false,
             dropped: Vec::new(),
+            refuse: false,
             order: Rc::default(),
             over: None,
             defer: false,
@@ -223,6 +226,9 @@ fn collection(s: &Host) -> Collection<Host> {
     }
     if s.drops {
         c = c.on_drop(|s: &mut Host, target, _, _| s.dropped.push(target));
+        if s.refuse {
+            c = c.drop_action(|_: &Host, _, _, _| None);
+        }
     }
     if s.defer {
         c = c.header_defers_press(
@@ -3467,4 +3473,103 @@ fn back_at_the_same_point_after_leaving_the_window_is_an_arrival() {
         .map(|r| r.id)
         .collect();
     assert_eq!(inside, [id(10)], "an arrival");
+}
+
+/// A runtime whose folder rows report resting and take drops.
+fn rest_drop_runtime() -> Runtime<Host> {
+    let mut rt = rest_runtime(30);
+    rt.update(|s, _| s.drops = true);
+    settle(&mut rt);
+    rt
+}
+
+/// A file drag (a system drag: the collection sees no pointer moves) over `key` and dropped
+/// there, then held by the host, as X2's adapter does when the drag ends.
+fn drop_on_and_hold(rt: &mut Runtime<Host>, key: &str) -> (f32, f32) {
+    let at = centre_of(rt, key);
+    rt.drag_files(vec!["/tmp/a.txt".into()], Some(at));
+    rt.frame(1.0 / 60.0);
+    rt.drop_files(vec!["/tmp/a.txt".into()], Some(at));
+    rt.frame(1.0 / 60.0);
+    rt.update(|s, _| s.coll.hold_rest());
+    at
+}
+
+fn rested(rt: &Runtime<Host>) -> Vec<EntryId> {
+    rt.state
+        .rests
+        .iter()
+        .filter(|r| r.inside)
+        .map(|r| r.id)
+        .collect()
+}
+
+/// A system drag moves the pointer onto the row it drops on without the collection seeing a
+/// move: the pointer's first move there afterwards (X11's crossing after the ungrab) is no
+/// arrival, so the folder dropped on never peeks.
+#[test]
+fn the_first_move_after_a_system_drop_on_a_row_is_no_arrival() {
+    let mut rt = rest_drop_runtime();
+    let (x, y) = drop_on_and_hold(&mut rt, "row-10");
+    assert_eq!(rt.state.dropped, [Some(id(10))]);
+    rt.pointer_move(x, y);
+    rt.frame(1.0 / 60.0);
+    wake_until(&mut rt, 1.0, |_| false);
+    assert_eq!(rested(&rt), []);
+}
+
+/// Last seen on another row, the pointer leaves and enters again at once on the row a system
+/// drag dropped on (X11's ungrab crossing, handled after the host held): no arrival.
+#[test]
+fn a_crossing_onto_the_row_a_system_drag_dropped_on_is_no_arrival() {
+    let mut rt = rest_drop_runtime();
+    let (x, y) = centre_of(&rt, "row-5");
+    rt.pointer_move(x, y);
+    rt.frame(1.0 / 60.0);
+    let (x, y) = drop_on_and_hold(&mut rt, "row-10");
+    rt.pointer_leave();
+    rt.frame(1.0 / 60.0);
+    rt.pointer_move(x, y);
+    rt.frame(1.0 / 60.0);
+    wake_until(&mut rt, 1.0, |_| false);
+    assert_eq!(rested(&rt), []);
+}
+
+/// A window blur during a system drag forgets the row the pointer was on: the drop on that
+/// row records it again, so a small move after the drag is no arrival either.
+#[test]
+fn a_blur_during_a_system_drag_doesnt_make_the_row_dropped_on_an_arrival() {
+    let mut rt = rest_drop_runtime();
+    let (x, y) = centre_of(&rt, "row-10");
+    rt.pointer_move(x, y);
+    rt.frame(1.0 / 60.0);
+    rt.window_focus(false);
+    rt.frame(1.0 / 60.0);
+    drop_on_and_hold(&mut rt, "row-10");
+    rt.window_focus(true);
+    rt.frame(1.0 / 60.0);
+    rt.pointer_move(x + 3.0, y);
+    rt.frame(1.0 / 60.0);
+    wake_until(&mut rt, 1.0, |_| false);
+    assert_eq!(rested(&rt), []);
+    // Moving on to another folder still reports it.
+    let (x, y) = centre_of(&rt, "row-0");
+    rt.pointer_move(x, y);
+    rt.frame(1.0 / 60.0);
+    wake_until(&mut rt, 1.0, |s| s.rests.iter().any(|r| r.inside));
+    assert_eq!(rested(&rt), [id(0)]);
+}
+
+/// A drop a folder row refuses lands on it all the same: no arrival either.
+#[test]
+fn the_first_move_after_a_refused_system_drop_on_a_row_is_no_arrival() {
+    let mut rt = rest_drop_runtime();
+    rt.update(|s, _| s.refuse = true);
+    settle(&mut rt);
+    let (x, y) = drop_on_and_hold(&mut rt, "row-10");
+    assert_eq!(rt.state.dropped, []);
+    rt.pointer_move(x, y);
+    rt.frame(1.0 / 60.0);
+    wake_until(&mut rt, 1.0, |_| false);
+    assert_eq!(rested(&rt), []);
 }

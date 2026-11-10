@@ -600,6 +600,18 @@ pub(super) fn on_rest<S: 'static>(
     (rest.report)(s, report, tx);
 }
 
+/// A drop on folder row `id`, taken or refused: with the rest hook, the pointer is on that row
+/// and its rest is held. A system drag carries the pointer there with no move the collection
+/// sees, so without this the pointer's next move there (X11's crossing after the drop, or the
+/// first after a blur during the drag) would count as an arrival and peek the folder.
+pub(super) fn dropped_on_row<S: 'static>(cfg: &Config<S>, s: &mut S, id: crate::contract::EntryId) {
+    if cfg.rest.is_some() {
+        let st = (cfg.get_mut)(s).1;
+        st.rest_under = Some(id);
+        st.rest_entered = None;
+    }
+}
+
 /// `on_hover_change` on the container of a collection with the rest hook: leaving it forgets
 /// the row the pointer was on.
 pub(super) fn on_hover<S: 'static>(cfg: &Rc<Config<S>>, s: &mut S, inside: bool, tx: &mut Tx) {

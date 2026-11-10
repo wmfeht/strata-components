@@ -288,7 +288,8 @@ impl CollectionState {
     /// next arrives on a row: call it when a drag that didn't start in this collection ends
     /// (a sidebar row, a tab, another pane, a system drag from P1 or X2). A drag dropped on a
     /// folder then never peeks it. The collection does this itself when one of its own
-    /// presses ends.
+    /// presses ends, and when a drop lands on one of its folder rows, which it also records as
+    /// the row under the pointer (a system drag moves the pointer there unseen).
     pub fn hold_rest(&mut self) {
         self.rest_entered = None;
     }

@@ -69,11 +69,11 @@ fn a_drag_near_a_snap_point_lands_on_it() {
 fn a_press_on_the_track_jumps_and_one_on_the_knob_keeps_its_grab() {
     let mut st = laid_out(6.0, frame());
     let centre = st.x_of(6.0, KNOB);
-    // Pressed 5 pt right of the knob's centre, then moved 50 pt: the knob follows the
-    // pointer from where it was grabbed, so it moves 50 pt (3 px), not 55.
-    assert_eq!(st.press(centre + 5.0, KNOB, &[], WITHIN, false), None);
-    st.drag(centre + 55.0, KNOB, &[], WITHIN, false);
-    assert_eq!(st.value(), 9.0);
+    // Pressed 7 pt right of the knob's centre, then moved 40 pt: the knob follows the
+    // pointer from where it was grabbed, so it moves 40 pt (2.4 px, to 8), not 47 (to 9).
+    assert_eq!(st.press(centre + 7.0, KNOB, &[], WITHIN, false), None);
+    st.drag(centre + 47.0, KNOB, &[], WITHIN, false);
+    assert_eq!(st.value(), 8.0);
     st.release(false);
     // Off the knob, the press itself moves it there.
     assert_eq!(

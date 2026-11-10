@@ -223,8 +223,10 @@ impl<S: 'static> SettingsSearch<S> {
 
     /// Enter: go to the best row. Its page shows, it scrolls into view, the keyboard moves to
     /// its first control and it is highlighted for [`FLASH_FOR`]. False when no query or no
-    /// match leaves a row to go to.
+    /// match leaves a row to go to. A query or index the host's tick hasn't searched yet is
+    /// searched first: the matches name rows by position in the index.
     pub fn jump(&self, s: &mut S, tx: &mut Tx) -> bool {
+        self.refresh(s, tx);
         let st = (self.get)(s);
         let Some((_, row, page)) = st.matches().and_then(|m| m.best) else {
             return false;

@@ -567,6 +567,7 @@ fn a_whole_title_match_ranks_first() {
 struct Host {
     search: SettingsSearchState,
     index: SearchIndex,
+    went: Vec<(String, Option<String>)>,
 }
 
 fn search() -> SettingsSearch<Host> {
@@ -576,6 +577,7 @@ fn search() -> SettingsSearch<Host> {
         |h: &mut Host| &mut h.search,
         |h: &Host| &h.index,
     )
+    .on_navigate(|h: &mut Host, to, _| h.went.push((to.page, to.row)))
 }
 
 /// Strata's `heading_shown`: a heading shows while a row under it does, and always when no
@@ -583,6 +585,7 @@ fn search() -> SettingsSearch<Host> {
 #[test]
 fn headings_and_pages_follow_the_rows_under_them() {
     let mut h = Host {
+        went: Vec::new(),
         search: SettingsSearchState::new(),
         index: SearchIndex {
             revision: 1,
@@ -614,4 +617,31 @@ fn headings_and_pages_follow_the_rows_under_them() {
         s.shows_row(&h, "not-indexed"),
         "a row the index doesn't list always shows"
     );
+}
+
+/// Enter reads the index as it is now: one the host changed since the last tick is searched
+/// first, so the jump never follows a stale row position.
+#[test]
+fn enter_searches_a_changed_index_before_it_jumps() {
+    let mut tx = rune::Tx::default();
+    let mut h = Host {
+        went: Vec::new(),
+        search: SettingsSearchState::new(),
+        index: SearchIndex {
+            revision: 1,
+            pages: vec![IndexPage::new("one", "One"), IndexPage::new("two", "Two")],
+            rows: vec![IndexRow::new("units", "one", "Units")],
+        },
+    };
+    let s = search();
+    h.search.set_text("units");
+    s.refresh(&mut h, &mut tx);
+    h.went.clear();
+    h.index
+        .rows
+        .insert(0, IndexRow::new("glow", "two", "Element glow"));
+    h.index.revision += 1;
+    assert!(s.jump(&mut h, &mut tx));
+    assert_eq!(h.search.highlighted(), Some("units"));
+    assert_eq!(h.went, [("one".to_owned(), Some("units".to_owned()))]);
 }

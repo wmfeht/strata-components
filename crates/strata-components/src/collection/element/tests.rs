@@ -3394,11 +3394,12 @@ fn back_on_the_same_row_after_leaving_the_collection_is_an_arrival() {
     rt.update(|s, _| s.coll.hold_rest());
     wake_until(&mut rt, 1.0, |_| false);
     assert!(!rt.state.rests.iter().any(|r| r.inside), "held");
-    // Out of the collection for longer than the leave delay, then straight back onto row 10.
+    // Out of the collection for longer than the leave delay, then straight back onto row 10
+    // (not to the very point it left from: a move reported there is a re-enter, not a move).
     rt.pointer_move(W - 20.0, y);
     rt.frame(1.0 / 60.0);
     wake_until(&mut rt, 0.3, |_| false);
-    rt.pointer_move(x, y);
+    rt.pointer_move(x + 3.0, y);
     rt.frame(1.0 / 60.0);
     wake_until(&mut rt, 1.0, |s| s.rests.iter().any(|r| r.inside));
     let inside: Vec<_> = rt
@@ -3409,4 +3410,36 @@ fn back_on_the_same_row_after_leaving_the_collection_is_an_arrival() {
         .map(|r| r.id)
         .collect();
     assert_eq!(inside, [id(10)], "an arrival");
+}
+
+/// X11 can send a leave and an enter after a drop with the pointer where it was: the enter's
+/// move, at the point the last move was, is no arrival, so a held row stays held.
+#[test]
+fn a_held_row_stays_held_when_the_pointer_leaves_and_reenters_without_moving() {
+    let mut rt = rest_runtime(30);
+    settle(&mut rt);
+    let (x, y) = centre_of(&rt, "row-10");
+    rt.pointer_move(x, y);
+    rt.frame(1.0 / 60.0);
+    rt.update(|s, _| s.coll.hold_rest());
+    rt.pointer_leave();
+    rt.frame(1.0 / 60.0);
+    wake_until(&mut rt, 0.3, |_| false);
+    rt.pointer_move(x, y);
+    rt.frame(1.0 / 60.0);
+    wake_until(&mut rt, 1.0, |_| false);
+    assert!(
+        !rt.state.rests.iter().any(|r| r.inside),
+        "{:?}",
+        rt.state.rests
+    );
+    // Nor is a move inside the row after it.
+    rt.pointer_move(x + 5.0, y);
+    rt.frame(1.0 / 60.0);
+    wake_until(&mut rt, 1.0, |_| false);
+    assert!(
+        !rt.state.rests.iter().any(|r| r.inside),
+        "{:?}",
+        rt.state.rests
+    );
 }

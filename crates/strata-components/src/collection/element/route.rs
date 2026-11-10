@@ -631,9 +631,12 @@ pub(super) fn on_pointer_move<S: 'static>(
             }
         };
         let st = (cfg.get_mut)(s).1;
+        let moved = st.rest_at.replace(window) != Some(window);
         if under != st.rest_under {
             st.rest_under = under;
-            st.rest_entered = under;
+            if moved {
+                st.rest_entered = under;
+            }
         }
     }
     let st = (cfg.get_mut)(s).1;

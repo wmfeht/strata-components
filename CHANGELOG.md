@@ -45,8 +45,8 @@ Nothing is released yet. The first release is planned for milestone M1 with the 
 
 - One cargo feature per shim, each gating its own module: `dnd`, `clipboard`, `csd`,
   `foreign-parent`, `settings`, `icon-theme`, `media-audio`, `single-instance` and `glib-bridge`.
-  Apart from `dnd`, `clipboard`, `glib-bridge`, `csd`, `settings` and `single-instance`, the
-  modules are placeholders until their work packages land.
+  Apart from `dnd`, `clipboard`, `glib-bridge`, `csd`, `settings`, `single-instance` and
+  `media-audio`, the modules are placeholders until their work packages land.
 - `dnd`: system drag and drop on Wayland (`wl_data_device`) and X11 (XDND 5), mirroring Rune's
   `drag_out` and `on_drop_files` with any MIME types. Each window has a `Dnd`, attached from
   `App::on_window`.
@@ -166,3 +166,31 @@ Nothing is released yet. The first release is planned for milestone M1 with the 
   The portal is the only source: without one (an X11 session with only XSETTINGS, say) the
   values are the defaults. Rune's own double press keeps its fixed 0.5 s (draft U13). It uses
   `zbus` and `tokio`, as Rune's `dbus` feature does.
+- `media-audio`: media output, for an app that decodes its own media. Rune has no audio output
+  on Linux (`Player` has no Linux backend, upstream #30).
+  - `AudioSink` plays interleaved PCM (`PcmFormat`: S16, S32 or F32, any rate and channel
+    count) through GStreamer's `appsrc` into the default output (`autoaudiosink`), or nowhere
+    (`Output::Null`). Its clock (`SinkClock`, for any thread) is the device's position. It
+    plays, pauses, seeks, flushes, reopens after a lost device, and sets the volume. A seek
+    right after a failure or a reopen, before the new pipeline is built, still lands on it.
+  - A seek starts a generation: the sink flushes `appsrc` and plays the PCM pushed since from
+    the seek's target, with no pipeline rebuild. An underrun pauses the pipeline until 200 ms
+    is queued again, so the PCM that follows doesn't play late.
+  - Each change the clock makes on its own is a `SinkEvent` (`Ready`, `SeekLanded`,
+    `Underrun`, `Resumed`, `Stalled`, `Ended`, `DeviceLost`, `Error`) and wakes the app once.
+    One failure is one event. Nothing from a generation before a seek lands or ends the seek
+    after it, and nothing from a failed pipeline touches the one its rebuild starts; an error
+    from the pipeline a plain seek flushed and kept fails it. `Stalled` covers a device that
+    stops (`SinkOptions::stall_after`, 3 s) and one that never starts
+    (`SinkOptions::start_timeout`, 8 s of loading or seeking with PCM queued, paused or not,
+    and of playing).
+    No call blocks on the device: state changes run on a control thread.
+  - `FramePacer` writes the RGBA frame the clock is at into a `rune::Pixels` in place, with no
+    view commit: it drops frames whose time passed, holds while the next isn't due, counts
+    repeats (none past the clip's last frame after `FramePacer::finish`), and shows the first
+    frame after a flush at once. `WallClock` is the same clock on monotonic time, for clips
+    without sound.
+
+  It needs GStreamer and gst-plugins-base (`libgstreamer1.0-dev` and
+  `libgstreamer-plugins-base1.0-dev` to build), and gst-plugins-good for `autoaudiosink`. The
+  bindings are MIT OR Apache-2.0 and share glib 0.22 with `glib-bridge`.

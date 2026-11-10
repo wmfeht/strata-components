@@ -25,11 +25,15 @@ jobs:
       # Rune links libwayland-client and libxkbcommon. mesa-vulkan-drivers is lavapipe, the
       # software Vulkan the PNG goldens and scripts render on (docs/testing.md).
       # strata-platform's glib-bridge feature links GLib and GIO (glib-sys, gio-sys).
+      # Its media-audio feature links GStreamer and gstreamer-app (gstreamer-sys,
+      # gstreamer-app-sys), and its headless sink tests run appsrc, audioconvert, audioresample
+      # and volume, from gstreamer1.0-plugins-base.
       - name: Install system libraries
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libglib2.0-dev libwayland-dev libxkbcommon-dev mesa-vulkan-drivers
+            libglib2.0-dev libwayland-dev libxkbcommon-dev mesa-vulkan-drivers \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-base
 
       - name: Install the pinned toolchain
         uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7

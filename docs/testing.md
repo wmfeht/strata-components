@@ -535,3 +535,26 @@ passed.
 Trap: the demo hears another app's copy only as a change of the badge, so a test that offers
 files twice in a row first offers text (the badge turns off), then the files (it turns on
 again): otherwise a paste could read the clipboard before the demo heard the new copy.
+
+## Media output (P7's `media-audio`)
+
+The sink's tests run in `mise run test` with the rest: they use `Output::Null` (GStreamer's
+`fakesink`) on a manual GStreamer clock, so they open no sound server and time moves only when
+a test moves it. They need GStreamer's `appsrc`, `audioconvert`, `audioresample` and `volume`
+(gst-plugins-base) at run time; on Ubuntu that is `gstreamer1.0-plugins-base`. The first
+`gst::init` writes GStreamer's plugin registry cache under `~/.cache/gstreamer-1.0/`.
+
+One test plays sound and is for a person: `media::sink::tests::plays_a_tone_on_the_default_output`
+plays two seconds of 440 Hz on the default output. It is `#[ignore]`d and plays only with
+`STRATA_PLATFORM_TONE=1`:
+
+```sh
+STRATA_PLATFORM_TONE=1 cargo test -p strata-platform --features media-audio plays_a_tone -- --ignored
+```
+
+`mise run test-platform` runs every ignored strata-platform test, this one included, without
+the variable. It then plays nothing but reports `ok`, and prints
+`SKIP p7::plays_a_tone_on_the_default_output: …` on stderr, past libtest's capture. Count it as
+skipped, never as passed. The example `cargo run -p strata-platform --features media-audio
+--example media` plays a tone and a video ramp in sync, for the by-ear check; with `--null` it
+plays nothing.

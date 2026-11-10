@@ -50,7 +50,7 @@ settings = [
 icon-theme = []
 
 # P7 media output: src/media/
-media-audio = []
+media-audio = ["dep:gstreamer", "dep:gstreamer-app"]
 
 # P8 single instance and activation: src/single_instance/
 single-instance = [
@@ -98,6 +98,8 @@ futures-util = { workspace = true, optional = true, features = ["std"] }
 # icon-theme (P6)
 
 # media-audio (P7)
+gstreamer = { workspace = true, optional = true }
+gstreamer-app = { workspace = true, optional = true }
 
 # single-instance (P8)
 

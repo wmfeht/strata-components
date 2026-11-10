@@ -59,3 +59,19 @@ fn the_selected_frames_hover_is_its_fill_deepened_by_default() {
     assert_eq!(hover, look.kit.alpha(fill, fill.a * 30.0 / 22.0));
     assert!(hover.a > fill.a, "{} over {}", hover.a, fill.a);
 }
+
+/// C13 review 1: the hover bubble's styling has tokens of its own (`.preview-video-bubble`).
+#[test]
+fn the_media_bubble_styling_is_overridable_by_name() {
+    let look = Look::fallback(false);
+    for name in [
+        "media.bubble.fill",
+        "media.bubble.border",
+        "media.bubble.radius",
+        "media.bubble.pad",
+        "media.bubble.cell_fill",
+        "media.bubble.cell_radius",
+    ] {
+        assert!(tokens::get(&look, name).is_ok(), "{name}");
+    }
+}

@@ -39,6 +39,11 @@ pub struct Media {
     pub frame_radius: Option<f32>,
     pub frame_fill: Option<Color>,
     pub bubble_fill: Option<Color>,
+    pub bubble_border: Option<Color>,
+    pub bubble_radius: Option<f32>,
+    pub bubble_pad: Option<f32>,
+    pub bubble_cell_fill: Option<Color>,
+    pub bubble_cell_radius: Option<f32>,
 }
 
 fn accent(look: &Look) -> Color {
@@ -213,6 +218,45 @@ pub fn bubble_fill(look: &Look) -> Color {
         .unwrap_or_else(|| fade(look, look.kit.c.bg_base, 0.92))
 }
 
+/// The bubble's border: `media.bubble.border`, else the base border at 50 %.
+pub fn bubble_border(look: &Look) -> Color {
+    look.slots
+        .media
+        .bubble_border
+        .unwrap_or_else(|| fade(look, look.kit.c.border_base, 0.5))
+}
+
+/// The bubble's corner radius: `media.bubble.radius`, else Strata's 6 at the look's roundness.
+pub fn bubble_radius(look: &Look) -> f32 {
+    look.slots
+        .media
+        .bubble_radius
+        .unwrap_or_else(|| look.round(6.0))
+}
+
+/// The space inside the bubble's border: `media.bubble.pad`, else Strata's 3.
+pub fn bubble_pad(look: &Look) -> f32 {
+    look.slots.media.bubble_pad.unwrap_or(3.0)
+}
+
+/// The storyboard cell's backing, shown until a cell lands: `media.bubble.cell_fill`, else
+/// muted text at 14 %.
+pub fn bubble_cell_fill(look: &Look) -> Color {
+    look.slots
+        .media
+        .bubble_cell_fill
+        .unwrap_or_else(|| fade(look, look.kit.c.text_muted, 0.14))
+}
+
+/// The storyboard cell's corner radius: `media.bubble.cell_radius`, else Strata's 4 at the
+/// look's roundness.
+pub fn bubble_cell_radius(look: &Look) -> f32 {
+    look.slots
+        .media
+        .bubble_cell_radius
+        .unwrap_or_else(|| look.round(4.0))
+}
+
 pub const TOKENS: &[Token] = &[
     Token::length("media.waveform.height", waveform_height, |l, v| {
         l.slots.media.waveform_height = Some(v)
@@ -273,5 +317,20 @@ pub const TOKENS: &[Token] = &[
     }),
     Token::color("media.bubble.fill", bubble_fill, |l, v| {
         l.slots.media.bubble_fill = Some(v)
+    }),
+    Token::color("media.bubble.border", bubble_border, |l, v| {
+        l.slots.media.bubble_border = Some(v)
+    }),
+    Token::length("media.bubble.radius", bubble_radius, |l, v| {
+        l.slots.media.bubble_radius = Some(v)
+    }),
+    Token::length("media.bubble.pad", bubble_pad, |l, v| {
+        l.slots.media.bubble_pad = Some(v)
+    }),
+    Token::color("media.bubble.cell_fill", bubble_cell_fill, |l, v| {
+        l.slots.media.bubble_cell_fill = Some(v)
+    }),
+    Token::length("media.bubble.cell_radius", bubble_cell_radius, |l, v| {
+        l.slots.media.bubble_cell_radius = Some(v)
     }),
 ];

@@ -315,7 +315,7 @@
 //!   event: tests use `Runtime::ime`).
 
 pub mod chord;
-mod field;
+pub(crate) mod field;
 pub mod filter;
 mod flash;
 mod keycap;

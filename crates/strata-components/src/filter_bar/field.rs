@@ -15,13 +15,13 @@ use strata_kit::look::Look;
 
 use crate::contract::Point;
 
-pub(super) type EditFn<S> = Rc<dyn Fn(&mut S) -> &mut TextEdit>;
-pub(super) type KeyFn<S> = Rc<dyn Fn(&mut S, &KeyEvent, &mut Tx) -> bool>;
-pub(super) type ChangeFn<S> = Rc<dyn Fn(&mut S, &mut Tx)>;
-pub(super) type MenuFn<S> = Rc<dyn Fn(&mut S, Point, &mut Tx)>;
+pub(crate) type EditFn<S> = Rc<dyn Fn(&mut S) -> &mut TextEdit>;
+pub(crate) type KeyFn<S> = Rc<dyn Fn(&mut S, &KeyEvent, &mut Tx) -> bool>;
+pub(crate) type ChangeFn<S> = Rc<dyn Fn(&mut S, &mut Tx)>;
+pub(crate) type MenuFn<S> = Rc<dyn Fn(&mut S, Point, &mut Tx)>;
 
 /// What a field draws and names.
-pub(super) struct Spec<'a> {
+pub(crate) struct Spec<'a> {
     /// The field's key.
     pub key: &'a str,
     /// Its accessible name.
@@ -34,7 +34,7 @@ pub(super) struct Spec<'a> {
 }
 
 /// The handlers a field sends its input to.
-pub(super) struct Handlers<S> {
+pub(crate) struct Handlers<S> {
     pub edit: EditFn<S>,
     pub key: KeyFn<S>,
     pub change: ChangeFn<S>,
@@ -54,7 +54,7 @@ impl<S> Clone for Handlers<S> {
 
 /// The core field: single-line, no spell marks (a query or a name isn't prose), its keys,
 /// edits and menu press going to `h`.
-pub(super) fn input<S: 'static>(
+pub(crate) fn input<S: 'static>(
     look: &Look,
     edit: &TextEdit,
     spec: &Spec<'_>,
@@ -104,7 +104,7 @@ pub(super) fn input<S: 'static>(
 /// and a danger outline while `invalid`. The frame is a `textbox`, so Rune routes a press
 /// anywhere in it to the field inside (as rune-kit's box does), and its menu press is the
 /// field's too.
-pub(super) fn frame<S: 'static>(
+pub(crate) fn frame<S: 'static>(
     look: &Look,
     inner: El,
     focused: bool,
@@ -131,7 +131,7 @@ pub(super) fn frame<S: 'static>(
 }
 
 /// A row for [`frame`]: the field's height, its content centred.
-pub(super) fn frame_row(look: &Look, key: String) -> El {
+pub(crate) fn frame_row(look: &Look, key: String) -> El {
     row()
         .key(key)
         .w_full()

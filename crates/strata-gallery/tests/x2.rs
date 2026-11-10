@@ -1116,14 +1116,25 @@ mod x2 {
             && v["open"] == false
             && v["why"] == "drag"));
         let _ = dropped_on_peer(&peer, 1);
-        // A drop from the peer on Music, the pointer left resting there: no peek.
+        // A drop from the peer on Music, the pointer left resting there: Music doesn't peek.
+        // (Rows the pointer rests on on its way to the peer before the drag may; on X11 the
+        // pointer waits over the list while the peer takes focus.)
         let mark = demo.app.line_count();
         let got = drop_on(&s, &demo, &peer, &from, &["todo.txt"], row(2, "Music"));
         assert!(got.is_some());
+        let music = demo.root.join("Music");
+        std::thread::sleep(Duration::from_millis(1200));
+        let lines = demo.lines_from(mark);
+        let dropped = lines
+            .iter()
+            .position(|v| v["ev"] == "transfer")
+            .expect("the drop");
+        let peeked = lines[dropped..].iter().any(|v| {
+            v["ev"] == "peek" && v["open"] == true && v["folder"].as_str() == music.to_str()
+        });
         assert!(
-            !demo.saw(mark, Duration::from_millis(1200), |v| v["ev"] == "peek"
-                && v["open"] == true),
-            "a folder a drag was dropped on doesn't peek"
+            !peeked,
+            "a folder a drag was dropped on doesn't peek: {lines:?}"
         );
         demo.quit();
     }

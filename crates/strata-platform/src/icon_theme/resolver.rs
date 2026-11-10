@@ -5,6 +5,7 @@
 mod tests;
 
 use std::collections::{HashMap, VecDeque};
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -36,22 +37,22 @@ impl SearchPath {
     /// and `/usr/share`), with `pixmaps` under each of those for unthemed icons, and
     /// `/usr/share/pixmaps` last when they leave it out (the spec names it).
     pub fn from_env() -> Self {
-        let var = |name| {
-            std::env::var_os(name)
-                .filter(|v| !v.is_empty())
-                .map(PathBuf::from)
-        };
-        let home = var("HOME");
-        let data_home = var("XDG_DATA_HOME")
+        Self::from_vars(|name| std::env::var_os(name))
+    }
+
+    /// [`from_env`](Self::from_env) over `var`, which reads an environment variable.
+    fn from_vars(var: impl Fn(&str) -> Option<OsString>) -> Self {
+        let path = |name| var(name).filter(|v| !v.is_empty()).map(PathBuf::from);
+        let home = path("HOME");
+        let data_home = path("XDG_DATA_HOME")
             .filter(|p| p.is_absolute())
             .or_else(|| home.as_ref().map(|h| h.join(".local/share")));
-        let data_dirs: Vec<PathBuf> = std::env::var("XDG_DATA_DIRS")
-            .ok()
+        // Paths are bytes on Linux: a directory name that isn't UTF-8 is still one.
+        let dirs = var("XDG_DATA_DIRS")
             .filter(|dirs| !dirs.is_empty())
-            .unwrap_or_else(|| "/usr/local/share:/usr/share".into())
-            .split(':')
-            .filter(|d| !d.is_empty())
-            .map(PathBuf::from)
+            .unwrap_or_else(|| "/usr/local/share:/usr/share".into());
+        let data_dirs: Vec<PathBuf> = std::env::split_paths(&dirs)
+            .filter(|d| !d.as_os_str().is_empty())
             .collect();
         let mut icon_dirs: Vec<PathBuf> = data_home.map(|d| d.join("icons")).into_iter().collect();
         icon_dirs.extend(home.map(|h| h.join(".icons")));

@@ -28,6 +28,35 @@ fn one(theme: &str, name: &str, size: u32, scale: u32) -> Option<String> {
 }
 
 #[test]
+fn a_data_dir_that_isnt_utf8_is_still_searched() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+    let odd = OsString::from_vec(b"/data/\xff".to_vec());
+    let mut dirs = odd.clone().into_vec();
+    dirs.extend_from_slice(b":/usr/share");
+    let dirs = OsString::from_vec(dirs);
+    let search = SearchPath::from_vars(|name| match name {
+        "HOME" => Some("/home/u".into()),
+        "XDG_DATA_DIRS" => Some(dirs.clone()),
+        _ => None,
+    });
+    let odd = std::path::PathBuf::from(odd);
+    assert_eq!(
+        search.icon_dirs,
+        [
+            "/home/u/.local/share/icons".into(),
+            "/home/u/.icons".into(),
+            odd.join("icons"),
+            "/usr/share/icons".into(),
+        ]
+    );
+    assert_eq!(
+        search.pixmap_dirs,
+        [odd.join("pixmaps"), "/usr/share/pixmaps".into()]
+    );
+}
+
+#[test]
 fn inherited_themes_are_searched_depth_first_then_hicolor() {
     let mut r = resolver();
     let mut at = |name| find(&mut r, "Child", &[name], 32, 1);

@@ -443,6 +443,38 @@ fn matched_text_marks_whole_words_prefixes_and_han_runs_in_the_shown_title() {
     assert_eq!(title_ranges("Drag & drop", "drop"), [7..11]);
 }
 
+/// The marks follow the matcher's own normalisation (`normalized`): the whole title lowercased
+/// (a final Σ is ς) and split after lowercasing (İ lowers to i and a combining dot, which
+/// splits), with the shown title's words joined as the matcher joins them. A range never
+/// splits a character.
+#[test]
+fn matched_text_follows_the_matchers_lowercasing() {
+    let cases: [(&str, &str, &[std::ops::Range<usize>]); 6] = [
+        ("ΟΔΟΣ", "οδος", &[0..8]),
+        ("ΟΔΟΣ", "ΟΔΟΣ", &[0..8]),
+        ("Οδός ΟΔΟΣ", "οδος", &[9..17]),
+        ("İstanbul", "istanbul", &[0..9]),
+        ("İstanbul", "istan", &[0..6]),
+        ("Thumbnail size", "thumbnails", &[0..9, 10..11]),
+    ];
+    let mut wrong = Vec::new();
+    for (title, query, want) in cases {
+        let q = normalized(query);
+        let index = translated(vec![IndexRow::new("r", "general", title)]);
+        assert_eq!(find(&index, &q).1, ["r"], "{title:?} matches {query:?}");
+        let got = title_ranges(title, &q);
+        assert!(
+            got.iter()
+                .all(|r| title.is_char_boundary(r.start) && title.is_char_boundary(r.end)),
+            "{title:?}: {got:?} splits a character"
+        );
+        if got != want {
+            wrong.push((title, query, got));
+        }
+    }
+    assert!(wrong.is_empty(), "marked wrongly: {wrong:?}");
+}
+
 /// "Typing in Search settings ... opens the best-matching page"; clearing a query with no
 /// match goes back to the first page; a new query drops a jump's highlight.
 #[test]

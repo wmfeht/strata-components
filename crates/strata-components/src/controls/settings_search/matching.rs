@@ -287,65 +287,105 @@ impl Matches {
 }
 
 /// The byte ranges of `title` that a normalised `query`'s words match in full: an exact word
-/// or a prefix of one, or a Han or kana run inside one. A typo marks nothing, and neither does
-/// a query that runs across the title's spaces.
+/// or a prefix of one, or a Han or kana run inside one, as the matcher scores them. A word
+/// that no title word holds marks where it matches the title's words joined, as the matcher
+/// joins the shown title ("thumbnails" in "Thumbnail size"). The title is read as
+/// [`normalized`] reads it, so a match the matcher finds is marked; a typo marks nothing. A
+/// range covers whole characters.
 pub fn title_ranges(title: &str, query: &str) -> Vec<Range<usize>> {
+    let words = words(title);
+    let joined = Word::join(&words);
     let mut out = Vec::new();
-    for word in words(title) {
-        for q in query.split_whitespace() {
-            let at = if word.lower.starts_with(q) {
-                Some(0)
-            } else if is_unspaced_query(q) {
-                word.lower.find(q)
-            } else {
-                None
-            };
-            if let Some(at) = at {
-                out.push(word.original(at..at + q.len()));
+    for q in query.split_whitespace() {
+        let mut found = false;
+        for word in &words {
+            if let Some(at) = word.find(q) {
+                out.extend(word.original(at..at + q.len()));
+                found = true;
             }
         }
+        if !found && let Some(at) = joined.find(q) {
+            out.extend(joined.original(at..at + q.len()));
+        }
     }
+    out.sort_by_key(|r| r.start);
     out
 }
 
-/// A word of a title: its lowercase text, and where each of its characters came from.
+/// A word of a title as [`normalized`] reads it: its lowercase text, and the title bytes
+/// behind each of its characters.
+#[derive(Default)]
 struct Word {
     lower: String,
-    /// For each original character: its start in `lower`, and its byte range in the title.
+    /// For each character of `lower`: its start there, and the title character it came from.
     chars: Vec<(usize, Range<usize>)>,
 }
 
 impl Word {
-    /// The title bytes behind `lower[range]`.
-    fn original(&self, range: Range<usize>) -> Range<usize> {
-        let ends = |i: usize| self.chars.get(i + 1).map_or(self.lower.len(), |c| c.0);
-        let first = self
+    /// Where `q` matches: a prefix, or for a Han or kana query a run anywhere.
+    fn find(&self, q: &str) -> Option<usize> {
+        if self.lower.starts_with(q) {
+            Some(0)
+        } else if is_unspaced_query(q) {
+            self.lower.find(q)
+        } else {
+            None
+        }
+    }
+
+    /// The words run together, as the matcher's joined title.
+    fn join(words: &[Word]) -> Word {
+        let mut out = Word::default();
+        for w in words {
+            let base = out.lower.len();
+            out.chars
+                .extend(w.chars.iter().map(|(at, src)| (base + at, src.clone())));
+            out.lower.push_str(&w.lower);
+        }
+        out
+    }
+
+    /// The title bytes behind `lower[range]`, one range per run of adjacent title characters
+    /// (a joined match spans the title's spaces in several).
+    fn original(&self, range: Range<usize>) -> Vec<Range<usize>> {
+        let mut out: Vec<Range<usize>> = Vec::new();
+        for (_, src) in self
             .chars
             .iter()
-            .enumerate()
-            .find(|(i, _)| ends(*i) > range.start);
-        let last = self.chars.iter().rev().find(|c| c.0 < range.end);
-        match (first, last) {
-            (Some((_, a)), Some(b)) => a.1.start..b.1.end,
-            _ => 0..0,
+            .filter(|(at, _)| range.start <= *at && *at < range.end)
+        {
+            match out.last_mut() {
+                Some(last) if src.start <= last.end => last.end = last.end.max(src.end),
+                _ => out.push(src.clone()),
+            }
         }
+        out
     }
 }
 
+/// The title's words, lowercased whole and split after lowercasing, as [`normalized`] does:
+/// a final Σ lowers to ς, and İ to i and a combining dot, which isn't alphanumeric and so
+/// ends the word.
 fn words(title: &str) -> Vec<Word> {
+    let lower = title.to_lowercase();
     let mut out = Vec::new();
     let mut current: Option<Word> = None;
+    let mut from = 0;
     for (at, c) in title.char_indices() {
-        if c.is_alphanumeric() {
-            let w = current.get_or_insert_with(|| Word {
-                lower: String::new(),
-                chars: Vec::new(),
-            });
-            w.chars.push((w.lower.len(), at..at + c.len_utf8()));
-            w.lower.extend(c.to_lowercase());
-        } else if let Some(w) = current.take() {
-            out.push(w);
+        // `str::to_lowercase` lowers each character alone but for Σ, whose two forms (σ, ς)
+        // are as long as each other: so each character's share of `lower` is as long as its
+        // own lowercase.
+        let len: usize = c.to_lowercase().map(char::len_utf8).sum();
+        for l in lower[from..from + len].chars() {
+            if l.is_alphanumeric() {
+                let w = current.get_or_insert_with(Word::default);
+                w.chars.push((w.lower.len(), at..at + c.len_utf8()));
+                w.lower.push(l);
+            } else if let Some(w) = current.take() {
+                out.push(w);
+            }
         }
+        from += len;
     }
     out.extend(current);
     out

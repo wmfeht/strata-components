@@ -587,7 +587,15 @@ impl<S: 'static> Core<S> {
             };
             let registry = self.registry.borrow();
             let local = d.local.as_ref().map(|(t, p)| (t.as_str(), p));
-            let landing = session::land(&registry, path, s, &d.offer, local, d.offer.mods);
+            let landing = session::land_at(
+                &registry,
+                path,
+                s,
+                &d.offer,
+                local,
+                d.offer.mods,
+                Some(d.at),
+            );
             (
                 landing,
                 d.landing.clone(),

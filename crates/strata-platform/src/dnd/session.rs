@@ -52,7 +52,7 @@ use std::rc::Rc;
 
 use rune::{Drag, Mods, Phase};
 
-use super::api::{Actions, DragAction, DropOffer, Hover};
+use super::api::{Actions, DragAction, DropOffer, DropPoint, Hover};
 use super::negotiate;
 use super::registry::Registry;
 
@@ -236,6 +236,7 @@ pub(crate) fn allowed(offer: &DropOffer) -> Actions {
 }
 
 /// The target of the drag at a hit test's `path`: the innermost that takes it.
+#[cfg(test)]
 pub(crate) fn land<S: 'static>(
     registry: &Registry<S>,
     path: Option<&str>,
@@ -243,6 +244,20 @@ pub(crate) fn land<S: 'static>(
     offer: &DropOffer,
     local: Option<(&str, &Rc<dyn Any>)>,
     mods: Option<Mods>,
+) -> Landing {
+    land_at(registry, path, s, offer, local, mods, None)
+}
+
+/// [`land`], with where the drag is in window points, for targets that ask by point
+/// ([`DropTarget::action_at`](super::DropTarget::action_at)).
+pub(crate) fn land_at<S: 'static>(
+    registry: &Registry<S>,
+    path: Option<&str>,
+    s: &S,
+    offer: &DropOffer,
+    local: Option<(&str, &Rc<dyn Any>)>,
+    mods: Option<Mods>,
+    at: Option<(f32, f32)>,
 ) -> Landing {
     let Some(path) = path else {
         return Landing::Nowhere;
@@ -260,7 +275,20 @@ pub(crate) fn land<S: 'static>(
             }
             continue;
         }
-        let pick = t.action.as_ref().map(|f| f(s, offer, mods));
+        let pick = match &t.action_at {
+            Some(f) => {
+                let (x, y) = at.unwrap_or_default();
+                let [rx, ry, ..] = entry.rect.get();
+                let point = DropPoint {
+                    x: x - rx,
+                    y: y - ry,
+                    window_x: x,
+                    window_y: y,
+                };
+                Some(f(s, offer, mods, point))
+            }
+            None => t.action.as_ref().map(|f| f(s, offer, mods)),
+        };
         let action = negotiate::drop_action(pick, allowed(offer), mods);
         let accept = match local {
             Some((token, p)) if t.takes_local(Some(p)) => Some(token.to_owned()),

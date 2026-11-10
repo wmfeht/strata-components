@@ -61,6 +61,8 @@ Nothing is released yet. The first release is planned for milestone M1 with the 
   - `Dnd::drop_target_in`: a drop target whose key is unique only inside a keyed ancestor (its
     scope), as rows keyed by entry id are inside their list. A drag finds it under the nearest
     ancestor of that key.
+  - `DropTarget::action_at`: the target's action, asked with where the drag is (in the target's
+    points and the window's), for a target that routes a drop by point.
   - `DragItem::local` and `DropTarget::local`: a typed payload between the app's own windows,
     with nothing serialized.
   - On Wayland, Rune's capture of the press ends once the compositor has taken the pointer

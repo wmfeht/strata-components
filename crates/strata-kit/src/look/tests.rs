@@ -46,6 +46,30 @@ fn a_tile_takes_the_smallest_thumbnail_class_that_covers_it() {
     assert!(ThumbnailSteps::new(vec![0.0, 128.0]).is_none());
 }
 
+/// Rune draws streamed thumbnails with no mipmaps, so a class more than twice its draw
+/// aliases: every tile on Strata's ladder, and a 16 pt list icon, at the usual scales.
+#[test]
+fn strata_thumbnails_are_never_held_at_more_than_twice_their_drawn_size() {
+    let look = Look::fallback(true);
+    let classes = &look.thumbnails;
+    let largest = *classes.sizes().last().expect("a class");
+    let sizes = std::iter::once(16.0).chain(look.tiles.steps().iter().copied());
+    for points in sizes {
+        for scale in [1.0, 1.25, 1.5, 2.0] {
+            let px = points * scale;
+            let class = classes.sizes()[classes.for_size(px)];
+            if px <= largest {
+                assert!(
+                    class >= px && class <= 2.0 * px,
+                    "{points} pt at {scale}: {class}"
+                );
+            } else {
+                assert_eq!(class, largest, "{points} pt at {scale}");
+            }
+        }
+    }
+}
+
 #[test]
 fn an_icon_key_finds_the_catalog_icon_of_that_name() {
     let look = Look::fallback(false);

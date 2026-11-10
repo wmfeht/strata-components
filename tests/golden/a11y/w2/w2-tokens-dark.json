@@ -433,7 +433,7 @@
                   "role": "label"
                 },
                 {
-                  "name": "thumbnails 128 256",
+                  "name": "thumbnails 32 64 128 256",
                   "role": "label"
                 }
               ],

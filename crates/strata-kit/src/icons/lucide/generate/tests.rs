@@ -140,6 +140,41 @@ fn sources_with_unexpected_content_are_refused() {
 }
 
 #[test]
+fn text_entities_and_markup_outside_the_root_are_refused() {
+    let lucide = |body: &str| svg(LUCIDE_ROOT, body);
+    let path = r#"<path d="M1 1h2"/>"#;
+    let cases = [
+        (lucide(&format!("{path}hello")), "stray text `hello`"),
+        (lucide(&format!("hello{path}")), "stray text `hello`"),
+        (lucide(&format!("<g>{path}</g>bye")), "stray text `bye`"),
+        (lucide(&format!("{path}&#60;script&#62;")), "`&`"),
+        (lucide(r#"<path d="M1&#x20;1h2"/>"#), "`&`"),
+        (
+            format!("<?xml version=\"1.0\"?>{}", lucide(path)),
+            "outside the <svg>",
+        ),
+        (
+            format!(
+                r#"<!DOCTYPE svg [<!ENTITY a "b">]>{}"#,
+                lucide(r#"<path d="M1 1"/>"#)
+            ),
+            "outside the <svg>",
+        ),
+        (format!("{}<path/>", lucide(path)), "outside the <svg>"),
+    ];
+    for (source, says) in cases {
+        let why = refused("strata-x", &source, Kind::Lucide);
+        assert!(why.contains(says), "{says}: {why}");
+    }
+    // Whitespace and comments around and inside the root stay fine.
+    let fine = format!(
+        "<!-- a note -->\n{}\n",
+        lucide(&format!(" {path}\n  {path} "))
+    );
+    assert!(icon("strata-x", &fine, Kind::Lucide).is_ok());
+}
+
+#[test]
 fn a_root_or_viewbox_rune_cant_draw_is_refused() {
     let body = r#"<path d="M1 1"/>"#;
     let off = svg("", body).replace("0 0 24 24", "2 2 24 24");

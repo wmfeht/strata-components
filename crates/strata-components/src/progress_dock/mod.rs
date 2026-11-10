@@ -211,8 +211,6 @@
 //!   Strata hides the button as soon as no job is left (its popover goes with it). The list
 //!   needs its anchor while it shows, and closing it sends focus to
 //!   [`Jobs::return_focus`](jobs::Jobs::return_focus) rather than nowhere.
-//! - Icons the catalog lacks (W2d follow-up): Details and Hide use chevrons for Strata's eye and
-//!   eye-off, the Jobs header a list icon for `list-checks`.
 //!
 //! # Coverage
 //!

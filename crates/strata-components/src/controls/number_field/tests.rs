@@ -1,6 +1,4 @@
-use rune::text::TextSystem;
 use rune::{Cx, El, Env, Key, KeyEvent, Mods, Runtime, Tx, col, el};
-use strata_kit::fonts;
 use strata_kit::look::Look;
 
 use super::state::NumberFieldState;
@@ -245,8 +243,9 @@ fn a_menu_press_that_opens_no_menu_keeps_the_blur_commit() {
         look: Look::fallback(false),
         heard: Vec::new(),
     };
-    let text = TextSystem::new(fonts::FONTS, fonts::FAMILIES);
-    let mut rt = Runtime::with_text(host, view, (400.0, 200.0), Env::new(false, 1.0), text);
+    // Rune's own font: a text system built here would move the fonts the crate's other tests
+    // measure with (docs/testing.md, R-K6-1).
+    let mut rt = Runtime::new(host, view, (400.0, 200.0), Env::new(false, 1.0));
     rt.poll = Some(poll);
     let frames = |rt: &mut Runtime<Host>| {
         for _ in 0..3 {

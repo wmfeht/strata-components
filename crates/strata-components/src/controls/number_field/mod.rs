@@ -39,7 +39,7 @@
 //!   same Kit tokens: `bg_base`, `radius.md`, the input elevation, the hover overlay, the
 //!   `border_focus` outline, a `danger.fg` outline while invalid, half opacity when
 //!   disabled. Its height is `frame.control + space.xs` (28 at 13 px), the steppers
-//!   `frame.control` squares with `icon_size.md` Lucide − (`IconName::Minimize`) and +, the
+//!   `frame.control` squares with `icon_size.md` Lucide − (`IconName::Minus`) and +, the
 //!   number centred in `kit.ty.ui_compact`, as wide as the wider end, the unit after it in
 //!   `text_muted`.
 //! - **Disabled:** dimmed, the field read-only and out of the focus order, no steps.

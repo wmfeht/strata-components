@@ -8,7 +8,7 @@
 //! A 900 pt window at scale 2, as C1e's perf test: the first frame, then 600 frames at
 //! 120 Hz, each scrolled 48 pt by the wheel. Three runs side by side: C1e's default icon, the
 //! thumbnail slot with nothing landing, and the slot with a worker landing up to 8 images a
-//! frame at the slot's step (128 px for 32 pt at scale 2). Each figure is the best of three.
+//! frame at the slot's step (64 px for 32 pt at scale 2). Each figure is the best of three.
 //! Then the store alone: `sync` for a 200-tile grid viewport stepping a line at a time, and
 //! `pop` plus `complete` for each request it makes.
 //!

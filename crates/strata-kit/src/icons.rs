@@ -177,10 +177,12 @@ icon_names! {
     Recent = "recent" => line!(r#"<circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/>"#),
     /// Network locations and remote servers.
     Network = "network" => line!(r#"<circle cx="8" cy="8" r="5.5"/><ellipse cx="8" cy="8" rx="2.5" ry="5.5"/><path d="M2.5 8h11"/>"#),
-    /// This computer: the file system root.
+    /// This computer: the file system root. Strata's catalogs draw its root crumb's hard
+    /// drive; their monitor stays reachable by name (`strata-monitor`).
     Computer = "computer" => line!(r#"<rect x="3.5" y="3.5" width="9" height="6.5" rx="0.5"/><path d="M1.5 12.5h13"/>"#),
 
-    // Devices (C8).
+    // Devices (C8). Strata draws every device as a hard drive, so its catalogs map all four
+    // names to one icon; the names stay for a host or a catalog that tells devices apart.
     /// An internal or external drive.
     Drive = "drive" => line!(r#"<rect x="2" y="5" width="12" height="6" rx="1.5"/><circle cx="11.5" cy="8" r="0.75" fill="currentColor" stroke="none"/>"#),
     /// A USB stick.
@@ -217,8 +219,10 @@ icon_names! {
     Back = "back" => line!(r#"<path d="M13 8H3M7 4L3 8l4 4"/>"#),
     /// Go forward in history.
     Forward = "forward" => line!(r#"<path d="M3 8h10M9 4l4 4-4 4"/>"#),
-    /// Go to the parent folder.
+    /// Points up: go to the parent folder, the previous match (C9's find bar).
     Up = "up" => line!(r#"<path d="M8 13V3M4 7l4-4 4 4"/>"#),
+    /// Points down: the next match (C9's find bar).
+    Down = "down" => line!(r#"<path d="M8 3v10M4 9l4 4 4-4"/>"#),
     /// Reload a listing.
     Refresh = "refresh" => line!(r#"<path d="M13 8a5 5 0 1 1-1.5-3.6"/><path d="M13 2.5V5h-2.5"/>"#),
     /// More actions: a crumb's hierarchy menu, a column header's menu (C6, C2).
@@ -229,8 +233,13 @@ icon_names! {
     // Actions.
     /// Add: a new tab, a new folder (C7).
     Plus = "plus" => line!(r#"<path d="M8 3v10M3 8h10"/>"#),
+    /// Take away: a number field's decrease step (C20a). Not [`IconName::Minimize`], the
+    /// window button, though Strata draws both with Lucide's minus.
+    Minus = "minus" => line!(r#"<path d="M3 8h10"/>"#),
     /// Close or cancel: tabs, the preview drawer, dialogs, progress cards (C7, C9, C15, C16).
     Close = "close" => kit!(CLOSE),
+    /// Close a side panel: the preview drawer's close (C9).
+    ClosePanel = "close_panel" => line!(r#"<rect x="2.5" y="3" width="11" height="10" rx="1"/><path d="M10 3v10M5.5 6l2 2-2 2"/>"#),
     /// Search and find (C9, C17).
     Search = "search" => kit!(SEARCH),
     /// The Ctrl+F filter (C18).
@@ -261,7 +270,10 @@ icon_names! {
     Source = "source" => line!(r#"<path d="M5.5 4.5L2 8l3.5 3.5M10.5 4.5L14 8l-3.5 3.5"/>"#),
     /// Show a document rendered (C9).
     Rendered = "rendered" => kit!(EYE),
-    /// Hidden files shown or not, a hidden entry (C21).
+    /// Show: a progress card's Details (C16), and in Strata's menus Quick preview and Hide
+    /// Hidden Files (C21, host data).
+    Eye = "eye" => kit!(EYE),
+    /// Hidden files shown or not, a hidden entry (C21), a progress card's Hide (C16).
     EyeOff = "eye_off" => kit!(EYE_OFF),
 
     // Views.
@@ -287,6 +299,11 @@ icon_names! {
     Error = "error" => kit!(CIRCLE_X),
     /// Done (C16).
     Success = "success" => line!(r#"<circle cx="8" cy="8" r="5.5"/><path d="M5.5 8.2l1.8 1.8 3.2-3.8"/>"#),
+    /// Background jobs: the Jobs list's header (C16), and in Strata's menus Select All and
+    /// Group by file type (C21, host data).
+    ListChecks = "list_checks" => line!(r#"<path d="M8 4h5.5M8 8h5.5M8 12h5.5M2.5 4.5l1 1 2-2M2.5 12.5l1 1 2-2"/>"#),
+    /// The Enter key: a hint for what Enter does (C17's open hint).
+    Enter = "enter" => line!(r#"<path d="M13 3v4.5a2 2 0 0 1-2 2H3"/><path d="M6 6.5l-3 3 3 3"/>"#),
     /// The keyboard shortcuts (C19).
     Keyboard = "keyboard" => kit!(KEYBOARD),
     /// Help: the F1 button (C19).

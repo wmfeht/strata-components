@@ -21,9 +21,12 @@
 //!
 //! - a name of lowercase ASCII letters, digits, `-` and `_`, starting with a letter;
 //! - one root `<svg>` with a `0 0 s s` viewBox, `xmlns`, `width`, `height` and paint
-//!   attributes ([`PAINT`]);
+//!   attributes ([`PAINT`]), and only whitespace and comments outside it: no XML
+//!   declaration, doctype or trailing markup;
 //! - the elements in [`ELEMENTS`], with the attributes in [`ATTRIBUTES`]: no `style`, no
 //!   `class`, no `href`, no `<use>`, `<image>`, `<style>` or `<script>`;
+//! - no text between tags (none of these elements holds any) and no `&`: no entity or
+//!   character references, in text or in attribute values;
 //! - paint (`fill`, `stroke`, `stop-color`) that is `none`, `currentColor`, a reference inside
 //!   the file (`url(#id)`) and, by folder: Strata's tint placeholders in `lucide/` (and its
 //!   white in `strata-check-on-primary`), or Catppuccin's `var(--vscode-ctp-<colour>)` in
@@ -265,6 +268,15 @@ fn parse(svg: &str) -> Result<(String, String), String> {
     if close < head_end {
         return Err("an empty <svg>".into());
     }
+    // Comments are already gone, so a prolog, a doctype (with its entities) or trailing
+    // markup is all that could sit here.
+    let outside = [&svg[..open], &svg[close + "</svg>".len()..]];
+    if let Some(stray) = outside.iter().find(|s| !s.trim().is_empty()) {
+        return Err(format!("`{}` outside the <svg>", stray.trim()));
+    }
+    if svg.contains('&') {
+        return Err("an entity or character reference (`&`)".into());
+    }
     let head = svg[open + 4..head_end].trim_end_matches('/');
 
     let mut view = None;
@@ -316,29 +328,39 @@ fn attributes(head: &str) -> Result<Vec<(&str, &str)>, String> {
 
 /// Every element in `body` is one Rune or resvg draws, with known attributes and colours.
 fn check_elements(name: &str, body: &str, kind: Kind) -> Result<(), String> {
-    for tag in body.split('<').skip(1) {
-        if tag.starts_with('/') {
-            continue;
+    let mut tags = body.split('<');
+    // None of the elements Rune draws holds text, so text is a mistake or worse.
+    let stray = |text: &str| match text.trim() {
+        "" => Ok(()),
+        text => Err(format!("stray text `{text}`")),
+    };
+    stray(tags.next().unwrap_or(""))?;
+    for tag in tags {
+        let (tag, after) = tag.split_once('>').ok_or("an unclosed tag")?;
+        if !tag.starts_with('/') {
+            check_element(name, tag, kind)?;
         }
-        let tag = tag
-            .split_once('>')
-            .map(|(t, _)| t)
-            .ok_or("an unclosed tag")?;
-        let tag = tag.trim_end().trim_end_matches('/');
-        let (element, head) = tag.split_once(char::is_whitespace).unwrap_or((tag, ""));
-        if !ELEMENTS.contains(&element) {
-            return Err(format!("an element Rune doesn't draw: <{element}>"));
+        stray(after)?;
+    }
+    Ok(())
+}
+
+/// One opening tag, `<` and `>` taken off: an element and attributes the catalogs take.
+fn check_element(name: &str, tag: &str, kind: Kind) -> Result<(), String> {
+    let tag = tag.trim_end().trim_end_matches('/');
+    let (element, head) = tag.split_once(char::is_whitespace).unwrap_or((tag, ""));
+    if !ELEMENTS.contains(&element) {
+        return Err(format!("an element Rune doesn't draw: <{element}>"));
+    }
+    for (key, value) in attributes(head)? {
+        if !ATTRIBUTES.contains(&key) {
+            return Err(format!("an attribute the catalogs don't take: `{key}`"));
         }
-        for (key, value) in attributes(head)? {
-            if !ATTRIBUTES.contains(&key) {
-                return Err(format!("an attribute the catalogs don't take: `{key}`"));
-            }
-            if key == "clip-path" {
-                internal_reference(value)?;
-            }
-            if COLOURS.contains(&key) {
-                colour(name, value, kind)?;
-            }
+        if key == "clip-path" {
+            internal_reference(value)?;
+        }
+        if COLOURS.contains(&key) {
+            colour(name, value, kind)?;
         }
     }
     Ok(())

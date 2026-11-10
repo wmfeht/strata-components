@@ -1,6 +1,7 @@
 //! Which icon each semantic name draws, the same in every catalog: Strata's own choice where
 //! Strata has one (read at lgse/strata `upstream/main` 35ee677ab: its context menus, sidebar
-//! and `src/ui/browser/entry.rs`), else the closest Lucide icon.
+//! and `src/ui/browser/entry.rs`; W2d's names and the device and root rulings at fb7eb0c4e,
+//! whose icons are the same), else the closest Lucide icon.
 //!
 //! The match is exhaustive, so a name W2 adds fails to build until it has an icon here, and a
 //! target that leaves `icons/` fails to build too.
@@ -36,13 +37,17 @@ pub(super) const fn index(name: IconName) -> usize {
         IconName::Videos => i::STRATA_VIDEO,
         IconName::Recent => i::STRATA_CLOCK,
         IconName::Network => i::STRATA_NETWORK,
-        IconName::Computer => i::STRATA_MONITOR,
+        // Strata's root crumb (`src/ui/browser/location/breadcrumbs.rs`); its monitor is the
+        // Desktop chip in Settings and a custom action icon, found by name.
+        IconName::Computer => i::STRATA_HARD_DRIVE,
 
-        // Devices: Strata draws every drive, USB stick included, as a hard drive.
+        // Devices: Strata draws every device row (mount, volume or drive, a USB stick, a disc
+        // or a phone alike) as a hard drive (`src/ui/window/sidebar_devices.rs`). Its disc is
+        // for disk-image files and its smartphone for file-provider integrations.
         IconName::Drive => i::STRATA_HARD_DRIVE,
         IconName::Usb => i::STRATA_HARD_DRIVE,
-        IconName::Optical => i::STRATA_DISC,
-        IconName::Phone => i::STRATA_SMARTPHONE,
+        IconName::Optical => i::STRATA_HARD_DRIVE,
+        IconName::Phone => i::STRATA_HARD_DRIVE,
         IconName::Eject => i::STRATA_EJECT,
 
         // Pins and the trash: Strata's Unpin shows the pin (the current state), and its trash
@@ -60,14 +65,21 @@ pub(super) const fn index(name: IconName) -> usize {
         IconName::ChevronDown => i::STRATA_CHEVRON_DOWN,
         IconName::Back => i::STRATA_ARROW_LEFT,
         IconName::Forward => i::STRATA_ARROW_RIGHT,
+        // Also C9's find bar, as Strata's `src/ui/preview/find.rs` draws it.
         IconName::Up => i::STRATA_ARROW_UP,
+        IconName::Down => i::STRATA_ARROW_DOWN,
         IconName::Refresh => i::STRATA_REFRESH,
         IconName::More => i::STRATA_KIT_ELLIPSIS,
         IconName::Menu => i::STRATA_KIT_MENU,
 
         // Actions.
         IconName::Plus => i::STRATA_PLUS,
+        // Strata's spin buttons draw `strata-minus-symbolic`, the same shape filled for GTK's
+        // recolouring; Rune tints the stroked one.
+        IconName::Minus => i::STRATA_MINUS,
         IconName::Close => i::STRATA_X,
+        // `src/ui/preview/drawer/header.rs`.
+        IconName::ClosePanel => i::STRATA_PANEL_RIGHT_CLOSE,
         IconName::Search => i::STRATA_SEARCH,
         IconName::Filter => i::STRATA_FUNNEL,
         IconName::Check => i::STRATA_CHECK,
@@ -84,6 +96,7 @@ pub(super) const fn index(name: IconName) -> usize {
         // C9's toggle, as Strata's `src/ui/preview/document.rs` draws it.
         IconName::Source => i::STRATA_FILE_CODE,
         IconName::Rendered => i::STRATA_FILE_TEXT,
+        IconName::Eye => i::STRATA_EYE,
         IconName::EyeOff => i::STRATA_EYE_OFF,
 
         // Views.
@@ -102,6 +115,10 @@ pub(super) const fn index(name: IconName) -> usize {
         // Its circled check and cross are Settings-row status icons, not these.
         IconName::Error => i::STRATA_X,
         IconName::Success => i::STRATA_CHECK,
+        // `src/ui/jobs.rs`'s header bezel.
+        IconName::ListChecks => i::STRATA_LIST_CHECKS,
+        // `src/ui/search/panel.rs`'s open hint.
+        IconName::Enter => i::STRATA_CORNER_DOWN_LEFT,
         IconName::Keyboard => i::STRATA_KEYBOARD,
         IconName::Help => i::STRATA_KIT_CIRCLE_QUESTION_MARK,
         IconName::Clipboard => i::STRATA_KIT_CLIPBOARD,

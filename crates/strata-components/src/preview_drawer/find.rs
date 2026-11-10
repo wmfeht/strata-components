@@ -105,13 +105,13 @@ pub(super) fn bar<S: 'static>(
         );
     }
     bar.child(step(
-        IconName::ChevronUp,
+        IconName::Up,
         &labels.find_previous,
         "preview-find-previous",
         false,
     ))
     .child(step(
-        IconName::ChevronDown,
+        IconName::Down,
         &labels.find_next,
         "preview-find-next",
         true,

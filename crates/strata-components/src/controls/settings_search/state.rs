@@ -31,6 +31,9 @@ pub struct SettingsSearchState {
     prepared: Option<Prepared>,
     /// The normalised query `matches` answer, and whether there is one.
     query: String,
+    /// The field's text as last searched: any change of it is a new query, as Strata's every
+    /// text change opens the best page again, even one that normalises the same.
+    searched: String,
     matches: Option<Matches>,
     /// The index revision `matches` were found in.
     revision: Option<u64>,
@@ -43,6 +46,7 @@ pub struct SettingsSearchState {
 pub(super) struct Refresh {
     prepared: Option<Prepared>,
     query: String,
+    searched: String,
     matches: Option<Matches>,
     revision: u64,
     change: Change,
@@ -124,7 +128,7 @@ impl SettingsSearchState {
             .filter(|p| p.revision == index.revision)
             .is_none()
             .then(|| Prepared::new(index));
-        let changed_query = query != self.query;
+        let changed_query = self.field.text != self.searched;
         if !changed_query && self.revision == Some(index.revision) {
             return None;
         }
@@ -141,6 +145,7 @@ impl SettingsSearchState {
         Some(Refresh {
             prepared: fresh,
             query,
+            searched: self.field.text.clone(),
             matches,
             revision: index.revision,
             change,
@@ -156,6 +161,7 @@ impl SettingsSearchState {
             self.flash = None;
         }
         self.query = r.query;
+        self.searched = r.searched;
         self.matches = r.matches;
         self.revision = Some(r.revision);
         r.change

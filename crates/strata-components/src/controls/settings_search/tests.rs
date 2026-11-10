@@ -518,6 +518,11 @@ fn a_new_query_opens_its_best_page_and_clearing_no_results_goes_to_the_first() {
         "the same query searches nothing again"
     );
     assert_eq!(
+        type_in(&mut st, "License "),
+        Some(Change::Query(Some("about".into()))),
+        "new text with the same words opens its page again, as Strata's every text change does"
+    );
+    assert_eq!(
         type_in(&mut st, ""),
         Some(Change::Query(None)),
         "clearing stays on the page"

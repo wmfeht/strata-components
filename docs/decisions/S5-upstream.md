@@ -646,6 +646,24 @@ hook that runs before every native window maps, X11 included.
   creation ignored `visible: false` and mapped before `on_window`, so a `WM_TRANSIENT_FOR` set
   there reaches the window manager after the map request.
 
+**Also needed** (P4, amending the draft):
+- **Modal on Wayland.** A portal's request is modal by default, and Hyprland, Mutter and KWin
+  offer `xdg_wm_dialog_v1`, whose `get_xdg_dialog` takes the window's `xdg_toplevel`.
+  `with_raw_handle` gives only the `wl_surface`, and nothing recovers the toplevel from it, so
+  a shim can parent a Wayland window but not mark it modal. Ask for `modal` with the
+  transient-for (`set_modal` where the compositor has the protocol), or for the toplevel.
+- **A Rune window transient for another of the same app's windows**, such as a folder chooser
+  floating modal over the window it was opened from. GTK apps get it from `set_transient_for`.
+  A shim could reach it only by exporting its own window through `zxdg_exporter_v2` and
+  importing that, on a display Rune doesn't expose (U9's link).
+
+**Meanwhile** P4 (`strata-platform::foreign_parent`) imports on winit's display through P0's
+substrate and sets the X11 hints on a connection of its own, from `App::on_window` of a window
+opened hidden, one window per request, and reports when it came too late. X11 windows are
+modal through `_NET_WM_STATE_MODAL`. Upstream was searched again at `dev` `af7971ae`
+(2026-11-09, 108 commits past the pin): no commit touches `window/handle.rs` or
+`window/create.rs`, and no issue asks for a transient-for, a dialog or a display handle.
+
 ### U12
 
 **Title:** Linux: read Settings portal keys beyond `color-scheme`, with change signals

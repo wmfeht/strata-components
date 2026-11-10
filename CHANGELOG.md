@@ -45,7 +45,7 @@ Nothing is released yet. The first release is planned for milestone M1 with the 
 
 - One cargo feature per shim, each gating its own module: `dnd`, `clipboard`, `csd`,
   `foreign-parent`, `settings`, `icon-theme`, `media-audio`, `single-instance` and `glib-bridge`.
-  Apart from `dnd`, `clipboard`, `glib-bridge`, `csd`, `settings`, `icon-theme`,
+  Apart from `dnd`, `clipboard`, `foreign-parent`, `glib-bridge`, `csd`, `settings`, `icon-theme`,
   `single-instance` and `media-audio`, the modules are placeholders until their work packages
   land.
 - `dnd`: system drag and drop on Wayland (`wl_data_device`) and X11 (XDND 5), mirroring Rune's
@@ -82,6 +82,23 @@ Nothing is released yet. The first release is planned for milestone M1 with the 
     the last window's `on_close` (`on_quit` doesn't run in a last window that is closing). A
     drag from another app takes the compositor's action. X11's source shows no cursor
     feedback. Link is X11 only.
+- `foreign-parent`: a window transient for another process's window, from the parent handle an
+  XDG portal passes, for a portal backend's dialog.
+  - `Parent::parse` takes `wayland:<handle>` (kept opaque, at most 1024 bytes, no NUL) and
+    `x11:<hex>` (GTK's bare hex and Chromium's `0x`); `""` is no parent.
+  - `apply`, from `App::on_window` of a window opened hidden, parents it: on Wayland through
+    `zxdg_importer_v2` and `set_parent_of` on winit's display, with one round trip to hear a
+    refused handle; on X11 (and Xwayland) through `WM_TRANSIENT_FOR`, `_NET_WM_WINDOW_TYPE_DIALOG`
+    and `_NET_WM_STATE_MODAL` for a modal request. It returns an `Outcome`: parented (and
+    whether too late, after the map), or parentless with the `Reason` and the `Fallback` (the
+    compositor's placement, or centred for an X11 parent that doesn't exist).
+  - `Options::on_lost` hears a Wayland parent going away; the window stays open. `release`
+    drops a window's import from its `on_close`, and `shutdown` destroys every import with the
+    transfer substrate before the event loop ends.
+  - Parentless where no route exists: an `x11:` parent for a Wayland window and libwayland
+    below 1.23 (S3's decisions 2 and 1, pending the owner's rulings), and a compositor without
+    `zxdg_importer_v2`. No modality on Wayland: Rune hands out no `xdg_toplevel` for
+    `xdg_wm_dialog_v1`.
 - `clipboard`: copy and paste with any MIME types on Wayland and X11, beside Rune's own
   text clipboard. A `Clipboard` per state type, attached from `App::on_window`.
   - `Clipboard::copy` writes a `Content` of any types at once, each with bytes or a lazy

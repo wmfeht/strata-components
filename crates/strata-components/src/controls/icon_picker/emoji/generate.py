@@ -57,7 +57,7 @@ def main(test, *annotations):
         glyph, version, name = m.group(2), m.group(3), m.group(4).strip()
         if TONE.search(glyph):
             continue
-        words = kw.get(glyph) or kw.get(glyph.replace("️", "")) or []
+        words = kw.get(glyph) or kw.get(glyph.replace("\ufe0f", "")) or []
         words = [w for w in words if w and w != name and "\t" not in w and "|" not in w]
         print(f"{glyph}\t{version}\t{name}\t{'|'.join(words)}")
 

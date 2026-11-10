@@ -1909,4 +1909,48 @@ mod c2_drop_action {
             "the blank strip takes no drop"
         );
     }
+
+    /// A drag the blank strip refuses still drives the column wash and autoscroll (Strata's
+    /// motion controller follows any drag): the refusal keeps the last point, and only
+    /// leaving clears it.
+    #[test]
+    fn a_refused_drag_over_the_blank_strip_keeps_the_column_wash() {
+        use strata_components::contract::DropHover;
+        let mut rt = mount();
+        let blank = ZONES.with(|z| {
+            z.borrow()
+                .iter()
+                .find(|(k, _, _)| *k == format!("{}-blank", scenes::c2::KEY))
+                .map(|(_, _, z)| z.clone())
+                .expect("the blank strip")
+        });
+        let key = rt.state.c2.columns.column_key(1).expect("column 1");
+        let [x, y, w, h] = rt
+            .elements()
+            .into_iter()
+            .find(|e| e.key.as_deref() == Some(key.as_str()))
+            .expect("column 1 drawn")
+            .rect;
+        let mut at = rune::PointerEvent::default();
+        (at.window_x, at.window_y) = (x + w / 2.0, y + h / 2.0);
+        let offer = DropOffer::new(vec![URI_LIST.into()], DropActions::MOVE);
+        let frames = |rt: &mut Runtime<Gallery>| {
+            for _ in 0..3 {
+                rt.frame(1.0 / 60.0);
+            }
+        };
+        rt.update(|g, tx| blank.moved(g, at, tx));
+        frames(&mut rt);
+        assert_eq!(rt.state.c2.columns.drop_column(), Some(1));
+        rt.update(|g, tx| blank.hover(g, DropHover::Rejecting, &offer, tx));
+        frames(&mut rt);
+        assert_eq!(
+            rt.state.c2.columns.drop_column(),
+            Some(1),
+            "refused, still over it"
+        );
+        rt.update(|g, tx| blank.hover(g, DropHover::Left, &offer, tx));
+        frames(&mut rt);
+        assert_eq!(rt.state.c2.columns.drop_column(), None, "gone");
+    }
 }

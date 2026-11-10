@@ -731,8 +731,10 @@ pub(super) fn drag_over<S: 'static>(
     p.state.drag.hover(&geo)
 }
 
-/// The strip's blank space as a drop zone: it takes no drops (Strata's has no target), but
-/// follows a drag over it, so the strip autoscrolls there too.
+/// The strip's blank space as a drop zone. A drop there does nothing (Strata's has no
+/// target), but the zone follows every drag over it, accepted or refused, so the strip
+/// autoscrolls and washes the column under the drag there too. A refusal keeps the last
+/// point, and only leaving clears it.
 pub(super) fn blank_zone<S: 'static>(sh: &Rc<Shared<S>>) -> DropZone<S> {
     let (hover, moves) = (sh.clone(), sh.clone());
     let zone = DropZone::new(|_: &mut S, _, _| {});
@@ -742,8 +744,14 @@ pub(super) fn blank_zone<S: 'static>(sh: &Rc<Shared<S>>) -> DropZone<S> {
     };
     zone.on_hover(move |s: &mut S, h, _offer, tx| {
         let at = match h {
-            DropHover::Accepting => tx.drop_point().map(|p| Point::new(p.window_x, p.window_y)),
-            DropHover::Rejecting | DropHover::Left => None,
+            DropHover::Left => None,
+            DropHover::Accepting | DropHover::Rejecting => {
+                match tx.drop_point().map(|p| Point::new(p.window_x, p.window_y)) {
+                    Some(at) => Some(at),
+                    None if h == DropHover::Rejecting => return,
+                    None => None,
+                }
+            }
         };
         drag_over(&hover, s, at, tx);
     })

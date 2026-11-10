@@ -541,59 +541,96 @@ fn reduced_motion_draws_nothing_and_each_effect_ends_at_once() {
 
 #[test]
 fn a_leg_or_target_out_of_sight_flies_nothing_but_still_launches_lands_and_ends() {
+    #[derive(Clone, Copy, PartialEq)]
+    enum Op {
+        Trash,
+        Restore,
+        Release,
+    }
     type Setup = fn(&mut Host);
-    // (case, setup, whether it is a restore, the rows)
-    let cases: [(&str, Setup, bool, &[u64]); 8] = [
-        ("an unmounted row", |_| {}, false, &[99]),
+    let hidden: Setup = |s| s.target = false;
+    let off_window: Setup = |s| s.target_y = H + 40.0;
+    let scrolled: Setup = |s| s.side_h = 50.0;
+    // (case, setup, the operation, the rows)
+    let cases: [(&str, Setup, Op, &[u64]); 11] = [
+        ("an unmounted row", |_| {}, Op::Trash, &[99]),
         (
             "a row scrolled out of its list",
             |s| {
                 s.rows_in = true;
                 s.list_h = 100.0;
             },
-            false,
+            Op::Trash,
             &[6],
         ),
-        ("the sidebar hidden", |s| s.target = false, false, &[1]),
-        (
-            "a target off the window",
-            |s| s.target_y = H + 40.0,
-            false,
-            &[1],
-        ),
+        ("the sidebar hidden", hidden, Op::Trash, &[1]),
+        ("a target off the window", off_window, Op::Trash, &[1]),
         (
             "a target scrolled out of its viewport",
-            |s| s.side_h = 80.0,
-            false,
+            scrolled,
+            Op::Trash,
             &[1],
         ),
         // A restore that flies nothing still shows its rows.
         (
             "a restore with the target unmounted",
-            |s| s.target = false,
-            true,
+            hidden,
+            Op::Restore,
             &[2],
         ),
         (
             "a restore with the target out of its viewport",
-            |s| s.side_h = 50.0,
-            true,
+            scrolled,
+            Op::Restore,
             &[2],
         ),
-        ("a restore onto an unmounted row", |_| {}, true, &[99]),
+        (
+            "a restore onto an unmounted row",
+            |_| {},
+            Op::Restore,
+            &[99],
+        ),
+        (
+            "a release with the target unmounted",
+            hidden,
+            Op::Release,
+            &[2],
+        ),
+        (
+            "a release with the target off the window",
+            off_window,
+            Op::Release,
+            &[2],
+        ),
+        (
+            "a release with the target out of its viewport",
+            scrolled,
+            Op::Release,
+            &[2],
+        ),
     ];
-    for (case, setup, restoring, rows) in cases {
+    for (case, setup, op, rows) in cases {
         let mut host = Host::new(30);
-        if restoring {
+        if op == Op::Restore {
             host.rows.retain(|r| !rows.contains(r));
         }
         setup(&mut host);
         let mut rt = runtime(host);
-        if restoring {
-            restore(&mut rt, rows).unwrap();
-        } else {
-            trash(&mut rt, rows).unwrap();
+        match op {
+            Op::Trash => {
+                trash(&mut rt, rows).unwrap();
+            }
+            Op::Restore => {
+                restore(&mut rt, rows).unwrap();
+            }
+            Op::Release => rt.update(|s, tx| {
+                let f = Flight::release("trash", icons(s, rows, "/icon")).target_in("side");
+                let Host { fx, look, .. } = s;
+                let id = fx.fly(f, look, tx).unwrap();
+                s.owed.push((id, Owe::RemoveAtLaunch, rows.to_vec()));
+            }),
         }
+        rt.frame(DT);
         assert!(
             keys_with(&rt, "c23-launch").is_empty(),
             "{case}: nothing launches"
@@ -604,9 +641,15 @@ fn a_leg_or_target_out_of_sight_flies_nothing_but_still_launches_lands_and_ends(
             ["launched", "landed", "done"],
             "{case}: once each, in order"
         );
+        rt.update(|s, _| {
+            s.target = true;
+            s.target_y = 100.0;
+            s.side_h = H;
+        });
+        rt.frame(DT);
         assert!(!has(&rt, "c23-pulse-1"), "{case}: no pulse");
         assert!(rt.state.vanished.is_empty(), "{case}: nothing stays hidden");
-        if restoring {
+        if op == Op::Restore {
             assert!(shown(&rt.state).contains(&rows[0]), "{case}: it shows");
         }
     }
@@ -719,6 +762,94 @@ fn a_release_lifts_off_the_rows_and_shakes_the_target() {
         now[1] < start[1] - 30.0,
         "the icon rises: {now:?} from {start:?}"
     );
+}
+
+/// The target's presented scale, frame by frame for `n` frames.
+fn target_scales(rt: &mut Runtime<Host>, n: usize) -> Vec<f32> {
+    (0..n)
+        .map(|_| {
+            rt.frame(DT);
+            rt.presented_pose("trash").unwrap().scale()
+        })
+        .collect()
+}
+
+/// Takes the target away for `gone` seconds, then shows it again.
+fn remount_target(rt: &mut Runtime<Host>, gone: f64) {
+    rt.update(|s, _| s.target = false);
+    frames(rt, gone, |_| false);
+    rt.update(|s, _| s.target = true);
+}
+
+fn at_rest(scales: &[f32]) -> bool {
+    scales.iter().all(|s| (s - 1.0).abs() < 1e-3)
+}
+
+#[test]
+fn a_target_remounted_after_its_pulse_ends_does_not_replay_it() {
+    type Start = fn(&mut Runtime<Host>);
+    fn into(rt: &mut Runtime<Host>) {
+        trash(rt, &[1]).unwrap();
+    }
+    fn release(rt: &mut Runtime<Host>) {
+        rt.update(|s, tx| {
+            let f = Flight::release("trash", icons(s, &[1], "/icon")).target_in("side");
+            let Host { fx, look, .. } = s;
+            fx.fly(f, look, tx).unwrap();
+        });
+        rt.frame(DT);
+    }
+    // (pulse, start, settle it mid-pulse rather than let it end)
+    let cases: [(&str, Start, bool); 3] = [
+        ("the impact", into, false),
+        ("the shake", release, false),
+        ("a settled impact", into, true),
+    ];
+    let mut replayed = Vec::new();
+    for (pulse, start, settle) in cases {
+        let mut rt = runtime(Host::new(5));
+        start(&mut rt);
+        if settle {
+            wake_to_wake(&mut rt, 2.0, |s| s.kinds().contains(&"landed"));
+            rt.frame(DT);
+            rt.state.fx.settle();
+            rt.invalidate();
+        } else {
+            wake_to_wake(&mut rt, 2.0, finished);
+        }
+        frames(&mut rt, 2.0, |_| false);
+        // The sidebar hidden and shown again, or the page left and reopened.
+        remount_target(&mut rt, 0.5);
+        let scales = target_scales(&mut rt, 20);
+        if !at_rest(&scales) {
+            replayed.push((pulse, scales));
+        }
+        assert!(has(&rt, "c23-pulse-1"), "{pulse}: the wrapper stays");
+    }
+    assert!(replayed.is_empty(), "replayed: {replayed:?}");
+}
+
+#[test]
+fn a_target_away_at_landing_takes_no_pulse_when_it_returns() {
+    let mut rt = runtime(Host::new(5));
+    trash(&mut rt, &[1]).unwrap();
+    frames(&mut rt, 1.0, launched);
+    rt.update(|s, _| s.target = false);
+    frames(&mut rt, 1.0, |s| s.kinds().contains(&"landed"));
+    // Back mid-bounce, then again after the flight is done.
+    rt.update(|s, _| s.target = true);
+    let scales = target_scales(&mut rt, 20);
+    assert!(at_rest(&scales), "no bounce mid-way: {scales:?}");
+    wake_to_wake(&mut rt, 1.0, finished);
+    remount_target(&mut rt, 0.3);
+    let scales = target_scales(&mut rt, 20);
+    assert!(at_rest(&scales), "nor after: {scales:?}");
+}
+
+#[test]
+fn ring_keys_are_one_per_target() {
+    assert_ne!(ring_key("a/b", 1), ring_key("a_b", 1));
+    assert_ne!(ring_key("a_/b", 1), ring_key("a/_b", 1));
 }
 
 #[test]

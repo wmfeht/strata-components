@@ -125,6 +125,7 @@ fn flight_view<S>(
     let target = cx
         .window_layout(&f.target)
         .filter(|&r| target_shows(r, window, f.target_in.as_deref(), cx));
+    f.target_seen.set(target.is_some());
     let size = look.icon_size.md;
     // Where a leg's row side is, while it shows.
     let row_rect = |cx: &Cx<S>, key: &str| {
@@ -141,7 +142,8 @@ fn flight_view<S>(
                 } else {
                     match f.mode {
                         Mode::Inbound => target.and(row_rect(cx, &leg.row)),
-                        Mode::Release => row_rect(cx, &leg.row),
+                        // The target shakes as they lift: one out of sight flies nothing.
+                        Mode::Release => target.and(row_rect(cx, &leg.row)),
                         Mode::Outbound => {
                             let to = row_rect(cx, &leg.row);
                             target

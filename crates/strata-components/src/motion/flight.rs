@@ -227,6 +227,11 @@ pub(super) struct FlightRun {
     pub flying: Vec<usize>,
     /// A view has drawn the launch side (set by the layer).
     pub viewed: Cell<bool>,
+    /// The target showed when a view last drew this flight (set by the layer): one gone at
+    /// its pulse takes none, so it can't play when the target comes back.
+    pub target_seen: Cell<bool>,
+    /// The target's pulse this flight started, spent when it ends.
+    pub pulse: Option<u32>,
 }
 
 impl FlightRun {
@@ -250,6 +255,8 @@ impl FlightRun {
             phase: Phase::Mount { ticks: 0 },
             flying: Vec::new(),
             viewed: Cell::new(false),
+            target_seen: Cell::new(false),
+            pulse: None,
         }
     }
 
@@ -261,6 +268,20 @@ impl FlightRun {
         let (kind, at_landing) = self.mode.pulse();
         let from = if at_landing { landed_at } else { t0 };
         landed_at.max(from + kind.duration())
+    }
+
+    fn start_pulse(&mut self, pulses: &mut Pulses) {
+        if self.target_seen.get() {
+            self.pulse = Some(pulses.start(&self.target, self.mode.pulse().0));
+        }
+    }
+
+    /// Ends this flight's pulse, if it is still the target's latest: the target then keeps its
+    /// wrapper but stops replaying the pulse each time it mounts.
+    pub fn spend_pulse(&self, pulses: &mut Pulses) {
+        if let Some(n) = self.pulse {
+            pulses.spend(&self.target, n);
+        }
     }
 
     /// One tick at `now`: pushes this flight's events, lowers `next` to its next deadline,
@@ -298,9 +319,8 @@ impl FlightRun {
                     t0: now,
                     landed: None,
                 };
-                let (kind, at_landing) = self.mode.pulse();
-                if !at_landing {
-                    pulses.start(&self.target, kind);
+                if !self.mode.pulse().1 {
+                    self.start_pulse(pulses);
                 }
                 due(next, self.land_at(now));
                 true
@@ -311,9 +331,8 @@ impl FlightRun {
                     Some(at) => at,
                     None if now + EPS >= land => {
                         events.push(Event::Landed(self.id));
-                        let (kind, at_landing) = self.mode.pulse();
-                        if at_landing {
-                            pulses.start(&self.target, kind);
+                        if self.mode.pulse().1 {
+                            self.start_pulse(pulses);
                         }
                         self.phase = Phase::Fly {
                             t0,
@@ -329,6 +348,7 @@ impl FlightRun {
                 let done = self.done_at(t0, landed);
                 if now + EPS >= done {
                     events.push(Event::Done(self.id));
+                    self.spend_pulse(pulses);
                     return false;
                 }
                 due(next, done);

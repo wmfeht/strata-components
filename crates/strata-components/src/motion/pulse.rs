@@ -105,51 +105,86 @@ const RECEIVING_RING: &[Beat] = &[
     Beat::new(RECEIVING).opacity(0.28).easing(SETTLE),
 ];
 
-/// How many pulses each target has started, and the last one's kind: a new count is a new
-/// key, which replays a sequence.
+/// Each target's pulses: how many it has started, and its latest one's kind and whether that
+/// still plays. A new count is a new key, which replays a sequence.
 #[derive(Debug, Default)]
-pub(super) struct Pulses(Vec<(String, u32, PulseKind)>);
+pub(super) struct Pulses(Vec<Pulse>);
+
+#[derive(Debug)]
+struct Pulse {
+    target: String,
+    n: u32,
+    kind: PulseKind,
+    /// Its flight hasn't ended. Rune replays a sequence whenever its key mounts, so a spent
+    /// pulse drops its sequence, or a target that remounts would play it again.
+    live: bool,
+}
 
 impl Pulses {
-    pub fn start(&mut self, target: &str, kind: PulseKind) {
-        match self.0.iter_mut().find(|(t, ..)| t == target) {
+    /// Starts a pulse of `kind` on `target`, and returns its count.
+    pub fn start(&mut self, target: &str, kind: PulseKind) -> u32 {
+        match self.0.iter_mut().find(|p| p.target == target) {
             Some(p) => {
-                p.1 += 1;
-                p.2 = kind;
+                p.n += 1;
+                p.kind = kind;
+                p.live = true;
+                p.n
             }
-            None => self.0.push((target.to_owned(), 1, kind)),
+            None => {
+                self.0.push(Pulse {
+                    target: target.to_owned(),
+                    n: 1,
+                    kind,
+                    live: true,
+                });
+                1
+            }
         }
     }
 
-    pub fn last(&self, target: &str) -> Option<(u32, PulseKind)> {
+    /// Ends `target`'s pulse `n`, unless a later one has started.
+    pub fn spend(&mut self, target: &str, n: u32) {
+        if let Some(p) = self.0.iter_mut().find(|p| p.target == target && p.n == n) {
+            p.live = false;
+        }
+    }
+
+    /// `target`'s latest pulse: its count, and its kind while it plays.
+    fn last(&self, target: &str) -> Option<(u32, Option<PulseKind>)> {
         self.0
             .iter()
-            .find(|(t, ..)| t == target)
-            .map(|&(_, n, k)| (n, k))
+            .find(|p| p.target == target)
+            .map(|p| (p.n, p.live.then_some(p.kind)))
     }
 }
 
 /// The target element `el`, keyed `key`, dressed for its pulses: pass C8's Trash icon box
 /// through it (`PlacesSidebar::trash_icon(|el| dress_target(&fx, &key, el))`).
 ///
-/// Until its first pulse it is `el` itself. From then on, for good (even through
-/// [`Effects::settle`]), it sits in a wrapper keyed by its pulse count, so each pulse mounts it
-/// afresh and replays the scale (the wrapper's sequence holds its last pose, its rest, between
-/// pulses). Its element path gains the wrapper's `c23-pulse-<n>` step.
+/// Until its first pulse it is `el` itself. From then on, for good, it sits in a wrapper keyed
+/// by its pulse count, so each pulse mounts it afresh and plays the scale. Its element path
+/// gains the wrapper's `c23-pulse-<n>` step. Once the pulse's flight ends (or
+/// [`Effects::settle`] ends it), the wrapper stays but plays nothing, so a target that
+/// remounts later (its sidebar shown again, its page reopened) doesn't replay it.
 pub fn dress_target(fx: &Effects, key: &str, el: El) -> El {
     match fx.pulses.last(key) {
         None => el,
-        Some((n, kind)) => rune::el()
-            .key(format!("c23-pulse-{n}"))
-            .sequence(Sequence::new(kind.target_beats()))
-            .child(el),
+        Some((n, kind)) => {
+            let wrapper = rune::el().key(format!("c23-pulse-{n}"));
+            match kind {
+                Some(kind) => wrapper.sequence(Sequence::new(kind.target_beats())),
+                None => wrapper,
+            }
+            .child(el)
+        }
     }
 }
 
 /// The ring's key over the target keyed `target` for its pulse `n`: one per pulse, so each
-/// replays.
+/// replays. The target is escaped (`_` as `__`, `/` as `_s`), so no two targets share one.
 pub fn ring_key(target: &str, n: u32) -> String {
-    format!("c23-ring-{}-{n}", target.replace('/', "_"))
+    let target = target.replace('_', "__").replace('/', "_s");
+    format!("c23-ring-{target}-{n}")
 }
 
 fn ring(look: &Look, key: String, rect: [f32; 4], beats: &'static [Beat]) -> El {
@@ -178,8 +213,8 @@ pub(super) fn receiving(look: &Look, flight: u64, rect: [f32; 4]) -> El {
     )
 }
 
-/// The ring of the target's latest pulse, if that pulse has one.
+/// The ring of the target's latest pulse, while it plays and if it has one.
 pub(super) fn pulse_ring(look: &Look, fx: &Effects, target: &str, rect: [f32; 4]) -> Option<El> {
     let (n, kind) = fx.pulses.last(target)?;
-    Some(ring(look, ring_key(target, n), rect, kind.ring_beats()?))
+    Some(ring(look, ring_key(target, n), rect, kind?.ring_beats()?))
 }

@@ -112,11 +112,12 @@ impl Effects {
     }
 
     /// Ends every effect now (a tab or view-mode switch under them), with the events each
-    /// still owed. The targets' pulses stay: one playing plays out, and
-    /// [`dress_target`](super::dress_target) keeps its wrapper.
+    /// still owed. Their targets' pulses end too: [`dress_target`](super::dress_target) keeps
+    /// its wrapper, playing nothing.
     pub fn settle(&mut self) -> Vec<Event> {
         let mut events = Vec::new();
         for f in self.flights.drain(..) {
+            f.spend_pulse(&mut self.pulses);
             if matches!(f.phase, super::flight::Phase::Mount { .. }) {
                 events.push(Event::Launched(f.id));
             }

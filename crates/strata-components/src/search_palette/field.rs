@@ -136,6 +136,7 @@ pub(super) fn on_key(
             if st.step(delta) {
                 polled.changed = true;
                 if let Some(i) = st.highlighted() {
+                    st.mark_own_scroll();
                     tx.scroll_into_view_in(results, super::option_key(key, i));
                 }
             }

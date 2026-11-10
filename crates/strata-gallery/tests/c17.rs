@@ -7,7 +7,7 @@
 mod c17 {
     use rune::{ElementInfo, Env, Ime, Key, KeyEvent, Mods, PointerButton, Runtime};
     use strata_components::contract::fuzzy;
-    use strata_components::search_palette::{Answer, PaletteItem, Phase, option_key};
+    use strata_components::search_palette::{Answer, PaletteItem, Phase, option_key, results_key};
     use strata_gallery::scenes::c17::KEY;
     use strata_gallery::{Gallery, scenes};
 
@@ -958,5 +958,199 @@ mod c17 {
             assert!(visible(rt, "a00"), "a00 hidden at offset {}", offset(rt));
         });
         assert_eq!(highlighted(&rt).as_deref(), Some("c00"));
+    }
+
+    /// Queues `items` for the current query on the page's fake worker: its poll delivers them
+    /// at the start of the next frame.
+    fn queue(rt: &mut Runtime<Gallery>, items: Vec<PaletteItem>) {
+        rt.update(move |g, _| {
+            let generation = g.c17.palette.generation();
+            g.c17
+                .worker
+                .push((g.c17.now, Answer::new(generation, items)));
+        });
+    }
+
+    fn two_above() -> Vec<PaletteItem> {
+        let mut more = vec![item("a0"), item("a1")];
+        more.extend(named("b", 30));
+        more
+    }
+
+    // Review round 3, B1: a click held while a batch moves another result into its row opens
+    // nothing, as GTK's ListBox activates only when press and release land on the same row.
+    // Left and middle.
+    #[test]
+    fn a_press_held_while_a_batch_moves_its_row_opens_nothing() {
+        for button in [PointerButton::Primary, PointerButton::Middle] {
+            let mut rt = synthetic();
+            land(&mut rt, named("b", 30), |_| {});
+            let (x, y) = centre(&rt, &row_key(&rt, "b03"));
+            rt.pointer_move(x, y);
+            rt.frame(FRAME);
+            rt.button_down(x, y, button);
+            rt.frame(FRAME);
+            queue(&mut rt, two_above());
+            rt.frame(FRAME);
+            rt.frame(FRAME);
+            assert_eq!(
+                rt.state.c17.palette.items()[3].id,
+                "b01",
+                "{button:?}: b01 under it"
+            );
+            rt.button_up(x, y, button);
+            rt.frame(FRAME);
+            assert_eq!(rt.state.c17.log, "", "{button:?} opened something");
+            assert!(rt.state.c17.palette.is_open(), "{button:?}");
+        }
+    }
+
+    // Review round 3, B1: the same for a right-click: no menu, and the highlight stays.
+    #[test]
+    fn a_right_press_held_while_a_batch_moves_its_row_asks_for_no_menu() {
+        let mut rt = synthetic();
+        land(&mut rt, named("b", 30), |_| {});
+        let (x, y) = centre(&rt, &row_key(&rt, "b03"));
+        rt.pointer_move(x, y);
+        rt.frame(FRAME);
+        rt.button_down(x, y, PointerButton::Secondary);
+        rt.frame(FRAME);
+        queue(&mut rt, two_above());
+        rt.frame(FRAME);
+        rt.frame(FRAME);
+        rt.button_up(x, y, PointerButton::Secondary);
+        rt.frame(FRAME);
+        assert_eq!(rt.state.c17.menu.as_ref().map(|m| m.0.as_str()), None);
+        assert_eq!(highlighted(&rt).as_deref(), Some("b00"));
+    }
+
+    // Review round 3, B1: the guard leaves ordinary clicks alone, a batch landing before the
+    // press or after the release included.
+    #[test]
+    fn a_click_between_batches_still_acts_on_its_row() {
+        for button in [
+            PointerButton::Primary,
+            PointerButton::Middle,
+            PointerButton::Secondary,
+        ] {
+            let mut rt = synthetic();
+            land(&mut rt, named("b", 30), |_| {});
+            queue(&mut rt, two_above());
+            rt.frame(FRAME);
+            rt.frame(FRAME);
+            let (x, y) = centre(&rt, &row_key(&rt, "b03"));
+            rt.pointer_move(x, y);
+            rt.frame(FRAME);
+            rt.button_down(x, y, button);
+            rt.frame(FRAME);
+            rt.button_up(x, y, button);
+            rt.frame(FRAME);
+            match button {
+                PointerButton::Primary => assert_eq!(rt.state.c17.log, "Opened b03"),
+                PointerButton::Middle => assert_eq!(rt.state.c17.log, "Opened b03 in a new tab"),
+                _ => assert_eq!(
+                    rt.state.c17.menu.as_ref().map(|m| m.0.as_str()),
+                    Some("b03")
+                ),
+            }
+        }
+    }
+
+    // Review round 3, B2: right after an arrow scrolls the list, a batch in the next frame
+    // still reveals the highlighted row: the palette's own scroll isn't the user scrolling.
+    // With and without reduced motion (a reveal glides over frames without it), and with up to
+    // three frames between.
+    #[test]
+    fn a_batch_right_after_an_arrow_scroll_keeps_the_highlight_in_view() {
+        for reduced in [true, false] {
+            for gap in 0..4 {
+                let mut rt = synthetic_with(reduced);
+                land(&mut rt, named("b", 60), |_| {});
+                let top =
+                    |rt: &Runtime<Gallery>| element(rt, &option_key(KEY, 0)).map(|e| e.rect[1]);
+                let mut n = 0;
+                loop {
+                    let before = top(&rt);
+                    press(&mut rt, Key::Down, Mods::default());
+                    n += 1;
+                    if top(&rt) != before || n > 30 {
+                        break;
+                    }
+                }
+                for _ in 0..gap {
+                    rt.frame(FRAME);
+                }
+                let mut more = named("a", 4);
+                more.extend(named("b", 60));
+                queue(&mut rt, more);
+                let id = format!("b{n:02}");
+                for f in 0..60 {
+                    rt.frame(FRAME);
+                    if f >= 20 || reduced {
+                        assert!(
+                            visible(&rt, &id),
+                            "reduced {reduced}, gap {gap}, frame {f}: {id} out of view at {}",
+                            offset(&rt)
+                        );
+                    }
+                }
+                press(&mut rt, Key::Enter, Mods::default());
+                assert_eq!(rt.state.c17.log, format!("Opened {id}"));
+            }
+        }
+    }
+
+    // Review round 3 (mutant T5): an arrow scrolls only as far as it takes: the row it reaches
+    // past the bottom lands at the bottom, not in the middle.
+    #[test]
+    fn an_arrow_scrolls_only_as_far_as_it_takes() {
+        let mut rt = synthetic();
+        land(&mut rt, named("b", 60), |_| {});
+        let vp = element(&rt, &results_key(KEY)).expect("the list").rect;
+        let mut i = 0;
+        while offset(&rt) < 1.0 {
+            press(&mut rt, Key::Down, Mods::default());
+            i += 1;
+            assert!(i < 30);
+        }
+        let row = element(&rt, &row_key(&rt, &format!("b{i:02}")))
+            .expect("the row")
+            .rect;
+        assert!(
+            (row[1] + row[3] - (vp[1] + vp[3])).abs() < 1.0,
+            "b{i:02} ends at {} where the list ends at {}",
+            row[1] + row[3],
+            vp[1] + vp[3]
+        );
+    }
+
+    // Review round 3, B2 (the batch's side): after the user moved the highlight, a batch whose
+    // reveal scrolls the list and another batch in the next frame: the second still reveals,
+    // since the first's scroll was the palette's own, not the user's.
+    #[test]
+    fn back_to_back_batches_keep_a_moved_highlight_in_view() {
+        let mut rt = synthetic();
+        land(&mut rt, named("b", 60), |_| {});
+        for _ in 0..3 {
+            press(&mut rt, Key::Down, Mods::default());
+        }
+        settle(&mut rt);
+        let mut first = named("a", 12);
+        first.extend(named("b", 60));
+        queue(&mut rt, first);
+        rt.frame(FRAME);
+        assert!(visible(&rt, "b03"), "the first batch revealed b03");
+        let mut second = named("m", 12);
+        second.extend(named("a", 12));
+        second.extend(named("b", 60));
+        queue(&mut rt, second);
+        for f in 0..30 {
+            rt.frame(FRAME);
+            assert!(
+                visible(&rt, "b03"),
+                "frame {f}: b03 out of view at {}",
+                offset(&rt)
+            );
+        }
     }
 }

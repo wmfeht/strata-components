@@ -479,8 +479,32 @@ fn result_row<S: 'static>(
         .build(k)
         .truncate_middle()
         .a11y_hidden();
-    let (press, menu) = (handler.clone(), handler.clone());
-    let (open_id, menu_id) = (item.id.clone(), item.id.clone());
+    // The press handlers sit on an inner element keyed by the result, inside the row keyed by
+    // place. Rune resolves a release by the pressed element's path and drops it when that path
+    // is gone, so a press held while a batch moves another result into the row (the row's key
+    // stays, the inner key changes) opens nothing and asks for no menu, for every button, as
+    // GTK's ListBox activates only when press and release land on the same row. Rune has no
+    // press-down hook for the right button to record the pressed result with instead.
+    let on_press = {
+        let (press, open_id) = (handler.clone(), item.id.clone());
+        move |s: &mut S, tx: &mut Tx| {
+            let middle = tx.button() == PointerButton::Middle;
+            let via = if middle { Via::Middle } else { Via::Click };
+            let polled = access(s).choose(&open_id, middle, via, tx);
+            if let Some(emit) = press.get::<Emit<S>>() {
+                route(&emit, s, polled, tx);
+            }
+        }
+    };
+    let on_menu = {
+        let (menu, menu_id) = (handler.clone(), item.id.clone());
+        move |s: &mut S, p: PointerPress, tx: &mut Tx| {
+            let polled = access(s).menu(&menu_id, Point::new(p.x, p.y));
+            if let Some(emit) = menu.get::<Emit<S>>() {
+                route(&emit, s, polled, tx);
+            }
+        }
+    };
     let selected = TableStyle::from_kit(k).selected;
     let mut content = row()
         .w_full()
@@ -500,6 +524,21 @@ fn result_row<S: 'static>(
     if active {
         content = content.fill(selected).outline(1.0, -1.0, k.c.border_focus);
     }
+    let pressable = col()
+        .key(format!("result-{}", escape(&item.id)))
+        // A layout box to assistive technology: the option around it is the row.
+        .role("none")
+        .w_full()
+        .h_full()
+        // A tint only: the pointer never moves the keyboard's highlight. Rune reports a hover
+        // when a row scrolls under a still pointer (C6's review round 1, B1).
+        .hover(k.c.hover)
+        .preserve_focus_on_press(true)
+        .pointer_buttons([PointerButton::Primary, PointerButton::Middle])
+        .on_press_tx(on_press.clone())
+        .on_secondary_press(on_menu.clone())
+        .child(content)
+        .child(rule(k.c.border_weak));
     col()
         .role("option")
         // Strata names a row by its full path.
@@ -507,27 +546,26 @@ fn result_row<S: 'static>(
         .focus_selected(active)
         .w_full()
         .h(look.row.palette)
-        // A tint only: the pointer never moves the keyboard's highlight. Rune reports a hover
-        // when a row scrolls under a still pointer (C6's review round 1, B1).
-        .hover(k.c.hover)
         .preserve_focus_on_press(true)
-        .pointer_buttons([PointerButton::Primary, PointerButton::Middle])
-        .on_press_tx(move |s: &mut S, tx: &mut Tx| {
-            let middle = tx.button() == PointerButton::Middle;
-            let via = if middle { Via::Middle } else { Via::Click };
-            let polled = access(s).choose(&open_id, middle, via, tx);
-            if let Some(emit) = press.get::<Emit<S>>() {
-                route(&emit, s, polled, tx);
-            }
-        })
-        .on_secondary_press(move |s: &mut S, p: PointerPress, tx: &mut Tx| {
-            let polled = access(s).menu(&menu_id, Point::new(p.x, p.y));
-            if let Some(emit) = menu.get::<Emit<S>>() {
-                route(&emit, s, polled, tx);
-            }
-        })
-        .child(content)
-        .child(rule(k.c.border_weak))
+        // Assistive technology's click and menu actions reach the option, not the inner box;
+        // the pointer reaches the inner box first.
+        .on_press_tx(on_press)
+        .on_secondary_press(on_menu)
+        .child(pressable)
+}
+
+/// `id` made safe as a key segment: Rune reads `/` in a key as a key path, so `/` and `%`
+/// (to keep keys apart) are escaped.
+fn escape(id: &str) -> String {
+    let mut out = String::with_capacity(id.len());
+    for c in id.chars() {
+        match c {
+            '%' => out.push_str("%25"),
+            '/' => out.push_str("%2F"),
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 /// The footer: the key hints, then the partial-results notice at its end.

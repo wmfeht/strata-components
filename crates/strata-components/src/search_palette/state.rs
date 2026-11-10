@@ -89,11 +89,15 @@ pub struct PaletteState {
     pub(crate) bar: Bar,
     /// The list's scroll position as it last reported it.
     pub(crate) feed: ScrollFeed,
-    /// The offset at the last tick, and whether it moved between the last two: a fling or a
-    /// wheel's motion in flight, which a batch's reveal leaves alone (Strata's
+    /// The offset at the last tick, and whether the user is scrolling the list: it moved
+    /// between the last two ticks, and not because the palette asked (a fling or a wheel's
+    /// motion in flight), which a batch's reveal leaves alone (Strata's
     /// `interaction_revision`).
     settled: Cell<f32>,
     moving: Cell<bool>,
+    /// The palette asked for a scroll (an arrow's or an answer's reveal) and the list hasn't
+    /// come to rest since: its motion is the palette's, not the user's (review round 3, B2).
+    own_scroll: Cell<bool>,
     /// The palette's key as the latest view built it, for the scroll requests an answer makes.
     pub(crate) key: RefCell<String>,
     pub(crate) handler: HandlerSlot,
@@ -254,6 +258,16 @@ impl PaletteState {
         // Reveals only: "just far enough", and a wheel or a fling wins over them (Rune), so a
         // batch never undoes the user's scroll. Rows are keyed by place, so keeping the offset
         // takes no request at all.
+        // A batch's reveal is the palette's own scroll: the next ticks don't take it for the
+        // user scrolling (review round 3, B2). A new query's top needs no mark: after it, only an
+        // arrow (which marks its own) makes the next batch reveal.
+        let own = match follow {
+            Follow::Reveal(_) => !self.moving.get(),
+            Follow::Top | Follow::Stay | Follow::Keep => false,
+        };
+        if own && !key.is_empty() {
+            self.own_scroll.set(true);
+        }
         match follow {
             // Not built yet: nothing to scroll.
             _ if key.is_empty() => {}
@@ -264,6 +278,12 @@ impl PaletteState {
             Follow::Reveal(i) => tx.scroll_into_view_in(results, super::option_key(&key, i)),
         }
         Polled::changed()
+    }
+
+    /// The palette asked for a scroll of its own (an arrow's reveal): the next ticks don't take
+    /// the list's motion for the user scrolling until it comes to rest.
+    pub(crate) fn mark_own_scroll(&self) {
+        self.own_scroll.set(true);
     }
 
     /// The query `generation` failed: the shown results go and the body says `message`, until
@@ -296,6 +316,13 @@ impl PaletteState {
     pub fn tick(&mut self) -> Polled {
         let offset = self.feed.get().offset[1];
         self.moving.set(offset != self.settled.replace(offset));
+        if !self.moving.get() {
+            // At rest: whatever the palette asked for has landed.
+            self.own_scroll.set(false);
+        } else if self.own_scroll.get() {
+            // The palette's own scroll, still landing: not the user's.
+            self.moving.set(false);
+        }
         let mut out = Polled::default();
         if self.leaving.mode.is_some() && self.leaving.built.get() {
             self.leaving = Leaving::default();

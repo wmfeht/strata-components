@@ -200,8 +200,11 @@ pub(super) fn attach(
         // Events read while binding wait for a dispatch (winit's display).
         let _ = t.dispatch();
     } else {
-        // P0 tracks every window: the data device's routing compares their surfaces.
-        let _ = Transfer::attach(window, Arc::new(|_| {}), Wants::default());
+        // P0 tracks every window: the data device's routing compares their surfaces, and its
+        // reader's turns go through any window's app that still runs.
+        let turn_poster = poster.clone();
+        let turn: Turn = Arc::new(move |f| turn_poster(Job::Run(f)));
+        let _ = Transfer::attach(window, turn, Wants::default());
     }
     let (status, now) = with(|hub| {
         hub.sinks.retain(|(i, s)| *i != id && s.strong_count() > 0);

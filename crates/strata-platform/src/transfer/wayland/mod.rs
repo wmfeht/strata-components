@@ -44,12 +44,12 @@ use wayland_client::{
     Connection, Dispatch, EventQueue, Proxy, QueueHandle, WEnum, event_created_child,
 };
 
-use super::Turn;
 use super::data::SourceSpec;
 use super::error::{Error, Unsupported};
 use super::event::{Action, Event, Route, Selection, SelectionOffer, SourceId, Subscribers};
 use super::gate::Gate;
 use super::pipe;
+use super::windows::Windows;
 use control::Control;
 use echo::Echoes;
 pub use offer::DragOffer;
@@ -116,7 +116,7 @@ struct Source {
 pub(crate) struct State {
     kind: Kind,
     home: Home,
-    windows: Arc<Mutex<Vec<WindowHandle>>>,
+    windows: Arc<Windows>,
     seat: Option<WlSeat>,
     /// For P1's drag icons, bound on winit's display only.
     compositor: Option<WlCompositor>,
@@ -151,7 +151,7 @@ pub(crate) struct State {
 }
 
 impl State {
-    fn new(kind: Kind, home: Home, windows: Arc<Mutex<Vec<WindowHandle>>>) -> State {
+    fn new(kind: Kind, home: Home, windows: Arc<Windows>) -> State {
         State {
             kind,
             home,
@@ -251,14 +251,12 @@ impl State {
     /// the event's surface may be stale by now, so no request is ever sent on it.
     fn window_of(&self, surface: &WlSurface) -> Option<String> {
         let ptr = surface.id().as_ptr().cast::<c_void>();
-        let windows = lock(&self.windows);
-        windows
-            .iter()
-            .find(|w| {
-                w.with_raw_handle(|h| matches!(h.as_raw(), RawWindowHandle::Wayland(s) if s.surface.as_ptr() == ptr))
-                    .unwrap_or(false)
-            })
-            .map(|w| w.key().to_owned())
+        self.windows.find(|w| {
+            w.with_raw_handle(
+                |h| matches!(h.as_raw(), RawWindowHandle::Wayland(s) if s.surface.as_ptr() == ptr),
+            )
+            .unwrap_or(false)
+        })
     }
 
     /// The connection is dead: nothing is held or heard on it. owns() turns false for every
@@ -306,6 +304,8 @@ pub(crate) struct Conn {
     gate: Arc<Gate>,
     reader: Mutex<Option<Reader>>,
     subs: Subscribers,
+    /// The attached windows (winit's display): the reader's turns go through them.
+    windows: Arc<Windows>,
     /// A dispatch failed: the connection is dead, and that was reported once.
     failed: AtomicBool,
     /// A Turn ran dispatch off the UI thread, and that was reported once.
@@ -314,18 +314,18 @@ pub(crate) struct Conn {
 
 impl Conn {
     /// Binds on winit's display, found from `window`'s surface. Call it on the UI thread.
+    /// The reader's turns go to `windows`' turns.
     pub(crate) fn shared(
         window: &WindowHandle,
-        windows: Arc<Mutex<Vec<WindowHandle>>>,
+        windows: Arc<Windows>,
         subs: Subscribers,
-        turn: Turn,
         data_control: Option<Prefer>,
         as_if_old: bool,
     ) -> Result<Arc<Conn>, Error> {
         let display = display::winit_display(window, as_if_old)?;
         let backend = display::foreign_backend(display);
         let conn = Connection::from_backend(backend);
-        Conn::bind(Kind::Shared, conn, windows, subs, data_control, Some(turn))
+        Conn::bind(Kind::Shared, conn, windows, subs, data_control)
     }
 
     /// Connects to the compositor on a connection of our own, for data control alone.
@@ -338,16 +338,15 @@ impl Conn {
     ) -> Result<Arc<Conn>, Error> {
         let conn = Connection::connect_to_env().map_err(|e| Error::Connection(e.to_string()))?;
         let control = (!as_if_none).then_some(prefer);
-        Conn::bind(Kind::Own, conn, Arc::default(), subs, control, None)
+        Conn::bind(Kind::Own, conn, Arc::default(), subs, control)
     }
 
     fn bind(
         kind: Kind,
         conn: Connection,
-        windows: Arc<Mutex<Vec<WindowHandle>>>,
+        windows: Arc<Windows>,
         subs: Subscribers,
         data_control: Option<Prefer>,
-        turn: Option<Turn>,
     ) -> Result<Arc<Conn>, Error> {
         let (globals, mut queue) =
             registry_queue_init::<State>(&conn).map_err(|e| Error::Connection(e.to_string()))?;
@@ -356,7 +355,7 @@ impl Conn {
             backend: conn.backend().downgrade(),
             ui: (kind == Kind::Shared).then(|| std::thread::current().id()),
         };
-        let mut state = State::new(kind, home.clone(), windows);
+        let mut state = State::new(kind, home.clone(), windows.clone());
         state.seat = globals.bind::<WlSeat, _, _>(&qh, 1..=8, ()).ok();
         if kind == Kind::Shared {
             state.compositor = globals.bind::<WlCompositor, _, _>(&qh, 1..=6, ()).ok();
@@ -392,6 +391,7 @@ impl Conn {
             gate: gate.clone(),
             reader: Mutex::new(None),
             subs: subs.clone(),
+            windows: windows.clone(),
         });
         let weak = Arc::downgrade(&c);
         let failed = {
@@ -402,32 +402,36 @@ impl Conn {
                 }
             }
         };
-        let reader = match turn {
-            Some(turn) => {
+        let reader = match kind {
+            Kind::Shared => {
                 let gate = gate.clone();
                 Reader::spawn(
                     "transfer-wl",
                     conn,
                     gate.clone(),
                     move || {
-                        // Ask the UI thread to dispatch, then wait for it with no read intent held.
+                        // Ask the UI thread to dispatch, through every attached window's app
+                        // with no turn outstanding (see `windows`), then wait for it with no
+                        // read intent held.
                         let before = gate.turns();
-                        let weak: Weak<Conn> = weak.clone();
-                        turn(Box::new(move || {
-                            // On the UI thread, where Turn runs it; refused anywhere else, and the
-                            // reader then waits for a turn that never comes: say so, once.
-                            if let Some(c) = weak.upgrade()
-                                && let Err(e) = c.dispatch()
-                            {
-                                c.report_misrouted_turn(e);
-                            }
-                        }));
+                        windows.post(|| {
+                            let weak: Weak<Conn> = weak.clone();
+                            Box::new(move || {
+                                // On the UI thread, where Turn runs it; refused anywhere else, and
+                                // the reader then waits for a turn that never comes: say so, once.
+                                if let Some(c) = weak.upgrade()
+                                    && let Err(e) = c.dispatch()
+                                {
+                                    c.report_misrouted_turn(e);
+                                }
+                            })
+                        });
                         gate.wait(before);
                     },
                     failed,
                 )
             }
-            None => Reader::spawn(
+            Kind::Own => Reader::spawn(
                 "transfer-wl-own",
                 conn,
                 gate,
@@ -462,7 +466,14 @@ impl Conn {
         }
         let any = self.dispatch_here();
         self.gate.turned();
+        self.windows.prune();
         Ok(any)
+    }
+
+    /// Releases a reader waiting for a turn, so it asks again: the windows it asked through
+    /// may have closed since. A no-op when it isn't waiting.
+    pub(crate) fn wake_reader(&self) {
+        self.gate.turned();
     }
 
     fn dispatch_here(&self) -> bool {

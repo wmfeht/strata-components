@@ -106,7 +106,11 @@ mod c20a {
         rt.frame(FRAME);
         assert_eq!(heard(&rt), ["Frame Live 6", "Frame Cancel 0"]);
         assert_eq!(rt.state.c20a.frame.value(), 0.0);
-        assert_eq!(rt.state.page, Some("c20a"), "the Escape went to the drag, not the gallery");
+        assert_eq!(
+            rt.state.page,
+            Some("c20a"),
+            "the Escape went to the drag, not the gallery"
+        );
     }
 
     #[test]
@@ -138,9 +142,19 @@ mod c20a {
         let at = centre(&rt, "c20a-frame-knob");
         click(&mut rt, at);
         for mods in [
-            Mods { shift: true, ..Mods::default() },
-            Mods { ctrl: true, cmd: true, ..Mods::default() },
-            Mods { alt: true, ..Mods::default() },
+            Mods {
+                shift: true,
+                ..Mods::default()
+            },
+            Mods {
+                ctrl: true,
+                cmd: true,
+                ..Mods::default()
+            },
+            Mods {
+                alt: true,
+                ..Mods::default()
+            },
         ] {
             press(&mut rt, Key::PageUp, mods);
         }
@@ -196,12 +210,22 @@ mod c20a {
             rt.frame(FRAME);
         }
         assert!(rt.state.c20a.fields.is_open(), "the field's menu opened");
-        assert!(!rt.state.c20a.workers.edit().focused, "and has the keyboard");
-        assert_eq!(rt.state.c20a.workers.value(), 4.0, "losing the keyboard to it commits nothing");
+        assert!(
+            !rt.state.c20a.workers.edit().focused,
+            "and has the keyboard"
+        );
+        assert_eq!(
+            rt.state.c20a.workers.value(),
+            4.0,
+            "losing the keyboard to it commits nothing"
+        );
         assert_eq!(rt.state.c20a.workers.edit().text, "9");
         press(&mut rt, Key::Escape, Mods::default());
         assert!(!rt.state.c20a.fields.is_open());
-        assert!(rt.state.c20a.workers.edit().focused, "the keyboard is back in the field");
+        assert!(
+            rt.state.c20a.workers.edit().focused,
+            "the keyboard is back in the field"
+        );
         assert_eq!(rt.state.c20a.workers.edit().text, "9");
         press(&mut rt, Key::Tab, Mods::default());
         assert_eq!(rt.state.c20a.workers.value(), 9.0);

@@ -45,7 +45,11 @@ fn tenths_step_without_float_noise() {
 #[test]
 fn a_page_is_whole_steps() {
     assert_eq!(frame().page_steps(), 4);
-    assert_eq!(Range::new(0.0, 200.0, 10.0).page_steps(), 10, "ten steps by default");
+    assert_eq!(
+        Range::new(0.0, 200.0, 10.0).page_steps(),
+        10,
+        "ten steps by default"
+    );
     assert_eq!(Range::new(0.0, 1.0, 0.1).page(0.25).page_steps(), 3);
 }
 
@@ -54,9 +58,16 @@ fn a_drag_near_a_snap_point_lands_on_it() {
     let mut st = laid_out(0.0, frame());
     let snaps = [0.0, 4.0];
     // Grab the knob at its centre (x 8), then drag to 3.6 px: 8 pt short of Airy's tick.
-    assert_eq!(st.press(8.0, KNOB, &snaps, WITHIN, false), None, "grabbing the knob moves nothing");
+    assert_eq!(
+        st.press(8.0, KNOB, &snaps, WITHIN, false),
+        None,
+        "grabbing the knob moves nothing"
+    );
     let near = st.x_of(3.6, KNOB);
-    assert_eq!(st.drag(near, KNOB, &snaps, WITHIN, false), Some(SliderChange::Live));
+    assert_eq!(
+        st.drag(near, KNOB, &snaps, WITHIN, false),
+        Some(SliderChange::Live)
+    );
     assert_eq!(st.value(), 4.0);
     // 2.6 px is 23 pt from Airy and 43 pt from Compact: the grid's nearest point.
     st.drag(st.x_of(2.6, KNOB), KNOB, &snaps, WITHIN, false);
@@ -116,8 +127,15 @@ fn precise_wheel_travel_adds_up_to_whole_notches() {
     let mut st = SliderState::new(64.0, Range::new(32.0, 256.0, 16.0));
     assert!(!st.wheel(30.0, true, 1.0), "30 pt is short of a notch");
     assert!(st.wheel(30.0, true, 1.0));
-    assert_eq!(st.value(), 65.0, "a notch moves the wheel's amount, off the grid");
-    assert!(st.wheel(-1.0, false, 1.0), "a mouse notch is one whatever its size");
+    assert_eq!(
+        st.value(),
+        65.0,
+        "a notch moves the wheel's amount, off the grid"
+    );
+    assert!(
+        st.wheel(-1.0, false, 1.0),
+        "a mouse notch is one whatever its size"
+    );
     assert_eq!(st.value(), 64.0);
 }
 

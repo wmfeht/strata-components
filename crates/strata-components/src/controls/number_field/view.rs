@@ -4,8 +4,7 @@
 use std::rc::Rc;
 
 use rune::{
-    Align, Cursor, El, Key, KeyEvent, PointerPress, Tx, WheelEvent, el, icon, row, text,
-    text_input,
+    Align, Cursor, El, Key, KeyEvent, PointerPress, Tx, WheelEvent, el, icon, row, text, text_input,
 };
 use strata_kit::icons::IconName;
 use strata_kit::look::Look;
@@ -245,7 +244,11 @@ impl<S: 'static> NumberField<S> {
     ) -> El {
         let k = &look.kit;
         let side = look.frame.control;
-        let glyph = look.icon(if up { IconName::Plus } else { IconName::Minimize });
+        let glyph = look.icon(if up {
+            IconName::Plus
+        } else {
+            IconName::Minimize
+        });
         let off = self.disabled || at_end;
         let mut b = el()
             .key(format!(
@@ -257,13 +260,11 @@ impl<S: 'static> NumberField<S> {
             .size(side, side)
             .radius(k.radius.sm)
             .center()
-            .child(
-                icon(glyph, look.icon_size.md).color(if off {
-                    k.c.icon_faint
-                } else {
-                    k.c.icon_muted
-                }),
-            )
+            .child(icon(glyph, look.icon_size.md).color(if off {
+                k.c.icon_faint
+            } else {
+                k.c.icon_muted
+            }))
             .a11y_hidden();
         if off {
             return b;

@@ -26,7 +26,13 @@ fn press(st: &mut NumberFieldState, key: Key, mods: Mods) -> Option<Option<f64>>
 #[test]
 fn a_number_reads_with_or_without_its_unit() {
     let mut st = roundness(60.0);
-    for (text, value) in [("80", 80.0), (" 80 % ", 80.0), ("80%", 80.0), ("+70", 70.0), ("7", 7.0)] {
+    for (text, value) in [
+        ("80", 80.0),
+        (" 80 % ", 80.0),
+        ("80%", 80.0),
+        ("+70", 70.0),
+        ("7", 7.0),
+    ] {
         typed(&mut st, text);
         assert!(!st.invalid(), "{text:?} is a value");
         assert_eq!(st.commit_text(), Some(value), "{text:?}");
@@ -63,7 +69,11 @@ fn signs_and_decimal_points_follow_the_range() {
     typed(&mut st, "-2.5");
     assert_eq!(st.commit_text(), Some(-2.5));
     typed(&mut st, "1.25");
-    assert_eq!(st.commit_text(), Some(1.3), "rounded to the step's decimals");
+    assert_eq!(
+        st.commit_text(),
+        Some(1.3),
+        "rounded to the step's decimals"
+    );
     assert_eq!(st.edit().text, "1.3");
     typed(&mut st, "1.2.5");
     assert_eq!(st.commit_text(), None);
@@ -99,13 +109,21 @@ fn the_keys_step_page_and_reach_the_limits() {
     let mut st = roundness(60.0);
     assert_eq!(press(&mut st, Key::Up, none), Some(Some(70.0)));
     assert_eq!(press(&mut st, Key::Down, none), Some(Some(60.0)));
-    assert_eq!(press(&mut st, Key::PageUp, none), Some(Some(160.0)), "a page is ten steps");
+    assert_eq!(
+        press(&mut st, Key::PageUp, none),
+        Some(Some(160.0)),
+        "a page is ten steps"
+    );
     assert_eq!(press(&mut st, Key::PageDown, none), Some(Some(60.0)));
     assert_eq!(press(&mut st, Key::End, ctrl), Some(Some(200.0)));
     assert_eq!(press(&mut st, Key::Home, ctrl), Some(Some(0.0)));
     assert_eq!(press(&mut st, Key::PageUp, ctrl), Some(Some(200.0)));
     assert_eq!(press(&mut st, Key::PageDown, ctrl), Some(Some(0.0)));
-    assert_eq!(press(&mut st, Key::Home, none), None, "plain Home moves the caret");
+    assert_eq!(
+        press(&mut st, Key::Home, none),
+        None,
+        "plain Home moves the caret"
+    );
     assert_eq!(press(&mut st, Key::Left, none), None);
     let shift = Mods {
         shift: true,
@@ -113,9 +131,17 @@ fn the_keys_step_page_and_reach_the_limits() {
     };
     assert_eq!(press(&mut st, Key::Up, shift), None, "Shift+Up selects");
     typed(&mut st, "90");
-    assert_eq!(press(&mut st, Key::Enter, none), Some(Some(90.0)), "Return commits");
+    assert_eq!(
+        press(&mut st, Key::Enter, none),
+        Some(Some(90.0)),
+        "Return commits"
+    );
     typed(&mut st, "900");
-    assert_eq!(press(&mut st, Key::Enter, none), Some(None), "and takes Return when it reverts");
+    assert_eq!(
+        press(&mut st, Key::Enter, none),
+        Some(None),
+        "and takes Return when it reverts"
+    );
     assert_eq!(st.edit().text, "90");
 }
 
@@ -135,19 +161,31 @@ fn losing_the_keyboard_commits_but_not_to_the_menu() {
     st.edit_mut().focused = true;
     st.blurred();
     st.edit_mut().focused = false;
-    assert_eq!(st.blurred(), None, "a blur with nothing typed changes nothing");
+    assert_eq!(
+        st.blurred(),
+        None,
+        "a blur with nothing typed changes nothing"
+    );
     st.edit_mut().focused = true;
     st.blurred();
     typed(&mut st, "99");
     st.edit_mut().focused = false;
-    assert_eq!(st.blurred(), Some(None), "reverted: the text changed, the value didn't");
+    assert_eq!(
+        st.blurred(),
+        Some(None),
+        "reverted: the text changed, the value didn't"
+    );
     assert_eq!(st.edit().text, "6");
 }
 
 #[test]
 fn the_wheel_steps_a_notch_or_forty_points() {
     let mut st = roundness(60.0);
-    assert_eq!(st.wheel(1.0, false), Some(70.0), "the wheel rolled up raises it");
+    assert_eq!(
+        st.wheel(1.0, false),
+        Some(70.0),
+        "the wheel rolled up raises it"
+    );
     assert_eq!(st.wheel(-3.0, false), Some(60.0));
     assert_eq!(st.wheel(25.0, true), None);
     assert_eq!(st.wheel(25.0, true), Some(70.0));

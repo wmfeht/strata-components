@@ -348,7 +348,11 @@ impl<S: 'static> Slider<S> {
                 .child(
                     text((*label).to_owned())
                         .font(font)
-                        .color(if current { k.c.text_accent } else { k.c.text_muted })
+                        .color(if current {
+                            k.c.text_accent
+                        } else {
+                            k.c.text_muted
+                        })
                         .a11y_hidden(),
                 );
             if self.disabled {

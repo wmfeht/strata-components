@@ -204,12 +204,23 @@ where
 
 /// The NumberField for `f`, as the view and the poll both build it.
 fn number_field(f: Field) -> NumberField<Gallery> {
-    let (key, get, get_mut): (&str, fn(&Gallery) -> &NumberFieldState, fn(&mut Gallery) -> &mut NumberFieldState) =
-        match f {
-            Field::Workers => ("c20a-workers", |g| &g.c20a.workers, |g| &mut g.c20a.workers),
-            Field::TextSize => ("c20a-text-size", |g| &g.c20a.text_size, |g| &mut g.c20a.text_size),
-            Field::Roundness => ("c20a-roundness", |g| &g.c20a.roundness, |g| &mut g.c20a.roundness),
-        };
+    let (key, get, get_mut): (
+        &str,
+        fn(&Gallery) -> &NumberFieldState,
+        fn(&mut Gallery) -> &mut NumberFieldState,
+    ) = match f {
+        Field::Workers => ("c20a-workers", |g| &g.c20a.workers, |g| &mut g.c20a.workers),
+        Field::TextSize => (
+            "c20a-text-size",
+            |g| &g.c20a.text_size,
+            |g| &mut g.c20a.text_size,
+        ),
+        Field::Roundness => (
+            "c20a-roundness",
+            |g| &g.c20a.roundness,
+            |g| &mut g.c20a.roundness,
+        ),
+    };
     NumberField::new(key, get, get_mut).on_change(move |g: &mut Gallery, v, _| {
         heard(g, format!("{f:?} {v}"));
     })
@@ -275,7 +286,8 @@ pub fn view(g: &Gallery, cx: &mut Cx<Gallery>) -> El {
                     col()
                         .w_full()
                         .gap(look.space.lg)
-                        .px(look.space.md).py(look.space.md)
+                        .px(look.space.md)
+                        .py(look.space.md)
                         .child(density_slider(
                             g,
                             look,
@@ -311,9 +323,11 @@ pub fn view(g: &Gallery, cx: &mut Cx<Gallery>) -> El {
 
     // The Icons pane's Thumbnail size popover: a notch of the wheel moves it 1 px.
     let thumbs = g.c20a.thumbs.value();
-    let slider = Slider::new("c20a-thumbs", |g: &Gallery| &g.c20a.thumbs, |g: &mut Gallery| {
-        &mut g.c20a.thumbs
-    })
+    let slider = Slider::new(
+        "c20a-thumbs",
+        |g: &Gallery| &g.c20a.thumbs,
+        |g: &mut Gallery| &mut g.c20a.thumbs,
+    )
     .wheel(Some(1.0))
     .label("Thumbnail size")
     .value_text(format!("{thumbs} px"))
@@ -343,9 +357,7 @@ pub fn view(g: &Gallery, cx: &mut Cx<Gallery>) -> El {
                 .key("c20a-thumbs-field"),
         );
 
-    let open = |f: Field| {
-        move |g: &mut Gallery, at, tx: &mut Tx| field_menu().open(g, f, at, tx)
-    };
+    let open = |f: Field| move |g: &mut Gallery, at, tx: &mut Tx| field_menu().open(g, f, at, tx);
     let numbers = col()
         .key("c20a-numbers")
         .w(240.0)
@@ -390,10 +402,15 @@ pub fn view(g: &Gallery, cx: &mut Cx<Gallery>) -> El {
             .key("c20a")
             .w_full()
             .h_full()
-            .px(look.space.xl).py(look.space.xl)
+            .px(look.space.xl)
+            .py(look.space.xl)
             .gap(look.space.xl)
             .fill(k.c.layer_01)
-            .child(text("Settings controls").font(look.ty.title).color(k.c.text_base))
+            .child(
+                text("Settings controls")
+                    .font(look.ty.title)
+                    .color(k.c.text_base),
+            )
             .child(
                 row()
                     .w_full()

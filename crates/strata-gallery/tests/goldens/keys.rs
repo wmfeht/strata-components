@@ -27,10 +27,11 @@ fn routed_leaving(g: &mut Gallery, key: &KeyEvent, tx: &mut Tx) -> bool {
     route_key(leaves_every_key, g, key, tx)
 }
 
-/// Page c20d open, with `on_key` routing through `hook` as the app routes through a page's.
+/// Page w1 open, with `on_key` routing through `hook` as the app routes through a page's. W1's
+/// page is static: nothing on it takes focus or a key, so every key reaches the hook.
 fn page_open(hook: KeyHook) -> Runtime<Gallery> {
     let mut g = Gallery::default();
-    g.open("c20d", false);
+    g.open("w1", false);
     let mut rt = strata_gallery::runtime(g, Env::new(false, 1.0));
     rt.on_key = Some(hook);
     rt.frame(0.0);
@@ -49,7 +50,7 @@ fn escape(rt: &mut Runtime<Gallery>) {
 fn a_page_that_takes_escape_keeps_its_page_open() {
     let mut rt = page_open(routed_taking);
     escape(&mut rt);
-    assert_eq!(rt.state.page, Some("c20d"));
+    assert_eq!(rt.state.page, Some("w1"));
     assert!(rt.state.dark, "the page's hook should have run");
 }
 
@@ -61,12 +62,12 @@ fn escape_that_a_page_leaves_goes_back_to_the_index() {
     assert!(!rt.state.dark);
 }
 
-/// The mount the goldens use wires the app's own hooks: page c20d's stub leaves Escape, so the
+/// The mount the goldens use wires the app's own hooks: page w1's `on_key` leaves Escape, so the
 /// gallery goes back to the index.
 #[test]
 fn the_mounted_gallery_routes_keys_through_the_open_page() {
     let mut g = Gallery::default();
-    g.open("c20d", false);
+    g.open("w1", false);
     let mut rt = strata_gallery::runtime(g, Env::new(false, 1.0));
     rt.frame(0.0);
     escape(&mut rt);

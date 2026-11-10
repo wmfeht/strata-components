@@ -283,7 +283,7 @@ fn a_script_opens_the_page_it_taps() {
     let path = fixture("index-open.json");
     let tree = run(&path, "gallery-index-light", &tree_out).expect("fixture runs");
     let opened = [
-        json!({"key": "c20d-placeholder", "name": "C20d IconPicker: not built yet"}),
+        json!({"key": "w1-title", "name": "Matched text"}),
         json!({"key": "index", "absent": true}),
     ];
     assert_eq!(unmet(&tree, &opened), Vec::<String>::new());

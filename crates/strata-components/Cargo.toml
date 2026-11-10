@@ -26,6 +26,9 @@ unicode-segmentation.workspace = true
 syntect.workspace = true
 two-face.workspace = true
 
+# C10b CodeView: drawn widths of wide characters
+unicode-width.workspace = true
+
 # C11 DocumentView
 
 # C12 PdfView

@@ -153,6 +153,8 @@ use crate::code_view::highlight::CodeBlocks;
 use crate::dialog::FOCUS_RING_WIDTH;
 use crate::scroll::{BarLook, overlay};
 
+/// The case folding find runs on, shared with C10b's CodeView.
+pub(crate) use find::Folded;
 pub use find::{Match, Point};
 pub use lang::grammar_token;
 pub use model::{

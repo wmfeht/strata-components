@@ -10,6 +10,7 @@ mod c20b {
     use rune::runtime::ElementInfo;
     use rune::{Env, Key, KeyEvent, Mods, Runtime};
     use strata_components::controls::color_picker::Srgba;
+    use strata_gallery::scenes::c20b::Pick;
     use strata_gallery::{Gallery, scenes};
 
     const FRAME: f64 = 1.0 / 60.0;
@@ -155,6 +156,169 @@ mod c20b {
         rt.frame(FRAME);
         assert_eq!(focused(&rt).as_deref(), Some("c20b-accent-button"));
         assert_eq!(rt.state.page, Some("c20b"));
+    }
+
+    fn shift() -> Mods {
+        Mods {
+            shift: true,
+            ..Mods::default()
+        }
+    }
+
+    /// Rune's modal dismisses on Escape with Shift held, as on bare Escape.
+    #[test]
+    fn shift_escape_in_the_popover_puts_the_colour_back_as_escape_does() {
+        let mut rt = mount("c20b-opaque-light");
+        let start = rt.state.c20b.accent.value();
+        tap(&mut rt, "c20b-accent-button", 0.5, 0.5);
+        press(&mut rt, Key::Right, Mods::default());
+        assert_ne!(rt.state.c20b.accent.value(), start);
+        press(&mut rt, Key::Escape, shift());
+        assert!(!rt.state.c20b.accent.is_open());
+        assert_eq!(rt.state.c20b.accent.value(), start);
+        let h = heard(&rt);
+        assert_eq!(h[h.len() - 2], format!("Accent Cancel {start}"));
+        assert_eq!(h[h.len() - 1], "Accent closed, changed false");
+        rt.frame(FRAME);
+        assert_eq!(focused(&rt).as_deref(), Some("c20b-accent-button"));
+    }
+
+    #[test]
+    fn shift_escape_in_the_popover_field_reverts_typing_then_puts_the_colour_back() {
+        let mut rt = mount("c20b-popover-light");
+        let start = rt.state.c20b.accent.value();
+        tap(&mut rt, "c20b-accent-hex", 0.5, 0.5);
+        rt.update(|g, _| g.c20b.accent.edit_mut().replace_text("#123"));
+        rt.frame(FRAME);
+        press(&mut rt, Key::Escape, shift());
+        assert!(
+            rt.state.c20b.accent.is_open(),
+            "the first Shift+Escape reverts the text"
+        );
+        assert_eq!(rt.state.c20b.accent.edit().text, start.hex());
+        press(&mut rt, Key::Escape, shift());
+        assert!(!rt.state.c20b.accent.is_open());
+        assert_eq!(rt.state.c20b.accent.value(), start);
+        assert_eq!(heard(&rt), ["Accent closed, changed false"]);
+    }
+
+    /// A popover's Cancel comes after the Commits its keys, swatches and releases sent: the
+    /// host saves the opening colour it reports.
+    #[test]
+    fn the_host_saves_the_opening_colour_a_popover_cancel_reports() {
+        let mut rt = mount("c20b-opaque-light");
+        let start = rt.state.c20b.accent.value();
+        tap(&mut rt, "c20b-accent-button", 0.5, 0.5);
+        press(&mut rt, Key::Right, Mods::default());
+        let moved = rt.state.c20b.accent.value();
+        press(&mut rt, Key::Escape, Mods::default());
+        assert_eq!(
+            rt.state.c20b.saved,
+            [(Pick::Accent, moved), (Pick::Accent, start)]
+        );
+    }
+
+    #[test]
+    fn the_plane_passes_shift_ctrl_super_and_cmd_arrows_on() {
+        let mut rt = mount("c20b-popover-light");
+        let start = rt.state.c20b.accent.hsv();
+        let held = [
+            shift(),
+            Mods {
+                ctrl: true,
+                ..Mods::default()
+            },
+            Mods {
+                logo: true,
+                ..Mods::default()
+            },
+            Mods {
+                cmd: true,
+                ..Mods::default()
+            },
+        ];
+        for mods in held {
+            for key in [Key::Right, Key::Up] {
+                press(&mut rt, key, mods);
+                assert_eq!(rt.state.c20b.accent.hsv(), start, "{mods:?}");
+            }
+        }
+        assert!(heard(&rt).is_empty(), "{:?}", heard(&rt));
+        assert_eq!(focused(&rt).as_deref(), Some("c20b-accent-plane"));
+    }
+
+    /// Keys queued in one frame reach the plane and a swatch before the poll notices the
+    /// field's blur.
+    #[test]
+    fn typed_hex_commits_before_a_plane_key_or_a_swatch() {
+        let typed = |rt: &mut Runtime<Gallery>| {
+            tap(rt, "c20b-folder-hex", 0.5, 0.5);
+            rt.update(|g, _| g.c20b.folder.edit_mut().replace_text("#336699"));
+            rt.frame(FRAME);
+        };
+        let mut rt = mount("c20b-opaque-light");
+        typed(&mut rt);
+        // Back past the hue strip to the plane, then a step right.
+        for key in [Key::Tab, Key::Tab, Key::Right] {
+            let mods = if key == Key::Tab {
+                shift()
+            } else {
+                Mods::default()
+            };
+            rt.key(KeyEvent { key, mods });
+        }
+        rt.frame(FRAME);
+        rt.frame(FRAME);
+        assert_eq!(focused(&rt).as_deref(), Some("c20b-folder-plane"));
+        let h = heard(&rt);
+        assert_eq!(h[0], "Folder color Commit #336699", "{h:?}");
+        assert_eq!(h.len(), 2, "{h:?}");
+        assert_eq!(
+            h[1],
+            format!("Folder color Commit {}", rt.state.c20b.folder.value())
+        );
+        assert_eq!(rt.state.c20b.folder.hsv().h.round(), 210.0, "the typed hue");
+
+        let mut rt = mount("c20b-opaque-light");
+        typed(&mut rt);
+        // On to the first preset, Red, and a press on it.
+        rt.key(KeyEvent {
+            key: Key::Tab,
+            mods: Mods::default(),
+        });
+        rt.key(KeyEvent {
+            key: Key::Text(" ".into()),
+            mods: Mods::default(),
+        });
+        rt.frame(FRAME);
+        rt.frame(FRAME);
+        assert_eq!(focused(&rt).as_deref(), Some("c20b-folder-swatch-0-0"));
+        assert_eq!(
+            heard(&rt),
+            ["Folder color Commit #336699", "Folder color Commit #e5484d"]
+        );
+    }
+
+    #[test]
+    fn disabling_a_picker_closes_its_popover_for_good() {
+        let mut rt = mount("c20b-opaque-light");
+        tap(&mut rt, "c20b-accent-button", 0.5, 0.5);
+        assert!(rt.state.c20b.accent.is_open());
+        rt.update(|g, _| g.c20b.disabled = true);
+        for _ in 0..3 {
+            rt.frame(FRAME);
+        }
+        assert!(!rt.state.c20b.accent.is_open());
+        assert_eq!(heard(&rt), ["Accent closed, changed false"]);
+        rt.update(|g, _| g.c20b.disabled = false);
+        for _ in 0..30 {
+            rt.frame(FRAME);
+        }
+        assert!(!rt.state.c20b.accent.is_open());
+        assert!(
+            find(&rt, "c20b-accent-plane").is_none_or(|e| e.exiting),
+            "re-enabling doesn't bring it back"
+        );
     }
 
     #[test]

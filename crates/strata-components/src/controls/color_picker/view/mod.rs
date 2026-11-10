@@ -1,5 +1,5 @@
-//! The picker's element: the plane, the strips, the hex row and the swatch rows, inline or in
-//! a popover behind a button.
+//! The picker's element: the plane, the strips, the hex row and the swatch rows
+//! (`parts.rs`), inline or in a popover behind a button (`button.rs`).
 
 mod button;
 mod parts;
@@ -20,6 +20,14 @@ pub(super) type GetMut<S> = fn(&mut S) -> &mut ColorPickerState;
 type Report<S> = Rc<dyn Fn(&mut S, Srgba, ColorChange, &mut Tx)>;
 type Menu<S> = Rc<dyn Fn(&mut S, Point, &mut Tx) -> bool>;
 type Closed<S> = Rc<dyn Fn(&mut S, bool, &mut Tx)>;
+
+/// Escape as Rune's modal dismisses on it: bare, or with Shift held, but no Ctrl, Alt, Cmd or
+/// Super (`focus_key` in rune's `runtime/input/focus.rs`). Whatever the modal would dismiss on,
+/// the picker takes first as a cancel, so no Escape keeps the colour as a press outside does.
+pub(super) fn escape_key(e: &KeyEvent) -> bool {
+    let m = e.mods;
+    e.key == Key::Escape && !(m.ctrl || m.alt || m.cmd || m.logo)
+}
 
 /// Sizes, all from Look tokens, so they follow the text size.
 #[derive(Clone, Copy)]
@@ -191,7 +199,7 @@ impl<S: 'static> ColorPicker<S> {
     }
 
     /// A picker that can't be used now: dimmed, out of the focus order, deaf to input; the
-    /// button doesn't open.
+    /// button doesn't open, and an open popover closes ([`ColorPicker::poll`]).
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
@@ -234,13 +242,19 @@ impl<S: 'static> ColorPicker<S> {
         }
     }
 
-    /// Call from the host's poll every frame: commits typed hex text once the field has lost
-    /// the keyboard (Rune has no focus-change hook, upstream #106), and reports a popover a
-    /// press outside closed (Rune's modal dismissal has no `Tx`). True when it changed the
-    /// state.
+    /// Call from the host's poll every frame, built with the view's [`ColorPicker::disabled`]:
+    /// commits typed hex text once the field has lost the keyboard (Rune has no focus-change
+    /// hook, upstream #106), reports a popover a press outside closed (Rune's modal dismissal
+    /// has no `Tx`), and closes an open popover once the picker is disabled, keeping the colour
+    /// as a press outside does, so enabling it again doesn't bring the popover back. True when
+    /// it changed the state.
     pub fn poll(&self, s: &mut S, tx: &mut Tx) -> bool {
         let w = self.wire();
         let mut changed = false;
+        if self.disabled && w.st(s).is_open() {
+            w.close(s, false, tx);
+            changed = true;
+        }
         if let Some((kept, moved)) = w.st(s).take_dismissed() {
             w.closed_with(s, kept, moved, false, tx);
             changed = true;
@@ -287,8 +301,6 @@ impl<S: 'static> ColorPicker<S> {
         // open popover's cancel, ahead of Rune's modal dismissal, which can't tell Escape from a
         // press outside (draft U-C20b-2).
         let w = self.wire();
-        body.on_key(move |s: &mut S, e: &KeyEvent, tx: &mut Tx| {
-            e.key == Key::Escape && e.mods == rune::Mods::default() && w.escape(s, tx)
-        })
+        body.on_key(move |s: &mut S, e: &KeyEvent, tx: &mut Tx| escape_key(e) && w.escape(s, tx))
     }
 }

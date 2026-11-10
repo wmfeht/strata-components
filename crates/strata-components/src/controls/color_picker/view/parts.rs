@@ -11,7 +11,7 @@ use strata_kit::look::Look;
 use super::super::state::{ColorChange, ColorPickerState, Part, percent};
 use super::super::swatch::SwatchRow;
 use super::super::value::{Hsv, Srgba};
-use super::{ColorPicker, Metrics};
+use super::{ColorPicker, Metrics, escape_key};
 use crate::contract::Point;
 
 /// The hue strip's stops: red, yellow, green, cyan, blue, magenta and red again, which sRGB
@@ -147,7 +147,8 @@ impl<S: 'static> ColorPicker<S> {
             .cursor(Cursor::Crosshair)
             .on_drag(drag)
             // Arrows move a whole percent, Alt+arrows ten (GTK's 0.01 and 0.1): Left and Right
-            // the saturation, Up and Down the value.
+            // the saturation, Up and Down the value. Typed hex commits first, as for a strip.
+            // Shift, Ctrl, Super and Cmd arrows pass on.
             .on_key(move |s: &mut S, e: &KeyEvent, tx: &mut Tx| {
                 let mods = e.mods;
                 if mods.shift || mods.ctrl || mods.cmd || mods.logo {
@@ -162,6 +163,7 @@ impl<S: 'static> ColorPicker<S> {
                     _ => return false,
                 };
                 tx.instant();
+                w.pending(s, tx);
                 let moved = w.st(s).plane_step(ds, dv);
                 w.commit(s, moved, tx);
                 true
@@ -322,19 +324,17 @@ impl<S: 'static> ColorPicker<S> {
                 .on_edit(move |s: &mut S| &mut get_mut(s).edit)
                 .on_input_change(move |s: &mut S, _: &mut Tx| get_mut(s).edited())
                 .on_input_key(move |s: &mut S, e: &KeyEvent, tx: &mut Tx| {
-                    if e.mods != rune::Mods::default() {
+                    // Typed text reverts first; then the open popover's cancel. A field's keys
+                    // never reach the body's `on_key`, but they do reach the modal's dismissal.
+                    if escape_key(e) {
+                        return w.st(s).revert_text() || w.escape(s, tx);
+                    }
+                    if e.key != Key::Enter || e.mods != rune::Mods::default() {
                         return false;
                     }
-                    match e.key {
-                        Key::Enter => {
-                            let moved = w.st(s).commit_text();
-                            w.commit(s, moved, tx);
-                            true
-                        }
-                        // Typed text reverts first; then the open popover's cancel.
-                        Key::Escape => w.st(s).revert_text() || w.escape(s, tx),
-                        _ => false,
-                    }
+                    let moved = w.st(s).commit_text();
+                    w.commit(s, moved, tx);
+                    true
                 });
             if let Some(menu) = &self.menu {
                 let menu = menu.clone();
@@ -427,6 +427,7 @@ impl<S: 'static> ColorPicker<S> {
                 dot = dot.focusable(true).cursor(Cursor::Pointer).on_press_tx(
                     move |s: &mut S, tx: &mut Tx| {
                         tx.instant();
+                        w.pending(s, tx);
                         let moved = w.st(s).pick(color);
                         w.commit(s, moved, tx);
                     },

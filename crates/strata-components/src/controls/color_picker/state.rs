@@ -15,7 +15,10 @@ pub enum ColorChange {
     /// action, or the popover closing on a press outside. Save it.
     Commit,
     /// A drag was cancelled, or the popover closed on Escape: the colour is back where the
-    /// drag started or the popover opened. Apply it again; nothing was saved.
+    /// drag started or the popover opened. Apply it and save it. After a drag that is the
+    /// colour last saved (its moves were only `Live`); in the popover, keys, swatches, hex
+    /// commits and releases sent `Commit`s before Escape, so the opening colour it reports
+    /// replaces what they saved.
     Cancel,
 }
 
@@ -134,7 +137,7 @@ impl ColorPickerState {
         self.grab.is_some()
     }
 
-    /// The hex field's text is a hex colour, or still being typed into one.
+    /// The hex field's text isn't a hex colour (typed, not yet committed).
     pub fn invalid(&self) -> bool {
         self.invalid
     }
@@ -253,8 +256,9 @@ impl ColorPickerState {
     // ---- Keys and assistive actions ----
 
     /// Saturation `ds` and value `dv` whole percents along (the plane's arrows), from the
-    /// nearest whole percent (C20a's `Range::stepped`), holding at the ends. True when the
-    /// colour moved.
+    /// nearest whole percent (C20a's `Range::stepped`), holding at the ends. From an off-grid
+    /// start (a drag, a swatch) Right then Left lands on a whole percent, not back on the start.
+    /// True when the colour moved.
     pub(super) fn plane_step(&mut self, ds: i32, dv: i32) -> bool {
         let before = self.value();
         let r = percent_range();

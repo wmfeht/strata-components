@@ -100,6 +100,9 @@ pub struct Demo {
     pub log: String,
     /// Every change reported, oldest first (the page's tests read it).
     pub heard: Vec<String>,
+    /// What the host saved, oldest first: each Commit's colour and each Cancel's, as Strata's
+    /// theme editor would write them.
+    pub saved: Vec<(Pick, Srgba)>,
 }
 
 impl Default for Demo {
@@ -126,6 +129,7 @@ impl Default for Demo {
             fields: FieldMenuState::new(),
             log: String::new(),
             heard: Vec::new(),
+            saved: Vec::new(),
         }
     }
 }
@@ -217,6 +221,10 @@ fn picker(p: Pick) -> ColorPicker<Gallery> {
     ColorPicker::new(p.key(), get, get_mut)
         .label(p.name())
         .on_change(move |g: &mut Gallery, c: Srgba, change: ColorChange, _| {
+            // A popover's Cancel undoes the Commits before it: the host saves it as well.
+            if change != ColorChange::Live {
+                g.c20b.saved.push((p, c));
+            }
             heard(g, format!("{} {change:?} {c}", p.name()));
         })
         .on_close(move |g: &mut Gallery, changed, _| {
@@ -393,12 +401,13 @@ pub fn on_key(_g: &mut Gallery, _key: &KeyEvent, _tx: &mut Tx) -> bool {
 }
 
 /// Runs at the start of every frame while this page is open, with the clock in seconds.
-/// Commits a hex field that lost the keyboard, reports a popover a press outside closed, and
-/// closes the field menu if its field went. True when state changed.
+/// Commits a hex field that lost the keyboard, reports a popover a press outside closed,
+/// closes a disabled picker's popover, and closes the field menu if its field went. True when
+/// state changed.
 pub fn poll(g: &mut Gallery, _t: f64, tx: &mut Tx) -> bool {
     let mut changed = false;
     for p in ALL {
-        changed |= picker(p).poll(g, tx);
+        changed |= picker(p).disabled(g.c20b.disabled).poll(g, tx);
     }
     changed |= field_menu().check(g);
     changed

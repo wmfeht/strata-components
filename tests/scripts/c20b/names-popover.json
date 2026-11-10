@@ -1,6 +1,5 @@
 {
   "bullets": [
-    "settings/themes: In that panel the name field is named",
     "settings/themes: A swatch's color chooser draws its Cancel and Select buttons, hex entry, sliders"
   ],
   "scene": "c20b-popover-light",
@@ -37,7 +36,7 @@
       "key": "c20b-accent-hue",
       "role": "slider",
       "name": "Hue",
-      "value": "217°"
+      "value": "217\u00b0"
     },
     {
       "key": "c20b-accent-hex",

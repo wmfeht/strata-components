@@ -45,7 +45,9 @@
 //!   jumps the
 //!   cursor there and a drag follows it; Escape or a lost pointer puts the colour back. Arrows
 //!   move a whole percent from the nearest one, Alt+arrows ten (GTK's 0.01 and 0.1): Left and
-//!   Right the saturation, Up and Down the value.
+//!   Right the saturation, Up and Down the value. So from an off-grid start (a drag, a
+//!   swatch) Right then Left lands on a whole percent, not back on the start. Shift, Ctrl,
+//!   Super and Cmd arrows pass on.
 //! - **The strips:** hue in whole degrees, alpha in whole percents, each a slider whose track
 //!   draws what it sets (the hue's seven stops; the colour fading in over a checkerboard).
 //!   Press and drag as the plane; Rune's slider keys step one (Left and Down down, Right and
@@ -54,7 +56,7 @@
 //!   Return and when the field loses the keyboard (the host's poll), and before any other
 //!   part changes the colour (as GTK applies its entry on focus-out); text that isn't a colour
 //!   reverts, and is marked invalid while typed. Without alpha, eight digits drop theirs.
-//!   Escape with typed text reverts it; the next Escape goes on. A right-click, the Menu key
+//!   Escape (or Shift+Escape) with typed text reverts it; the next Escape goes on. A right-click, the Menu key
 //!   or Shift+F10 opens the host's C21 `FieldMenu` ([`ColorPicker::on_menu`]).
 //! - **Swatches** ([`SwatchRow`]): a heading over a row of dots, a radio group named by it;
 //!   each dot is checked while it is the colour (compared opaque without alpha). A row is one
@@ -64,15 +66,17 @@
 //! - **Tab** goes plane, hue, alpha, hex field, then each swatch row (one stop a row).
 //! - **The button** ([`ColorPicker::button`]): shows the colour, named by the host's label with
 //!   the hex as its description. It opens the picker in a rune-kit Popover with focus on the
-//!   plane. Changes apply as they happen; Escape closes it and puts back the opening colour
-//!   (`Cancel`), a press outside closes it and keeps the colour; focus goes back to the button
-//!   and [`ColorPicker::on_close`] hears whether the colour changed.
+//!   plane. Changes apply as they happen; Escape or Shift+Escape (Rune's modal dismisses on
+//!   both) closes it and puts back the opening colour (`Cancel`), a press outside closes it
+//!   and keeps the colour; focus goes back to the button and [`ColorPicker::on_close`] hears
+//!   whether the colour changed.
 //! - **Reports** ([`ColorChange`]): `Live` for each move of a drag, `Commit` when it settles
 //!   (a release, a key, a hex commit, a swatch, an assistive action, a press outside the
 //!   popover), `Cancel` when a drag is cancelled or the popover closes on Escape. Nothing is
-//!   reported when the colour didn't change.
+//!   reported when the colour didn't change. The host saves `Commit` and `Cancel` alike: in
+//!   the popover a `Cancel` follows the `Commit`s it undoes.
 //! - **Disabled:** dimmed to half, out of the focus order, deaf to input; the button doesn't
-//!   open.
+//!   open, and an open popover closes from the host's poll, keeping the colour.
 //! - **Sizes**, from Look tokens: the picker ten `frame.control` wide (240 at 13 px; the
 //!   popover's 320 less its padding at most), the plane six `frame.control` tall plus a
 //!   cursor, the strips `frame.control`, cursors `icon_size.md`, swatches `icon_size.lg`
@@ -106,7 +110,7 @@
 //!
 //! | Bullet | Covered by |
 //! | --- | --- |
-//! | `settings/themes`: In that panel the name field is named "Theme name", and each color picker is named after its row label | script `names` (the buttons; the name field is Strata's), `names-popover`; a11y goldens |
+//! | `settings/themes`: In that panel the name field is named "Theme name", and each color picker is named after its row label | script `names` (the buttons; the name field is Strata's); a11y goldens |
 //! | `settings/themes`: The editor saves each picked color as `#rrggbb` | scripts `hex-entry`, `swatch-click` (the hex the picker reports without alpha); unit `hex_is_lowercase_and_six_digits_when_opaque` |
 //! | `settings/themes`: Add theme opens … 14 color pickers seeded from the selected theme | **Partial**: buttons seeded from the state (PNG goldens); the panel is Strata's |
 //! | `settings/themes`: Each picker change previews across the interface | **Partial**: `Live` and `Commit` reports (`c20b::a_plane_drag_reports_live_then_one_commit`; scripts `plane-arrow-right`, `plane-arrow-up`, `plane-alt-arrow-down`, `hue-arrow-right`, `hue-end`, `alpha-arrow-left`, `swatch-click`, `swatch-arrow`); the preview is Strata's |
@@ -114,7 +118,7 @@
 //! | `settings/themes`: Editor color swatches keep rounded corners … | **Partial**: the PNG goldens, at rest only (forced focus rings are past the pin) |
 //! | `browser/folder-customization`: The custom-color button opens … a color chooser that recolors the dialog's header icon live | **Partial**: `Live` reports while dragging (script `plane-drag`, the page's preview dot); the dialog is Strata's |
 //! | `browser/folder-customization`: Apply saves the chosen color as `#rrggbb` | **Partial**: the reported hex (scripts `hex-entry`, `plane-drag`); Apply is Strata's |
-//! | `browser/folder-customization`: Closing the custom color dialog by … Escape, or a click outside it returns focus to the custom color button | **Partial**, for the popover: scripts `popover-escape`, `popover-outside`; Strata's dialog is C15's |
+//! | `browser/folder-customization`: Closing the custom color dialog by … Escape, or a click outside it returns focus to the custom color button | **Partial**, for the popover: scripts `popover-escape`, `popover-shift-escape`, `popover-outside`; Strata's dialog is C15's |
 //! | `browser/folder-customization`: In the custom color dialog, Escape from the editor returns to the palette … | N/A: one page (D1) |
 //! | `browser/folder-customization`: The custom color dialog's back button is named "Back to palette" | N/A: one page (D1) |
 //! | `browser/folder-customization`: The custom color editor's spin buttons show Strata's bundled plus and minus icons | N/A: no value popups (D3) |
@@ -122,9 +126,11 @@
 //! | `settings/themes`: A keyboard-focused Select button in a swatch's color chooser shows a 3 px accent halo | N/A: no Select button (D2) |
 //!
 //! Not from a bullet: hex forms and reverts (scripts `hex-short`, `hex-invalid`, `hex-escape`),
-//! Escape cancelling a drag, Escape in the popover's field, assistive increments, the blur
-//! commit, the field menu's hold and the disabled state (`c20b::`), hue kept through black
-//! (unit `a_drag_through_black_keeps_the_hue`).
+//! Escape cancelling a drag, Escape and Shift+Escape in the popover and its field, the host
+//! saving a popover's `Cancel`, modified plane arrows passing on, typed hex committing before
+//! a plane key or a swatch, assistive increments, the blur commit, the field menu's hold, the
+//! disabled state and disabling an open popover (`c20b::`), hue kept through black (unit
+//! `a_drag_through_black_keeps_the_hue`).
 //!
 //! # Deviations
 //!

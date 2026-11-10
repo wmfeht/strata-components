@@ -943,6 +943,23 @@ mod c24 {
     }
 
     #[test]
+    fn a_press_outside_the_panel_closes_it_and_selects_nothing_under_it() {
+        // Review round 1, SF3: the scrim is the panel's outside press too, in place of the
+        // popover's own: a press there over a row closes the panel and leaves the row alone.
+        use strata_gallery::scenes::c24::PANEL_SCRIM;
+        let mut rt = mount("c24-panel-light");
+        assert!(element(&rt, PANEL_SCRIM).is_some());
+        let [rx, ry, rw, rh] = element(&rt, "row-3").expect("row 3").visible;
+        let (x, y) = (viewport(&rt).x + 100.0, ry + rh / 2.0);
+        assert!((rx..rx + rw).contains(&x), "the press lands on row 3");
+        press(&mut rt, x, y, PointerButton::Primary);
+        run(&mut rt, 0.3);
+        assert!(!panel_open(&rt));
+        assert!(element(&rt, PANEL_SCRIM).is_none(), "the scrim is gone");
+        assert_eq!(selected(&rt), Vec::<u64>::new(), "nothing is selected");
+    }
+
+    #[test]
     fn a_wheel_inside_the_panel_keeps_it_open_and_scrolls_nothing_under_it() {
         // browser/scrolling: Wheel scrolling inside an open panel keeps it open.
         let mut rt = mount("c24-panel-light");

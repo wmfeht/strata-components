@@ -16,7 +16,7 @@ use crate::controls::slider::takes_wheel;
 type Get<S> = fn(&S) -> &NumberFieldState;
 type GetMut<S> = fn(&mut S) -> &mut NumberFieldState;
 type Report<S> = Rc<dyn Fn(&mut S, f64, &mut Tx)>;
-type Menu<S> = Rc<dyn Fn(&mut S, Point, &mut Tx)>;
+type Menu<S> = Rc<dyn Fn(&mut S, Point, &mut Tx) -> bool>;
 /// Reports a step's or commit's new value, when it moved.
 type Tell<S> = Rc<dyn Fn(&mut S, Option<f64>, &mut Tx)>;
 
@@ -77,10 +77,12 @@ impl<S: 'static> NumberField<S> {
     }
 
     /// The field's text menu: its right-click, Menu key and Shift+F10, at the window point
-    /// Rune gives. The host opens C21's `FieldMenu` there, and calls
-    /// `NumberFieldState::hold(false)` from its `on_close` and `edited` from its `on_change`.
-    /// Without it the field asks for Rune's own menu, which Linux doesn't show (U-C21-1).
-    pub fn on_menu(mut self, f: impl Fn(&mut S, Point, &mut Tx) + 'static) -> Self {
+    /// Rune gives. The host opens C21's `FieldMenu` there and returns whether it opened; while
+    /// it is open, losing the keyboard to it commits nothing. The host calls
+    /// `NumberFieldState::hold(false)` from the menu's `on_close`, and `edited` from its
+    /// `on_change`. Without it the field asks for Rune's own menu, which Linux doesn't show
+    /// (U-C21-1).
+    pub fn on_menu(mut self, f: impl Fn(&mut S, Point, &mut Tx) -> bool + 'static) -> Self {
         self.menu = Some(Rc::new(f));
         self
     }
@@ -155,8 +157,9 @@ impl<S: 'static> NumberField<S> {
             if let Some(menu) = &self.menu {
                 let menu = menu.clone();
                 field = field.on_secondary_press(move |s: &mut S, p: PointerPress, tx: &mut Tx| {
-                    get_mut(s).hold(true);
-                    menu(s, Point::new(p.x, p.y), tx);
+                    if menu(s, Point::new(p.x, p.y), tx) {
+                        get_mut(s).hold(true);
+                    }
                 });
             }
         }
@@ -200,8 +203,9 @@ impl<S: 'static> NumberField<S> {
         {
             let menu = menu.clone();
             frame = frame.on_secondary_press(move |s: &mut S, p: PointerPress, tx: &mut Tx| {
-                get_mut(s).hold(true);
-                menu(s, Point::new(p.x, p.y), tx);
+                if menu(s, Point::new(p.x, p.y), tx) {
+                    get_mut(s).hold(true);
+                }
             });
         }
 

@@ -1,7 +1,10 @@
-use rune::{Key, KeyEvent, Mods};
+use rune::text::TextSystem;
+use rune::{Cx, El, Env, Key, KeyEvent, Mods, Runtime, Tx, col, el};
+use strata_kit::fonts;
+use strata_kit::look::Look;
 
 use super::state::NumberFieldState;
-use super::view::key_step;
+use super::view::{NumberField, key_step};
 use crate::controls::slider::Range;
 
 /// Strata's Corner roundness: 0–200 % in steps of 10.
@@ -206,4 +209,78 @@ fn the_value_text_has_its_unit() {
     assert_eq!(st.value_text(), "60%");
     st.set_value(400.0);
     assert_eq!((st.value(), st.edit().text.as_str()), (200.0, "200"));
+}
+
+struct Host {
+    field: NumberFieldState,
+    look: Look,
+    heard: Vec<f64>,
+}
+
+/// A field whose host opens no menu for it (it has none to show now), and a button to move
+/// the keyboard to.
+fn field() -> NumberField<Host> {
+    NumberField::new("n", |h: &Host| &h.field, |h: &mut Host| &mut h.field)
+        .on_change(|h: &mut Host, v, _| h.heard.push(v))
+        .on_menu(|_: &mut Host, _, _: &mut Tx| false)
+}
+
+fn view(h: &Host, _: &mut Cx<Host>) -> El {
+    col().child(field().build(h, &h.look)).child(
+        el().key("other")
+            .size(40.0, 20.0)
+            .focusable(true)
+            .on_press(|_: &mut Host| {}),
+    )
+}
+
+fn poll(h: &mut Host, _: f64, tx: &mut Tx) -> bool {
+    field().poll(h, tx)
+}
+
+#[test]
+fn a_menu_press_that_opens_no_menu_keeps_the_blur_commit() {
+    let host = Host {
+        field: workers(4.0),
+        look: Look::fallback(false),
+        heard: Vec::new(),
+    };
+    let text = TextSystem::new(fonts::FONTS, fonts::FAMILIES);
+    let mut rt = Runtime::with_text(host, view, (400.0, 200.0), Env::new(false, 1.0), text);
+    rt.poll = Some(poll);
+    let frames = |rt: &mut Runtime<Host>| {
+        for _ in 0..3 {
+            rt.frame(1.0 / 60.0);
+        }
+    };
+    rt.frame(0.0);
+    frames(&mut rt);
+    let r = rt
+        .elements()
+        .into_iter()
+        .find(|e| e.key.as_deref() == Some("n-input"))
+        .expect("the field")
+        .rect;
+    let (x, y) = (r[0] + r[2] / 2.0, r[1] + r[3] / 2.0);
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    frames(&mut rt);
+    assert!(rt.state.field.edit().focused);
+    for key in [Key::End, Key::Backspace, Key::Text("9".into())] {
+        rt.key(KeyEvent {
+            key,
+            mods: Mods::default(),
+        });
+        frames(&mut rt);
+    }
+    rt.secondary_down(x, y);
+    rt.secondary_up(x, y);
+    frames(&mut rt);
+    rt.key(KeyEvent {
+        key: Key::Tab,
+        mods: Mods::default(),
+    });
+    frames(&mut rt);
+    assert!(!rt.state.field.edit().focused, "the keyboard went on");
+    assert_eq!(rt.state.heard, [9.0], "and the typed count committed");
 }

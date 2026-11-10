@@ -186,7 +186,7 @@ fn density_slider(
 
 fn number<F>(g: &Gallery, look: &Look, field: Field, name: &str, title: &str, menu: F) -> El
 where
-    F: Fn(&mut Gallery, strata_components::contract::Point, &mut Tx) + 'static,
+    F: Fn(&mut Gallery, strata_components::contract::Point, &mut Tx) -> bool + 'static,
 {
     let nf = number_field(field);
     let key = format!("{}-field", nf.key());
@@ -356,7 +356,12 @@ pub fn view(g: &Gallery, cx: &mut Cx<Gallery>) -> El {
                 .key("c20a-thumbs-field"),
         );
 
-    let open = |f: Field| move |g: &mut Gallery, at, tx: &mut Tx| field_menu().open(g, f, at, tx);
+    let open = |f: Field| {
+        move |g: &mut Gallery, at, tx: &mut Tx| {
+            field_menu().open(g, f, at, tx);
+            g.c20a.fields.is_open()
+        }
+    };
     let numbers = col()
         .key("c20a-numbers")
         .w(240.0)

@@ -34,8 +34,11 @@ pub struct DialogShell<S> {
     reduced_motion: bool,
     return_focus: Option<String>,
     footer: Vec<String>,
-    dismiss: Rc<dyn Fn(&mut S)>,
+    dismiss: DismissFn<S>,
 }
+
+/// The shell's dismissal, with the change's `Tx`.
+type DismissFn<S> = Rc<dyn Fn(&mut S, &mut Tx)>;
 
 impl<S: 'static> DialogShell<S> {
     /// A closed shell keyed `key`, named `label` for assistive technology. `on_dismiss` runs
@@ -58,8 +61,15 @@ impl<S: 'static> DialogShell<S> {
             reduced_motion: false,
             return_focus: None,
             footer: Vec::new(),
-            dismiss: Rc::new(on_dismiss),
+            dismiss: Rc::new(move |s, _| on_dismiss(s)),
         }
+    }
+
+    /// Replaces `on_dismiss` with one that gets the dismissal's `Tx`: to raise an intent or
+    /// move focus in the change that closes the dialog.
+    pub fn on_dismiss_tx(mut self, on_dismiss: impl Fn(&mut S, &mut Tx) + 'static) -> Self {
+        self.dismiss = Rc::new(on_dismiss);
+        self
     }
 
     /// Shown while true. Closing plays the exit motion; the dialog is inert as it leaves.
@@ -196,7 +206,7 @@ impl<S: 'static> DialogShell<S> {
             panel = panel.focus_return(key);
         }
         let dismiss = self.dismiss;
-        panel = panel.modal(!self.blocking, move |s: &mut S| dismiss(s));
+        panel = panel.modal_tx(!self.blocking, move |s: &mut S, tx: &mut Tx| dismiss(s, tx));
 
         layer.push(
             col()

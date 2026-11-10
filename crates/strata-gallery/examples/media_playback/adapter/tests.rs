@@ -2,9 +2,12 @@ use std::cell::RefCell;
 use std::time::Duration;
 
 use strata_components::media_player::{MediaIntent, PlaybackClock, PlaybackState};
-use strata_platform::media::{ClockState, MediaClock, Reading};
+use strata_platform::media::{ClockState, MediaClock, Reading, SinkEvent};
 
-use super::{ClockAdapter, Transport, apply};
+use super::{ClockAdapter, Recovered, Recovery, Transport, apply};
+
+/// Where a test's reopen says the clock stopped.
+const STOPPED: Duration = Duration::from_millis(1_500);
 
 /// The sink calls an intent made, in order.
 #[derive(Default)]
@@ -22,6 +25,10 @@ impl Transport for Calls {
     }
     fn set_volume(&self, volume: f64, muted: bool) {
         self.0.borrow_mut().push(format!("volume {volume} {muted}"));
+    }
+    fn reopen(&self) -> Duration {
+        self.0.borrow_mut().push("reopen".into());
+        STOPPED
     }
 }
 
@@ -111,4 +118,67 @@ fn intents_reach_the_sink_and_seeks_restart_the_decoder() {
             "play"
         ]
     );
+}
+
+fn reading(state: ClockState, position: Duration) -> Reading {
+    Reading {
+        position,
+        state,
+        generation: 1,
+    }
+}
+
+#[test]
+fn a_lost_device_an_error_and_a_stall_reopen_three_times_in_a_row_then_show_the_failure() {
+    let calls = Calls::default();
+    let mut recovery = Recovery::default();
+    let reopened = Some(Recovered::Reopened { at: STOPPED });
+    assert_eq!(
+        recovery.handle(&calls, &SinkEvent::Underrun { at: STOPPED }),
+        None
+    );
+    let lost = SinkEvent::DeviceLost {
+        message: "gone".into(),
+    };
+    assert_eq!(recovery.handle(&calls, &lost), reopened);
+    // A stall: the device stopped taking PCM, or a fresh output never started.
+    assert_eq!(
+        recovery.handle(&calls, &SinkEvent::Stalled { at: STOPPED }),
+        reopened
+    );
+    let error = SinkEvent::Error {
+        message: "broken".into(),
+    };
+    assert_eq!(recovery.handle(&calls, &error), reopened);
+    assert_eq!(
+        recovery.handle(&calls, &error),
+        Some(Recovered::GaveUp {
+            detail: "broken".into()
+        })
+    );
+    assert_eq!(calls.0.into_inner(), ["reopen", "reopen", "reopen"]);
+}
+
+#[test]
+fn playing_on_past_a_reopen_clears_the_count() {
+    let calls = Calls::default();
+    let mut recovery = Recovery::default();
+    let stalled = SinkEvent::Stalled { at: STOPPED };
+    for _ in 0..3 {
+        assert!(matches!(
+            recovery.handle(&calls, &stalled),
+            Some(Recovered::Reopened { .. })
+        ));
+        // Ready again where it stopped, or moved on while not playing: not yet recovered.
+        recovery.observe(reading(ClockState::Playing, STOPPED));
+        recovery.observe(reading(ClockState::Seeking, STOPPED * 2));
+    }
+    recovery.observe(reading(
+        ClockState::Playing,
+        STOPPED + Duration::from_millis(20),
+    ));
+    assert!(matches!(
+        recovery.handle(&calls, &stalled),
+        Some(Recovered::Reopened { .. })
+    ));
 }

@@ -22,11 +22,10 @@ use rune::{App, AppSpec, Cx, El, KeyEvent, Pixels, Tx, col};
 use strata_components::media_player::{Clip, MediaError, MediaKind, MediaPlayer, MediaState};
 use strata_kit::look::Look;
 use strata_platform::media::{
-    AudioSink, ClockState, FramePacer, MediaClock, Output, PcmFormat, Presented, SinkEvent,
-    SinkOptions, VideoFrame,
+    AudioSink, ClockState, FramePacer, Output, PcmFormat, Presented, SinkOptions, VideoFrame,
 };
 
-use adapter::ClockAdapter;
+use adapter::{ClockAdapter, Recovered, Recovery};
 
 const FORMAT: PcmFormat = PcmFormat::STEREO_S16_48K;
 const CLIP: Duration = Duration::from_secs(60);
@@ -118,6 +117,7 @@ struct Host {
     frames: Pixels,
     clock: ClockAdapter,
     sink: Option<AudioSink>,
+    recovery: Recovery,
     pacer: FramePacer,
     decoder: Decoder,
     /// Clock position minus the shown frame's time while playing, in µs.
@@ -148,6 +148,7 @@ fn init() -> Host {
         frames,
         clock: ClockAdapter::new(Some(CLIP)),
         sink: None,
+        recovery: Recovery::default(),
         decoder: Decoder::at(Duration::ZERO),
         offsets: Vec::new(),
     }
@@ -204,21 +205,19 @@ fn poll(h: &mut Host, now: f64, tx: &mut Tx) -> bool {
     let Some(sink) = &h.sink else { return false };
     let mut changed = false;
     for event in sink.drain_events() {
-        match event {
-            SinkEvent::DeviceLost { .. } => {
-                sink.reopen();
-                let at = sink.reading().position;
+        match h.recovery.handle(sink, &event) {
+            Some(Recovered::Reopened { at }) => {
                 h.pacer.flush();
                 h.decoder = Decoder::at(at);
             }
-            SinkEvent::Error { message } => {
+            Some(Recovered::GaveUp { detail }) => {
                 h.media.set_error(Some(MediaError {
                     title: "Playback failed".into(),
-                    detail: message,
+                    detail,
                 }));
                 changed = true;
             }
-            _ => {}
+            None => {}
         }
     }
     h.decoder.feed(sink, &mut h.pacer);
@@ -231,6 +230,7 @@ fn poll(h: &mut Host, now: f64, tx: &mut Tx) -> bool {
     }
     h.clock.refresh(sink);
     let r = h.clock.reading();
+    h.recovery.observe(r);
     if r.state == ClockState::Playing
         && let Some(shown) = h.pacer.shown()
     {

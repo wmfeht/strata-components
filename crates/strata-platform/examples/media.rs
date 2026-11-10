@@ -8,7 +8,9 @@
 //!
 //! Keys: Space plays or pauses (from the end it starts again), Left and Right seek 5 s, S seeks
 //! somewhere else. The line under the picture shows the clock, its state and how far the clock
-//! is past the frame on screen; closing the window prints the sync report on stderr.
+//! is past the frame on screen; closing the window prints the sync report on stderr. A lost
+//! device, an error or a stall reopens the output where the clock stopped, up to three times
+//! in a row.
 //!
 //! - `cargo run -p strata-platform --features media-audio --example media` plays on the
 //!   default output.
@@ -43,6 +45,8 @@ mod demo {
     /// PCM goes in chunks of one video frame's time, as a decoder sends it.
     const CHUNK_FRAMES: u64 = FORMAT.rate as u64 / FPS as u64;
     const BEEP: Duration = Duration::from_millis(60);
+    /// Reopens in a row before a failure stands: Strata's `MAX_STALL_RECOVERIES`.
+    const MAX_REOPENS: u32 = 3;
 
     static NULL: AtomicBool = AtomicBool::new(false);
 
@@ -141,6 +145,9 @@ mod demo {
         /// Clock position minus the shown frame's time, in µs, at each present while playing.
         offsets: Vec<i64>,
         seed: u64,
+        /// Reopens since the clock last played on, and where the last one started.
+        reopens: u32,
+        reopened_at: Option<Duration>,
     }
 
     impl Player {
@@ -154,6 +161,8 @@ mod demo {
                 finished: false,
                 offsets: Vec::new(),
                 seed: 0x2545_f491_4f6c_dd1d,
+                reopens: 0,
+                reopened_at: None,
             })
         }
 
@@ -224,13 +233,30 @@ mod demo {
             self.seek(Duration::from_millis(self.seed % 55_000));
         }
 
-        /// Handles what the sink did on its own; a lost device reopens where it stopped.
+        /// Handles what the sink did on its own. A lost device, an error and a stall reopen
+        /// the output where the clock stopped, as Strata answers its stuck-audio and frame
+        /// timeouts: up to three times in a row (the clock playing on past the reopen clears
+        /// the count), and then the failure stands.
         fn events(&mut self) -> Vec<SinkEvent> {
+            let r = self.sink.reading();
+            if r.state == ClockState::Playing && self.reopened_at.is_some_and(|at| r.position > at)
+            {
+                self.reopens = 0;
+                self.reopened_at = None;
+            }
             let events = self.sink.drain_events();
             for event in &events {
-                if let SinkEvent::DeviceLost { .. } = event {
+                let failed = matches!(
+                    event,
+                    SinkEvent::DeviceLost { .. }
+                        | SinkEvent::Error { .. }
+                        | SinkEvent::Stalled { .. }
+                );
+                if failed && self.reopens < MAX_REOPENS {
+                    self.reopens += 1;
                     self.sink.reopen();
                     let at = self.sink.reading().position;
+                    self.reopened_at = Some(at);
                     self.pacer.flush();
                     self.generator = Generator::at(at);
                     self.finished = false;

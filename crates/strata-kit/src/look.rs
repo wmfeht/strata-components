@@ -166,7 +166,7 @@ impl Look {
             },
             tiles: Ladder::strata_tiles(),
             thumbnails: ThumbnailSteps {
-                sizes: vec![128.0, 256.0],
+                sizes: vec![32.0, 64.0, 128.0, 256.0],
             },
             roundness: 1.0,
             glow: Glow {
@@ -502,6 +502,17 @@ impl Ladder {
 
 /// Thumbnail size classes in pixels, smallest first. A view asks for the class that covers
 /// its tile, so thumbnails are rendered once per class, not once per tile size.
+///
+/// Strata's are 32, 64, 128 and 256 px ([`Look::fallback`]). Rune draws a streamed `Pixels`
+/// bilinearly with no mipmaps (C25's draft U-C25-1), which averages cleanly only down to 2:1,
+/// so each class is twice the one below it: the class a draw gets is less than twice its size
+/// for any draw of 16 px or more, where a 128 px image drawn at 37 px aliases.
+///
+/// There is no 512 px class for tiles over 128 pt at scale 2. Strata renders no thumbnail
+/// larger than 256 px (`CANONICAL_MAX_EDGE`, `src/ui/thumbnail_cache.rs`), so a 512 step would
+/// still get 256 px images, drawn larger as now; drawing larger softens but doesn't alias; and
+/// a 512 px image holds 1 MiB (four times a 256 px one) of C25's budget, plus Rune's copy in
+/// its image pages. Add one, with a larger budget, when Strata's canonical edge grows.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ThumbnailSteps {
     sizes: Vec<f32>,

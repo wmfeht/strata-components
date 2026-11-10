@@ -22,8 +22,8 @@ strata-kit.workspace = true
 # C3 IconsGrid: captions cut between grapheme clusters
 unicode-segmentation.workspace = true
 
-# C10a highlighter: syntect and two-face
-syntect.workspace = true
+# C10a highlighter: syntect and two-face, on S4's onig backend
+syntect = { workspace = true, features = ["parsing", "regex-onig"] }
 two-face.workspace = true
 
 # C10b CodeView: drawn widths of wide characters

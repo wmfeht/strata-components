@@ -13,13 +13,16 @@ parent and shows over a fullscreen parent. On Xwayland, `WM_TRANSIENT_FOR` set f
 connection does the same. Real `wayland:` handles from GTK 3, GTK 4 and Chromium imported
 cleanly.
 
-Three conditions need an [owner decision](#owner-decisions) before P4 ships. None stops P4 from
-starting:
+Three conditions needed an [owner decision](#owner-decisions) before P4 ships. None stopped P4
+from starting, and the owner ruled all three on 2026-11-10:
 
-1. Ubuntu 24.04's libwayland 1.22 gives the shim no route to winit's `wl_display`.
-2. An `x11:` parent can't be honoured by a chooser running on Wayland.
+1. Ubuntu 24.04's libwayland 1.22 gives the shim no route to winit's `wl_display`. **Ruled:**
+   Ubuntu 24.04 is dropped, and libwayland 1.23 is the minimum supported version.
+2. An `x11:` parent can't be honoured by a chooser running on Wayland. **Ruled:** parentless
+   (a), with the Xwayland helper (b) as the upgrade path.
 3. The FileChooser portal carries no activation token, so a parentless chooser is placed and
-   focused only by the compositor's own policy. That matters most on GNOME.
+   focused only by the compositor's own policy. That matters most on GNOME. **Ruled:**
+   compositor policy plus a tokenless `focus()` (a + b), which Strata calls, not the shim.
 
 Only sway and Xwayland ran here. Every Hyprland, GNOME and KDE cell is a hand test pending with
 a source-based expectation. QEMU runs (Tier B) were not approved for this spike;
@@ -89,7 +92,7 @@ Xwayland. A Wayland chooser with an `x11:` parent is covered under
     `meta_window_wayland_new`), so a parent set before the first commit passes Mutter's
     `is_valid_child`. `set_parent_of` calls `meta_window_set_transient_for`. A bad handle gets
     `destroyed`. An invalid child surface is a **fatal protocol error**. Ubuntu 24.04 (Mutter 46)
-    gets no parenting from Rune because of libwayland 1.22
+    gets no parenting from Rune because of libwayland 1.22, and is unsupported
     ([decision 1](#1-ubuntu-2404-and-libwayland-122)).
 12. GTK 4 and GTK ≥ 3.24.44 export v2. Ubuntu 24.04's GTK 3.24.41 has only the v1 exporter,
     finds no exporter on Mutter, warns "Server is missing xdg_foreign support" and sends `""`.
@@ -237,7 +240,7 @@ client. Centring is a no-op on Wayland (winit can't position windows there). So 
 | `x11:` handle, chooser on Wayland | Parentless (as Strata does today, `src/ui/chooser.rs:2315`), or an X11 helper process ([decision 2](#2-x11-parents-on-a-wayland-session)) | Measured: both paths work on sway (`e3/children/req4–6`, `e3-chromium/children/req2–3`) |
 | `x11:` handle with a bad xid | No transient-for. Centre on the screen. | Measured (E2.1) |
 | Parent closes while the chooser is open | Keep the chooser open and parentless. | Measured (E1.6a) |
-| Ubuntu 24.04 (libwayland 1.22) | Parentless ([decision 1](#1-ubuntu-2404-and-libwayland-122)) | Source |
+| Ubuntu 24.04 (libwayland 1.22) | Unsupported. The shim still opens it parentless ([decision 1](#1-ubuntu-2404-and-libwayland-122)) | Source |
 
 How a parentless chooser is placed and focused, per compositor (E4.1, `e4/`):
 
@@ -245,7 +248,7 @@ How a parentless chooser is placed and focused, per compositor (E4.1, `e4/`):
 | --- | --- | --- |
 | sway | Tiled beside the focused window | Focused, unless a fullscreen window is on the workspace (measured) |
 | Hyprland | Strata's window rule centres it on the monitor | Expected to take focus, as new windows do by default (pending) |
-| GNOME | Mutter's placement | Uncertain without a token (pending; [decision 3](#3-no-activation-token-and-focus-of-a-parentless-chooser)) |
+| GNOME | Mutter's placement | Uncertain without a token. Strata also calls the tokenless `focus()`; the hand test before M6 is pending ([decision 3](#3-no-activation-token-and-focus-of-a-parentless-chooser)) |
 | KDE | KWin's placement policy | Focus-stealing prevention, Low by default (pending) |
 
 Sway never focuses a view that maps while its workspace has a fullscreen view, **even a
@@ -353,7 +356,9 @@ prototype got wrong or only partly tested; each is marked.
 
 ## Owner decisions
 
-These are open. Each lists options and a recommendation. S3 decides none of them.
+S3 decided none of these; it listed options and a recommendation for each. **The owner ruled
+all three on 2026-11-10**, each under its heading below. P4's `policy.rs` holds the code for
+decisions 1 and 2.
 
 ### 1. Ubuntu 24.04 and libwayland 1.22
 
@@ -369,6 +374,12 @@ anyway, because GTK 3.24.41 can't export to Mutter.
 
 **Recommendation: a.** It costs one LTS, which Ubuntu 26.04 replaces, and GTK 3 apps on 24.04
 are parentless regardless. c depends on a private ABI and should not ship.
+
+**Ruled (2026-11-10): drop support for Ubuntu 24.04.** libwayland 1.23 is the minimum supported
+version, for P4 and for every shim that reaches winit's display (P0, P1, P2). The graceful
+behaviour stays: on an older libwayland P4 reports `Parentless { NoDisplay }`, and P0, P1 and
+P2 keep their existing fallbacks. That is an unsupported environment, not a supported
+fallback: it gets no hand test, and whether to remove its code is a separate question.
 
 ### 2. `x11:` parents on a Wayland session
 
@@ -389,6 +400,9 @@ Rune chooser can't.
 **Recommendation: a for the first Rune release** (parity with today), with b recorded as the
 upgrade path if users miss it.
 
+**Ruled (2026-11-10): a.** An `x11:` parent on a Wayland chooser stays parentless
+(`Reason::Mismatch`). The Xwayland helper process (b) is recorded as the upgrade path.
+
 ### 3. No activation token, and focus of a parentless chooser
 
 FileChooser carries no token, so "activation token only" isn't available, and a parentless
@@ -406,6 +420,10 @@ window and show "is ready" instead. That's the case for `""` and `x11:` parents 
 
 **Recommendation: a plus b.** Revisit c only if the GNOME hand test shows the chooser opening
 behind the app.
+
+**Ruled (2026-11-10): a plus b, with the `focus()` call left to Strata.** The shim calls no
+`focus()`; Strata calls Rune's tokenless `focus()` on a parentless chooser. GNOME is verified by
+hand before M6.
 
 ## Constraints for later WPs
 
@@ -545,7 +563,7 @@ guest at a time.
 | `arch`, `omarchy-4` | Hyprland 0.56.2, Wayland and Xwayland; Chromium on omarchy-4 | `s3-child` runs here too (glibc 2.44) |
 | `fedora-workstation` | KWin 6.7.5 Wayland, Firefox 155, GTK 3.24.52 | `s3-peer` only |
 | `fedora-workstation-x11` | kwin_x11 6.7.5 | `s3-peer --x11` only |
-| `ubuntu-2404` | GNOME 46, libwayland 1.22, GTK 3.24.41, snap Firefox | Decisions 1 and 3; `s3-peer` only |
+| `ubuntu-2404` | GNOME 46, libwayland 1.22, GTK 3.24.41, snap Firefox | **Dropped:** Ubuntu 24.04 is unsupported (decision 1). Was decisions 1 and 3; `s3-peer` only |
 | `nixos` | GNOME 50.4 | Prebuilt binaries need nix-ld or `patchelf` for the loader |
 
 ```sh

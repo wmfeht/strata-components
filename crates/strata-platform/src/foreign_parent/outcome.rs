@@ -80,7 +80,8 @@ pub enum Reason {
     /// The compositor has no `zxdg_importer_v2` (a v1-only compositor counts as none).
     NoImporter,
     /// winit's Wayland display is out of reach: libwayland below 1.23 has no
-    /// `wl_proxy_get_display` (Ubuntu 24.04).
+    /// `wl_proxy_get_display` (Ubuntu 24.04). An unsupported environment: 1.23 is the minimum
+    /// supported version (S3 decision 1).
     NoDisplay,
     /// The compositor destroyed the import at once: the handle is invalid, stale, or was
     /// already unexported.

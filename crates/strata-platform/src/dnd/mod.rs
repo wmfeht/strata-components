@@ -82,8 +82,9 @@
 //!   there. Other compositors' Escape is a hand test pending.
 //! - **X11 cursor:** the source is grab-less (winit holds the grab), so the cursor shows no
 //!   copy or move feedback; the icon follows the pointer.
-//! - **libwayland < 1.23** (Ubuntu 24.04): winit's display is out of reach, and so is drag
-//!   and drop on Wayland ([`Status::unsupported`]).
+//! - **libwayland < 1.23** (Ubuntu 24.04): unsupported, as 1.23 is the minimum (S3 decision
+//!   1). winit's display is out of reach there, and so is drag and drop on Wayland
+//!   ([`Status::unsupported`]).
 //!
 //! # Rune's capture on Wayland
 //!

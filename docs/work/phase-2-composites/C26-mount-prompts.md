@@ -26,6 +26,11 @@ without it.
   P9's request and response path. strata-components owns no I/O, and the binding only
   forwards signals, so it can sit here behind a `gio` cargo feature, or in Strata. Decide
   with the owner, and record the choice in the module docs.
+  **Decided by the owner (option B): the binding lives in Strata.** It is tangled with
+  Strata's policy, and `show-processes` needs `unsafe` and `/proc`. The module docs
+  (`mount_prompts/mod.rs`, "The GIO binding lives in Strata") give the mapping it must
+  follow, and a test-only reference binding in `crates/strata-gallery/tests/c26.rs` takes the
+  place of the `gio` feature's round trip below.
 
 ## Tests
 
@@ -35,4 +40,4 @@ signal round-trips through P9 in a headless runtime.
 
 ## Done when
 
-The prompts cover sign-in, the host key and LUKS. The binding location is decided.
+The prompts cover sign-in, the host key and LUKS. The binding location is decided: in Strata.

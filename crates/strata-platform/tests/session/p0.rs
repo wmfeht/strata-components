@@ -460,9 +460,10 @@ fn a_data_device_write_the_compositor_drops_is_reported_cancelled() {
     probe.no_errors();
 }
 
-/// libwayland < 1.23 (Ubuntu 24.04), on any host: the probe's test switch makes the lookup
-/// of `wl_proxy_get_display` find nothing. winit's display is reported Unsupported, the data
-/// device is out of reach, and data control falls back to a connection of its own, both ways.
+/// libwayland < 1.23 (Ubuntu 24.04, an unsupported environment), on any host: the probe's
+/// test switch makes the lookup of `wl_proxy_get_display` find nothing. winit's display is
+/// reported Unsupported, the data device is out of reach, and data control falls back to a
+/// connection of its own, both ways.
 #[test]
 #[ignore = "needs a private session: mise run test-platform"]
 fn without_winits_display_a_wayland_window_falls_back_to_its_own_data_control() {
@@ -501,13 +502,14 @@ fn without_winits_display_a_wayland_window_falls_back_to_its_own_data_control() 
     peer_offers_three(&probe, at, Via::DataControl, Selection::Clipboard);
 }
 
-/// libwayland < 1.23 and no data control (mutter's case, Ubuntu 24.04's GNOME), simulated:
-/// no Wayland route is left, so the selections go through Xwayland. The window's X11 copy
-/// reaches an X11 peer, and a Wayland peer through the compositor's bridge, and the window
-/// reads the Wayland peer's copy back the same way. wlroots bridges the clipboard only while
-/// an Xwayland window has keyboard focus (its xwm denies both directions otherwise), so the
-/// X11 peer's window has it here. wlroots compositors have data control and never take this
-/// route; mutter's bridge, the one it is for, is a hand test.
+/// libwayland < 1.23 and no data control (mutter's case, Ubuntu 24.04's GNOME, an unsupported
+/// environment), simulated: no Wayland route is left, so the selections go through Xwayland.
+/// The window's X11 copy reaches an X11 peer, and a Wayland peer through the compositor's
+/// bridge, and the window reads the Wayland peer's copy back the same way. wlroots bridges the
+/// clipboard only while an Xwayland window has keyboard focus (its xwm denies both directions
+/// otherwise), so the X11 peer's window has it here. wlroots compositors have data control and
+/// never take this route; mutter's bridge, the one it is for, gets no hand test, as 24.04 is
+/// unsupported.
 #[test]
 #[ignore = "needs a private session: mise run test-platform"]
 fn without_any_wayland_route_a_wayland_window_takes_x11_selections_through_xwayland() {

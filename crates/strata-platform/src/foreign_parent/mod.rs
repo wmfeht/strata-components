@@ -75,18 +75,19 @@
 //!
 //! # S3's owner decisions
 //!
-//! Each is pending the owner's ruling; the shim follows S3's recommendation, kept in one
-//! place (`policy.rs`) so a different ruling is a small change:
+//! The owner ruled all three on 2026-11-10, as S3 recommended. The code for them is kept in
+//! one place (`policy.rs`):
 //!
-//! 1. **libwayland below 1.23** (Ubuntu 24.04): winit's display is out of reach, so a Wayland
-//!    window opens parentless ([`Reason::NoDisplay`]). Pending the owner's ruling (S3
-//!    decision 1).
+//! 1. **libwayland below 1.23** (Ubuntu 24.04): unsupported. libwayland 1.23 is the minimum
+//!    supported version. On an older one winit's display is out of reach, and a Wayland window
+//!    still opens parentless ([`Reason::NoDisplay`]) rather than failing (S3 decision 1).
 //! 2. **An `x11:` parent for a Wayland window** (Electron, Java, Wine and other Xwayland
-//!    apps): parentless ([`Reason::Mismatch`]), as a GTK portal dialog is today. Pending the
-//!    owner's ruling (S3 decision 2).
+//!    apps): parentless ([`Reason::Mismatch`]), as a GTK portal dialog is today. A helper
+//!    process on Xwayland is the recorded upgrade path (S3 decision 2).
 //! 3. **No activation token**: the FileChooser request carries none, so a parentless window is
-//!    placed and focused by the compositor's policy. The shim calls no `focus()`; whether to
-//!    is the caller's choice. Pending the owner's ruling (S3 decision 3).
+//!    placed and focused by the compositor's policy, and the caller also calls Rune's tokenless
+//!    `focus()` on it. The shim calls no `focus()` itself: that call is Strata's (S3
+//!    decision 3). GNOME is a hand test before M6.
 //!
 //! # Known limits
 //!

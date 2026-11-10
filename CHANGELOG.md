@@ -96,9 +96,9 @@ Nothing is released yet. The first release is planned for milestone M1 with the 
     drops a window's import from its `on_close` and detaches it from the transfer substrate,
     and `shutdown` destroys every import with the transfer substrate before the event loop
     ends.
-  - Parentless where no route exists: an `x11:` parent for a Wayland window and libwayland
-    below 1.23 (S3's decisions 2 and 1, pending the owner's rulings), and a compositor without
-    `zxdg_importer_v2`. No modality on Wayland: Rune hands out no `xdg_toplevel` for
+  - Parentless where no route exists: an `x11:` parent for a Wayland window (S3's decision
+    2), libwayland below 1.23 (an unsupported environment: S3's decision 1 makes 1.23 the
+    minimum), and a compositor without `zxdg_importer_v2`. No modality on Wayland: Rune hands out no `xdg_toplevel` for
     `xdg_wm_dialog_v1`.
 - `clipboard`: copy and paste with any MIME types on Wayland and X11, beside Rune's own
   text clipboard. A `Clipboard` per state type, attached from `App::on_window`.

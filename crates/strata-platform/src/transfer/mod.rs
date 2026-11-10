@@ -20,7 +20,8 @@
 //!
 //! A Wayland window with neither winit's display (libwayland < 1.23) nor data control on a
 //! connection of its own (mutter has none) has no Wayland route at all: Ubuntu 24.04's GNOME
-//! session. There the selections go through Xwayland instead ([`Status::x11`]): X11
+//! session, an unsupported environment (libwayland 1.23 is the minimum, S3 decision 1). There
+//! the selections go through Xwayland instead ([`Status::x11`]): X11
 //! selections on a connection of our own, which the compositor bridges to Wayland clients,
 //! as arboard falls back (the owner's choice, option a of S2's first question).
 //!

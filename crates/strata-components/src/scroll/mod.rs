@@ -194,5 +194,5 @@ mod feed;
 pub use autoscroll::{
     Autoscroll, AutoscrollPointer, AutoscrollSettings, Shield, Start, Stop, Target,
 };
-pub use bar::{Bar, BarLook, BarMode, overlay};
+pub use bar::{Bar, BarLook, BarMode, anchor, overlay};
 pub use feed::ScrollFeed;

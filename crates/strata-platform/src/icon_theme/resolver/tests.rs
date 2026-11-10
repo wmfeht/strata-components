@@ -88,6 +88,28 @@ fn an_unknown_or_unsafe_theme_name_searches_hicolor_alone() {
 }
 
 #[test]
+fn only_a_few_unknown_theme_names_are_kept() {
+    let mut r = resolver();
+    for i in 0..100 {
+        assert!(find(&mut r, &format!("Nope{i}"), &["only-hicolor"], 16, 1).is_some());
+    }
+    // Each kept name is checked on every revalidation.
+    assert!(
+        r.themes.len() <= super::UNKNOWN_THEMES + 1,
+        "{}",
+        r.themes.len()
+    );
+    // The known ones stay.
+    assert!(find(&mut r, "Child", &["only-child"], 16, 1).is_some());
+    for i in 0..100 {
+        find(&mut r, &format!("Nope{i}"), &["x"], 16, 1);
+    }
+    for theme in ["Child", "Parent", "Grand", "hicolor"] {
+        assert!(r.themes.contains_key(theme), "{theme}");
+    }
+}
+
+#[test]
 fn themes_are_searched_outside_names() {
     let mut r = resolver();
     // `primary` is only in hicolor; the theme's own `fallback` wins over it.

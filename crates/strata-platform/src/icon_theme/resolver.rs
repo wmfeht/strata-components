@@ -4,7 +4,7 @@
 #[cfg(test)]
 mod tests;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -14,6 +14,11 @@ use super::matching;
 
 /// The theme the spec makes every chain end in.
 pub const FALLBACK_THEME: &str = "hicolor";
+
+/// How many names of themes that no root has stay remembered, so a lookup in one doesn't read
+/// the roots again. Each is checked on every revalidation, so an app that tries arbitrary
+/// names (or a theme that inherits many missing ones) mustn't add one for good.
+const UNKNOWN_THEMES: usize = 8;
 
 /// Where icons are looked up.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -94,6 +99,8 @@ impl Resolved {
 pub struct IconResolver {
     search: SearchPath,
     themes: HashMap<String, Theme>,
+    /// The names in `themes` that no root had when read, oldest first.
+    unknown: VecDeque<String>,
     unthemed: Option<Unthemed>,
 }
 
@@ -102,6 +109,7 @@ impl IconResolver {
         Self {
             search,
             themes: HashMap::new(),
+            unknown: VecDeque::new(),
             unthemed: None,
         }
     }
@@ -178,7 +186,7 @@ impl IconResolver {
             .collect();
         for name in stale {
             let theme = Theme::load(&name, &self.search.icon_dirs);
-            self.themes.insert(name, theme);
+            self.keep(name, theme);
             changed = true;
         }
         if self.unthemed.as_ref().is_some_and(|u| u.watched.changed()) {
@@ -201,16 +209,31 @@ impl IconResolver {
         chain
     }
 
+    /// Stores a theme just read. A missing one joins the unknown names, and the oldest unknown
+    /// name beyond [`UNKNOWN_THEMES`] that is still missing is forgotten.
+    fn keep(&mut self, name: String, theme: Theme) {
+        if !theme.found && !self.unknown.contains(&name) {
+            self.unknown.push_back(name.clone());
+            if self.unknown.len() > UNKNOWN_THEMES
+                && let Some(oldest) = self.unknown.pop_front()
+                && self.themes.get(&oldest).is_some_and(|t| !t.found)
+            {
+                self.themes.remove(&oldest);
+            }
+        }
+        self.themes.insert(name, theme);
+    }
+
     fn visit(&mut self, name: &str, chain: &mut Vec<String>, visited: &mut Vec<String>) {
         if visited.iter().any(|v| v == name) || !valid_theme_name(name) {
             return;
         }
         visited.push(name.to_owned());
-        let roots = &self.search.icon_dirs;
-        let theme = self
-            .themes
-            .entry(name.to_owned())
-            .or_insert_with(|| Theme::load(name, roots));
+        if !self.themes.contains_key(name) {
+            let theme = Theme::load(name, &self.search.icon_dirs);
+            self.keep(name.to_owned(), theme);
+        }
+        let theme = &self.themes[name];
         if !theme.found {
             return;
         }

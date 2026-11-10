@@ -1,7 +1,7 @@
 //! The footer's marks: the pill the `10X` tag and the clipboard badge share, the `filter:` and
 //! `search:` marks, the search hit under the cursor, and the `VISUAL` and `UNSET` range marks.
 
-use rune::{El, LiveRegion, row, text};
+use rune::{El, row, text};
 use strata_kit::look::Look;
 
 /// The pill's fill and border: the accent at these opacities, as Strata's `.tenxer-tag`,
@@ -63,14 +63,13 @@ pub(super) fn tenxer(look: &Look, key: String, words: &str, name: &str, caveat: 
         .description(caveat.to_owned())
 }
 
-/// The Files on clipboard badge: a polite status, so it is heard when it appears.
+/// The Files on clipboard badge: a status (polite already), so it is heard when it appears.
 pub(super) fn clipboard(look: &Look, key: String, words: &str, description: &str) -> El {
     pill(look, words)
         .key(key)
         .role("status")
         .label(words.to_owned())
         .description(description.to_owned())
-        .live_region(LiveRegion::Polite)
 }
 
 /// The `filter:` or `search:` mark, in the footer's text colour, cut short past

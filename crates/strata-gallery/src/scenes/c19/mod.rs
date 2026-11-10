@@ -254,7 +254,7 @@ pub enum Field {
 }
 
 /// The `g` chord (a short copy of Strata's).
-fn go_chord() -> ChordMap<Act> {
+pub fn go_chord() -> ChordMap<Act> {
     let line = |cap: &str, label: &str, chord: &str, act| {
         ChordOption::new(
             cap,
@@ -281,14 +281,8 @@ fn prompt() -> FooterPrompt<Gallery, Kind> {
     )
     .focus_return("c19-list")
     .on_intent(|g: &mut Gallery, intent, tx| match intent {
-        // C21's menu takes the keyboard: hold the prompt open until it gives it back.
-        PromptIntent::FieldMenu { at } => {
-            g.c19.prompt.hold_open(true);
-            field_menu().open(g, Field::Prompt, at, tx);
-            if !g.c19.fields.is_open() {
-                g.c19.prompt.hold_open(false);
-            }
-        }
+        // C21's menu takes the keyboard; the poll holds the prompt open while it does.
+        PromptIntent::FieldMenu { at } => field_menu().open(g, Field::Prompt, at, tx),
         intent => g.c19.prompted(intent),
     })
 }
@@ -304,10 +298,6 @@ fn field_menu() -> FieldMenu<Gallery, Field> {
     .on_change(|g: &mut Gallery, _, tx| {
         let polled = g.c19.prompt.text_edited();
         prompt().route(g, polled, tx);
-    })
-    .on_close(|g: &mut Gallery, _| {
-        let open = g.c19.reference.is_open();
-        g.c19.prompt.hold_open(open);
     })
 }
 
@@ -504,9 +494,11 @@ pub fn view(g: &Gallery, cx: &mut Cx<Gallery>) -> El {
     if let Some(w) = d.compact_below {
         panel = panel.compact_below(w);
     }
-    panel.build(g, look, &mut layer);
+    // The prompt's candidates, the chord's panel and the field menu go onto the layer first:
+    // the reference, a modal, goes last, above them all.
     let footer = footer(g, look, cx, &mut layer);
     let menu = field_menu().build(g, look, &mut layer);
+    panel.build(g, look, &mut layer);
     rune_kit::root(
         col()
             .key("c19")
@@ -751,6 +743,13 @@ pub fn on_key(g: &mut Gallery, ev: &KeyEvent, tx: &mut Tx) -> bool {
         d.leaks.push(leak);
         return true;
     }
+    // The reference's keys run before an armed chord (Strata's `input_owner.rs`): F1 or `~`
+    // after `g` opens the reference. The poll then cancels the chord, as it does whichever way
+    // the reference opened.
+    if d.keys().toggles(ev, tx) {
+        d.reference.toggle();
+        return true;
+    }
     // An armed chord hears the next key first.
     if let Some(outcome) = d.chord.key(ev, tx) {
         match outcome {
@@ -759,10 +758,6 @@ pub fn on_key(g: &mut Gallery, ev: &KeyEvent, tx: &mut Tx) -> bool {
             ChordOutcome::Completed(act) => d.log(&format!("{act:?}")),
             ChordOutcome::Unknown => d.flash.show("Unknown chord", tx),
         }
-        return true;
-    }
-    if d.keys().toggles(ev, tx) {
-        d.reference.toggle();
         return true;
     }
     // The prompt's field passes on what it doesn't use: no browsing command runs from it, and
@@ -830,8 +825,11 @@ pub fn poll(g: &mut Gallery, t: f64, tx: &mut Tx) -> bool {
     // the prompt, as Strata's `abandoned` does); it closes on a blur otherwise.
     let held = g.c19.reference.is_open() || g.c19.fields.is_open();
     g.c19.prompt.hold_open(held);
+    // While the reference is open no chord stays armed, however it opened (the F1 button
+    // included): Strata cancels the chord on every key under the reference.
+    let mut changed = g.c19.reference.is_open() && g.c19.chord.clear();
     let polled = g.c19.prompt.tick();
-    let mut changed = polled.changed;
+    changed |= polled.changed;
     prompt().route(g, polled, tx);
     changed |= g.c19.flash.tick(t, tx);
     changed |= field_menu().check(g);

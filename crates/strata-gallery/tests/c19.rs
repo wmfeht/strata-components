@@ -428,4 +428,35 @@ mod c19 {
         plain(&mut rt, Key::Text("p".into()));
         assert_eq!(node(&rt, "c19-reference-status")["name"], "14 shortcuts");
     }
+
+    fn in_tree(rt: &Runtime<Gallery>, key: &str) -> bool {
+        fn find(n: &serde_json::Value, key: &str) -> bool {
+            n["key"] == key
+                || n["children"]
+                    .as_array()
+                    .is_some_and(|c| c.iter().any(|c| find(c, key)))
+        }
+        find(&rt.accessibility_json(), key)
+    }
+
+    /// The reference sits above everything else in the overlay layer: in the frame its button
+    /// opens it, an armed chord's panel (which the next poll clears) is under the modal, out of
+    /// the accessibility tree, not drawn over the dialog.
+    #[test]
+    fn the_reference_is_the_top_overlay() {
+        let mut rt = mount("c19-tenxer-light");
+        rt.update(|g, _| g.c19.chord.arm(scenes::c19::go_chord()));
+        run(&mut rt, 0.1);
+        assert!(in_tree(&rt, "c19-chord-panel"));
+        let (x, y) = rt.find("c19-footer-shortcuts").expect("the F1 button");
+        rt.pointer_down(x, y);
+        rt.pointer_up(x, y);
+        rt.frame(FRAME);
+        assert!(rt.state.c19.reference.is_open());
+        assert!(in_tree(&rt, "c19-reference-dialog"));
+        assert!(
+            !in_tree(&rt, "c19-chord-panel"),
+            "the chord panel is above the modal"
+        );
+    }
 }

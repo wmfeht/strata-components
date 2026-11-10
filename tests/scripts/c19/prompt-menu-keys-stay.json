@@ -1,6 +1,7 @@
 {
   "bullets": [
-    "browser/context-menu: A menu opens with keyboard focus on its first visible action"
+    "browser/context-menu: While a text input has focus, Menu and Shift+F10 open the input's text-editing menu",
+    "browser/context-menu: Escape closes the menu, keeps the selection, and returns focus"
   ],
   "scene": "c19-footer-prompt-light",
   "events": [

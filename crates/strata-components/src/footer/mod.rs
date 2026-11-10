@@ -21,11 +21,8 @@
 //! ```ignore
 //! // State: s.reference: ReferenceState, s.shortcuts: ShortcutData (bump its revision on change).
 //! let mut layer = Vec::new();
-//! ShortcutReference::new("reference", |s: &App| &s.reference, |s: &mut App| &mut s.reference,
-//!         |s: &App| &s.shortcuts)
-//!     .keys(if s.tenxer { ReferenceKeys::tenxer() } else { ReferenceKeys::default() })
-//!     .reduced_motion(cx.is_reduced_motion())
-//!     .build(s, &s.look, &mut layer);
+//! // The footer first: C18's prompt puts its candidates, and the chord its panel, on the layer.
+//! layer.extend(filter_bar::chord::panel(&s.look, "chord", &s.chord));
 //! let footer = Footer::new("footer")
 //!     .shortcuts(s.show_f1.then_some((|s: &App| &s.reference, |s: &mut App| &mut s.reference)))
 //!     .count(Some(footer::summary(&s.listing(), &s.words)))
@@ -39,12 +36,23 @@
 //!     .jobs(s.jobs_element())               // C16
 //!     .prompt(prompt.build(s, &s.look, cx, &mut layer))          // C18's FooterPrompt
 //!     .build(s, &s.look);
-//! // The window's on_key: first stand down while a C21 FieldMenu is open (C18's host rule:
-//! // take every key, do nothing); then keys.toggles(ev, tx) toggles s.reference (F1 anywhere;
-//! // `~` in 10xer only arrives with no text field focused, as a field types it).
+//! // The reference last, after prompt.build and the chord panel: a modal above every overlay.
+//! ShortcutReference::new("reference", |s: &App| &s.reference, |s: &mut App| &mut s.reference,
+//!         |s: &App| &s.shortcuts)
+//!     .keys(if s.tenxer { ReferenceKeys::tenxer() } else { ReferenceKeys::default() })
+//!     .reduced_motion(cx.is_reduced_motion())
+//!     .build(s, &s.look, &mut layer);
+//! // The window's on_key, in this order:
+//! // 1. stand down while a C21 FieldMenu is open (C18's host rule: take every key, do nothing);
+//! // 2. keys.toggles(ev, tx) toggles s.reference (F1 anywhere; `~` in 10xer only arrives with
+//! //    no text field focused, as a field types it);
+//! // 3. only then the armed chord (s.chord.key), then the rest of the key map.
 //! // Each poll, before s.prompt.tick(): s.prompt.hold_open(s.reference.is_open() ||
 //! // s.fields.is_open()) keeps a footer prompt open while the reference (or the prompt's field
-//! // menu) has the keyboard; closing the reference gives the keyboard back to it.
+//! // menu) has the keyboard, and while s.reference.is_open(), s.chord.clear(): no chord stays
+//! // armed under the reference, whichever way it opened (the F1 button too). Strata runs the
+//! // reference's keys before its chord consumer and cancels a chord on any key under the
+//! // reference (`input_owner.rs`, `footer_key`).
 //! // The gallery's page (`scenes/c19`) does all of this with C18's prompt, chord and flash.
 //! ```
 //!
@@ -127,12 +135,12 @@
 //!
 //! | Bullet (opening words) | Checked by |
 //! | --- | --- |
-//! | F1 opens the "Keyboard shortcuts" panel…; F1 again closes it | scripts `f1-opens`, `f1-toggles`; goldens `c19-reference` |
+//! | F1 opens the "Keyboard shortcuts" panel…; F1 again closes it | scripts `f1-opens`, `f1-toggles`, `chord-then-f1` (an armed chord doesn't eat F1); goldens `c19-reference` |
 //! | F1 with Ctrl, Alt, Super, or Shift held does not toggle | script `f1-modifiers`; unit `toggle_chords_match_exactly_and_tilde_only_where_typed` |
-//! | In 10xer mode, `~` also toggles…; in the default map `~` does not | scripts `tilde-tenxer`, `tilde-altgr` (no Shift: AltGr), `tilde-default`; unit `a_tilde_typed_without_shift_toggles_in_tenxer` (which keys toggle is the host's: [`ReferenceKeys::tenxer`]) |
+//! | In 10xer mode, `~` also toggles…; in the default map `~` does not | scripts `tilde-tenxer` (ends on F1 finding the kept query), `tilde-altgr` (no Shift: AltGr), `tilde-default`, `chord-then-tilde` (after `g`); `yo-russian` (the Shift+backquote chord alone matches through the layout fallback: a typed `~` with Shift also matches the plain `~` chord, Rune's shifted-character rule); unit `a_tilde_typed_without_shift_toggles_in_tenxer` (which keys toggle is the host's: [`ReferenceKeys::tenxer`]) |
 //! | In 10xer mode, `~` in a focused footer prompt or text field… types | scripts `tilde-in-field`, `tilde-in-prompt` (C18's prompt; `~` with and without Shift) |
 //! | F1 still opens the reference from a footer prompt or text field | scripts `f1-from-field`, `f1-from-prompt` (C18's prompt, held open while the reference has the keyboard, keeps its text and gets the keyboard back) |
-//! | In 10xer mode, `~` typed in the open reference's search closes | scripts `tilde-in-search`, `tilde-altgr-closes` |
+//! | In 10xer mode, `~` typed in the open reference's search closes | scripts `tilde-in-search`, `tilde-altgr-closes` (each ends on F1 finding the kept query) |
 //! | In 10xer mode with Russian active and a text field focused, Shift and the ё key type Ё | scripts `yo-closes-nothing`, `yo-russian` (probe P5: a script's `code` event) |
 //! | In 10xer mode, Russian ё reads as `~` only through the layout fallback… | script `yo-russian` |
 //! | The footer's "F1 Shortcuts" button toggles… shows as pressed | **partial**: script `button-toggles` (opens; Escape closes and the button, unpressed, has focus back). The pressed state is drawn (golden `c19-reference`, behind the backdrop) but hidden from the tree under the modal, and a second press can't reach the inert button: it lands on the backdrop, which closes too |
@@ -155,7 +163,7 @@
 //! | The category list shows All and each section with its row count… | script `categories-filter`; test `a_category_change_is_announced_once`; golden `c19-reference-category` |
 //! | Tab cycles search, the selected category, and the results… | scripts `tab-cycle`, `tab-cycle-back` |
 //! | Ctrl+B focuses the categories, Ctrl+F the search field, and Ctrl+L the results | scripts `area-keys`, `area-keys-search` |
-//! | In the categories, arrows and h/j/k/l select…, and Home and End… | scripts `category-keys` (its end depends on each of `h j k l`), `category-end`, `category-home` |
+//! | In the categories, arrows and h/j/k/l select…, and Home and End… | scripts `category-keys` (its end depends on each of `h j k l`), `category-end`, `category-home`, `category-shift` (with Shift, as Strata's `category_step`) |
 //! | In the results, arrows, j/k, Page Up, Page Down, Home, and End scroll the list | tests `the_results_keys_scroll_the_list_and_the_search_field_scrolls_it_in_place`, `shifted_keys_and_left_and_right_scroll_the_results_as_strata_does` (scroll offsets aren't in script trees) |
 //! | With the search field focused, Up, Down, Page Up, and Page Down scroll the results without moving focus | script `search-scrolls-results`; the same tests (Shift held too) |
 //! | In windows narrower than 1480 px, the header stacks, categories become wrapping pills… | **partial** (deviation: the panel's width): goldens (compact at 960); review scene `c19-reference-wide` |
@@ -198,11 +206,19 @@
 //! | The `10X` pill's accessible name is… | script `tenxer-pill`; a11y goldens |
 //! | F1, or `~` outside text fields, toggles the shortcut reference, which lists only the commands of the active map and switches live | scripts `tilde-tenxer`, `live-mode` |
 //! | `v` starts a range…; the footer shows `VISUAL` or `UNSET` while it is active | **partial**: script `range-mark` (the mark); ranges are C1c's |
-//! | Arming a chord… shows its pill… beside the `10X` pill | scripts `chord-pill`, `chord-completes`; golden `c19-footer-tenxer` (C18's pill and panel in the footer's chord slot) |
+//! | Arming a chord… shows its pill… beside the `10X` pill | scripts `chord-pill`, `chord-completes`, `chord-unknown-flash` (the flash slot); golden `c19-footer-tenxer` (C18's pill and panel in the footer's chord slot) |
+//! | The panel lists each valid second key…, and closes when the chord completes or Esc cancels it | **C18**; with the reference: scripts `chord-then-f1`, `chord-then-f1-closed`, `chord-then-button`, `chord-then-button-closed` (opening the reference cancels the chord, so a later `h` completes nothing); test `the_reference_is_the_top_overlay` |
 //! | search: While an `f` filter is active, the footer shows `filter: …` and the displayed result count, including zero | scripts `filter-mark`, `filter-mark-zero` |
 //! | search: The footer shows `search: …`, the hit count including zero, and the hit under the cursor… | script `search-mark` |
 //! | search: With some hits filled, `j`, `k`, `G`, `g g`, and Space move the footer path… | **partial**: script `hit-follows` (the path follows what the host passes) |
 //! | search: While focus is outside the hits…, the footer keeps the last hit… | **Strata** (the hit it passes) |
+//!
+//! `browser/context-menu`, in the prompt: "While a text input has focus, Menu and Shift+F10 open
+//! the input's text-editing menu…" and "Escape closes the menu…": script `prompt-menu-keys-stay`,
+//! which also checks C18's host rule, that keys under the menu (F1, `~`) reach no key map.
+//! `integration/10xer-mode`, "In the location field or an inline rename, letters… are typed and
+//! no file command runs": script `prompt-commands` (Ctrl+1, Ctrl+, Ctrl+V, Ctrl+K and F5 from the
+//! prompt run no page command; the prompt's keys are C18's).
 //!
 //! `settings/preferences`: "Turning off … Show F1 Shortcuts button hides the footer shortcuts
 //! button…; F1 still opens the reference": script `button-hidden` (every window is Strata's).

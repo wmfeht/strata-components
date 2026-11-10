@@ -452,3 +452,16 @@ fn the_panel_takes_keys_with_focus_elsewhere_in_it() {
     assert!(route.panel_key(&mut s, &key(Key::Escape, ctrl()), &mut tx));
     assert!(!s.is_open(), "Escape with a modifier closes");
 }
+
+#[test]
+fn super_with_a_letter_is_taken() {
+    let logo = Mods {
+        logo: true,
+        ..Mods::default()
+    };
+    assert!(
+        !edits(&key(Key::Text("e".into()), logo)),
+        "Super+E is the desktop's or the app's"
+    );
+    assert!(!edits(&key(Key::Left, logo)));
+}

@@ -9,283 +9,217 @@
                 {
                   "children": [
                     {
-                      "actions": [
-                        "click",
-                        "focus"
+                      "children": [
+                        {
+                          "children": [
+                            {
+                              "actions": [
+                                "click",
+                                "focus",
+                                "set-value",
+                                "replace-selected-text",
+                                "set-text-selection"
+                              ],
+                              "key": "c19-reference-search",
+                              "name": "Search actions or keys…",
+                              "placeholder": "Search actions or keys…",
+                              "role": "text-input",
+                              "states": [
+                                "focused"
+                              ],
+                              "value": "co"
+                            }
+                          ],
+                          "key": "c19-reference-frame",
+                          "role": "group"
+                        }
                       ],
-                      "key": "c19-select-two",
-                      "name": "Select 2 files",
-                      "role": "button"
+                      "key": "c19-reference-header",
+                      "role": "group"
                     },
                     {
-                      "actions": [
-                        "click",
-                        "focus"
+                      "children": [
+                        {
+                          "actions": [
+                            "scroll-up",
+                            "scroll-down",
+                            "set-scroll-offset"
+                          ],
+                          "children": [
+                            {
+                              "actions": [
+                                "scroll-into-view"
+                              ],
+                              "children": [
+                                {
+                                  "actions": [
+                                    "click",
+                                    "focus",
+                                    "scroll-into-view"
+                                  ],
+                                  "description": "34 shortcuts",
+                                  "key": "c19-reference-category-0",
+                                  "name": "All",
+                                  "role": "tab",
+                                  "states": [
+                                    "selected"
+                                  ]
+                                },
+                                {
+                                  "actions": [
+                                    "click",
+                                    "focus",
+                                    "scroll-into-view"
+                                  ],
+                                  "description": "17 shortcuts",
+                                  "key": "c19-reference-category-1",
+                                  "name": "List navigation",
+                                  "role": "tab",
+                                  "states": [
+                                    "unselected"
+                                  ]
+                                },
+                                {
+                                  "actions": [
+                                    "click",
+                                    "focus",
+                                    "scroll-into-view"
+                                  ],
+                                  "description": "9 shortcuts",
+                                  "key": "c19-reference-category-2",
+                                  "name": "Files and selection",
+                                  "role": "tab",
+                                  "states": [
+                                    "unselected"
+                                  ]
+                                },
+                                {
+                                  "actions": [
+                                    "click",
+                                    "focus",
+                                    "scroll-into-view"
+                                  ],
+                                  "description": "4 shortcuts",
+                                  "key": "c19-reference-category-3",
+                                  "name": "Places",
+                                  "role": "tab",
+                                  "states": [
+                                    "unselected"
+                                  ]
+                                },
+                                {
+                                  "actions": [
+                                    "click",
+                                    "focus",
+                                    "scroll-into-view"
+                                  ],
+                                  "description": "4 shortcuts",
+                                  "key": "c19-reference-category-4",
+                                  "name": "10xer mode",
+                                  "role": "tab",
+                                  "states": [
+                                    "unselected"
+                                  ]
+                                }
+                              ],
+                              "key": "c19-reference-categories",
+                              "name": "Categories",
+                              "role": "tab-list"
+                            }
+                          ],
+                          "role": "scroll-view",
+                          "states": [
+                            "clips"
+                          ]
+                        },
+                        {
+                          "actions": [
+                            "focus",
+                            "scroll-up",
+                            "scroll-down",
+                            "set-scroll-offset"
+                          ],
+                          "children": [
+                            {
+                              "actions": [
+                                "scroll-into-view"
+                              ],
+                              "children": [
+                                {
+                                  "actions": [
+                                    "scroll-into-view"
+                                  ],
+                                  "description": "1 shortcut",
+                                  "key": "c19-reference-heading-1-title",
+                                  "name": "Files and selection",
+                                  "role": "row-header"
+                                },
+                                {
+                                  "actions": [
+                                    "scroll-into-view"
+                                  ],
+                                  "children": [
+                                    {
+                                      "actions": [
+                                        "scroll-into-view"
+                                      ],
+                                      "name": "Copy",
+                                      "role": "cell"
+                                    },
+                                    {
+                                      "actions": [
+                                        "scroll-into-view"
+                                      ],
+                                      "name": "Ctrl+C",
+                                      "role": "cell"
+                                    }
+                                  ],
+                                  "key": "c19-reference-row-1-0",
+                                  "name": "Copy Ctrl+C",
+                                  "position": 1,
+                                  "role": "row"
+                                }
+                              ],
+                              "key": "c19-reference-rows",
+                              "role": "row-group",
+                              "setSize": 1
+                            }
+                          ],
+                          "key": "c19-reference-results",
+                          "name": "Shortcuts",
+                          "role": "table",
+                          "states": [
+                            "clips"
+                          ]
+                        },
+                        {
+                          "key": "c19-reference-status",
+                          "name": "1 shortcut",
+                          "role": "status",
+                          "states": [
+                            "live-polite"
+                          ]
+                        }
                       ],
-                      "key": "c19-select-mixed",
-                      "name": "Select 1 folder, 2 files",
-                      "role": "button"
+                      "key": "c19-reference-body",
+                      "role": "group"
                     },
                     {
-                      "actions": [
-                        "click",
-                        "focus"
-                      ],
-                      "key": "c19-select-unknown",
-                      "name": "Select the unknown file",
-                      "role": "button"
-                    },
-                    {
-                      "actions": [
-                        "click",
-                        "focus"
-                      ],
-                      "key": "c19-select-all",
-                      "name": "Select all",
-                      "role": "button"
-                    },
-                    {
-                      "actions": [
-                        "click",
-                        "focus"
-                      ],
-                      "key": "c19-clear",
-                      "name": "Clear selection",
-                      "role": "button"
-                    },
-                    {
-                      "actions": [
-                        "click",
-                        "focus"
-                      ],
-                      "key": "c19-copy",
-                      "name": "Copy files",
-                      "role": "button"
-                    },
-                    {
-                      "actions": [
-                        "click",
-                        "focus"
-                      ],
-                      "key": "c19-clipboard-clear",
-                      "name": "Clipboard: text",
-                      "role": "button"
-                    },
-                    {
-                      "actions": [
-                        "click",
-                        "focus"
-                      ],
-                      "key": "c19-filter",
-                      "name": "Filter “o”",
-                      "role": "button"
-                    },
-                    {
-                      "actions": [
-                        "click",
-                        "focus"
-                      ],
-                      "key": "c19-filter-miss",
-                      "name": "Filter “zz”",
-                      "role": "button"
-                    },
-                    {
-                      "actions": [
-                        "click",
-                        "focus"
-                      ],
-                      "key": "c19-search",
-                      "name": "Search “read”",
-                      "role": "button"
-                    },
-                    {
-                      "actions": [
-                        "click",
-                        "focus"
-                      ],
-                      "key": "c19-pending",
-                      "name": "Type a search",
-                      "role": "button"
-                    },
-                    {
-                      "actions": [
-                        "click",
-                        "focus"
-                      ],
-                      "key": "c19-next-hit",
-                      "name": "Next hit",
-                      "role": "button"
-                    },
-                    {
-                      "actions": [
-                        "click",
-                        "focus"
-                      ],
-                      "key": "c19-range",
-                      "name": "Range v",
-                      "role": "button"
-                    },
-                    {
-                      "actions": [
-                        "click",
-                        "focus"
-                      ],
-                      "key": "c19-hide-button",
-                      "name": "Hide F1 button",
-                      "role": "button"
-                    },
-                    {
-                      "actions": [
-                        "click",
-                        "focus"
-                      ],
-                      "key": "c19-no-listing",
-                      "name": "No listing",
-                      "role": "button"
-                    },
-                    {
-                      "actions": [
-                        "click",
-                        "focus"
-                      ],
-                      "key": "c19-prompt",
-                      "name": "Footer prompt",
-                      "role": "button"
+                      "key": "c19-reference-note",
+                      "name": "Ctrl+B categories · Ctrl+F search · Ctrl+L list · j / k / ↑ / ↓ move · Tab cycle · Escape close",
+                      "role": "note"
                     }
                   ],
-                  "key": "c19-controls",
-                  "role": "group"
-                },
-                {
-                  "name": "Location",
-                  "role": "label"
-                },
-                {
-                  "actions": [
-                    "click",
-                    "focus",
-                    "set-value",
-                    "replace-selected-text",
-                    "set-text-selection"
-                  ],
-                  "key": "c19-location",
-                  "name": "Location",
-                  "role": "text-input",
-                  "value": ""
-                },
-                {
-                  "actions": [
-                    "focus"
-                  ],
-                  "children": [
-                    {
-                      "children": [
-                        {
-                          "name": "Documents/",
-                          "role": "label"
-                        }
-                      ],
-                      "key": "c19-entry-0",
-                      "name": "Documents/",
-                      "role": "list-item"
-                    },
-                    {
-                      "children": [
-                        {
-                          "name": "Music/",
-                          "role": "label"
-                        }
-                      ],
-                      "key": "c19-entry-1",
-                      "name": "Music/",
-                      "role": "list-item"
-                    },
-                    {
-                      "children": [
-                        {
-                          "name": "notes.txt",
-                          "role": "label"
-                        }
-                      ],
-                      "key": "c19-entry-2",
-                      "name": "notes.txt",
-                      "role": "list-item"
-                    },
-                    {
-                      "children": [
-                        {
-                          "name": "photo.png",
-                          "role": "label"
-                        }
-                      ],
-                      "key": "c19-entry-3",
-                      "name": "photo.png",
-                      "role": "list-item"
-                    },
-                    {
-                      "children": [
-                        {
-                          "name": "archive.zip",
-                          "role": "label"
-                        }
-                      ],
-                      "key": "c19-entry-4",
-                      "name": "archive.zip",
-                      "role": "list-item"
-                    }
-                  ],
-                  "key": "c19-list",
-                  "name": "Files",
-                  "role": "list",
-                  "states": [
-                    "focused"
-                  ]
-                },
-                {
-                  "key": "c19-log",
-                  "name": "—",
-                  "role": "label"
-                },
-                {
-                  "children": [
-                    {
-                      "actions": [
-                        "click",
-                        "focus"
-                      ],
-                      "description": "Show all file-view shortcuts (F1)",
-                      "key": "c19-footer-shortcuts",
-                      "name": "F1 Shortcuts",
-                      "role": "button",
-                      "states": [
-                        "unchecked"
-                      ]
-                    },
-                    {
-                      "description": "3 files, 2 folders",
-                      "key": "c19-footer-count",
-                      "name": "5 items",
-                      "role": "status",
-                      "states": [
-                        "live-polite"
-                      ]
-                    },
-                    {
-                      "description": "(experimental feature, under active development)",
-                      "key": "c19-footer-tenxer",
-                      "name": "10xer mode (experimental feature, under active development)",
-                      "role": "status",
-                      "states": [
-                        "live-polite"
-                      ]
-                    }
-                  ],
-                  "key": "c19-footer",
+                  "key": "c19-reference-content",
                   "role": "group"
                 }
               ],
-              "key": "c19",
-              "role": "group"
+              "key": "c19-reference-dialog",
+              "name": "Keyboard shortcuts",
+              "role": "dialog",
+              "states": [
+                "modal"
+              ]
             }
           ],
           "key": "kit-root",

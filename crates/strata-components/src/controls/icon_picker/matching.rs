@@ -24,8 +24,9 @@ pub(crate) enum Hit {
     /// The name: for each query word, the name word it starts and how many characters it
     /// covers there.
     Name(Vec<(usize, usize)>),
-    /// A keyword, the first the first query word starts.
-    Keyword(usize),
+    /// A keyword, the first the first query word starts, and how many characters that word
+    /// covers there.
+    Keyword(usize, usize),
 }
 
 /// A query: its folded words. A query with no words matches nothing ([`Query::is_empty`]).
@@ -77,7 +78,7 @@ impl Query {
             .keywords
             .iter()
             .position(|k| k.starts_with(first.as_str()))
-            .map(Hit::Keyword)
+            .map(|i| Hit::Keyword(i, first.chars().count()))
     }
 }
 
@@ -109,6 +110,15 @@ pub(crate) fn name_ranges(name: &str, words: &Words, hit: &Hit) -> Vec<Range<usi
             Some(range.start..end)
         })
         .collect()
+}
+
+/// The byte range of `keyword` a keyword hit lights: the first query word's share of its start,
+/// as [`name_ranges`] lights a name word.
+pub(crate) fn keyword_range(keyword: &str, chars: usize) -> Range<usize> {
+    0..keyword
+        .char_indices()
+        .nth(chars)
+        .map_or(keyword.len(), |(at, _)| at)
 }
 
 /// The words of `text`: runs of letters and digits, with their byte ranges.

@@ -13,7 +13,7 @@ use strata_kit::look::Look;
 
 use super::data::Choice;
 use super::grid::{self, CellLook, Metrics, PickerLines};
-use super::matching::{Hit, name_ranges};
+use super::matching::{Hit, keyword_range, name_ranges};
 use super::state::{IconPickerState, Page};
 use super::words::PickerWords;
 use crate::collection::element::{Collection, ContentSlot, Describe, Intent, Roles, RowCx, Slot};
@@ -653,13 +653,15 @@ impl<S: 'static> IconPicker<S> {
                 .shrink()
                 .min_w(0.0),
         );
-        if let Some(Hit::Keyword(i)) = hit
+        if let Some(Hit::Keyword(i, chars)) = hit
             && let Some(keyword) = it.keywords.get(i)
         {
+            let lit = keyword_range(keyword, chars);
+            let at = KEYWORD_MARK.len();
             line = line.child(
                 MatchedText::new(
                     format!("{KEYWORD_MARK}{keyword}"),
-                    std::iter::once(KEYWORD_MARK.len()..KEYWORD_MARK.len() + keyword.len()),
+                    std::iter::once(at + lit.start..at + lit.end),
                 )
                 .font(k.ty.ui)
                 .color(k.c.text_muted)

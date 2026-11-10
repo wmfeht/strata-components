@@ -3,7 +3,7 @@ mod perf;
 use std::borrow::Cow;
 use std::rc::Rc;
 
-use super::matching::{Hit, Query, fold, name_ranges, words};
+use super::matching::{Hit, Query, fold, keyword_range, name_ranges, words};
 use super::*;
 
 fn kw(list: &[&'static str]) -> Vec<Cow<'static, str>> {
@@ -38,7 +38,7 @@ fn each_query_word_must_start_a_word_of_the_name() {
 fn a_keyword_matches_when_the_name_does_not() {
     assert_eq!(
         hit("happy", "grinning face", &["cheerful", "happy", "smile"]),
-        Some(Hit::Keyword(1))
+        Some(Hit::Keyword(1, 5))
     );
     // Every query word must start some keyword; GTK matches each keyword whole.
     assert!(hit("happy cheer", "grinning face", &["cheerful", "happy"]).is_some());
@@ -76,6 +76,12 @@ fn a_name_hit_lights_each_query_words_share_of_its_name_word() {
     let w = words("grinning face", &kw(&["happy"]));
     let h = Query::new("hap").hit(&w).expect("a hit");
     assert!(name_ranges("grinning face", &w, &h).is_empty());
+    // It lights the typed share of the keyword instead.
+    let Hit::Keyword(0, chars) = h else {
+        panic!("{h:?}")
+    };
+    assert_eq!(&"happy"[keyword_range("happy", chars)], "hap");
+    assert_eq!(&"Côte"[keyword_range("Côte", 3)], "Côt");
 }
 
 #[test]

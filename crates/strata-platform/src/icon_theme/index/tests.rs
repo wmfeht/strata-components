@@ -57,8 +57,16 @@ fn a_directory_without_a_whole_size_is_left_out() {
     let index = parse(text).expect("an index");
     assert_eq!(index.dirs.len(), 1);
     let c = index.dirs[0].params;
-    // An unknown Type is Threshold and a bad MinSize the default, as GTK reads them.
+    // An unknown Type is Threshold, as in GTK; a bad MinSize takes the default (GTK reads 0).
     assert_eq!((c.kind, c.min), (DirKind::Threshold, 16));
+}
+
+#[test]
+fn a_directory_outside_the_theme_is_left_out() {
+    let text = "[Icon Theme]\nDirectories=/usr/share/pixmaps,../Other/48x48,a/../../b,./in,in/\nScaledDirectories=/abs\n[/usr/share/pixmaps]\nSize=48\n[../Other/48x48]\nSize=48\n[a/../../b]\nSize=48\n[./in]\nSize=48\n[in/]\nSize=48\n[/abs]\nSize=48\n";
+    let index = parse(text).expect("an index");
+    let paths: Vec<&str> = index.dirs.iter().map(|d| d.path.as_str()).collect();
+    assert_eq!(paths, ["./in", "in/"]);
 }
 
 #[test]

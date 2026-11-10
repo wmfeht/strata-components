@@ -39,12 +39,14 @@ pub(super) struct ThemeIndex {
 }
 
 /// Parses an `index.theme`, as GTK reads one with a `GKeyFile`: `None` without an
-/// `[Icon Theme]` group or its `Directories` key. A listed directory without its own group or
-/// a whole `Size` is left out; the other keys take the spec's defaults when absent or not whole
-/// numbers.
+/// `[Icon Theme]` group or its `Directories` key. A listed directory outside the theme, or
+/// without its own group or a whole `Size`, is left out; the other keys take the spec's
+/// defaults when absent or not whole numbers (GTK reads 0 for those). A repeated group is read
+/// from its first appearance, where `GKeyFile` merges them.
 pub(super) fn parse(text: &str) -> Option<ThemeIndex> {
     let parsed = key_file(text);
-    // The first appearance of each group; hicolor alone has hundreds.
+    // The first appearance of each group (`GKeyFile` would merge repeats); hicolor alone has
+    // hundreds.
     let mut groups: HashMap<&str, &[(String, String)]> = HashMap::new();
     for (name, keys) in &parsed {
         groups.entry(name.as_str()).or_insert(keys.as_slice());
@@ -57,7 +59,7 @@ pub(super) fn parse(text: &str) -> Option<ThemeIndex> {
         .unwrap_or_default();
     let mut dirs: Vec<DirSpec> = Vec::new();
     for path in listed.into_iter().chain(scaled) {
-        if dirs.iter().any(|d| d.path == path) {
+        if !inside_theme(&path) || dirs.iter().any(|d| d.path == path) {
             continue;
         }
         let Some(params) = group(&path).and_then(dir_params) else {
@@ -67,6 +69,16 @@ pub(super) fn parse(text: &str) -> Option<ThemeIndex> {
     }
     let inherits = value(head, "Inherits").map(list).unwrap_or_default();
     Some(ThemeIndex { inherits, dirs })
+}
+
+/// Whether a listed directory stays under the theme's directory. `Path::join` would replace
+/// the base with an absolute entry, and `..` climbs out; GTK concatenates the strings, so it
+/// keeps an absolute entry inside but follows `..`. Both are refused.
+fn inside_theme(path: &str) -> bool {
+    use std::path::{Component, Path};
+    Path::new(path)
+        .components()
+        .all(|c| matches!(c, Component::Normal(_) | Component::CurDir))
 }
 
 fn dir_params(keys: &[(String, String)]) -> Option<DirParams> {

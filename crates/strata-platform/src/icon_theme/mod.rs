@@ -114,6 +114,21 @@
 //!   shows its own fallback. A file that fails to decode is [`IconState::Failed`]; neither
 //!   GTK nor this module tries another file then.
 //! - No `-rtl` and `-ltr` variants and no forced regular or symbolic lookups.
+//! - **Each theme lists its own directories only.** GTK keeps one array of theme directories
+//!   (`dir_mtimes`) for the whole chain and looks for each subdirectory under every theme
+//!   directory read so far, so an inherited theme also picks up the files of the themes before
+//!   it under its own size parameters. That isn't copied.
+//! - **`index.theme` is read more leniently.** Where GTK would drop something, this module
+//!   keeps going:
+//!   - A group that appears twice is read from its first appearance; `GKeyFile` merges them.
+//!   - A `MinSize`, `MaxSize`, `Threshold` or `Scale` that isn't a whole number takes the
+//!     spec's default; GTK reads 0.
+//!   - An `index.theme` without an `[Icon Theme]` group or its `Directories` key counts as
+//!     missing: the next root's is read, and a hicolor gets one derived from its directories.
+//!     GTK leaves the theme out, hicolor too.
+//!   - A `Directories` entry that is absolute or climbs out with `..` is left out, where GTK
+//!     appends it to the theme directory as a string (keeping an absolute one inside the theme,
+//!     and following `..` out of it).
 //!
 //! # Changes on disk
 //!

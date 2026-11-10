@@ -28,7 +28,11 @@
 //!   a page (ten steps unless [`Range::page`] says), Ctrl+Home and Ctrl+Page Down the minimum,
 //!   Ctrl+End and Ctrl+Page Up the maximum (GTK's bindings), and the wheel over the field a
 //!   step a notch (precise deltas: 40 pt). Each commits the typed text first. Plain Home and
-//!   End move the caret.
+//!   End move the caret. From a value between grid points (one the host set off the grid) a
+//!   step lands on the next grid point that way, as the [`Slider`](crate::controls::slider)
+//!   does; GTK's spin button without snap-to-ticks would add a whole step instead. The wheel
+//!   reads the vertical delta only, as GTK's does: a sideways one (Shift+wheel on Linux, a
+//!   tilt wheel) and one with Ctrl, Alt, Cmd or Super held pass on to the window.
 //! - **The field.** Rune's core field, not rune-kit's `TextInput`, which builds its field
 //!   itself and takes no menu press (U-C21-2): through [`NumberField::on_menu`] the host opens
 //!   C21's `FieldMenu`. The frame is drawn as rune-kit's TextInput draws its box, from the
@@ -64,8 +68,10 @@
 //! | `settings/themes/corner-roundness`: …its stepper's accessible name is "Corner roundness in percent" | script `number-names` (the name; the group's place is Strata's) |
 //! | `settings/themes/icons`: Under any icon theme, the Text size, Corner roundness, and Thumbnail workers spin buttons draw Lucide − and + steps | PNG goldens |
 //!
-//! Not from a bullet: the field menu holding a typed value until it closes, a stepper press
-//! keeping the keyboard in the field, assistive increments (`c20a::` tests).
+//! Not from a bullet: the field menu holding a typed value until it closes (and not when the
+//! host opens none: unit `a_menu_press_that_opens_no_menu_keeps_the_blur_commit`), a stepper
+//! press keeping the keyboard in the field, assistive increments, and a sideways or modified
+//! wheel passing the field by (`c20a::` tests).
 //!
 //! # Deviations
 //!

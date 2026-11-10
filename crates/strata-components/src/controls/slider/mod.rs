@@ -30,9 +30,13 @@
 //! - **Snap points** ([`Snap`]): a tick under the track at each; a labelled one has a toggle
 //!   under its tick that sets it, in the accent colour and pressed while the value is there.
 //!   Labels sit centred under their ticks, kept inside the track and `space.md` (8 pt) apart,
-//!   as Strata's `SnapLabels` places them.
+//!   as Strata's `SnapLabels` places them, and the slider is at least as wide as the labels
+//!   side by side with those gaps, so a menu sized to its content leaves them room.
 //! - **Wheel:** passes on to what scrolls behind the slider, unless [`Slider::wheel`] gives an
-//!   amount a notch (precise deltas: 40 pt a notch).
+//!   amount a notch (precise deltas: 40 pt a notch). Even then it reads the vertical delta
+//!   only, as GTK does: a sideways wheel (Shift+wheel on Linux, a tilt wheel) and a wheel with
+//!   Ctrl, Alt, Cmd or Super held pass on, so Strata's Ctrl+wheel (text size) and
+//!   Ctrl+Shift+wheel (thumbnail size) reach the window over the slider.
 //! - **Reports** ([`SliderChange`]): `Live` for each move of a drag, `Commit` once it is
 //!   released and for every key, snap label, wheel step or assistive action, `Cancel` when a
 //!   drag is cancelled. Nothing is reported when the value didn't move.
@@ -60,9 +64,10 @@
 //!
 //! | Bullet | Covered by |
 //! | --- | --- |
-//! | Each slider has tick marks at its Compact and Airy values, with "Compact" and "Airy" buttons under them | script `slider-drag-snaps`; goldens; unit `a_drag_near_a_snap_point_lands_on_it` |
+//! | Each slider has tick marks at its Compact and Airy values, with "Compact" and "Airy" buttons under them | the PNG goldens show the ticks and buttons; script `slider-drag-snaps` and unit `a_drag_near_a_snap_point_lands_on_it` check the snapping; a11y goldens the buttons |
+//! | The Compact and Airy buttons sit at least 8 px apart. The menu reserves their combined width, such as in Russian at text size 13 or 24 px | unit `a_content_sized_menu_reserves_the_snap_labels_width` (Russian-length labels at 24 px in a content-sized column); PNG goldens |
 //! | Clicking "Compact" or "Airy" snaps that slider to the preset; the label of the current preset shows in the accent color | scripts `slider-snap-airy`, `slider-snap-compact`; PNG goldens |
-//! | A mouse wheel over a slider scrolls the menu and leaves the value unchanged | script `slider-wheel-passes` |
+//! | A mouse wheel over a slider scrolls the menu and leaves the value unchanged | script `slider-wheel-passes` (the value); `c20a::a_wheel_over_a_density_slider_scrolls_its_menu` (the scroll) |
 //! | Left and Right step a focused slider by 1 px; Page Up and Page Down step it by 4 px | scripts `slider-arrow-right`, `-arrow-left`, `-page-up`, `-page-down`, `-arrow-at-max` |
 //! | Each slider's accessible label is "Frame" or "Content", and its accessible value text is its value label | script `slider-names`; a11y goldens |
 //! | The snap button of the current preset exposes the accessible pressed state | scripts `slider-snap-airy`, `slider-snap-compact` |
@@ -72,7 +77,8 @@
 //! rules are C3's and Strata's.
 //!
 //! Not from a bullet: live, commit and cancel reports, a press on the track, Home and End,
-//! and assistive set-value (`c20a::` tests).
+//! assistive set-value, and a sideways or modified wheel passing a wheel-taking slider by
+//! (`c20a::` tests; unit `a_sideways_wheel_moves_nothing`).
 //!
 //! # C13
 //!

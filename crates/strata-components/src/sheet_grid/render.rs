@@ -4,10 +4,10 @@
 use std::rc::Rc;
 
 use rune::{Color, Cursor, Drag, El, Phase, TextStyle, Tx, col, icon, row, text};
-use rune_kit::{SortDir, TableStyle};
+use rune_kit::{Button, ButtonVariant, SortDir, TableStyle};
 use strata_kit::look::Look;
 
-use super::model::{column_letters, shown};
+use super::model::{column_letters, shown, title_shown};
 use super::range::Columns;
 use super::state::{SheetGridState, SheetLabels, SheetView, fill};
 use super::widths::{MAX_WIDTH, MIN_WIDTH};
@@ -71,7 +71,7 @@ pub(crate) struct Ctx<S> {
 pub(crate) fn column_name(v: &SheetView, labels: &SheetLabels, j: usize) -> String {
     let letters = column_letters(j);
     match v.data.as_ref().and_then(|d| d.title(j)) {
-        Some(t) if !t.trim().is_empty() => shown(t).0.into_owned(),
+        Some(t) if !t.trim().is_empty() => title_shown(t).into_owned(),
         _ => fill(&labels.column, &letters),
     }
 }
@@ -322,6 +322,44 @@ pub(crate) fn build_row<S: 'static>(ctx: &Ctx<S>, s: &S, i: usize) -> El {
 fn lead(cols: &Columns, built: &std::ops::Range<usize>) -> El {
     let w = cols.edges.get(built.start).map_or(0.0, |x| x - cols.gutter);
     rune::el().w(w).h_full().a11y_hidden()
+}
+
+/// A sheet that couldn't be read, in the grid's place: Strata's "Preview unavailable" over
+/// the reason, and Try again, which asks for it once more.
+pub(crate) fn failure<S: 'static>(
+    look: &Look,
+    key: &str,
+    labels: &SheetLabels,
+    reason: &str,
+    retry: impl Fn(&mut S, &mut Tx) + 'static,
+) -> El {
+    let k = &look.kit;
+    col()
+        .key(format!("{key}-failed"))
+        .w_full()
+        .grow(1.0)
+        .min_h(0.0)
+        .center()
+        .gap(look.space.sm)
+        .px(look.space.md)
+        .child(
+            text(labels.failed.clone())
+                .font(k.ty.ui)
+                .color(k.c.text_base),
+        )
+        .child(
+            text(reason.to_owned())
+                .wrap()
+                .font(k.ty.text_small)
+                .color(k.c.text_muted),
+        )
+        .child(
+            Button::new(labels.retry.clone())
+                .variant(ButtonVariant::Neutral)
+                .on_press_tx(retry)
+                .build(k)
+                .key(format!("{key}-retry")),
+        )
 }
 
 /// A line in the grid's place: the sheet loading, or empty.

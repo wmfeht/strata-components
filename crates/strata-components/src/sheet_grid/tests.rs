@@ -12,6 +12,7 @@ use super::range::Columns;
 use super::sort::{self, ColumnKeys, SortKey};
 use super::widths;
 use super::*;
+use crate::preview_drawer::HostedPreview;
 
 fn sheet(lines: &[&[&str]]) -> Sheet {
     Sheet::new(
@@ -184,7 +185,40 @@ fn a_cell_shows_its_first_line_cut_at_512_bytes_on_a_character_boundary() {
     let (s, _) = model::shown(&accents);
     assert_eq!(s.chars().filter(|&c| c == 'é').count(), 256);
     assert_eq!(model::shown("one\r\ntwo").0, "one…");
-    assert_eq!(model::shown("one\n").0, "one…");
+    assert_eq!(model::shown("one\n\n").0, "one…", "an empty second line");
+}
+
+#[test]
+fn a_lone_line_ending_at_the_end_is_not_another_line() {
+    for t in ["one\n", "one\r\n", "one\r"] {
+        let (s, cut) = model::shown(t);
+        assert_eq!((s.as_ref(), cut), ("one", false), "{t:?}");
+    }
+}
+
+#[test]
+fn an_empty_first_row_is_no_title_row_as_in_strata() {
+    let s = Sheet::new("t", vec![vec![], vec!["b".into()], vec!["a".into()]]);
+    assert!(!s.header);
+    assert_eq!(s.title(0), None);
+    let mut st = SheetGridState::new("g");
+    st.set_single(s);
+    // Every row sorts, the empty one last (its cell is empty).
+    assert_eq!(st.order(), [2, 1, 0]);
+    assert!(Sheet::new("t", vec![vec!["id".into()]]).header);
+}
+
+#[test]
+fn a_column_title_shows_at_most_128_characters_as_stratas_do() {
+    let title = "t".repeat(300);
+    let rt = single(sheet(&[&[&title, "b"], &["1", "2"]]));
+    let name = rt
+        .elements()
+        .into_iter()
+        .find(|e| e.key.as_deref() == Some("g-h0"))
+        .and_then(|e| e.label)
+        .expect("the first title");
+    assert_eq!(name, format!("{}…", "t".repeat(128)));
 }
 
 #[test]
@@ -651,4 +685,85 @@ fn a_wide_sheet_builds_the_columns_near_what_shows_and_follows_a_sideways_scroll
         0.0,
         "scrolled back to the first column"
     );
+}
+
+#[test]
+fn switching_sheets_drops_the_range_and_keeps_the_cursor() {
+    let mut rt = runtime(book());
+    drag(cell(&rt, 0, 0), cell(&rt, 2, 1), &mut rt);
+    assert!(rt.state.grid.range().is_some());
+    tap(mid(rect(&rt, "g-sheet1")), &mut rt);
+    tap(mid(rect(&rt, "g-sheet0")), &mut rt);
+    assert_eq!(rt.state.grid.range(), None);
+    assert_eq!(rt.state.grid.cursor(), Some(CellPos::new(2, 1)));
+    // By keys too.
+    drag(cell(&rt, 0, 0), cell(&rt, 2, 1), &mut rt);
+    key(&mut rt, Key::PageDown, CMD);
+    key(&mut rt, Key::PageUp, CMD);
+    assert_eq!(rt.state.grid.range(), None);
+}
+
+/// A press on the sticky row numbers, at the start and scrolled far sideways: it picks no
+/// cell and starts no drag, so holding it scrolls nothing.
+#[test]
+fn a_press_on_a_row_number_is_on_no_cell_at_any_sideways_offset() {
+    let mut rt = single(wide(40));
+    let hold = |rt: &mut Runtime<Host>| {
+        let at = mid(rect(rt, "g-r1-n"));
+        let x = rt.state.grid.feed.get().offset[0];
+        rt.pointer_move(at.0, at.1);
+        rt.pointer_down(at.0, at.1);
+        for _ in 0..20 {
+            step(rt);
+        }
+        assert_eq!(rt.state.grid.cursor(), None, "at offset {x}");
+        assert!(!rt.state.grid.dragging(), "at offset {x}");
+        assert_eq!(rt.state.grid.feed.get().offset[0], x, "no autoscroll");
+        rt.pointer_up(at.0, at.1);
+        settle(rt);
+    };
+    hold(&mut rt);
+    for _ in 0..12 {
+        rt.wheel_xy(W / 2.0, H / 2.0, -400.0, 0.0);
+        step(&mut rt);
+    }
+    settle(&mut rt);
+    assert!(rt.state.grid.feed.get().offset[0] > 4000.0);
+    hold(&mut rt);
+}
+
+#[test]
+fn a_sheet_that_failed_says_why_is_not_busy_and_asks_again_on_retry() {
+    let mut rt = runtime(book());
+    tap(mid(rect(&rt, "g-sheet2")), &mut rt);
+    assert_eq!(rt.state.intents, [SheetIntent::Load(2)]);
+    rt.update(|h, _| {
+        h.grid
+            .set_sheet_failed(2, "The sandboxed preview renderer failed")
+    });
+    settle(&mut rt);
+    assert!(!rt.state.grid.is_loading(2));
+    assert_eq!(rt.state.grid.busy(), None);
+    assert_eq!(
+        rt.state.grid.failure(2),
+        Some("The sandboxed preview renderer failed")
+    );
+    let t = rt.accessibility_json().to_string();
+    assert!(t.contains("Preview unavailable"), "{t}");
+    assert!(t.contains("The sandboxed preview renderer failed"), "{t}");
+    // Its tab again asks nothing; the retry button asks once more.
+    tap(mid(rect(&rt, "g-sheet0")), &mut rt);
+    tap(mid(rect(&rt, "g-sheet2")), &mut rt);
+    assert_eq!(rt.state.intents, [SheetIntent::Load(2)]);
+    tap(mid(rect(&rt, "g-retry")), &mut rt);
+    assert_eq!(
+        rt.state.intents,
+        [SheetIntent::Load(2), SheetIntent::Load(2)]
+    );
+    assert!(rt.state.grid.is_loading(2));
+    assert_eq!(rt.state.grid.failure(2), None);
+    assert!(rect(&rt, "g-loading")[2] > 0.0);
+    rt.update(|h, _| h.grid.set_sheet(2, people(3)));
+    settle(&mut rt);
+    assert!(rect(&rt, "g-h0")[2] > 0.0);
 }

@@ -7,7 +7,8 @@
 //! A sheet in C9's drawer beside a fake listing. Each fixture is what Strata's sandboxed
 //! reader would hand over: rows of text, the first the titles. The page stands in for
 //! Strata's policy: a workbook's other sheets "load" from a fake reader queue on the virtual
-//! clock, and closing the drawer ends a range drag. Two lines under the files read what the
+//! clock (its first read of Inventory fails, so Try again reads it), and closing the drawer
+//! ends a range drag. Two lines under the files read what the
 //! scripts check: the last intent (`c11b-last-intent`) and what Ctrl+C would copy from the
 //! range (`c11b-range`), each "None" while empty.
 
@@ -16,7 +17,7 @@ use strata_components::preview_drawer::{
     DocumentView, DrawerIntent, DrawerState, HeaderInfo, PreviewDrawer,
 };
 use strata_components::sheet_grid::{
-    CellPos, Sheet, SheetGrid, SheetGridState, SheetIntent, SortDir,
+    CellPos, CellRange, Sheet, SheetGrid, SheetGridState, SheetIntent, SortDir,
 };
 use strata_kit::icons::IconName;
 use strata_kit::look::Look;
@@ -25,6 +26,9 @@ use crate::{Gallery, Scene};
 
 /// How long the fake reader takes to read a sheet.
 const READ_SECONDS: f64 = 0.3;
+/// The workbook sheet whose first read fails (Inventory), and what the reader says.
+const FAILS_ONCE: usize = 3;
+const FAILURE: &str = "The sandboxed preview renderer failed";
 
 /// Which fixture the page shows.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -59,6 +63,11 @@ pub struct Demo {
     pub last: String,
     /// What Ctrl+C would copy from the range, read from the page's poll.
     pub range: String,
+    /// The sheet and range `range` was read from, so the poll reads it again only when it
+    /// changes.
+    pub range_at: Option<(usize, CellRange)>,
+    /// Whether the reader has failed its one failing read.
+    pub failed_once: bool,
 }
 
 impl Default for Demo {
@@ -72,6 +81,8 @@ impl Default for Demo {
             book: Vec::new(),
             last: String::new(),
             range: String::new(),
+            range_at: None,
+            failed_once: false,
         }
     }
 }
@@ -273,6 +284,15 @@ fn empty_sheet(g: &mut Gallery, dark: bool) {
     d.grid.set_active(2);
 }
 
+/// The workbook on Inventory, which the reader couldn't read.
+fn failed_sheet(g: &mut Gallery, dark: bool) {
+    setup(g, dark, Fixture::Workbook);
+    let d = &mut g.c11b;
+    d.grid.set_active(FAILS_ONCE);
+    d.grid.set_sheet_failed(FAILS_ONCE, FAILURE);
+    d.failed_once = true;
+}
+
 /// Golden scenes: each gets an accessibility and a PNG golden. Each calls
 /// `g.open("c11b", dark)`, then fills in `g.c11b`.
 pub const SCENES: &[Scene] = &[
@@ -286,6 +306,8 @@ pub const SCENES: &[Scene] = &[
     ("c11b-limits-dark", |g| setup(g, true, Fixture::Limits)),
     ("c11b-empty-sheet-light", |g| empty_sheet(g, false)),
     ("c11b-empty-sheet-dark", |g| empty_sheet(g, true)),
+    ("c11b-failed-light", |g| failed_sheet(g, false)),
+    ("c11b-failed-dark", |g| failed_sheet(g, true)),
 ];
 
 /// Scenes for review with `--scene` only, kept out of the goldens: Strata's QA table for the
@@ -420,7 +442,11 @@ pub fn poll(g: &mut Gallery, t: f64, tx: &mut Tx) -> bool {
     let (due, later): (Vec<_>, Vec<_>) = d.reads.drain(..).partition(|&(_, at)| at <= t);
     d.reads = later;
     for (i, _) in due {
-        if let Some(sheet) = d.book.get(i) {
+        if i == FAILS_ONCE && !d.failed_once {
+            d.failed_once = true;
+            d.grid.set_sheet_failed(i, FAILURE);
+            changed = true;
+        } else if let Some(sheet) = d.book.get(i) {
             d.grid.set_sheet(i, sheet.clone());
             changed = true;
         }
@@ -429,10 +455,14 @@ pub fn poll(g: &mut Gallery, t: f64, tx: &mut Tx) -> bool {
         tx.wake_after(std::time::Duration::from_secs_f64((at - t).max(0.0)));
     }
     changed |= d.grid.tick(t, &g.look, tx);
-    let range = d.grid.copy_range().unwrap_or_default();
-    if range != d.range {
+    // Read the range's text only when the range changes: a 100,000-row range is megabytes.
+    // A sort or a sheet arriving clears the range, so the same range has the same text.
+    let at = d.grid.range().map(|r| (d.grid.active(), r));
+    if at != d.range_at {
+        d.range_at = at;
+        let range = d.grid.copy_range().unwrap_or_default();
+        changed |= range != d.range;
         d.range = range;
-        changed = true;
     }
     changed
 }

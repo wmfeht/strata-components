@@ -33,11 +33,13 @@
 //!
 //! Strata's sandboxed reader turns a file into [`Sheet`]s: plain text cells (calamine's
 //! string conversion; no cell types, formulas or merged cells), rows possibly ragged, the
-//! first row the titles, cut at its 100,000-value, 4 MiB and 256-column budget (`truncated`).
+//! first row the titles unless it is empty, cut at its 100,000-value, 4 MiB and 256-column
+//! budget (`truncated`). A title shows at most 128 characters, as Strata's do.
 //! A CSV or TSV is one sheet ([`SheetGridState::set_single`]); a workbook gives its sheet
 //! names first ([`SheetGridState::set_workbook`]), then each sheet's data
-//! ([`SheetGridState::set_sheet`]): the first one Strata reads itself, the others when the
-//! person picks their tab ([`SheetIntent::Load`]). Reading, budgets, the Source view and
+//! ([`SheetGridState::set_sheet`]) or why it couldn't be read
+//! ([`SheetGridState::set_sheet_failed`]): the first one Strata reads itself, the others when
+//! the person picks their tab ([`SheetIntent::Load`]). Reading, budgets, the Source view and
 //! opening the file are Strata's.
 //!
 //! # How it draws
@@ -55,7 +57,10 @@
 //! - **Column windowing**: on a wide sheet only the columns that show and half a viewport's
 //!   width either side are built (the rows report every frame of a scroll through
 //!   `on_layout_tx`, which rebuilds only when what shows leaves what's built: about once half a
-//!   viewport of sideways travel). The cursor's column is always built. Assistive technology
+//!   viewport of sideways travel). A key that moves the cursor builds its column, so the
+//!   active descendant names a cell; after a press, a scroll can take the cursor's cell out of
+//!   what's built or mounted (sideways or down), and the grid then has no active descendant
+//!   until the cursor shows again (Rune drops one that names no node). Assistive technology
 //!   hears the built columns, as it hears the mounted rows.
 //! - **Row numbers are the sheet's own**: the title row is row 1, so data starts at 2, and a
 //!   sorted sheet shows where each row sits in the file.
@@ -65,8 +70,12 @@
 //! - **C24's overlay bars** down the right and along the bottom, over the viewport.
 //! - **Sheet tabs** below the grid, rune-kit's `TabStrip` without close buttons or reordering
 //!   (probe P5: without a drag state it takes no drag), shown with two or more sheets. Each
-//!   sheet keeps its sort, widths and scroll position while the preview is open; a range is
-//!   dropped when another sheet shows.
+//!   sheet keeps its sort, widths, cursor and scroll position while the preview is open; its
+//!   range is dropped when another sheet shows.
+//! - **A sheet that couldn't be read** ([`SheetGridState::set_sheet_failed`]) shows Strata's
+//!   "Preview unavailable" over the reason, in the grid's place, with a Try again button that
+//!   asks [`SheetIntent::Load`] again (Strata's failed preview has no button; picking the
+//!   sheet's tab again asks nothing). The drawer isn't busy meanwhile.
 //!
 //! # Sorting
 //!
@@ -131,9 +140,22 @@
 //! - **D12** (OWNER) Opening a 100,000-row sheet takes one commit of about 37 ms: Rune reads and
 //!   copies every row's key the first time a list shows (Rune #203); later commits skip it.
 //! - **D13** (OWNER) On a 256-column sheet the wheel runs p95 5.1 ms down and 4.7 ms sideways,
-//!   over the plan's 4 ms (none over 8 ms), with column windowing.
+//!   over the plan's 4 ms (none over 8 ms), with column windowing. In debug builds a fast
+//!   sideways scroll (1,500 points a frame) leaves the built columns on most frames, and Rune
+//!   warns that the rows' `on_layout_tx` "committed the view on 6 of 7 frames of a scroll":
+//!   each of those commits is the rebuild windowing needs, not a missed `Tx::live_only`.
 //! - **D14** Rows keyed by display position, not by row: Rune and assistive technology see a
 //!   re-sort as the same rows with new content (the range is cleared by it anyway).
+//! - **D15** (OWNER) A title click on 100,000 rows sorts inside the press handler: 19.4 ms for a
+//!   text or a number column, 4.2 ms for a flip (`tests/perf.rs`, the click's frame), over the
+//!   8 ms frame. Rune's commit budget doesn't see it, since the time is the handler's, not the
+//!   commit's. Sorting off the frame (a worker, the old order shown meanwhile) is the fix if
+//!   it's wanted.
+//! - **D16** Keys that clear the range are taken when there is one: Escape with any modifiers,
+//!   and the arrows, Home and End with Ctrl, Alt or Super (Strata's `ESCAPE_ANY` and its
+//!   arrows, Home and End ignoring the shortcut modifiers). Strata clears and passes the key
+//!   on, so there Escape with a range also reaches the preview; here it doesn't. Without a
+//!   range they pass on.
 //!
 //! # Bullets
 //!
@@ -162,7 +184,7 @@
 //! | With focus on the table, Ctrl+C copies every loaded row in the current sort order… | unit: the clipboard |
 //! | With focus on the table, Ctrl+Shift+C, Ctrl+Alt+C, and Ctrl+Super+C copy nothing. | unit: the clipboard |
 //! | With a cell range selected, Ctrl+A or Ctrl+Shift+A clears the range; Ctrl+Alt+A leaves it. | `ctrl-a-clears`, `ctrl-shift-a-clears`, `ctrl-alt-a-keeps` |
-//! | With a cell range selected, Escape, an arrow key, Home, or End also clears it. | `escape-clears`, `arrow-clears`, `home-clears`, `end-clears` |
+//! | With a cell range selected, Escape, an arrow key, Home, or End also clears it. | `escape-clears`, `arrow-clears`, `home-clears`, `end-clears`; gallery: with Strata's modifiers (D16) |
 //! | With a non-Latin layout such as Russian active, Ctrl+A in a focused table cell… | **not met** (D2) |
 //! | With a non-Latin layout active and no cell range selected, Ctrl+C in a focused table cell… | **not met** (D2) |
 //! | After smooth scrolling, a click, drag selection, or link hover acts on the row under the pointer. | `click-after-scroll` |
@@ -201,7 +223,8 @@
 //!   columns ran p95 31 ms a frame sideways and 184 ms down before this grid windowed its
 //!   columns itself from `on_layout_tx`. Repro: `virtual_rows(390, ..)` in `scroll_xy`, each
 //!   row a `sticky_left` cell and 256 text cells; wheel sideways. Ask: virtual columns, or a
-//!   scroll callback that may change state when a sideways window is crossed.
+//!   scroll callback that may change state when a sideways window is crossed. Meanwhile Rune's
+//!   debug commit warning on `on_layout_tx` fires on fast sideways scrolls (D13).
 //!
 //! Also seen: Space doesn't reach `on_key` while a pointer is held (Rune keeps it for its
 //! Space-drag pan), so the gallery closes its preview mid-drag on F9.
@@ -228,12 +251,12 @@ use strata_kit::slots::tabs as slot;
 use crate::dialog::FOCUS_RING_WIDTH;
 use crate::scroll::{BarLook, overlay};
 
-pub use model::{CELL_DISPLAY_BYTES, Sheet, column_letters};
+pub use model::{CELL_DISPLAY_BYTES, Sheet, TITLE_DISPLAY_CHARS, column_letters};
 pub use range::{CellPos, CellRange};
 pub use rune_kit::SortDir;
 pub use state::{SheetGridState, SheetIntent, SheetLabels};
 
-use render::{Ctx, Paint, build_row, header, placeholder};
+use render::{Ctx, Paint, build_row, failure, header, placeholder};
 
 type IntentFn<S> = Rc<dyn Fn(&mut S, SheetIntent, &mut Tx)>;
 
@@ -321,6 +344,16 @@ fn grid<S: 'static>(
     // Focus stays on the grid; the cursor's cell is what a screen reader follows (probe P3).
     if let Some(c) = v.sel.map(|s| s.cursor) {
         root = root.active_descendant(format!("{}-c{}", st.row_key(c.row), c.col));
+    }
+    if let Some(reason) = &v.failed {
+        let retry = intent.clone();
+        return root.child(failure(look, &key, labels, reason, move |s: &mut S, tx| {
+            if let Some(i) = get_mut(s).retry()
+                && let Some(f) = &retry
+            {
+                f(s, SheetIntent::Load(i), tx);
+            }
+        }));
     }
     let Some(data) = v.data.as_ref() else {
         return root.child(placeholder(look, format!("{key}-loading"), &labels.loading));

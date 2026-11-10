@@ -5,6 +5,7 @@
 mod c11b {
     use rune::{Env, Key, KeyEvent, Mods, Runtime};
     use strata_components::preview_drawer::HostedPreview;
+    use strata_components::sheet_grid::{CellPos, CellRange};
     use strata_gallery::{Gallery, scenes};
 
     const DT: f64 = 1.0 / 60.0;
@@ -103,6 +104,134 @@ mod c11b {
         assert_eq!(g.busy(), None);
         assert_eq!(g.sheet(1).map(|s| s.name.as_ref()), Some("Q1 sales"));
         assert!(rt.elements().iter().any(|e| e.path.ends_with("sheet-h4")));
+    }
+
+    /// A sheet the reader can't read says so in the grid's place, the drawer isn't busy, and
+    /// Try again asks the reader once more (the page's reader fails Inventory's first read).
+    #[test]
+    fn a_sheet_the_reader_fails_says_why_and_try_again_reads_it_again() {
+        let mut rt = scene("c11b-book-light");
+        // Inventory's tab sits past the strip's edge: Ctrl+Page Down gets there (D8).
+        let at = mid(&rt, "sheet-r0-c0");
+        tap(&mut rt, at);
+        for _ in 0..3 {
+            rt.key(KeyEvent {
+                key: Key::PageDown,
+                mods: Mods {
+                    cmd: true,
+                    ctrl: true,
+                    ..Mods::default()
+                },
+            });
+            settle(&mut rt, 2);
+        }
+        assert_eq!(rt.state.c11b.grid.active(), 3);
+        assert_eq!(rt.state.c11b.last, "Load 3");
+        settle(&mut rt, 30);
+        assert_eq!(rt.state.c11b.grid.busy(), None);
+        assert!(rt.state.c11b.grid.sheet(3).is_none());
+        let failed = rt
+            .elements()
+            .into_iter()
+            .find(|e| e.key.as_deref() == Some("sheet-failed"))
+            .expect("the failure in the grid's place");
+        assert!(failed.rect[2] > 0.0);
+        rt.state.c11b.last.clear();
+        let at = mid(&rt, "sheet-retry");
+        tap(&mut rt, at);
+        assert_eq!(rt.state.c11b.last, "Load 3");
+        assert_eq!(rt.state.c11b.grid.busy(), Some("Loading sheet…"));
+        settle(&mut rt, 30);
+        assert_eq!(rt.state.c11b.grid.busy(), None);
+        assert!(rt.state.c11b.grid.sheet(3).is_some());
+    }
+
+    /// preview/preview-panel/documents: "With a cell range selected, Escape, an arrow key,
+    /// Home, or End also clears it", with the modifiers Strata ignores on them: Escape with
+    /// any, the arrows, Home and End with Ctrl, Alt or Super. The grid takes each key that
+    /// clears a range, so the page stays open; Shift with an arrow still grows it (D6).
+    #[test]
+    fn modified_escape_arrows_home_and_end_clear_the_range_as_stratas_do() {
+        let mut rt = scene("c11b-csv-light");
+        let at = mid(&rt, "sheet-r1-c1");
+        tap(&mut rt, at);
+        let ctrl = Mods {
+            cmd: true,
+            ctrl: true,
+            ..Mods::default()
+        };
+        let alt = Mods {
+            alt: true,
+            ..Mods::default()
+        };
+        let logo = Mods {
+            logo: true,
+            ..Mods::default()
+        };
+        let shift = Mods {
+            shift: true,
+            ..Mods::default()
+        };
+        let range = |rt: &mut Runtime<Gallery>| {
+            rt.update(|g, _| g.c11b.grid.select(CellPos::new(1, 1), CellPos::new(3, 2)));
+            settle(rt, 2);
+        };
+        let cases = [
+            (Key::Escape, ctrl),
+            (Key::Escape, shift),
+            (
+                Key::Escape,
+                Mods {
+                    shift: true,
+                    ..ctrl
+                },
+            ),
+            (Key::Escape, alt),
+            (Key::Left, ctrl),
+            (Key::Right, ctrl),
+            (Key::Up, ctrl),
+            (Key::Down, ctrl),
+            (Key::Left, alt),
+            (Key::Down, alt),
+            (Key::Home, alt),
+            (Key::End, alt),
+            (Key::Up, logo),
+            (Key::Right, logo),
+            (Key::Home, logo),
+            (Key::End, logo),
+            (
+                Key::Left,
+                Mods {
+                    shift: true,
+                    ..ctrl
+                },
+            ),
+        ];
+        for (key, mods) in cases {
+            range(&mut rt);
+            assert!(rt.state.c11b.grid.range().is_some());
+            rt.key(KeyEvent {
+                key: key.clone(),
+                mods,
+            });
+            settle(&mut rt, 2);
+            assert_eq!(rt.state.c11b.grid.range(), None, "{key:?} {mods:?}");
+            assert!(
+                rt.state.page.is_some(),
+                "{key:?} {mods:?} stayed the grid's"
+            );
+        }
+        range(&mut rt);
+        rt.key(KeyEvent {
+            key: Key::Down,
+            mods: shift,
+        });
+        settle(&mut rt, 2);
+        assert_eq!(
+            rt.state.c11b.grid.range(),
+            Some(CellRange::spanning(CellPos::new(1, 1), CellPos::new(4, 2))),
+            "Shift+Down grows it"
+        );
     }
 
     /// Escape is the grid's only while a range is selected: without one, the page hears it.

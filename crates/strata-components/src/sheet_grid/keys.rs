@@ -2,7 +2,10 @@
 //!
 //! Strata's (`src/ui/table_view/selection.rs`): Ctrl+C copies the range, or every row without
 //! one; Ctrl+Shift+C, Ctrl+Alt+C and Ctrl+Super+C copy nothing. Ctrl+A and Ctrl+Shift+A clear
-//! the range, Ctrl+Alt+A leaves it, and Escape, an arrow, Home or End clear it too.
+//! the range, Ctrl+Alt+A leaves it, and Escape with any modifiers, or an arrow, Home or End
+//! with Ctrl, Alt or Super or none, clear it too. Strata clears and passes the key on; here a
+//! key that clears a range is taken (so Escape with a range doesn't also close the preview),
+//! and one that clears nothing passes on.
 //!
 //! New against Strata (D6, D8): the arrows, Home, End, Page Up and Page Down move a cell
 //! cursor (Ctrl+Home and Ctrl+End to the first and last cell), with Shift they grow the range
@@ -30,6 +33,16 @@ fn other_modifier(m: rune::Mods) -> bool {
         } else {
             m.logo
         }
+}
+
+/// A key that only clears the range: taken when there was one, so nothing else acts on it
+/// (Strata clears and passes it on; here Escape with a range doesn't also close the preview).
+fn clear(st: &mut SheetGridState) -> Outcome {
+    if st.clear_range() {
+        Outcome::Taken
+    } else {
+        Outcome::Ignored
+    }
 }
 
 pub(crate) fn key_in(st: &mut SheetGridState, ev: &KeyEvent, tx: &mut Tx) -> Outcome {
@@ -63,12 +76,16 @@ pub(crate) fn key_in(st: &mut SheetGridState, ev: &KeyEvent, tx: &mut Tx) -> Out
             _ => Outcome::Taken,
         };
     }
-    if ev.key == Key::Escape && !ctrl && !m.alt && !m.shift {
-        return if st.clear_range() {
-            Outcome::Taken
-        } else {
-            Outcome::Ignored
-        };
+    // Strata's `ESCAPE_ANY`, and the arrows, Home and End ignoring Ctrl, Alt, Shift and Super:
+    // each clears the range. Here Shift with an arrow, Home or End grows it instead (D6), and
+    // Ctrl+Home and Ctrl+End move the cursor (which clears it too).
+    let nav = matches!(
+        ev.key,
+        Key::Left | Key::Right | Key::Up | Key::Down | Key::Home | Key::End
+    );
+    let arrow = matches!(ev.key, Key::Left | Key::Right | Key::Up | Key::Down);
+    if ev.key == Key::Escape || (nav && (m.alt || m.logo)) || (arrow && ctrl) {
+        return clear(st);
     }
     if m.alt || m.logo {
         return Outcome::Ignored;

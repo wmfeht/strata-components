@@ -46,6 +46,10 @@ pub struct SheetLabels {
     pub shortened: String,
     /// While a sheet's data is on its way (also the drawer's busy label).
     pub loading: String,
+    /// Over the reason a sheet couldn't be read (Strata's title for a failed preview).
+    pub failed: String,
+    /// The button that asks for a sheet that couldn't be read once more.
+    pub retry: String,
     /// A sheet with no rows.
     pub empty: String,
 }
@@ -68,6 +72,8 @@ impl Default for SheetLabels {
                         complete text."
                 .into(),
             loading: "Loading sheet…".into(),
+            failed: "Preview unavailable".into(),
+            retry: "Try again".into(),
             empty: "This sheet is empty".into(),
         }
     }
@@ -82,7 +88,9 @@ pub(crate) fn fill(template: &str, value: &str) -> String {
 #[non_exhaustive]
 pub enum SheetIntent {
     /// Sheet `i` was chosen and has no data yet: read it (Strata's sandbox) and hand it over
-    /// with [`SheetGridState::set_sheet`]. Asked once until it arrives.
+    /// with [`SheetGridState::set_sheet`], or say why not with
+    /// [`SheetGridState::set_sheet_failed`]. Asked once until either; after a failure, again
+    /// only when the person presses Try again.
     Load(usize),
 }
 
@@ -91,6 +99,8 @@ pub(crate) struct SheetView {
     pub name: Arc<str>,
     pub data: Option<Arc<Sheet>>,
     pub loading: bool,
+    /// Why the sheet couldn't be read, until it is asked for again.
+    pub failed: Option<String>,
     keys: Vec<OnceCell<ColumnKeys>>,
     pub spec: Vec<(usize, SortDir)>,
     /// Body rows (source indices after the title row) in display order.
@@ -115,6 +125,7 @@ impl SheetView {
             name,
             data: None,
             loading: false,
+            failed: None,
             keys: Vec::new(),
             spec: Vec::new(),
             order: Vec::new(),
@@ -135,6 +146,7 @@ impl SheetView {
         self.order = (0..n as u32).collect();
         self.data = Some(Arc::new(sheet));
         self.loading = false;
+        self.failed = None;
         self.manual = None;
         *self.wanted.borrow_mut() = None;
         self.sel = None;
@@ -278,6 +290,21 @@ impl SheetGridState {
                 self.window = None;
             }
         }
+    }
+
+    /// Sheet `i` couldn't be read: the grid shows `reason` under Strata's "Preview
+    /// unavailable", with a Try again button that asks [`SheetIntent::Load`] once more. The
+    /// drawer stops showing it busy. Ignored for a sheet whose data has come.
+    pub fn set_sheet_failed(&mut self, i: usize, reason: impl Into<String>) {
+        if let Some(v) = self.sheets.get_mut(i).filter(|v| v.data.is_none()) {
+            v.loading = false;
+            v.failed = Some(reason.into());
+        }
+    }
+
+    /// Why sheet `i` couldn't be read, while it shows as failed.
+    pub fn failure(&self, i: usize) -> Option<&str> {
+        self.sheets.get(i)?.failed.as_deref()
     }
 
     pub fn set_labels(&mut self, labels: SheetLabels) {
@@ -534,12 +561,15 @@ impl SheetGridState {
 
     // --- What the handlers do ----------------------------------------------------------------
 
-    /// The cell at a point of the rows' content, if it is on one.
+    /// The cell at a point of the rows' content, if it is on one. The row numbers stay at the
+    /// viewport's left edge, over whatever has scrolled under them, so a point within the
+    /// gutter's width of that edge is on them, at any sideways offset.
     pub(crate) fn cell_at(&self, x: f32, y: f32) -> Option<CellPos> {
         let v = self.view()?;
         let laid = self.laid.borrow();
         let h = self.row_h.get().max(1.0);
-        if v.rows() == 0 || y < 0.0 || x >= laid.width() || x < laid.gutter {
+        let in_view = x - self.feed.get().offset[0];
+        if v.rows() == 0 || y < 0.0 || x >= laid.width() || in_view < laid.gutter {
             return None;
         }
         let row = (y / h) as usize;
@@ -643,13 +673,14 @@ impl SheetGridState {
         tx.scroll_to_instant(scroll, x, 0.0);
     }
 
-    /// Shows sheet `i`, keeping where the last one was scrolled. True when the host should
-    /// load it.
+    /// Shows sheet `i`, keeping where the last one was scrolled and its cursor, but not its
+    /// range. True when the host should load it.
     pub(crate) fn show(&mut self, i: usize, tx: &mut Tx) -> bool {
         if i >= self.sheets.len() || i == self.active {
             return false;
         }
         let offset = self.feed.get().offset;
+        self.clear_range();
         if let Some(v) = self.view_mut() {
             v.offset = offset;
         }
@@ -663,9 +694,19 @@ impl SheetGridState {
             tx.scroll_to_instant(self.scroll_key(), back[0], back[1]);
         }
         let v = &mut self.sheets[i];
-        let load = v.data.is_none() && !v.loading;
+        let load = v.data.is_none() && !v.loading && v.failed.is_none();
         v.loading |= load;
         load
+    }
+
+    /// Try again on the active sheet's failure: it shows loading again. The sheet the host
+    /// should load, if it had failed.
+    pub(crate) fn retry(&mut self) -> Option<usize> {
+        let i = self.active;
+        let v = self.view_mut()?;
+        v.failed.take()?;
+        v.loading = true;
+        Some(i)
     }
 
     /// The rows moved to `list_x` in the window (a scroll, sideways or down). True when the

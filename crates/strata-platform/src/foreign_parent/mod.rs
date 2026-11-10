@@ -96,11 +96,12 @@
 //! - **Wayland: one round trip** on the UI thread per [`apply`], to hear at once whether the
 //!   compositor refused the handle. Its wait has no limit: a compositor that stops answering
 //!   blocks the UI thread until it answers or the connection ends (as it stalls winit's own
-//!   frames meanwhile). A socket too full to take the request is waited out briefly, then
-//!   the call is [`Reason::Failed`] and the connection lives on.
+//!   frames meanwhile). A socket too full to take the request is waited out, up to about 1 s
+//!   on the UI thread, then the call is [`Reason::Failed`] and the connection lives on.
 //! - **Wayland: [`release`] in `on_close`.** It also detaches the window from P0's substrate,
 //!   which asks a window's app to dispatch winit's display's events. A window closed without
-//!   it is pruned once the substrate sees it never runs, a few events later.
+//!   it is set aside once the substrate sees its turn stay unrun, a few events later, and
+//!   dropped once a few more such windows pile up.
 //! - **Wayland: v2 only.** A compositor with `zxdg_importer_v1` alone is
 //!   [`Reason::NoImporter`]. Of Hyprland, GNOME, KDE and sway, only sway has v1 at all, and it
 //!   imports a v1-exported handle (Chromium's there) through v2.

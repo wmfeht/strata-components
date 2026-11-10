@@ -320,3 +320,44 @@ fn an_error_asked_for_from_inside_the_hidden_page_still_moves_the_keyboard() {
     run(&mut rt, 4);
     assert_eq!(focused(&rt).as_deref(), Some("name"));
 }
+
+/// GtkNotebook's `real_switch_page`: Ctrl+Page Up and Down with the keyboard on the page being
+/// hidden carry it into the new page (its first focusable element), else to the new page's
+/// tab; with the keyboard on a tab it stays on the tabs, on the new one; elsewhere it stays.
+#[test]
+fn ctrl_page_keys_carry_the_keyboard_out_of_the_hidden_page() {
+    for mounting in [Mounting::Kept, Mounting::Rebuilt] {
+        let mut rt = mount(mounting, "x");
+        tap(&mut rt, "name");
+        assert_eq!(focused(&rt).as_deref(), Some("name"));
+        let mut seen = Vec::new();
+        for key in [
+            Key::PageUp,
+            Key::PageDown,
+            Key::PageDown,
+            Key::PageDown,
+            Key::PageUp,
+        ] {
+            press(&mut rt, key, ctrl());
+            seen.push((rt.state.tabs.selected(), focused(&rt)));
+        }
+        let want = [
+            (2, "behavior-button"),
+            (0, "name"),
+            (1, "f-tab-1"),
+            (2, "f-tab-2"),
+            (1, "f-tab-1"),
+        ]
+        .map(|(i, k)| (i, Some(k.to_owned())));
+        assert_eq!(seen, want, "{mounting:?}");
+        tap(&mut rt, "save");
+        press(&mut rt, Key::PageDown, ctrl());
+        assert_eq!(rt.state.tabs.selected(), 2, "{mounting:?}");
+        assert_eq!(
+            focused(&rt).as_deref(),
+            Some("save"),
+            "{mounting:?}: a keyboard outside the form stays"
+        );
+        assert_eq!(rt.state.heard, [2, 0, 1, 2, 1, 2], "{mounting:?}");
+    }
+}

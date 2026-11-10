@@ -15,7 +15,13 @@
 //! then moves it nowhere. So an owner that hides the focused control (a form's page) does it in
 //! the commit that drops the leaf, where the target is shown and the old focus still counts.
 //!
-//! Used by: [`super::TabbedFormState::show_error`], C20c's settings search (Enter).
+//! A hop can name fallbacks: each target gets a leaf, the first choice last among them, and
+//! `sync_requested_focus` tries the dropped leaves from the last in the tree to the first, so
+//! a target with nothing focusable shown hands over to the next (the form's Ctrl+Page Down: the
+//! new page, else its tab).
+//!
+//! Used by: [`super::TabbedFormState::show_error`], [`super::TabbedForm::window_key`], C20c's
+//! settings search (Enter).
 
 use std::time::Duration;
 
@@ -24,7 +30,8 @@ use rune::{El, Tx, el};
 /// A pending hop, held in its owner's state.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Hop {
-    target: Option<String>,
+    /// In order of preference; empty when no hop is pending.
+    targets: Vec<String>,
     drawn: bool,
 }
 
@@ -32,37 +39,45 @@ impl Hop {
     /// Move the keyboard to the element keyed `target` once the leaf has been drawn and
     /// dropped. A new request replaces one not yet done.
     pub(crate) fn request(&mut self, target: String, tx: &mut Tx) {
-        self.target = Some(target);
+        self.request_first(vec![target], tx);
+    }
+
+    /// Move the keyboard to the first of `targets` that has a focusable element shown.
+    pub(crate) fn request_first(&mut self, targets: Vec<String>, tx: &mut Tx) {
+        self.targets = targets;
         self.drawn = false;
         tx.wake_after(Duration::ZERO);
     }
 
-    /// The leaf, keyed `key`, while the hop is pending.
+    /// The first target's leaf, keyed `key`, while the hop is pending.
     pub(crate) fn leaf(&self, key: &str) -> Option<El> {
-        let target = self.target.clone()?;
-        Some(
-            el().key(key.to_owned())
-                .absolute(0.0, 0.0)
-                .size(0.0, 0.0)
-                .a11y_hidden()
-                .focus_return(target),
-        )
+        self.targets.first().map(|t| leaf(key.to_owned(), t))
+    }
+
+    /// Every target's leaf, keyed `{key}-{n}` by preference, the first choice last, for
+    /// siblings in one element.
+    pub(crate) fn leaves(&self, key: &str) -> Vec<El> {
+        let n = self.targets.len();
+        (0..n)
+            .rev()
+            .map(|i| leaf(format!("{key}-{i}"), &self.targets[i]))
+            .collect()
     }
 
     /// Whether the next [`Hop::tick`] drops the leaf: the commit that moves the keyboard.
     pub(crate) fn dropping(&self) -> bool {
-        self.target.is_some() && self.drawn
+        !self.targets.is_empty() && self.drawn
     }
 
     /// From the owner's poll: the first tick after a request keeps the leaf for a frame that
     /// draws it (a request made in a poll before this tick still gets that frame); the next
     /// drops it, which moves the keyboard. True when the view changes.
     pub(crate) fn tick(&mut self, tx: &mut Tx) -> bool {
-        if self.target.is_none() {
+        if self.targets.is_empty() {
             return false;
         }
         if self.drawn {
-            self.target = None;
+            self.targets.clear();
             self.drawn = false;
         } else {
             self.drawn = true;
@@ -70,4 +85,12 @@ impl Hop {
         }
         true
     }
+}
+
+fn leaf(key: String, target: &str) -> El {
+    el().key(key)
+        .absolute(0.0, 0.0)
+        .size(0.0, 0.0)
+        .a11y_hidden()
+        .focus_return(target.to_owned())
 }

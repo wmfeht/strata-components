@@ -50,7 +50,11 @@ type SelectFn<S> = Rc<dyn Fn(&mut S, usize, &mut Tx)>;
 ///   (wrapping), Home and End the first and last; a press chooses. Focus stays on the tab.
 /// - Ctrl+Page Up and Ctrl+Page Down choose the previous or next page from anywhere: the host
 ///   routes them from its `on_key` with [`TabbedForm::window_key`] (a focused field passes them
-///   on to the window, never to an ancestor).
+///   on to the window, never to an ancestor). As in GtkNotebook, a keyboard on a tab moves to
+///   the new tab, one on the page being hidden to the new page's first focusable element (its
+///   `focus_selected` one first; Rune keeps no last-focused child), else to its tab, and one
+///   elsewhere stays. The tabs show the choice at once; the page follows two frames on, with
+///   the focus hop, when the keyboard was off the tabs.
 /// - A page with [`FormPage::has_errors`] shows a dot in the danger colour after its title, and
 ///   its tab is described as having errors and reports itself invalid.
 pub struct TabbedForm<S> {
@@ -113,7 +117,11 @@ impl<S: 'static> TabbedForm<S> {
     /// direct child of an element that holds both the form and whatever has the keyboard when
     /// the host calls `show_error` (the dialog body around the form and its Save button).
     pub fn hop(&self, s: &S) -> Option<El> {
-        (self.get)(s).hop.leaf(&format!("{}-hop", self.key))
+        let state = (self.get)(s);
+        if state.hop_in_form {
+            return None;
+        }
+        state.hop.leaf(&format!("{}-hop", self.key))
     }
 
     /// Ctrl+Page Up and Ctrl+Page Down: the previous or next page, wrapping. For the host's
@@ -129,7 +137,26 @@ impl<S: 'static> TabbedForm<S> {
             _ => return false,
         };
         let at = (self.get)(s).selected().min(pages - 1);
-        choose(self.get_mut, &self.on_select, s, (at + step) % pages, tx);
+        let next = (at + step) % pages;
+        if next == at {
+            return true;
+        }
+        // GtkNotebook's `real_switch_page`: a keyboard on a tab moves to the new tab, one on
+        // the page being hidden into the new page (its first focusable element, else its tab),
+        // and one elsewhere stays. Only the focused key is known here, so a keyboard not on a
+        // tab holds the shown page until the hop lands; the leaves sit in the form, so they
+        // move a keyboard outside it nowhere.
+        let focused = tx.focused().map(str::to_owned);
+        if let Some(f) = focused {
+            let on_tab = (0..pages).any(|j| f == self.tab_key(j));
+            let targets = if on_tab {
+                vec![self.tab_key(next)]
+            } else {
+                vec![self.panel_key(next), self.tab_key(next)]
+            };
+            (self.get_mut)(s).carry(targets, !on_tab, tx);
+        }
+        choose(self.get_mut, &self.on_select, s, next, tx);
         true
     }
 
@@ -143,7 +170,10 @@ impl<S: 'static> TabbedForm<S> {
         page: impl Fn(&S, usize) -> El,
     ) -> El {
         let state = (self.get)(s);
-        let chosen = state.selected().min(pages.len().saturating_sub(1));
+        let last = pages.len().saturating_sub(1);
+        let chosen = state.selected().min(last);
+        let (shown_page, visit) = state.shown();
+        let shown_page = shown_page.min(last);
         let k = &look.kit;
         let n = pages.len();
         let tabs = pages
@@ -168,7 +198,7 @@ impl<S: 'static> TabbedForm<S> {
             .equal_columns(1)
             .instant_changes();
         for (i, p) in pages.iter().enumerate() {
-            let shown = i == chosen;
+            let shown = i == shown_page;
             if !shown && self.mounting == Mounting::Rebuilt {
                 continue;
             }
@@ -178,7 +208,7 @@ impl<S: 'static> TabbedForm<S> {
                 // mounts again at the same path when the old one left in an instant commit
                 // (Rune draft U-C20c-4), so a stable key would bring the old offset back.
                 body = col()
-                    .key(format!("{}-visit-{}", self.panel_key(i), state.visits))
+                    .key(format!("{}-visit-{visit}", self.panel_key(i)))
                     .w_full()
                     .min_w(0.0)
                     .child(body);
@@ -197,11 +227,17 @@ impl<S: 'static> TabbedForm<S> {
                 panel.opacity(0.0).inert().a11y_hidden()
             });
         }
+        let leaves = if state.hop_in_form {
+            state.hop.leaves(&format!("{}-switch-hop", self.key))
+        } else {
+            Vec::new()
+        };
         col()
             .key(self.key.clone())
             .w_full()
             .child(strip)
             .child(stack)
+            .children(leaves)
     }
 
     fn tab(&self, look: &Look, p: &FormPage, i: usize, n: usize, chosen: bool) -> El {

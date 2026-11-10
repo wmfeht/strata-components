@@ -47,6 +47,7 @@
                               "position": 2,
                               "role": "tab",
                               "states": [
+                                "focused",
                                 "selected"
                               ]
                             },

@@ -27,7 +27,8 @@
       "key": "c20c-editor-tab-1",
       "states": [
         "selected"
-      ]
+      ],
+      "focused": true
     },
     {
       "key": "c20c-name",

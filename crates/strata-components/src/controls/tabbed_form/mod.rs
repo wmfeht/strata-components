@@ -27,7 +27,8 @@
 //!   host's state, so nothing is lost and nothing is written.
 //! - **Poll:** the host calls [`TabbedFormState::tick`] every frame; it runs the focus hop.
 //! - **Keys:** the host's `on_key` calls [`TabbedForm::window_key`] for Ctrl+Page Up and
-//!   Ctrl+Page Down.
+//!   Ctrl+Page Down. Its focus hop needs the host's poll to call
+//!   [`TabbedFormState::tick`], as [`TabbedFormState::show_error`]'s does.
 //! - The page bodies are the host's, padding and scrolling included (Strata pads 22 px and
 //!   scrolls each page). With [`Mounting::Kept`] each page keeps its scroll offset.
 //!
@@ -47,7 +48,8 @@
 //!   label only, so it can neither be a tablist nor carry a mark (Rune draft U-C20c-1). The
 //!   tabs are our own elements with tab roles, in Strata's underline look (bullets 43, 44 of
 //!   `integration/custom-actions`).
-//! - **D5:** the keyboard moves to the invalid field by a one-frame focus hop (`hop.rs`), as
+//! - **D5:** the keyboard moves to the invalid field, and with Ctrl+Page Up or Down out of
+//!   the page being hidden into the new one, by a one-frame focus hop (`hop.rs`), as
 //!   Rune 5d421fd has no `Tx::focus` (upstream #173). Past the pin Rune adds `Tx::focus` for
 //!   web focus (#384) and `Tx::focused` in every handler (#441); not adopted.
 //! - **D6:** a kept page is hidden by opacity 0, `inert` and `a11y_hidden` in a shared grid

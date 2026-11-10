@@ -7,7 +7,7 @@
 | Prototype crates | wayland-client 0.31.15, wayland-backend 0.3.17 (`client_system`), wayland-protocols 0.32.13, wayland-protocols-wlr 0.3.12, x11rb 0.13.2, Rust 1.99.1 |
 | Ran here | sway 1.12 / wlroots 0.20.2 headless (gles2 renderer on the RTX 5090 render node), Xwayland 24.1.14 inside it, Xvfb 21.1.25, libwayland 1.26.0, NVIDIA 615.78.08, Nautilus 51.1 (GTK 4.24.1) inside the nested sway, kernel 7.2.15 |
 | Hand test pending | Hyprland 0.56.2, GNOME (mutter), KDE (KWin), Dolphin, lavapipe |
-| Prototype | `/home/wmfeht/dev/strata-spikes/s2` (never merged). Logs are under its `logs/<experiment>-<time>/`. A copy of the transfer code sits on the local branch `spike/s2-prototype`, also never merged. |
+| Prototype | `/home/wmfeht/dev/strata-spikes/s2` (never merged). Logs are under its `logs/<experiment>-<time>/`. A copy of the transfer code sat on the local branch `spike/s2-prototype`, never merged. The branch was deleted once P0 had merged; its tip was `ee886835`. |
 
 ## Verdicts
 
@@ -442,9 +442,9 @@ No Rune patch. Everything goes behind P0's internal `transfer` module; P1, P2 an
   window that no longer exists. Designed, not run.
 
 **Starting point.** The prototype's `probe` (`wl.rs` drivers B and C, `x11.rs`, `display.rs`,
-`snapshot.rs`), the peer and the harness scripts are on the local branch `spike/s2-prototype`
-under `crates/strata-platform/src/transfer/`. They are reference code, not wired into the crate,
-and that branch must not be merged. P0 should rewrite them to the repository's lints. Every
+`snapshot.rs`), the peer and the harness scripts were on the local branch `spike/s2-prototype`
+under `crates/strata-platform/src/transfer/` (deleted after P0 merged; tip `ee886835`). They were
+reference code, not wired into the crate, and that branch was never merged. P0 should rewrite them to the repository's lints. Every
 `unsafe` needs a `SAFETY` comment and a module-level `#[expect(unsafe_code, reason = ..)]`.
 
 ## What Rune must expose

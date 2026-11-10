@@ -4,7 +4,8 @@
 //! GStreamer's state changes can block on the device (a sound server that is slow to answer),
 //! so none runs on the app's thread. The bus's sync handler runs on GStreamer's threads and only
 //! forwards messages here, tagged with the generation `appsrc` was flushed to when they were
-//! posted: a message from before a flush can't land the seek after it.
+//! posted: a message from before a flush (or from a pipeline a rebuild replaced) can't land the
+//! seek after it, end it or fail it.
 
 use std::io;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -23,11 +24,15 @@ const TICK: Duration = Duration::from_millis(20);
 pub(super) enum Cmd {
     /// Bring the pipeline's state in line with what's wanted.
     Settle,
-    Flush(u64),
-    Rebuild(u64),
+    /// Restart `appsrc` for this generation: flush it, or rebuild the pipeline when one is
+    /// owed (`Core::rebuild_owed`). Stale once a later seek came.
+    Seek(u64),
     /// A bus message, and the generation `appsrc` was flushed to when it was posted.
     Bus(gst::Message, u64),
     Stop,
+    /// Answers once the commands sent before it are handled.
+    #[cfg(test)]
+    Fence(mpsc::Sender<()>),
 }
 
 pub(super) fn spawn(shared: Arc<Shared>, parts: Parts) -> io::Result<mpsc::Sender<Cmd>> {
@@ -40,7 +45,7 @@ pub(super) fn spawn(shared: Arc<Shared>, parts: Parts) -> io::Result<mpsc::Sende
         tx: tx.clone(),
         flushed,
         target: None,
-        moved_from: None,
+        starting: None,
     };
     std::thread::Builder::new()
         .name(THREAD_NAME.into())
@@ -70,9 +75,19 @@ struct Control {
     flushed: Arc<AtomicU64>,
     /// The state last asked of the pipeline.
     target: Option<gst::State>,
-    /// Where the clock stood when playing last started, until it first moves: a device still
-    /// starting isn't a stall.
-    moved_from: Option<Duration>,
+    /// A fresh output (a new pipeline, or a flushed generation) until its clock first moves:
+    /// a device still starting isn't a stall until the start timeout.
+    starting: Option<Starting>,
+}
+
+/// How long a fresh output has been starting.
+#[derive(Default)]
+struct Starting {
+    /// The time counted so far: loading or seeking with PCM queued, or playing.
+    waited: Duration,
+    /// When the watchdog last counted, while it counts.
+    since: Option<Instant>,
+    reported: bool,
 }
 
 impl Control {
@@ -97,10 +112,13 @@ impl Control {
     fn handle(&mut self, cmd: Cmd) {
         match cmd {
             Cmd::Settle => {}
-            Cmd::Flush(generation) => self.flush(generation),
-            Cmd::Rebuild(generation) => self.rebuild(generation),
+            Cmd::Seek(generation) => self.seek(generation),
             Cmd::Bus(message, tag) => self.bus(&message, tag),
             Cmd::Stop => unreachable!("handled by run"),
+            #[cfg(test)]
+            Cmd::Fence(done) => {
+                let _ = done.send(());
+            }
         }
         self.settle();
     }
@@ -108,16 +126,31 @@ impl Control {
     /// Pauses a fresh pipeline (it prerolls on the first PCM) and lets `generation`'s PCM in.
     fn start(&mut self, generation: u64) {
         self.target = None;
+        self.starting = Some(Starting::default());
+        // Before the state change: a device that fails to open posts its error during it.
+        self.flushed.store(generation, Ordering::SeqCst);
         if self.set_state(gst::State::Paused) {
-            self.flushed.store(generation, Ordering::SeqCst);
             self.apply(generation);
         }
     }
 
-    fn flush(&mut self, generation: u64) {
-        if lock(&self.shared.core).generation != generation {
-            return; // A later seek follows in the queue.
+    fn seek(&mut self, generation: u64) {
+        let rebuild = {
+            let mut core = lock(&self.shared.core);
+            if core.generation != generation {
+                return; // A later seek follows in the queue.
+            }
+            std::mem::take(&mut core.rebuild_owed)
+        };
+        if rebuild {
+            self.rebuild(generation);
+        } else {
+            self.flush(generation);
         }
+    }
+
+    fn flush(&mut self, generation: u64) {
+        self.starting = Some(Starting::default());
         self.set_state(gst::State::Paused);
         self.parts.src.send_event(gst::event::FlushStart::new());
         // reset_time: the new generation's PCM starts at running time 0.
@@ -127,9 +160,6 @@ impl Control {
     }
 
     fn rebuild(&mut self, generation: u64) {
-        if lock(&self.shared.core).generation != generation {
-            return;
-        }
         self.teardown();
         let parts = match Parts::build(&self.shared.format, &self.shared.options) {
             Ok(parts) => parts,
@@ -174,6 +204,9 @@ impl Control {
             return;
         }
         let mut core = lock(&self.shared.core);
+        // The flush tag is load-bearing: open, push and seek at once, and the first
+        // generation's AsyncDone can arrive behind the seek's flush with the seek's own PCM
+        // already in, where nothing else tells the two apart.
         let current = tag == core.generation;
         match message.view() {
             gst::MessageView::AsyncDone(_) => {
@@ -181,6 +214,8 @@ impl Control {
                 if current
                     && matches!(core.phase, Phase::Loading | Phase::Seeking)
                     && core.applied == Some(core.generation)
+                    // Defensive: an output that finishes going to PAUSED without a preroll
+                    // has nothing ready to play.
                     && (core.pushed > 0 || core.finished)
                 {
                     core.phase = Phase::Running;
@@ -202,6 +237,12 @@ impl Control {
                 }
             }
             gst::MessageView::Error(error) => {
+                // One from before a seek or reopen leaves the output that seek starts alone:
+                // a pipeline still broken after a flush fails again, or doesn't start (the
+                // start timeout). While failed, `fail` keeps the first failure.
+                if !current {
+                    return;
+                }
                 drop(core);
                 let lost = self.parts.posted_by_output(message)
                     && error.error().is::<gst::ResourceError>();
@@ -220,8 +261,16 @@ impl Control {
         }
     }
 
+    /// Fails the clock and reports it, once: what fails while failed is the same failure
+    /// (appsrc stopping on the lost device, say), and adds nothing.
     fn fail(&mut self, event: SinkEvent) {
-        lock(&self.shared.core).phase = Phase::Failed;
+        {
+            let mut core = lock(&self.shared.core);
+            if core.phase == Phase::Failed {
+                return;
+            }
+            core.phase = Phase::Failed;
+        }
         self.shared.emit(event);
     }
 
@@ -237,13 +286,20 @@ impl Control {
         };
         if self.target != Some(desired) {
             if desired == gst::State::Playing {
-                self.moved_from = Some(self.shared.relative().1);
                 let mut core = lock(&self.shared.core);
                 core.still = None;
-                // The running time went on past the PCM before the watchdog paused it: start
-                // again where the PCM stopped, or what comes next plays late.
-                if let Some(from) = core.resume_from.take() {
-                    self.parts.pipeline.set_start_time(super::clock_time(from));
+                // After an underrun the pipeline paused at the running time it had reached.
+                // That can be past the PCM's end (it ran on between two watchdog reads): start
+                // again at the end, or what comes next plays late. Short of the end, it plays
+                // on from where it paused, so the last PCM before the underrun still plays.
+                if let Some(end) = core.resume_from.take()
+                    && self
+                        .parts
+                        .pipeline
+                        .start_time()
+                        .is_none_or(|paused_at| paused_at > super::clock_time(end))
+                {
+                    self.parts.pipeline.set_start_time(super::clock_time(end));
                 }
             }
             self.set_state(desired);
@@ -266,23 +322,31 @@ impl Control {
     fn watching(&self) -> bool {
         let core = lock(&self.shared.core);
         match core.phase {
-            Phase::Running => core.want_play && !core.finished,
+            Phase::Running => core.want_play,
             Phase::Underrun => true,
-            _ => false,
+            // Waiting for a preroll with PCM in: the start timeout runs.
+            Phase::Loading | Phase::Seeking => {
+                core.applied == Some(core.generation)
+                    && (core.pushed > 0 || core.finished)
+                    && self.starting.as_ref().is_some_and(|s| !s.reported)
+            }
+            Phase::Ended | Phase::Failed => false,
         }
     }
 
     /// Sees the PCM run out (pausing the pipeline, so PCM pushed later doesn't play late),
-    /// enough of it come back, and a device that stopped taking it.
+    /// enough of it come back, a fresh output that doesn't start, and a device that stopped
+    /// taking PCM.
     fn watch(&mut self) {
         if !self.watching() {
+            // Time paused doesn't count toward the start timeout.
+            if let Some(starting) = &mut self.starting {
+                starting.since = None;
+            }
             return;
         }
-        let (generation, relative) = self.shared.relative();
-        let mut core = lock(&self.shared.core);
-        if core.generation != generation {
-            return;
-        }
+        let mut core = self.shared.settled();
+        let relative = core.held;
         let ahead = self
             .shared
             .format
@@ -290,20 +354,32 @@ impl Control {
             .saturating_sub(relative);
         let at = core.base + relative;
         match core.phase {
-            Phase::Running if core.want_play && !core.finished => {
+            Phase::Loading | Phase::Seeking => {
+                drop(core);
+                self.count_start(at);
+            }
+            Phase::Running => {
                 if ahead <= UNDERRUN_MARGIN {
-                    core.phase = Phase::Underrun;
-                    core.still = None;
-                    core.resume_from = Some(self.shared.format.duration_of(core.pushed));
-                    drop(core);
-                    self.shared.emit(SinkEvent::Underrun { at });
-                    self.settle();
+                    // Finished: the end comes as EOS.
+                    if !core.finished {
+                        core.phase = Phase::Underrun;
+                        core.still = None;
+                        core.resume_from = Some(self.shared.format.duration_of(core.pushed));
+                        drop(core);
+                        self.shared.emit(SinkEvent::Underrun { at });
+                        self.settle();
+                    }
                     return;
                 }
-                if self.moved_from.is_some_and(|from| from == relative) {
-                    return;
+                // A new generation's clock starts at 0: it moved once it is past it.
+                if self.starting.is_some() {
+                    if relative.is_zero() {
+                        drop(core);
+                        self.count_start(at);
+                        return;
+                    }
+                    self.starting = None;
                 }
-                self.moved_from = None;
                 let stall_after = self.shared.options.stall_after;
                 match &mut core.still {
                     Some((still_at, since, reported)) if *still_at == relative => {
@@ -325,7 +401,23 @@ impl Control {
                     self.settle();
                 }
             }
-            _ => {}
+            Phase::Ended | Phase::Failed => {}
+        }
+    }
+
+    /// Counts a watchdog tick toward the start timeout, and reports a start that ran out.
+    fn count_start(&mut self, at: Duration) {
+        let Some(starting) = &mut self.starting else {
+            return;
+        };
+        let now = Instant::now();
+        if let Some(since) = starting.since {
+            starting.waited += now - since;
+        }
+        starting.since = Some(now);
+        if !starting.reported && starting.waited >= self.shared.options.start_timeout {
+            starting.reported = true;
+            self.shared.emit(SinkEvent::Stalled { at });
         }
     }
 

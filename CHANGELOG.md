@@ -171,12 +171,16 @@ Nothing is released yet. The first release is planned for milestone M1 with the 
   - `AudioSink` plays interleaved PCM (`PcmFormat`: S16, S32 or F32, any rate and channel
     count) through GStreamer's `appsrc` into the default output (`autoaudiosink`), or nowhere
     (`Output::Null`). Its clock (`SinkClock`, for any thread) is the device's position. It
-    plays, pauses, seeks, flushes, reopens after a lost device, and sets the volume.
+    plays, pauses, seeks, flushes, reopens after a lost device, and sets the volume. A seek
+    right after a failure or a reopen, before the new pipeline is built, still lands on it.
   - A seek starts a generation: the sink flushes `appsrc` and plays the PCM pushed since from
     the seek's target, with no pipeline rebuild. An underrun pauses the pipeline until 200 ms
     is queued again, so the PCM that follows doesn't play late.
   - Each change the clock makes on its own is a `SinkEvent` (`Ready`, `SeekLanded`,
     `Underrun`, `Resumed`, `Stalled`, `Ended`, `DeviceLost`, `Error`) and wakes the app once.
+    One failure is one event, and nothing from a pipeline or generation before a seek changes
+    the clock after it. `Stalled` covers a device that stops (`SinkOptions::stall_after`, 3 s)
+    and one that never starts (`SinkOptions::start_timeout`, 8 s of loading or playing).
     No call blocks on the device: state changes run on a control thread.
   - `FramePacer` writes the RGBA frame the clock is at into a `rune::Pixels` in place, with no
     view commit: it drops frames whose time passed, holds while the next isn't due, counts

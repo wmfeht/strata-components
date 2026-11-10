@@ -55,9 +55,10 @@
 //!
 //! The sink's calls never block on the device. GStreamer streams on its own threads, and state
 //! changes, flushes and rebuilds run on the sink's control thread ([`THREAD_NAME`]), which also
-//! reads the clock every 20 ms while playing to see the PCM run out. Every change the clock
-//! makes on its own (the first PCM ready, a seek landing, an underrun and the resume after it,
-//! a stall, the end, a failure) queues a [`SinkEvent`] and calls the waker, so an app's `poll`
+//! reads the clock every 20 ms while playing (and while a fresh output prerolls) to see the PCM
+//! run out and a device that doesn't start or stops. Every change the clock makes on its own
+//! (the first PCM ready, a seek landing, an underrun and the resume after it, a stall, the end,
+//! a failure) queues a [`SinkEvent`] and calls the waker, so an app's `poll`
 //! runs and its view shows the new state even in a resting window. Changes the app asks for
 //! (play, pause, the start of a seek) wake nothing: the app made them.
 //!
@@ -72,8 +73,8 @@
 //! timestamps start again at 0; the clock reads the seek's target plus the device's position
 //! in the generation. A probe on GStreamer 1.28 (fakesink on a manual clock) showed the running
 //! time restart at once after the flush, with no PCM from before it rendered, while playing and
-//! while paused, so no seek rebuilds the pipeline. Only a failed output is rebuilt
-//! ([`AudioSink::reopen`]).
+//! while paused, so no seek rebuilds the pipeline. Only a failed output is rebuilt: the first
+//! seek after the failure, or [`AudioSink::reopen`], and any seek before that rebuild runs.
 //!
 //! The same probe showed that PCM pushed after the sink ran dry plays late (the running time
 //! went on without it), so on an underrun the sink pauses its pipeline, and plays again once

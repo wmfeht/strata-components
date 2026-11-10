@@ -4,13 +4,15 @@
 
 use std::io::Write;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
 use gst::prelude::*;
 use gstreamer as gst;
 
-use super::{AudioSink, Output, PushError, SinkEvent, SinkOptions};
+use super::control::Cmd;
+use super::pipeline::Parts;
+use super::{AudioSink, Output, PushError, SinkEvent, SinkOptions, lock};
 use crate::media::clock::{ClockState, MediaClock};
 use crate::media::format::PcmFormat;
 use crate::media::pacer::{FramePacer, VideoFrame};
@@ -97,10 +99,62 @@ mod manual_clock {
 }
 use manual_clock::ManualClock;
 
+/// Holds the one thread that passes it once armed, until the test releases it: the control
+/// thread inside a wake, or a reader inside a clock read.
+#[derive(Default)]
+struct Gate {
+    /// Armed, and whether a thread is held.
+    state: Mutex<(bool, bool)>,
+    changed: Condvar,
+}
+
+impl Gate {
+    fn arm(&self) {
+        self.state.lock().unwrap().0 = true;
+    }
+
+    fn pass(&self) {
+        let mut state = self.state.lock().unwrap();
+        if !state.0 {
+            return;
+        }
+        *state = (false, true);
+        self.changed.notify_all();
+        while state.1 {
+            state = self.changed.wait(state).unwrap();
+        }
+    }
+
+    fn wait_held(&self) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut state = self.state.lock().unwrap();
+        while !state.1 {
+            assert!(Instant::now() < deadline, "nothing reached the gate");
+            state = self
+                .changed
+                .wait_timeout(state, Duration::from_millis(10))
+                .unwrap()
+                .0;
+        }
+    }
+
+    fn release(&self) {
+        self.state.lock().unwrap().1 = false;
+        self.changed.notify_all();
+    }
+}
+
+/// The thread name the read gate holds; the control thread reads the clock too.
+const READER: &str = "torn-read";
+
 struct Rig {
     sink: AudioSink,
     clock: ManualClock,
     wakes: Arc<AtomicUsize>,
+    /// Holds the control thread inside the next wake.
+    wake_gate: Arc<Gate>,
+    /// Holds a [`READER`] thread inside its next clock read.
+    read_gate: Arc<Gate>,
     /// Each buffer rendered: its timestamp and its PCM's sample value.
     rendered: Arc<Mutex<Vec<(Duration, i16)>>>,
 }
@@ -109,34 +163,40 @@ fn rig(options: SinkOptions) -> Rig {
     gst::init().expect("GStreamer");
     let clock = ManualClock::new();
     let wakes = Arc::new(AtomicUsize::new(0));
-    let w = Arc::clone(&wakes);
-    let options = options.output(Output::Null).clock(clock.clone().upcast());
+    let wake_gate = Arc::new(Gate::default());
+    let read_gate = Arc::new(Gate::default());
+    let (w, g, r) = (
+        Arc::clone(&wakes),
+        Arc::clone(&wake_gate),
+        Arc::clone(&read_gate),
+    );
+    let options = options
+        .output(Output::Null)
+        .clock(clock.clone().upcast())
+        .between_reads(move || {
+            if std::thread::current().name() == Some(READER) {
+                r.pass();
+            }
+        });
     let sink = AudioSink::open(
         FORMAT,
         options,
         Arc::new(move || {
             w.fetch_add(1, Ordering::SeqCst);
+            g.pass();
         }),
     )
     .expect("a null sink opens");
-    let rendered = Arc::new(Mutex::new(Vec::new()));
-    let r = Arc::clone(&rendered);
-    let element = sink.sink_element();
-    element.set_property("signal-handoffs", true);
-    element.connect("handoff", false, move |args| {
-        let buffer = args[1].get::<gst::Buffer>().expect("a buffer");
-        let pts = Duration::from_nanos(buffer.pts().map_or(0, |t| t.nseconds()));
-        let map = buffer.map_readable().expect("readable");
-        let value = i16::from_le_bytes([map[0], map[1]]);
-        r.lock().unwrap().push((pts, value));
-        None
-    });
-    Rig {
+    let rig = Rig {
         sink,
         clock,
         wakes,
-        rendered,
-    }
+        wake_gate,
+        read_gate,
+        rendered: Arc::new(Mutex::new(Vec::new())),
+    };
+    rig.record_renders();
+    rig
 }
 
 /// `ms` of PCM whose every sample is `value`, in decoder-sized chunks.
@@ -202,6 +262,80 @@ impl Rig {
     fn take_rendered(&self) -> Vec<(Duration, i16)> {
         std::mem::take(&mut *self.rendered.lock().unwrap())
     }
+
+    /// Records what the current output renders (after a rebuild, the new one's).
+    fn record_renders(&self) {
+        let r = Arc::clone(&self.rendered);
+        let element = self.sink.sink_element();
+        element.set_property("signal-handoffs", true);
+        element.connect("handoff", false, move |args| {
+            let buffer = args[1].get::<gst::Buffer>().expect("a buffer");
+            let pts = Duration::from_nanos(buffer.pts().map_or(0, |t| t.nseconds()));
+            let map = buffer.map_readable().expect("readable");
+            let value = i16::from_le_bytes([map[0], map[1]]);
+            r.lock().unwrap().push((pts, value));
+            None
+        });
+    }
+
+    fn parts(&self) -> Parts {
+        lock(&self.sink.shared.core)
+            .parts
+            .clone()
+            .expect("an output")
+    }
+
+    /// Waits until the control thread has handled every command sent before.
+    fn fence(&self) {
+        let (tx, rx) = mpsc::channel();
+        self.sink.control.send(Cmd::Fence(tx)).expect("running");
+        rx.recv_timeout(Duration::from_secs(5)).expect("the fence");
+    }
+
+    /// The output loses its device: a resource error from the output element, as a device
+    /// sink posts when its server goes away.
+    fn lose_device(&self) {
+        let element = self.sink.sink_element();
+        let _ = element.post_message(
+            gst::message::Error::builder(gst::ResourceError::Write, "the device went away")
+                .src(&element)
+                .build(),
+        );
+    }
+
+    /// What `appsrc` posts after the output fails: its streaming task stops on the error.
+    fn stream_error(src: &gstreamer_app::AppSrc) {
+        let _ = src.post_message(
+            gst::message::Error::builder(gst::StreamError::Failed, "Internal data stream error.")
+                .src(src)
+                .build(),
+        );
+    }
+
+    /// Holds every buffer before the output, so it never prerolls: no real AsyncDone comes.
+    fn block_output(&self) {
+        let pad = self.sink.sink_element().static_pad("sink").expect("a pad");
+        pad.add_probe(
+            gst::PadProbeType::BLOCK | gst::PadProbeType::BUFFER,
+            |_, _| gst::PadProbeReturn::Ok,
+        )
+        .expect("a probe");
+    }
+
+    /// Sends the control thread a preroll's AsyncDone, as the bus would, tagged with the
+    /// generation `appsrc` was flushed to when it was posted.
+    fn async_done(&self, tag: u64) {
+        let element = self.sink.sink_element();
+        let message = gst::message::AsyncDone::builder().src(&element).build();
+        self.sink
+            .control
+            .send(Cmd::Bus(message, tag))
+            .expect("running");
+    }
+
+    fn applied(&self) -> Option<u64> {
+        lock(&self.sink.shared.core).applied
+    }
 }
 
 #[test]
@@ -241,7 +375,9 @@ fn the_clock_follows_the_pcm_played_and_holds_while_paused() {
     );
 
     rig.sink.pause();
-    eventually("paused", || rig.sink.reading().state == ClockState::Paused);
+    assert_eq!(rig.sink.reading().state, ClockState::Paused);
+    // The pipeline pauses on the control thread: move the test's clock only after.
+    rig.fence();
     rig.run_to(700);
     std::thread::sleep(Duration::from_millis(30));
     let held = rig.sink.reading().position;
@@ -313,7 +449,9 @@ fn when_the_pcm_runs_out_the_clock_holds_there_and_resumes_when_more_arrives() {
     push(&rig.sink, 300, 1);
     rig.sink.play();
     assert_eq!(rig.next_event(), SinkEvent::Ready);
-    rig.run_to(600);
+    // The clock runs on well past the PCM's end before the watchdog can see it run dry.
+    rig.run_to(250);
+    rig.clock.set_ms(600);
     let SinkEvent::Underrun { at } = rig.next_event() else {
         panic!("not an underrun");
     };
@@ -406,16 +544,340 @@ fn a_device_that_stops_taking_pcm_is_a_stall_reported_once() {
 
 #[test]
 fn a_device_that_has_not_started_yet_is_not_a_stall() {
-    let rig = rig(SinkOptions::default().stall_after(ms(100)));
+    let rig = rig(SinkOptions::default()
+        .stall_after(ms(100))
+        .start_timeout(ms(600)));
     push(&rig.sink, 1_000, 1);
     rig.sink.play();
     assert_eq!(rig.next_event(), SinkEvent::Ready);
-    // The clock never moves: the device is still opening, not stuck.
-    std::thread::sleep(Duration::from_millis(400));
+    // The clock never moves: within the start timeout the device is still opening, not stuck,
+    // and the time paused doesn't count toward it.
+    std::thread::sleep(Duration::from_millis(300));
+    rig.sink.pause();
+    std::thread::sleep(Duration::from_millis(800));
+    rig.sink.play();
+    std::thread::sleep(Duration::from_millis(100));
+    rig.fence();
     assert!(
         rig.sink.drain_events().is_empty(),
         "a slow start reported as a stall"
     );
+}
+
+#[test]
+fn a_device_that_never_starts_is_a_stall_once_the_start_timeout_passes() {
+    let rig = rig(SinkOptions::default()
+        .stall_after(ms(100))
+        .start_timeout(ms(300)));
+    push(&rig.sink, 1_000, 1);
+    rig.sink.play();
+    assert_eq!(rig.next_event(), SinkEvent::Ready);
+    let playing = Instant::now();
+    // The clock never moves. Pressing play again and again doesn't restart the count.
+    let mut events = Vec::new();
+    while events.is_empty() {
+        assert!(
+            playing.elapsed() < ms(1_500),
+            "a device that never started went unreported"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+        rig.sink.pause();
+        rig.fence();
+        rig.sink.play();
+        events = rig.sink.drain_events();
+    }
+    assert_eq!(events, [SinkEvent::Stalled { at: Duration::ZERO }]);
+    assert!(
+        playing.elapsed() >= ms(300),
+        "reported inside the start timeout"
+    );
+    std::thread::sleep(Duration::from_millis(200));
+    assert!(rig.sink.drain_events().is_empty(), "one stall, one event");
+    assert_eq!(rig.wakes(), 2);
+}
+
+#[test]
+fn an_output_that_never_takes_its_first_pcm_is_a_stall_once_the_start_timeout_passes() {
+    let rig = rig(SinkOptions::default().start_timeout(ms(300)));
+    rig.block_output();
+    push(&rig.sink, 500, 1);
+    std::thread::sleep(Duration::from_millis(150));
+    rig.fence();
+    assert!(
+        rig.sink.drain_events().is_empty(),
+        "nothing inside the start timeout"
+    );
+    assert_eq!(rig.next_event(), SinkEvent::Stalled { at: Duration::ZERO });
+    assert_eq!(rig.sink.reading().state, ClockState::Loading);
+}
+
+#[test]
+fn reopening_then_seeking_in_the_same_frame_opens_a_new_output() {
+    let rig = rig(SinkOptions::default());
+    push(&rig.sink, 1_000, 1);
+    rig.sink.play();
+    assert_eq!(rig.next_event(), SinkEvent::Ready);
+    rig.run_to(300);
+    rig.position_near(ms(300));
+    let old = rig.parts();
+    // The host handles DeviceLost (reopen), then the player's seek, before the control thread
+    // has gone on from the wake.
+    rig.wake_gate.arm();
+    rig.lose_device();
+    rig.wake_gate.wait_held();
+    rig.sink.reopen();
+    rig.sink.seek(ms(2_000));
+    rig.wake_gate.release();
+    assert!(matches!(rig.next_event(), SinkEvent::DeviceLost { .. }));
+    eventually("a new output", || rig.parts().sink != old.sink);
+    eventually("the old pipeline stopped", || {
+        old.pipeline.current_state() == gst::State::Null
+    });
+    rig.take_rendered();
+    rig.record_renders();
+    push(&rig.sink, 500, 2);
+    assert_eq!(rig.next_event(), SinkEvent::SeekLanded { at: ms(2_000) });
+    eventually("playing again", || {
+        rig.sink.reading().state == ClockState::Playing
+    });
+    rig.run_to(500);
+    rig.position_near(ms(2_200));
+    assert!(rig.take_rendered().iter().all(|&(_, v)| v == 2));
+}
+
+#[test]
+fn two_seeks_after_a_failure_open_a_new_output() {
+    let rig = rig(SinkOptions::default());
+    push(&rig.sink, 1_000, 1);
+    rig.sink.play();
+    assert_eq!(rig.next_event(), SinkEvent::Ready);
+    let old = rig.parts();
+    rig.wake_gate.arm();
+    rig.lose_device();
+    rig.wake_gate.wait_held();
+    rig.sink.seek(ms(1_000));
+    rig.sink.seek(ms(2_000));
+    rig.wake_gate.release();
+    assert!(matches!(rig.next_event(), SinkEvent::DeviceLost { .. }));
+    eventually("a new output", || rig.parts().sink != old.sink);
+    push(&rig.sink, 500, 2);
+    assert_eq!(rig.next_event(), SinkEvent::SeekLanded { at: ms(2_000) });
+}
+
+#[test]
+fn one_failure_is_one_event_and_one_wake() {
+    let rig = rig(SinkOptions::default());
+    push(&rig.sink, 1_000, 1);
+    rig.sink.play();
+    assert_eq!(rig.next_event(), SinkEvent::Ready);
+    // A lost device, then appsrc's own error as its streaming task stops on it.
+    rig.lose_device();
+    Rig::stream_error(&rig.parts().src);
+    rig.fence();
+    let events = rig.sink.drain_events();
+    assert!(
+        matches!(events.as_slice(), [SinkEvent::DeviceLost { .. }]),
+        "{events:?}"
+    );
+    assert_eq!(rig.wakes(), 2);
+    assert_eq!(rig.sink.reading().state, ClockState::Failed);
+}
+
+#[test]
+fn an_error_from_before_a_reopen_leaves_the_new_output_alone() {
+    let rig = rig(SinkOptions::default());
+    push(&rig.sink, 1_000, 1);
+    rig.sink.play();
+    assert_eq!(rig.next_event(), SinkEvent::Ready);
+    let src = rig.parts().src;
+    rig.wake_gate.arm();
+    rig.lose_device();
+    rig.wake_gate.wait_held();
+    // The old pipeline's second error is queued behind the first, and the host reopens.
+    Rig::stream_error(&src);
+    rig.sink.reopen();
+    rig.wake_gate.release();
+    assert!(matches!(rig.next_event(), SinkEvent::DeviceLost { .. }));
+    rig.fence();
+    assert_eq!(rig.sink.reading().state, ClockState::Seeking);
+    push(&rig.sink, 500, 2);
+    assert!(matches!(rig.next_event(), SinkEvent::SeekLanded { .. }));
+    eventually("playing again", || {
+        rig.sink.reading().state == ClockState::Playing
+    });
+}
+
+#[test]
+fn a_reading_never_mixes_two_generations() {
+    let rig = rig(SinkOptions::default());
+    push(&rig.sink, 1_000, 1);
+    rig.sink.play();
+    assert_eq!(rig.next_event(), SinkEvent::Ready);
+    rig.run_to(300);
+    rig.position_near(ms(300));
+    // A read on another thread, parked between the device's position and the reading, while
+    // a seek and its first PCM come in between. The output takes nothing more, so the seek
+    // stays in flight.
+    rig.block_output();
+    rig.read_gate.arm();
+    let clock = rig.sink.clock();
+    let reader = std::thread::Builder::new()
+        .name(READER.into())
+        .spawn(move || clock.reading())
+        .expect("a reader");
+    rig.read_gate.wait_held();
+    rig.sink.seek(ms(5_000));
+    push(&rig.sink, 500, 2);
+    rig.read_gate.release();
+    let r = reader.join().expect("read");
+    assert_eq!(
+        (r.state, r.position, r.generation),
+        (ClockState::Seeking, ms(5_000), 1)
+    );
+}
+
+#[test]
+fn volume_and_mute_reach_the_pcm_played_and_survive_a_new_output() {
+    let rig = rig(SinkOptions::default());
+    push(&rig.sink, 1_500, 1_000);
+    rig.sink.play();
+    assert_eq!(rig.next_event(), SinkEvent::Ready);
+    rig.run_to(100);
+    // A buffer already past the volume element may still render at the old gain.
+    let settles_at = |want: i16| {
+        let rendered = rig.take_rendered();
+        let after: Vec<i16> = rendered
+            .iter()
+            .map(|&(_, v)| v)
+            .skip_while(|&v| v != want)
+            .collect();
+        assert!(
+            !after.is_empty() && after.iter().all(|&v| v == want),
+            "rendered {rendered:?}, not settling at {want}"
+        );
+    };
+    rig.sink.set_volume(0.5, false);
+    rig.take_rendered();
+    rig.run_to(400);
+    settles_at(500);
+    rig.sink.set_volume(0.8, true);
+    rig.run_to(700);
+    settles_at(0);
+
+    rig.sink.reopen();
+    eventually("seeking", || {
+        rig.sink.reading().state == ClockState::Seeking
+    });
+    rig.fence();
+    rig.take_rendered();
+    rig.record_renders();
+    push(&rig.sink, 500, 1_000);
+    assert!(matches!(rig.next_event(), SinkEvent::SeekLanded { .. }));
+    rig.run_to(900);
+    let rendered = rig.take_rendered();
+    assert!(!rendered.is_empty());
+    assert!(
+        rendered.iter().all(|&(_, v)| v == 0),
+        "mute lost on the new output: {rendered:?}"
+    );
+}
+
+#[test]
+fn dropping_the_sink_while_playing_ends_its_thread_and_stops_its_pipeline() {
+    let rig = rig(SinkOptions::default());
+    push(&rig.sink, 1_000, 1);
+    rig.sink.play();
+    assert_eq!(rig.next_event(), SinkEvent::Ready);
+    rig.run_to(300);
+    rig.position_near(ms(300));
+    let pipeline = rig.parts().pipeline;
+    let clock = rig.sink.clock();
+    drop(rig.sink);
+    // Only this reader holds the shared state once the control thread has returned.
+    eventually("the control thread ended", || {
+        Arc::strong_count(&clock.shared) == 1
+    });
+    assert_eq!(pipeline.current_state(), gst::State::Null);
+    let r = clock.reading();
+    assert_eq!(r.state, ClockState::Paused);
+    assert!(ms(300) - r.position <= SLACK, "held at {:?}", r.position);
+}
+
+#[test]
+fn dropping_the_sink_while_seeking_ends_its_thread_and_stops_its_pipeline() {
+    let rig = rig(SinkOptions::default());
+    push(&rig.sink, 1_000, 1);
+    rig.sink.play();
+    assert_eq!(rig.next_event(), SinkEvent::Ready);
+    let pipeline = rig.parts().pipeline;
+    let clock = rig.sink.clock();
+    rig.sink.seek(ms(5_000));
+    drop(rig.sink);
+    eventually("the control thread ended", || {
+        Arc::strong_count(&clock.shared) == 1
+    });
+    assert_eq!(pipeline.current_state(), gst::State::Null);
+    let r = clock.reading();
+    assert_eq!((r.state, r.position), (ClockState::Seeking, ms(5_000)));
+}
+
+#[test]
+fn an_async_done_from_before_a_seek_never_lands_it() {
+    let rig = rig(SinkOptions::default());
+    rig.block_output();
+    // Open, push and seek at once: the first generation's preroll can finish behind the
+    // seek's flush.
+    push(&rig.sink, 300, 1);
+    rig.sink.seek(ms(5_000));
+    push(&rig.sink, 300, 2);
+    eventually("the seek's flush", || rig.applied() == Some(1));
+    rig.async_done(0);
+    rig.fence();
+    assert!(
+        rig.sink.drain_events().is_empty(),
+        "a stale preroll landed the seek"
+    );
+    assert_eq!(rig.sink.reading().state, ClockState::Seeking);
+    rig.async_done(1);
+    assert_eq!(rig.next_event(), SinkEvent::SeekLanded { at: ms(5_000) });
+}
+
+#[test]
+fn an_async_done_before_any_pcm_never_lands_a_seek() {
+    let rig = rig(SinkOptions::default());
+    rig.block_output();
+    rig.sink.seek(ms(5_000));
+    eventually("the seek's flush", || rig.applied() == Some(1));
+    rig.async_done(1);
+    rig.fence();
+    assert!(rig.sink.drain_events().is_empty(), "landed with no PCM");
+    assert_eq!(rig.sink.reading().state, ClockState::Seeking);
+    push(&rig.sink, 300, 2);
+    rig.async_done(1);
+    assert_eq!(rig.next_event(), SinkEvent::SeekLanded { at: ms(5_000) });
+}
+
+#[test]
+fn after_an_underrun_the_clock_plays_on_from_where_it_held() {
+    let rig = rig(SinkOptions::default());
+    push(&rig.sink, 300, 1);
+    rig.sink.play();
+    assert_eq!(rig.next_event(), SinkEvent::Ready);
+    // Stop the clock a few ms short of the PCM's end: inside the underrun margin.
+    rig.run_to(295);
+    let SinkEvent::Underrun { .. } = rig.next_event() else {
+        panic!("not an underrun");
+    };
+    // Where the pipeline paused (the clock may have stepped on since the watchdog's read).
+    rig.fence();
+    let held = rig.sink.reading().position;
+    assert!(held < ms(298), "held at {held:?}, past the margin");
+    rig.run_to(500);
+    push(&rig.sink, 500, 1);
+    assert_eq!(rig.next_event(), SinkEvent::Resumed { at: held });
+    // The PCM left between there and the end plays: the clock goes on from where it held.
+    rig.run_to(600);
+    rig.position_near(held + ms(100));
 }
 
 /// Video on the sink's clock against the audio the sink renders, through play, pause, seek and

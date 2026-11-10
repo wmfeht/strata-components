@@ -47,11 +47,27 @@ pub struct SinkOptions {
     output: Output,
     lookahead: Duration,
     stall_after: Duration,
+    start_timeout: Duration,
     volume: f64,
     muted: bool,
     /// Tests drive the pipeline from a manual clock.
     #[cfg(test)]
     clock: Option<gst::Clock>,
+    /// Tests park a clock read between reading the device and building the reading.
+    #[cfg(test)]
+    between_reads: Option<Hook>,
+}
+
+/// A test's hook into the sink.
+#[cfg(test)]
+#[derive(Clone)]
+pub(crate) struct Hook(pub(crate) Arc<dyn Fn() + Send + Sync>);
+
+#[cfg(test)]
+impl fmt::Debug for Hook {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Hook")
+    }
 }
 
 impl Default for SinkOptions {
@@ -60,10 +76,13 @@ impl Default for SinkOptions {
             output: Output::Default,
             lookahead: Duration::from_millis(2_200),
             stall_after: Duration::from_secs(3),
+            start_timeout: Duration::from_secs(8),
             volume: 1.0,
             muted: false,
             #[cfg(test)]
             clock: None,
+            #[cfg(test)]
+            between_reads: None,
         }
     }
 }
@@ -88,6 +107,18 @@ impl SinkOptions {
         self
     }
 
+    /// How long a fresh output (the first, or one after a seek, a flush or a reopen) may take
+    /// to start before [`SinkEvent::Stalled`]: from its PCM's arrival to the clock's first
+    /// step, counting the time spent loading or seeking with PCM queued and the time spent
+    /// playing, not the time paused. 8 s by default: a Bluetooth headset reconnecting or a
+    /// suspended device waking takes a few seconds, well inside it, and it is the 8 s the app
+    /// this was written for allows its decoder for one frame, so neither gives up on a slow
+    /// start first.
+    pub fn start_timeout(mut self, start_timeout: Duration) -> SinkOptions {
+        self.start_timeout = start_timeout;
+        self
+    }
+
     /// The volume it opens at ([`AudioSink::set_volume`]).
     pub fn volume(mut self, volume: f64, muted: bool) -> SinkOptions {
         self.volume = clamp_volume(volume);
@@ -100,10 +131,17 @@ impl SinkOptions {
         self.clock = Some(clock);
         self
     }
+
+    #[cfg(test)]
+    pub(crate) fn between_reads(mut self, hook: impl Fn() + Send + Sync + 'static) -> SinkOptions {
+        self.between_reads = Some(Hook(Arc::new(hook)));
+        self
+    }
 }
 
 /// Something the clock did on its own. Each one wakes the app (the waker given to
-/// [`AudioSink::open`]) once; [`AudioSink::drain_events`] takes them.
+/// [`AudioSink::open`]) once; [`AudioSink::drain_events`] takes them. They queue until it does,
+/// so an app drains them on each wake.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SinkEvent {
     /// The first PCM is ready: [`ClockState::Loading`] ends.
@@ -114,14 +152,16 @@ pub enum SinkEvent {
     Underrun { at: Duration },
     /// Enough PCM arrived after an underrun: playing again from `at`.
     Resumed { at: Duration },
-    /// The clock stood still at `at` for the stall time while PCM was queued: the device
-    /// stopped taking it. The sink leaves the pipeline as it is; a restart (a flush) is the
-    /// app's call.
+    /// The device took no PCM: the clock stood still at `at` for
+    /// [`SinkOptions::stall_after`] while playing with PCM queued, or a fresh output didn't
+    /// start within [`SinkOptions::start_timeout`]. Reported once each time. The sink leaves
+    /// the pipeline as it is; a restart ([`AudioSink::reopen`]) is the app's call.
     Stalled { at: Duration },
     /// The last PCM played: [`ClockState::Ended`] at `at`.
     Ended { at: Duration },
     /// The output device failed or went away: [`ClockState::Failed`] until
-    /// [`AudioSink::reopen`] (or a seek) opens a new one.
+    /// [`AudioSink::reopen`] (or a seek) opens a new one. One failure is one event: what the
+    /// pipeline reports after the first, while failed, is the same failure.
     DeviceLost { message: String },
     /// Something else failed in the pipeline: [`ClockState::Failed`], as for a lost device.
     Error { message: String },
@@ -189,7 +229,9 @@ impl std::error::Error for PushError {}
 ///
 /// No call blocks on the device: state changes run on a control thread ([`THREAD_NAME`]). The
 /// handle is `Send`; [`AudioSink::clock`] gives a reader for any thread. Dropping the sink stops
-/// the sound, and its clock then holds where it was, paused.
+/// the sound and closes the output; a [`SinkClock`] kept after it holds its last reading,
+/// paused if it was playing (and a seek still in flight reads [`ClockState::Seeking`] at its
+/// target, for good).
 pub struct AudioSink {
     shared: Arc<Shared>,
     control: mpsc::Sender<Cmd>,
@@ -242,8 +284,12 @@ struct Core {
     muted: bool,
     /// Where the clock stood still, since when, and whether it was reported.
     still: Option<(Duration, Instant, bool)>,
-    /// After an underrun, where the PCM ran out: playing resumes at that running time.
+    /// After an underrun, where the PCM ran out: playing resumes there at the latest.
     resume_from: Option<Duration>,
+    /// The output failed (or a reopen asked for a new one): the next seek's restart on the
+    /// control thread builds a new pipeline instead of flushing this one. It stays owed until
+    /// a rebuild runs, so a second seek before then rebuilds too.
+    rebuild_owed: bool,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -287,6 +333,7 @@ impl AudioSink {
                 muted: options.muted,
                 still: None,
                 resume_from: None,
+                rebuild_owed: false,
             }),
             events: Mutex::new(Vec::new()),
             waker,
@@ -393,7 +440,9 @@ impl AudioSink {
     /// as it was. After a failure this opens a new output, as [`AudioSink::reopen`] does.
     pub fn seek(&self, at: Duration) {
         let mut core = lock(&self.shared.core);
-        let rebuild = core.phase == Phase::Failed;
+        if core.phase == Phase::Failed {
+            core.rebuild_owed = true;
+        }
         core.generation += 1;
         core.base = at;
         core.pushed = 0;
@@ -407,11 +456,7 @@ impl AudioSink {
         core.resume_from = None;
         let generation = core.generation;
         drop(core);
-        let _ = self.control.send(if rebuild {
-            Cmd::Rebuild(generation)
-        } else {
-            Cmd::Flush(generation)
-        });
+        let _ = self.control.send(Cmd::Seek(generation));
     }
 
     /// Drops the PCM queued and starts again where the clock is: a seek to its position, for
@@ -420,11 +465,12 @@ impl AudioSink {
         self.seek(self.shared.reading().position);
     }
 
-    /// Opens a new output where the clock stopped, after [`SinkEvent::DeviceLost`]: a seek to
-    /// its position on a fresh pipeline. Push from that position on.
+    /// Opens a new output where the clock stopped, after [`SinkEvent::DeviceLost`] (or a
+    /// stall): a seek to its position on a fresh pipeline. Push from that position on. A seek
+    /// right after it (the player's, in the same frame) still lands on the fresh pipeline.
     pub fn reopen(&self) {
         let at = self.shared.reading().position;
-        lock(&self.shared.core).phase = Phase::Failed;
+        lock(&self.shared.core).rebuild_owed = true;
         self.seek(at);
     }
 
@@ -438,7 +484,8 @@ impl AudioSink {
         }
     }
 
-    /// The events since the last call, oldest first.
+    /// The events since the last call, oldest first. Events queue until taken: call it on
+    /// each wake, or they grow.
     pub fn drain_events(&self) -> Vec<SinkEvent> {
         std::mem::take(&mut *lock(&self.shared.events))
     }
@@ -494,9 +541,11 @@ impl Shared {
         (self.waker)();
     }
 
-    /// How far into the current generation the device has played, read now. The query runs
-    /// outside the lock, since a device's position can take its own locks.
-    fn relative(&self) -> (u64, Duration) {
+    /// The core, locked, with `held` brought up to how far into the current generation the
+    /// device has played now. The device's position is read outside the lock, since a device
+    /// can take its own locks, and counts only if no seek came in between; whatever is built
+    /// from the guard is one moment's.
+    fn settled(&self) -> MutexGuard<'_, Core> {
         let (generation, sink) = {
             let core = lock(&self.core);
             let sink = match core.phase {
@@ -506,6 +555,10 @@ impl Shared {
             (core.generation, sink)
         };
         let queried = sink.and_then(|s| s.query_position::<gst::ClockTime>());
+        #[cfg(test)]
+        if let Some(hook) = &self.options.between_reads {
+            (hook.0)();
+        }
         let mut core = lock(&self.core);
         let end = self.format.duration_of(core.pushed);
         if core.generation == generation
@@ -517,12 +570,11 @@ impl Shared {
         if core.phase == Phase::Ended {
             core.held = end;
         }
-        (core.generation, core.held)
+        core
     }
 
     fn reading(&self) -> Reading {
-        let (_, relative) = self.relative();
-        let core = lock(&self.core);
+        let core = self.settled();
         let state = match core.phase {
             Phase::Loading => ClockState::Loading,
             Phase::Seeking => ClockState::Seeking,
@@ -534,7 +586,7 @@ impl Shared {
             Phase::Failed => ClockState::Failed,
         };
         Reading {
-            position: core.base + relative,
+            position: core.base + core.held,
             state,
             generation: core.generation,
         }
@@ -542,11 +594,10 @@ impl Shared {
 
     /// PCM pushed but not yet played.
     fn queued(&self) -> Duration {
-        let (_, relative) = self.relative();
-        let core = lock(&self.core);
+        let core = self.settled();
         self.format
             .duration_of(core.pushed)
-            .saturating_sub(relative)
+            .saturating_sub(core.held)
     }
 }
 

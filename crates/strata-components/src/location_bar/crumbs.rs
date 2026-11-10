@@ -120,11 +120,11 @@ pub(super) fn view<S: 'static>(cx: &Ctx<'_, S>) -> El {
         cx.state
             .bar
             .build::<S>(&format!("{}-crumbs-bar", cx.key), &viewport, cx.bar_look());
-    // The bar lays itself along its viewport's bottom edge; this frame is the viewport moved
-    // down by the bar's row, so the bar sits in that row, under the labels.
-    let bar_row = col()
-        .pin(Some(0.0), Some(cx.band()), Some(0.0), Some(0.0))
-        .child(bar_el);
+    // The bar lays itself along its viewport's bottom edge; hung from the viewport's origin
+    // moved down by the bar's row, it sits in that row, under the labels. (A zero-size anchor,
+    // not a frame over the crumbs: a frame there is what a system drag's hit test, P1's, would
+    // find over them.)
+    let bar_row = crate::scroll::anchor(0.0, cx.band(), bar_el);
     let column = col()
         .w_full()
         .h(cx.height())

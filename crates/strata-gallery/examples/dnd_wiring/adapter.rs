@@ -225,17 +225,25 @@ fn target_of<S: 'static>(zone: DropZone<S>, hovered: Hovered) -> DropTarget<S> {
     })
 }
 
-/// Whether a target in the window has a drag over it, and whether one left since the last
-/// [`Wiring::tick`] with none reached after: a drag that ended, dropped or left the window
-/// (see [`Wiring::sentinel`]).
-type Hovered = Rc<Cell<(bool, bool)>>;
+/// What the window knows of the drag over it: whether a target has it, and whether one left
+/// since the last [`Wiring::tick`] with none reached after (a drag that ended, dropped or left
+/// the window: see [`Wiring::sentinel`]).
+#[derive(Default)]
+struct Seen {
+    over: Cell<bool>,
+    left: Cell<bool>,
+}
 
-fn note_hover(hovered: &Hovered, h: Hover) {
-    let (_, left) = hovered.get();
-    hovered.set(match h {
-        Hover::Left => (false, true),
-        Hover::Accepting(_) | Hover::Rejecting => (true, left),
-    });
+type Hovered = Rc<Seen>;
+
+fn note_hover(seen: &Hovered, h: Hover) {
+    match h {
+        Hover::Left => {
+            seen.over.set(false);
+            seen.left.set(true);
+        }
+        Hover::Accepting(_) | Hover::Rejecting => seen.over.set(true),
+    }
 }
 
 type EndFn<S> = Rc<dyn Fn(&mut S, &mut Tx)>;
@@ -375,11 +383,11 @@ impl<S: 'static> Wiring<S> {
     /// From the window's poll: reports a drag that left every target and reached none since
     /// to the sentinel's `ended`. True when it did.
     pub fn tick(&self, s: &mut S, tx: &mut Tx) -> bool {
-        let (over, left) = self.hovered.get();
+        let (over, left) = (self.hovered.over.get(), self.hovered.left.get());
         if over || !left {
             return false;
         }
-        self.hovered.set((false, false));
+        self.hovered.left.set(false);
         let f = self.ended.borrow().clone();
         match f {
             Some(f) => {

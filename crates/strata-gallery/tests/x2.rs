@@ -124,7 +124,7 @@ mod x2 {
         pub fn window(&self, s: &Session, key: &str) -> Window {
             let (title, pid) = (self.title_of(key), self.app.pid());
             s.wait_window_where(&format!("the {key} window"), |w| {
-                w.pid == pid && w.title.starts_with(&title) && w.content.width > 0.0
+                w.pid == pid && w.title == title && w.content.width > 0.0
             })
         }
 
@@ -359,7 +359,11 @@ mod x2 {
             .path(((from.0 + to.0) / 2.0, (from.1 + to.1) / 2.0));
         demo.wait(mark, "the drag starting", |v| v["ev"] == "drag-start");
         s.input().path(to);
-        std::thread::sleep(Duration::from_millis(150));
+        // A motion after arriving, then time for the target to answer the compositor (a
+        // window of this app picks its target in its next update).
+        std::thread::sleep(Duration::from_millis(200));
+        s.input().path((to.0 + 1.0, to.1));
+        std::thread::sleep(Duration::from_millis(250));
         s.input().button(false);
         (
             mark,
@@ -763,5 +767,420 @@ mod x2 {
     #[ignore = "needs a private session: mise run test-platform"]
     fn x11_drop_on_a_crumb() {
         drop_on_a_crumb(Display::X11);
+    }
+
+    // ---- Springs and autoscroll ----
+
+    /// A drag from the peer that rests on `target` for `rest`, then goes back to the peer and
+    /// is dropped there (where nothing takes it). The demo's line count before it.
+    fn rest_on(
+        s: &Session,
+        demo: &Demo,
+        peer: &Peer,
+        from: &Window,
+        offers: &[Offer],
+        target: (f64, f64),
+        rest: Duration,
+    ) -> usize {
+        let mark = demo.app.line_count();
+        press_on_peer(s, peer, from);
+        peer.drag_start(offers, &BOTH);
+        s.input().path(target);
+        std::thread::sleep(Duration::from_millis(100));
+        s.input().path((target.0 + 1.0, target.1));
+        std::thread::sleep(rest);
+        s.input().path(from.at(0.5, 0.5));
+        std::thread::sleep(Duration::from_millis(150));
+        s.input().button(false);
+        peer.wait_event("the drag ending", |e| {
+            matches!(e, Event::DragFinished { .. } | Event::DragCancelled)
+        });
+        mark
+    }
+
+    /// operations/drag-and-drop: "Holding a file drag over a folder row or sidebar row for
+    /// 750 ms navigates there, and the drag stays held"; tabs: a file drag resting on a tab
+    /// selects it (450 ms); column-autoscroll: "Holding a file drag within 44 px of the column
+    /// strip's left or right edge scrolls the columns toward that edge", and "Only drags
+    /// offering a file list or `text/uri-list` autoscroll".
+    fn springs_and_autoscroll(display: Display) {
+        let s = Session::start();
+        let demo = Demo::start(&s, display, false, false);
+        let (peer, from) = peer_beside(&s, display, &demo);
+        let root = demo.root.clone();
+        let offer = [files(&root, &["notes.txt"])];
+        // A folder row in List.
+        select_tab(&demo, "main", 2);
+        let at = demo.at(&s, "main", row(2, "Documents"), 0.5, 0.5);
+        let mark = rest_on(
+            &s,
+            &demo,
+            &peer,
+            &from,
+            &offer,
+            at,
+            Duration::from_millis(1200),
+        );
+        let seen = demo.lines_from(mark);
+        assert!(
+            seen.iter()
+                .any(|v| v["ev"] == "spring" && v["site"] == "row"),
+            "{seen:?}"
+        );
+        assert!(
+            seen.iter().any(|v| v["ev"] == "navigate"
+                && v["folder"].as_str() == root.join("Documents").to_str())
+        );
+        assert!(
+            !seen.iter().any(|v| v["ev"] == "transfer"),
+            "the drag stayed held: {seen:?}"
+        );
+        // Too short a rest opens nothing (Strata's "leaving before 750 ms cancels").
+        demo.command(
+            "main",
+            json!({ "cmd": "open", "tab": 2, "path": "" }),
+            "navigate",
+        );
+        let at = demo.at(&s, "main", row(2, "Music"), 0.5, 0.5);
+        let mark = rest_on(
+            &s,
+            &demo,
+            &peer,
+            &from,
+            &offer,
+            at,
+            Duration::from_millis(300),
+        );
+        assert!(!demo.saw(mark, Duration::ZERO, |v| v["ev"] == "spring"));
+        // A sidebar place.
+        let at = demo.at(&s, "main", json!({ "place": "Pictures" }), 0.5, 0.5);
+        let mark = rest_on(
+            &s,
+            &demo,
+            &peer,
+            &from,
+            &offer,
+            at,
+            Duration::from_millis(1200),
+        );
+        assert!(demo.saw(mark, Duration::ZERO, |v| v["ev"] == "spring"
+            && v["site"] == "sidebar"));
+        assert!(demo.saw(mark, Duration::ZERO, |v| v["ev"] == "navigate"
+            && v["folder"].as_str() == root.join("Pictures").to_str()));
+        // A tab (on a file from elsewhere: tab 3 shows the root, where notes.txt is).
+        let at = demo.at(&s, "main", json!({ "tab": 3 }), 0.5, 0.5);
+        let mark = rest_on(
+            &s,
+            &demo,
+            &peer,
+            &from,
+            &[files(&root, &["usb/stick.txt"])],
+            at,
+            Duration::from_millis(900),
+        );
+        assert!(demo.saw(mark, Duration::ZERO, |v| v["ev"] == "tab-select"
+            && v["tab"] == 3
+            && v["via"] == "Spring"));
+        // Columns: six columns deep overflow the strip, which shows the last; resting at its
+        // left edge scrolls it back toward the first.
+        select_tab(&demo, "main", 1);
+        demo.command(
+            "main",
+            json!({ "cmd": "open", "tab": 1, "path": "Deep" }),
+            "navigate",
+        );
+        for p in ["Deep/a", "Deep/a/b", "Deep/a/b/c", "Deep/a/b/c/d"] {
+            demo.command(
+                "main",
+                json!({ "cmd": "open", "tab": 1, "path": p }),
+                "navigate",
+            );
+        }
+        let strip = demo.at(&s, "main", json!({ "tab": 1, "pane": true }), 0.0, 0.5);
+        let first = || {
+            demo.locate(
+                &s,
+                "main",
+                &[json!({ "name": "c0", "tab": 1, "column": 0 })],
+            )["c0"][0]
+        };
+        let before = first();
+        // A drag offering only text doesn't scroll the strip.
+        let text = [Offer::text("text/plain;charset=utf-8", "words")];
+        rest_on(
+            &s,
+            &demo,
+            &peer,
+            &from,
+            &text,
+            (strip.0 + 10.0, strip.1),
+            Duration::from_millis(1200),
+        );
+        assert!((first() - before).abs() < 1.0, "a text drag doesn't scroll");
+        rest_on(
+            &s,
+            &demo,
+            &peer,
+            &from,
+            &offer,
+            (strip.0 + 10.0, strip.1),
+            Duration::from_millis(1200),
+        );
+        let after = first();
+        assert!(
+            after > before + 20.0,
+            "the strip scrolled toward the first column: {before} → {after}"
+        );
+        demo.quit();
+    }
+
+    #[test]
+    #[ignore = "needs a private session: mise run test-platform"]
+    fn wayland_springs_and_column_autoscroll() {
+        springs_and_autoscroll(Display::Wayland);
+    }
+
+    #[test]
+    #[ignore = "needs a private session: mise run test-platform"]
+    fn x11_springs_and_column_autoscroll() {
+        springs_and_autoscroll(Display::X11);
+    }
+
+    // ---- In process ----
+
+    /// operations/drag-and-drop: a drag between Strata's own windows carries typed entries, not
+    /// serialized URIs (plan §4, P1's fast path): a drop in the second window takes the
+    /// payload with nothing read; tabs: "A folder-only drag" from Strata's own views dropped
+    /// on New tab opens it in a new tab.
+    fn between_two_windows(display: Display) {
+        let s = Session::start();
+        let demo = Demo::start(&s, display, true, false);
+        let _ = s.wait_windows(&[demo.app.pid()]);
+        for key in ["main", "second"] {
+            select_tab(&demo, key, 2);
+        }
+        let to = demo.at(&s, "second", row(2, "Music"), 0.5, 0.5);
+        let (mark, end) = drag_out(&s, &demo, "main", row(2, "notes.txt"), to);
+        assert_eq!(end["outcome"], "moved", "{end}");
+        let (_, got) = demo.wait(mark, "the second window's transfer", |v| {
+            v["ev"] == "transfer" && v["window"] == "second"
+        });
+        assert_eq!(got["local"], true, "{got}");
+        assert_eq!(got["types"], json!([]), "nothing read: {got}");
+        assert_eq!(got["sources"], json!(["notes.txt"]));
+        assert_eq!(got["action"], "move");
+        // A folder from main's List onto second's New tab: a new tab there.
+        let to = demo.at(&s, "second", json!({ "new-tab": true }), 0.5, 0.5);
+        let (mark, end) = drag_out(&s, &demo, "main", row(2, "Pictures"), to);
+        assert_ne!(end["outcome"], "cancelled", "{end}");
+        let (_, opened) = demo.wait(mark, "a tab opening in second", |v| {
+            v["ev"] == "tab-open" && v["window"] == "second"
+        });
+        assert_eq!(
+            opened["folder"].as_str(),
+            demo.root.join("Pictures").to_str()
+        );
+        demo.quit();
+    }
+
+    #[test]
+    #[ignore = "needs a private session: mise run test-platform"]
+    fn wayland_between_two_windows_takes_the_typed_payload() {
+        between_two_windows(Display::Wayland);
+    }
+
+    #[test]
+    #[ignore = "needs a private session: mise run test-platform"]
+    fn x11_between_two_windows_takes_the_typed_payload() {
+        between_two_windows(Display::X11);
+    }
+
+    // ---- Actions, Escape, peeks, pins ----
+
+    /// copy-or-move: "Holding Ctrl at the drop copies and holding Shift moves, on the same or
+    /// another device", where the platform says (X11 in both directions; on Wayland a drag
+    /// from another client brings none, P1's limit, and the plain rule applies); the source's
+    /// half: Ctrl or Shift at a drag's start narrows what it offers (P1).
+    fn modifiers(display: Display) {
+        let s = Session::start();
+        let demo = Demo::start(&s, display, false, false);
+        let (peer, from) = peer_beside(&s, display, &demo);
+        let root = demo.root.clone();
+        select_tab(&demo, "main", 2);
+        let drop_with = |held: &str, names: &[&str], target: Value| {
+            let at = demo.at(&s, "main", target, 0.5, 0.5);
+            let mark = demo.app.line_count();
+            press_on_peer(&s, &peer, &from);
+            peer.drag_start(&[files(&root, names)], &BOTH);
+            s.input().key_down(held);
+            s.input().path(at);
+            std::thread::sleep(Duration::from_millis(150));
+            s.input().path((at.0 + 1.0, at.1));
+            std::thread::sleep(Duration::from_millis(200));
+            s.input().button(false);
+            s.input().key_up(held);
+            peer.wait_event("the drag ending", |e| {
+                matches!(e, Event::DragFinished { .. } | Event::DragCancelled)
+            });
+            demo.wait(mark, "the transfer", |v| v["ev"] == "transfer").1
+        };
+        let ctrl = drop_with("ctrl", &["notes.txt"], row(2, "Documents"));
+        let shift = drop_with("shift", &["usb/stick.txt"], row(2, "Music"));
+        match display {
+            Display::X11 => {
+                assert_eq!(ctrl["action"], "copy", "Ctrl copies on one volume: {ctrl}");
+                assert_eq!(
+                    shift["action"], "move",
+                    "Shift moves across devices: {shift}"
+                );
+            }
+            _ => {
+                assert_eq!(ctrl["action"], "move", "no modifiers on Wayland: {ctrl}");
+                assert_eq!(shift["action"], "ask", "no modifiers on Wayland: {shift}");
+            }
+        }
+        // The source's half, both platforms: the modifiers at the start.
+        peer.accept_drops_with(&[URI_LIST], &BOTH, Action::Move, false, None);
+        let to = from.at(0.5, 0.5);
+        for (held, want) in [("ctrl", "copied"), ("shift", "moved")] {
+            s.input().key_down(held);
+            let (_, end) = drag_out(&s, &demo, "main", row(2, "todo.txt"), to);
+            s.input().key_up(held);
+            assert_eq!(end["outcome"], want, "{held}: {end}");
+            let _ = dropped_on_peer(&peer, 1);
+        }
+        demo.quit();
+    }
+
+    #[test]
+    #[ignore = "needs a private session: mise run test-platform"]
+    fn wayland_actions_by_modifier() {
+        modifiers(Display::Wayland);
+    }
+
+    #[test]
+    #[ignore = "needs a private session: mise run test-platform"]
+    fn x11_actions_by_modifier() {
+        modifiers(Display::X11);
+    }
+
+    /// tabs: "Escape during a file drag in Columns, List, or Icons… cancels it" (X11: Rune hears
+    /// the key; on Wayland the compositor's grab keeps it, and sway doesn't cancel, P1's
+    /// limit).
+    #[test]
+    #[ignore = "needs a private session: mise run test-platform"]
+    fn x11_escape_cancels_a_drag_out() {
+        let s = Session::start();
+        let demo = Demo::start(&s, Display::X11, false, false);
+        let (peer, to) = peer_beside(&s, Display::X11, &demo);
+        peer.accept_drops_with(&[URI_LIST], &BOTH, Action::Copy, false, None);
+        select_tab(&demo, "main", 2);
+        let from = demo.at(&s, "main", row(2, "notes.txt"), 0.1, 0.5);
+        let mark = press(&s, &demo, "main", from);
+        s.input().path(((from.0 + to.at(0.5, 0.5).0) / 2.0, from.1));
+        demo.wait(mark, "the drag starting", |v| v["ev"] == "drag-start");
+        s.input().key("Escape");
+        let (_, end) = demo.wait(mark, "the outcome", |v| v["ev"] == "drag-end");
+        assert_eq!(end["outcome"], "cancelled", "{end}");
+        s.input().path(to.at(0.5, 0.5));
+        s.input().button(false);
+        assert!(!demo.saw(mark, Duration::from_millis(500), |v| v["ev"] == "transfer"));
+        demo.quit();
+    }
+
+    /// operations/drag-and-drop: "Starting a drag closes any open folder peek" (C22's host
+    /// duty), and a drag dropped on a folder never peeks it after (`hold_rest`).
+    fn peeks(display: Display) {
+        let s = Session::start();
+        let demo = Demo::start(&s, display, false, false);
+        let (peer, from) = peer_beside(&s, display, &demo);
+        select_tab(&demo, "main", 2);
+        demo.focus(&s, "main");
+        let docs = demo.at(&s, "main", row(2, "Documents"), 0.3, 0.5);
+        let mark = demo.app.line_count();
+        s.input().pointer_move((docs.0 + 4.0, docs.1));
+        s.input().pointer_move(docs);
+        demo.wait(mark, "a peek opening", |v| {
+            v["ev"] == "peek" && v["open"] == true
+        });
+        // A drag from the folder it peeks closes it (moving to another row would close it
+        // anyway, after the leave delay).
+        peer.accept_drops_with(&[URI_LIST], &BOTH, Action::Copy, false, None);
+        let (mark, _) = drag_out(&s, &demo, "main", row(2, "Documents"), from.at(0.5, 0.5));
+        assert!(demo.saw(mark, Duration::ZERO, |v| v["ev"] == "peek"
+            && v["open"] == false
+            && v["why"] == "drag"));
+        let _ = dropped_on_peer(&peer, 1);
+        // A drop from the peer on Music, the pointer left resting there: no peek.
+        let mark = demo.app.line_count();
+        let got = drop_on(&s, &demo, &peer, &from, &["todo.txt"], row(2, "Music"));
+        assert!(got.is_some());
+        assert!(
+            !demo.saw(mark, Duration::from_millis(1200), |v| v["ev"] == "peek"
+                && v["open"] == true),
+            "a folder a drag was dropped on doesn't peek"
+        );
+        demo.quit();
+    }
+
+    #[test]
+    #[ignore = "needs a private session: mise run test-platform"]
+    fn wayland_a_drag_closes_the_peek() {
+        peeks(Display::Wayland);
+    }
+
+    #[test]
+    #[ignore = "needs a private session: mise run test-platform"]
+    fn x11_a_drag_closes_the_peek() {
+        peeks(Display::X11);
+    }
+
+    /// pins/drag-to-pin: folders dropped in a PINNED gap are pinned there; a gap shows nothing
+    /// for a drag that isn't all folders, checked while it hovers (its `text/uri-list` read
+    /// before the drop), so a file is refused.
+    fn pin_gaps(display: Display) {
+        let s = Session::start();
+        let demo = Demo::start(&s, display, false, false);
+        let (peer, from) = peer_beside(&s, display, &demo);
+        let root = demo.root.clone();
+        for (names, pins) in [(vec!["Music"], true), (vec!["notes.txt"], false)] {
+            // The sidebar lays its gaps out again while a drag is over it: find the gap then.
+            let near = demo.at(&s, "main", json!({ "place": "Music" }), 0.5, 0.5);
+            let mark = demo.app.line_count();
+            press_on_peer(&s, &peer, &from);
+            peer.drag_start(&[files(&root, &names)], &BOTH);
+            s.input().path(near);
+            std::thread::sleep(Duration::from_millis(300));
+            let at = demo.at(&s, "main", json!({ "gap": 0 }), 0.5, 0.5);
+            s.input().path(at);
+            // A checked folder drag opens the gap, which moves it: find it again.
+            std::thread::sleep(Duration::from_millis(400));
+            let at = demo.at(&s, "main", json!({ "gap": 0 }), 0.5, 0.5);
+            s.input().path(at);
+            std::thread::sleep(Duration::from_millis(250));
+            s.input().path((at.0 + 1.0, at.1));
+            std::thread::sleep(Duration::from_millis(250));
+            s.input().button(false);
+            peer.wait_event("the drag ending", |e| {
+                matches!(e, Event::DragFinished { .. } | Event::DragCancelled)
+            });
+            let pinned = demo.saw(mark, Duration::from_millis(800), |v| v["ev"] == "pin");
+            assert_eq!(pinned, pins, "{names:?}");
+        }
+        let st = demo.command("main", json!({ "cmd": "state" }), "state");
+        assert_eq!(st["pins"], json!(["Music", "pinned"]), "{st}");
+        demo.quit();
+    }
+
+    #[test]
+    #[ignore = "needs a private session: mise run test-platform"]
+    fn wayland_pin_gaps_take_folders_only() {
+        pin_gaps(Display::Wayland);
+    }
+
+    #[test]
+    #[ignore = "needs a private session: mise run test-platform"]
+    fn x11_pin_gaps_take_folders_only() {
+        pin_gaps(Display::X11);
     }
 }

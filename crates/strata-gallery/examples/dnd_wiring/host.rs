@@ -226,9 +226,13 @@ impl Win {
         } else {
             Vec::new()
         };
+        // `Unchecked::Accept`, though P1 reads a drag's URIs while it hovers: under `Wait` a gap
+        // refuses an unchecked drag, and C8 notes which drag is over its gaps only from a gap's
+        // accepting hover, so the check would never start (a C8 finding, reported). Here the
+        // gap's first hover starts it, the read URIs settle it, and a refused drag then stops
+        // at the gap (its `on_reject`).
         let mut sidebar = SidebarState::new(&look);
-        // P1 reads a drag's URIs while it hovers: a gap opens only for folders.
-        sidebar.pin_check.unchecked = Unchecked::Wait;
+        sidebar.pin_check.unchecked = Unchecked::Accept;
         let mut peek = PeekState::new();
         peek.set_enabled(true);
         let mut w = Win {
@@ -511,6 +515,11 @@ impl Win {
     /// A drop into `dest`: files are transferred with the host's action (with `--apply`),
     /// content is noted. Logs a `transfer` line either way.
     fn transfer(&mut self, dest: &Path, dropped: &Dropped, via: &str, tx: &mut Tx) {
+        // A drop ends the drag: C22's duties for one that didn't start in this window (the
+        // adapter's end check may have run already, mid-drag, if the drag left every target).
+        if self.out.is_none() {
+            self.end_of_drag(tx);
+        }
         let local = dropped.data.local.is_some();
         let uris = match &dropped.data.local {
             Some(p) => p.uris.clone(),

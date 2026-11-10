@@ -65,8 +65,6 @@ pub struct ColorPickerState {
     seen: bool,
     /// The colour the popover opened with, while it is open.
     opened: Option<Hsv>,
-    /// A press outside closed the popover; its reports wait for the poll.
-    dismissed: Option<(bool, bool)>,
 }
 
 impl ColorPickerState {
@@ -85,7 +83,6 @@ impl ColorPickerState {
             held: false,
             seen: false,
             opened: None,
-            dismissed: None,
         }
     }
 
@@ -407,20 +404,6 @@ impl ColorPickerState {
         }
         let now = self.value();
         (now != self.value_of(start), now != before)
-    }
-
-    /// A press outside closed the popover, keeping the colour. Rune's modal dismissal has no
-    /// `Tx`, so what it reports waits for the host's poll ([`super::ColorPicker::poll`]).
-    pub(super) fn dismiss(&mut self) {
-        if self.is_open() {
-            self.dismissed = Some(self.close(false));
-        }
-    }
-
-    /// What a dismissal left to report: whether the colour differs from the opening one, and
-    /// whether closing moved it.
-    pub(super) fn take_dismissed(&mut self) -> Option<(bool, bool)> {
-        self.dismissed.take()
     }
 
     /// The colour `hsv` gives, opaque without alpha.

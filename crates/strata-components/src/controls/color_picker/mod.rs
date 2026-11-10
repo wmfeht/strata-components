@@ -10,17 +10,16 @@
 //! The picker does no I/O and holds no policy: what a colour is for, saving it, previewing it
 //! and the recent colours list are the host's ([`remember`] keeps one as GTK does).
 //!
-//! **Rune dev 5d421fd: partly.** Gradients (`linear_gradient`, `gradient`), `Shape` fills, the
+//! **Rune 2a44156: partly.** Gradients (`linear_gradient`, `gradient`), `Shape` fills, the
 //! slider role (`on_step`, `on_step_limit`, `range_value`, `a11y_value`), `on_drag` with its
 //! cancel, radio groups (`focus_group`), `El::modal` (Tab trap, first-stop focus, the opener's
 //! focus back, a press outside) and core `text_input` cover it, as do `rune::Color` and its
 //! sRGB transfer functions. Missing: no picker in rune-kit (no issue); no two-dimensional
 //! control for assistive technology (U-C20b-3); rune-kit's `Popover` has no Escape or initial
-//! focus (U-C20b-1); a modal's dismissal can't tell Escape from a press outside, and gets no
-//! `Tx` (U-C20b-2); no focus-change hook (anomalyco/rune#106). Past the pin and not adopted:
-//! `El::autofocus` and `Tx::focus` (22aa8cde), `Tx::focused` in every handler (cd2bd55a),
-//! `Cx::force_focus_rings` (42f2d354, which would let a golden show focused swatches) and
-//! 16-stop gradients (c9cd9df3); this needs 7.
+//! focus (U-C20b-1); a modal's dismissal can't tell Escape from a press outside (U-C20b-2);
+//! no focus-change hook (anomalyco/rune#106). `El::modal_tx` (22aa8cde) gives the dismissal a
+//! `Tx`. Not adopted: `Cx::force_focus_rings` (42f2d354, which would let a golden show focused
+//! swatches) and 16-stop gradients (c9cd9df3); this needs 7.
 //!
 //! # The colour
 //!
@@ -170,11 +169,10 @@
 //!   `Popover` with a focusable child, opened by a button press: Escape leaves it open, Tab
 //!   reaches the page behind it. Ask: `Popover::modal(true)` (Escape closes, Tab stays in, the
 //!   first stop focused, the trigger focused on close). Here: `El::modal` on the body.
-//! - **U-C20b-2, a modal's dismissal can't say why, and gets no `Tx`.** `El::modal`'s closure is
-//!   `Fn(&mut S)`; Rune calls it for Escape and for a press outside alike (`el.rs:1131`
-//!   ignores the reason it is given). A picker that cancels on Escape and keeps on a press
-//!   outside takes Escape in an ancestor's `on_key` first, and reports a press outside from
-//!   its poll, a frame late. Ask: `modal_with(|s, why: Dismiss, tx| ..)`.
+//! - **U-C20b-2, a modal's dismissal can't say why.** `El::modal_tx`'s closure gets the
+//!   change's `Tx` (22aa8cde) but no reason: Rune calls it for Escape and for a press outside
+//!   alike. A picker that cancels on Escape and keeps on a press outside takes Escape in an
+//!   ancestor's `on_key` first. Ask: `modal_with(|s, why: Dismiss, tx| ..)`.
 //! - **U-C20b-3, no two-dimensional control for assistive technology.** AccessKit (and ARIA)
 //!   have no 2D slider: a saturation and value plane is one slider with a value text and no
 //!   range, set-value or increments. Ask how a two-axis control should expose its two values

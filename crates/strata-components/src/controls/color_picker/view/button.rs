@@ -19,8 +19,8 @@ impl<S: 'static> ColorPicker<S> {
     ///
     /// The popover applies changes as they happen. Escape (Shift+Escape too, as Rune's modal
     /// takes both) closes it and puts back the colour it opened with
-    /// ([`super::ColorChange::Cancel`]); a press outside closes it and keeps the colour
-    /// (reported from [`ColorPicker::poll`]), as disabling the picker does. Either way focus
+    /// ([`super::ColorChange::Cancel`]); a press outside closes it and keeps the colour, as
+    /// disabling the picker does. Either way focus
     /// goes back to the button, and [`ColorPicker::on_close`] hears whether the colour changed.
     pub fn button(self, s: &S, look: &Look, layer: &mut Vec<El>) -> El {
         let st = (self.get)(s);
@@ -32,6 +32,7 @@ impl<S: 'static> ColorPicker<S> {
         let swatch = swatch_paint(look, m, value);
         let get_mut = self.get_mut;
         let w = self.wire();
+        let dismiss = w.clone();
         let button = Button::new(label.clone())
             .variant(ButtonVariant::Neutral)
             .label_with(move |_, _| swatch)
@@ -61,10 +62,14 @@ impl<S: 'static> ColorPicker<S> {
             // initial focus of its own).
             // The popover's own dialog, named by the label, is what assistive technology
             // hears; the body adds no second one around the parts.
-            let body = self
-                .body(s, look, m, width)
-                .role("none")
-                .modal(true, move |s: &mut S| get_mut(s).dismiss());
+            let body = self.body(s, look, m, width).role("none").modal_tx(
+                true,
+                move |s: &mut S, tx: &mut Tx| {
+                    if get_mut(s).is_open() {
+                        dismiss.close(s, false, tx);
+                    }
+                },
+            );
             popover = popover.child(body);
         }
         row().child(popover.build(k, layer))

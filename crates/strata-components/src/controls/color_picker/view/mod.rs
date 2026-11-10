@@ -244,19 +244,14 @@ impl<S: 'static> ColorPicker<S> {
 
     /// Call from the host's poll every frame, built with the view's [`ColorPicker::disabled`]:
     /// commits typed hex text once the field has lost the keyboard (Rune has no focus-change
-    /// hook, upstream #106), reports a popover a press outside closed (Rune's modal dismissal
-    /// has no `Tx`), and closes an open popover once the picker is disabled, keeping the colour
-    /// as a press outside does, so enabling it again doesn't bring the popover back. True when
-    /// it changed the state.
+    /// hook, upstream #106), and closes an open popover once the picker is disabled, keeping
+    /// the colour as a press outside does, so enabling it again doesn't bring the popover back.
+    /// True when it changed the state.
     pub fn poll(&self, s: &mut S, tx: &mut Tx) -> bool {
         let w = self.wire();
         let mut changed = false;
         if self.disabled && w.st(s).is_open() {
             w.close(s, false, tx);
-            changed = true;
-        }
-        if let Some((kept, moved)) = w.st(s).take_dismissed() {
-            w.closed_with(s, kept, moved, false, tx);
             changed = true;
         }
         if let Some(moved) = w.st(s).blurred() {

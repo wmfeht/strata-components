@@ -106,6 +106,12 @@
 //! - **D13** The position bar's accessible value follows scrolling in steps of a
 //!   two-hundredth of the text (so a scroll runs the view at most 200 times), and exactly
 //!   after a step from the keyboard or assistive technology.
+//! - **D14** With wrap off, a row of a few glyphs that a fallback face draws far wider than
+//!   any estimate can still widen the list when it mounts: `﷽` (U+FDFD, one character, about
+//!   12 columns) ×150 took review 2's probe from 1,740 to 14,487 pt. Rows are measured in
+//!   the order an estimate ranks them (two columns for anything the mono face doesn't draw),
+//!   and only the first six; measuring every row of a large text at open would cost what
+//!   virtual rows save.
 //!
 //! # Measured
 //!

@@ -30,7 +30,7 @@ pub(crate) struct Rows {
     rows: Vec<Row>,
     /// Each line's start in the text.
     line_starts: Vec<usize>,
-    /// The most columns any row takes, tabs expanded.
+    /// The most columns any row takes at least ([`floor_columns_of`]), tabs expanded.
     pub columns: usize,
     /// The rows that draw widest by [`width_of`]'s estimate, widest first: a fallback face
     /// (CJK, emoji) draws them wider than their columns, so the view measures these.
@@ -67,7 +67,7 @@ impl Rows {
         let mut by_width: Vec<(usize, usize)> = Vec::new();
         for (i, r) in rows.iter().enumerate() {
             let s = &text[r.start..r.end];
-            columns = columns.max(columns_of(s));
+            columns = columns.max(floor_columns_of(s));
             let n = width_of(s);
             if by_width.len() < MEASURED || n > by_width[by_width.len() - 1].0 {
                 by_width.push((n, i));
@@ -161,16 +161,67 @@ fn split(text: &str, start: usize, end: usize, line: usize, rows: &mut Vec<Row>)
     });
 }
 
-/// An estimate of how wide `s` draws, in columns of the mono face: East Asian wide
-/// characters and emoji take two (`unicode-width`), tabs run to the next [`TAB`] stop, and
-/// control characters one. It only ranks rows for measuring; the width itself is measured.
+/// Whether `ch` is in a script the mono face draws (or a fallback draws one column wide):
+/// Latin, Greek, Cyrillic and their supplements.
+fn monospaced_script(ch: char) -> bool {
+    matches!(ch,
+        '\u{00A0}'..='\u{052F}' // Latin-1 to Cyrillic Supplement
+        | '\u{1D00}'..='\u{1DBF}' // phonetic extensions
+        | '\u{1E00}'..='\u{1FFF}' // Latin Extended Additional, Greek Extended
+        | '\u{2C60}'..='\u{2C7F}' // Latin Extended-C
+        | '\u{2DE0}'..='\u{2DFF}' // Cyrillic Extended-A
+        | '\u{A640}'..='\u{A69F}' // Cyrillic Extended-B
+        | '\u{A720}'..='\u{A7FF}' // Latin Extended-D
+        | '\u{AB30}'..='\u{AB6F}' // Latin Extended-E
+    )
+}
+
+/// Whether `ch` is an Arabic letter, which joins its neighbours and draws narrower than a
+/// column.
+fn arabic(ch: char) -> bool {
+    matches!(ch,
+        '\u{0600}'..='\u{06FF}'
+        | '\u{0750}'..='\u{077F}'
+        | '\u{08A0}'..='\u{08FF}'
+        | '\u{FB50}'..='\u{FDFF}'
+        | '\u{FE70}'..='\u{FEFF}'
+    )
+}
+
+/// An estimate of how wide `s` draws, in columns of the mono face, generous on purpose: it
+/// only ranks rows for measuring, and the width itself is measured. ASCII and the scripts the
+/// mono face covers take a column; East Asian wide characters and emoji two
+/// (`unicode-width`); and so does any other character `unicode-width` rates one column,
+/// since a fallback face draws it (pictographs and dingbats such as ❤, Indic and other
+/// complex scripts: review 2 measured ❤ at 1.9 columns and क at 1.2). Combining marks take
+/// none; tabs run to the next [`TAB`] stop; control characters take one.
 pub(crate) fn width_of(s: &str) -> usize {
     use unicode_width::UnicodeWidthChar;
     s.chars().fold(0, |col, ch| {
-        if ch == '\t' {
-            col + TAB - col % TAB
-        } else {
-            col + ch.width().unwrap_or(1)
+        col + match ch {
+            '\t' => TAB - col % TAB,
+            _ if ch.is_ascii() => 1,
+            _ => match ch.width() {
+                None => 1,
+                Some(0) => 0,
+                Some(1) if monospaced_script(ch) => 1,
+                Some(w) => w.max(2),
+            },
+        }
+    })
+}
+
+/// The columns `s` takes at least, as the list's floor width: each character one column but
+/// combining marks and Arabic letters (which join and draw narrower), tabs to the next
+/// [`TAB`] stop. Rows that draw wider are measured ([`width_of`] ranks them).
+pub(crate) fn floor_columns_of(s: &str) -> usize {
+    use unicode_width::UnicodeWidthChar;
+    s.chars().fold(0, |col, ch| {
+        col + match ch {
+            '\t' => TAB - col % TAB,
+            _ if ch.is_ascii() => 1,
+            _ if arabic(ch) || ch.width() == Some(0) => 0,
+            _ => 1,
         }
     })
 }

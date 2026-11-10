@@ -431,8 +431,10 @@ impl<S: 'static> CodeEditor<S> {
 /// The editor's own keys, before the field's.
 fn key_in(st: &mut EditorState, ev: &KeyEvent, tx: &mut Tx) -> bool {
     let m = ev.mods;
-    if ev.key == Key::Tab && std::mem::take(&mut st.tab_out) {
-        // The Tab Ctrl+Tab sent: Rune moves focus with it.
+    if ev.key == Key::Tab && !(m.ctrl || m.cmd) && std::mem::take(&mut st.tab_out) {
+        // The Tab Ctrl+Tab sent: Rune moves focus with it. Only an unmodified Tab is it: a
+        // second Ctrl+Tab in the same frame comes before the first one's Tab and sends its
+        // own (review 2).
         return false;
     }
     // Ctrl+Tab and Ctrl+Shift+Tab move focus on, as they do out of a GtkTextView, whose Tab

@@ -92,6 +92,26 @@ fn columns_count_tabs_to_four_column_stops() {
 }
 
 #[test]
+fn rows_drawn_by_a_fallback_face_rank_widest() {
+    // Ten ASCII characters against six that a fallback face draws: a dingbat, an Indic
+    // script, CJK and emoji rank first however few they are.
+    for wide in ["❤❤❤❤❤❤", "कककककक", "漢漢漢漢漢漢", "😀😀😀😀😀😀"]
+    {
+        let r = rows(&format!("abcdefghij\n{wide}\n"));
+        assert_eq!(r.widest.first(), Some(&1), "{wide}");
+    }
+    // Latin, Greek and Cyrillic draw in the mono face: a column each.
+    let r = rows("abcdefghij\néλжéλж\n");
+    assert_eq!(r.widest.first(), Some(&0));
+}
+
+#[test]
+fn the_floor_width_leaves_out_combining_marks_and_arabic_letters() {
+    assert_eq!(rows("e\u{301}e\u{301}e\u{301}").columns, 3);
+    assert_eq!(rows("x = \"سلام\"").columns, 6);
+}
+
+#[test]
 fn a_match_across_a_split_is_cut_to_each_row() {
     let text = format!("{}needle{}", "x".repeat(CHUNK - 3), "y".repeat(3000));
     let r = rows(&text);
@@ -136,6 +156,21 @@ fn find_clears_then_selects_and_centres_each_match() {
     assert_eq!(st.current_match(), Some(0), "wraps at the end");
     st.find("");
     assert!(st.matches().is_empty());
+}
+
+#[test]
+fn new_text_runs_find_again_with_no_match_selected() {
+    use crate::preview_drawer::HostedPreview;
+    let mut st = CodeState::new("one needle");
+    st.find("needle");
+    assert_eq!(st.current_match(), Some(0));
+    st.set_text("needle, needle and needle");
+    assert_eq!(st.matches().len(), 3);
+    assert_eq!(st.current_match(), None, "the next step selects one");
+    let status = st.find_status().expect("a status");
+    assert_eq!((status.current, status.total), (None, 3));
+    st.find_step(true);
+    assert_eq!(st.current_match(), Some(0));
 }
 
 /// A bar over `n` rows in a viewport 100 points tall at window y 0, rows

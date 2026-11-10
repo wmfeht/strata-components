@@ -23,7 +23,7 @@
                 },
                 {
                   "key": "c13-status",
-                  "name": "Volume 100%",
+                  "name": "Paused",
                   "role": "label"
                 },
                 {
@@ -91,16 +91,13 @@
                           "key": "media-volume",
                           "name": "Volume",
                           "range": [
-                            1.0,
+                            0.6,
                             0.0,
                             1.0,
-                            0.10000000149011612
+                            0.1
                           ],
                           "role": "slider",
-                          "states": [
-                            "focused"
-                          ],
-                          "value": "100%"
+                          "value": "60%"
                         }
                       ],
                       "key": "media-volume-row",
@@ -157,19 +154,19 @@
                       "key": "media-timeline",
                       "name": "Playback position",
                       "range": [
-                        0.0,
+                        1.0,
                         0.0,
                         200.0,
                         5.0
                       ],
                       "role": "slider",
-                      "value": "0:00 of 3:20"
+                      "value": "0:01 of 3:20"
                     },
                     {
                       "children": [
                         {
                           "key": "media-elapsed",
-                          "name": "0:00",
+                          "name": "0:01",
                           "role": "label"
                         },
                         {

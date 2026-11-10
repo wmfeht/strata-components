@@ -23,12 +23,12 @@
                 },
                 {
                   "key": "c13-status",
-                  "name": "Decoding at 1256 × 707",
+                  "name": "Muted",
                   "role": "label"
                 },
                 {
                   "key": "c13-seeks",
-                  "name": "6 seeks",
+                  "name": "1 seeks",
                   "role": "label"
                 }
               ],
@@ -104,13 +104,13 @@
                           "key": "media-volume",
                           "name": "Volume",
                           "range": [
-                            0.6000000238418579,
+                            0.0,
                             0.0,
                             1.0,
-                            0.10000000149011612
+                            0.1
                           ],
                           "role": "slider",
-                          "value": "60%"
+                          "value": "0%"
                         }
                       ],
                       "key": "media-volume-row",
@@ -167,7 +167,7 @@
                       "key": "media-timeline",
                       "name": "Playback position",
                       "range": [
-                        70.0,
+                        100.0,
                         0.0,
                         200.0,
                         5.0
@@ -176,7 +176,7 @@
                       "states": [
                         "focused"
                       ],
-                      "value": "1:10 of 3:20"
+                      "value": "1:40 of 3:20"
                     },
                     {
                       "children": [

@@ -23,12 +23,12 @@
                 },
                 {
                   "key": "c13-status",
-                  "name": "Paused",
+                  "name": "Decoding at 1256 × 707",
                   "role": "label"
                 },
                 {
                   "key": "c13-seeks",
-                  "name": "3 seeks",
+                  "name": "4 seeks",
                   "role": "label"
                 }
               ],
@@ -44,6 +44,19 @@
                       "actions": [
                         "click",
                         "focus"
+                      ],
+                      "children": [
+                        {
+                          "children": [
+                            {
+                              "key": "media-bubble-time",
+                              "name": "1:40 · The harbour",
+                              "role": "label"
+                            }
+                          ],
+                          "key": "media-bubble",
+                          "role": "group"
+                        }
                       ],
                       "key": "media-frame",
                       "name": "Video frame",
@@ -91,13 +104,13 @@
                           "key": "media-volume",
                           "name": "Volume",
                           "range": [
-                            0.0,
+                            0.6,
                             0.0,
                             1.0,
-                            0.10000000149011612
+                            0.1
                           ],
                           "role": "slider",
-                          "value": "0%"
+                          "value": "60%"
                         }
                       ],
                       "key": "media-volume-row",
@@ -154,19 +167,22 @@
                       "key": "media-timeline",
                       "name": "Playback position",
                       "range": [
-                        6.0,
+                        105.0,
                         0.0,
                         200.0,
                         5.0
                       ],
                       "role": "slider",
-                      "value": "0:06 of 3:20"
+                      "states": [
+                        "focused"
+                      ],
+                      "value": "1:45 of 3:20"
                     },
                     {
                       "children": [
                         {
                           "key": "media-elapsed",
-                          "name": "0:06",
+                          "name": "1:40",
                           "role": "label"
                         },
                         {

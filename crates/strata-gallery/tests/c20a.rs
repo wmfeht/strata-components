@@ -5,7 +5,7 @@
 mod c20a {
     use rune::accesskit::{Action, ActionData};
     use rune::runtime::ElementInfo;
-    use rune::{Env, Key, KeyEvent, Mods, Runtime};
+    use rune::{Env, Key, KeyEvent, Mods, Runtime, WheelEvent};
     use strata_gallery::{Gallery, scenes};
 
     const FRAME: f64 = 1.0 / 60.0;
@@ -194,6 +194,78 @@ mod c20a {
         click(&mut rt, at);
         assert!(rt.state.c20a.workers.edit().focused);
         assert_eq!(heard(&rt), ["Workers 5"]);
+    }
+
+    fn wheel(rt: &mut Runtime<Gallery>, key: &str, dx: f32, dy: f32, mods: Mods) {
+        let (x, y) = centre(rt, key);
+        rt.pointer_move(x, y);
+        rt.wheel_event(WheelEvent::new(dx, dy).at(x, y).mods(mods));
+        for _ in 0..3 {
+            rt.frame(FRAME);
+        }
+    }
+
+    /// A sideways notch (Shift+wheel on Linux, a tilt wheel), and a notch with Ctrl (the text
+    /// size), Ctrl+Shift (Strata's thumbnail size) or Alt, go past both controls to the page.
+    #[test]
+    fn a_sideways_or_modified_wheel_passes_both_controls_by() {
+        let ctrl = Mods {
+            ctrl: true,
+            cmd: true,
+            ..Mods::default()
+        };
+        let cases = [
+            ((-40.0, 0.0), Mods::default()),
+            ((40.0, 0.0), Mods::default()),
+            ((0.0, 40.0), ctrl),
+            (
+                (0.0, 40.0),
+                Mods {
+                    shift: true,
+                    ..ctrl
+                },
+            ),
+            (
+                (0.0, -40.0),
+                Mods {
+                    alt: true,
+                    ..Mods::default()
+                },
+            ),
+        ];
+        for key in ["c20a-thumbs", "c20a-workers"] {
+            for ((dx, dy), mods) in cases {
+                let mut rt = mount("c20a-controls-light");
+                wheel(&mut rt, key, dx, dy, mods);
+                assert_eq!(
+                    (rt.state.c20a.thumbs.value(), rt.state.c20a.workers.value()),
+                    (64.0, 4.0),
+                    "{key} ({dx}, {dy}) {mods:?} moved nothing"
+                );
+                assert!(heard(&rt).is_empty(), "{key} ({dx}, {dy}) {mods:?}");
+                assert_eq!(
+                    rt.state.c20a.log, "Page wheel",
+                    "{key} ({dx}, {dy}) {mods:?} reached the page"
+                );
+            }
+        }
+    }
+
+    /// The density sliders take no wheel: it scrolls the Appearance menu they sit in.
+    #[test]
+    fn a_wheel_over_a_density_slider_scrolls_its_menu() {
+        let mut rt = mount("c20a-controls-light");
+        let before = element(&rt, "c20a-frame").rect[1];
+        wheel(&mut rt, "c20a-frame", 0.0, -40.0, Mods::default());
+        for _ in 0..30 {
+            rt.frame(FRAME);
+        }
+        assert!(
+            element(&rt, "c20a-frame").rect[1] < before,
+            "the menu scrolled the slider up"
+        );
+        assert_eq!(rt.state.c20a.frame.value(), 0.0);
+        assert!(heard(&rt).is_empty());
     }
 
     #[test]

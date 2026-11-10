@@ -192,6 +192,15 @@ fn the_wheel_steps_a_notch_or_forty_points() {
 }
 
 #[test]
+fn a_sideways_wheel_neither_steps_nor_commits_the_text() {
+    let mut st = workers(4.0);
+    typed(&mut st, "9");
+    assert_eq!(st.wheel(0.0, false), None, "a notch with no vertical part");
+    assert_eq!(st.wheel(0.0, true), None);
+    assert_eq!((st.value(), st.edit().text.as_str()), (4.0, "9"));
+}
+
+#[test]
 fn the_value_text_has_its_unit() {
     let mut st = roundness(60.0);
     assert_eq!(st.value_text(), "60%");

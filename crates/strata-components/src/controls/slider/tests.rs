@@ -140,6 +140,14 @@ fn precise_wheel_travel_adds_up_to_whole_notches() {
 }
 
 #[test]
+fn a_sideways_wheel_moves_nothing() {
+    let mut st = SliderState::new(64.0, Range::new(32.0, 256.0, 16.0));
+    assert!(!st.wheel(0.0, false, 1.0), "a notch with no vertical part");
+    assert!(!st.wheel(0.0, true, 1.0));
+    assert_eq!(st.value(), 64.0);
+}
+
+#[test]
 fn home_end_and_set_report_only_a_move() {
     let mut st = SliderState::new(0.0, frame());
     assert!(!st.jump_to_end(false));

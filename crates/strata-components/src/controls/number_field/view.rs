@@ -11,6 +11,7 @@ use strata_kit::look::Look;
 
 use super::state::NumberFieldState;
 use crate::contract::Point;
+use crate::controls::slider::takes_wheel;
 
 type Get<S> = fn(&S) -> &NumberFieldState;
 type GetMut<S> = fn(&mut S) -> &mut NumberFieldState;
@@ -228,6 +229,9 @@ impl<S: 'static> NumberField<S> {
         // `on_step` makes it focusable: the keyboard belongs to the field inside.
         .focusable(false)
         .on_wheel(move |s: &mut S, w: WheelEvent, tx: &mut Tx| {
+            if !takes_wheel(&w) {
+                return false;
+            }
             let moved = get_mut(s).wheel(w.dy, w.precise);
             tell(s, moved, tx);
             true

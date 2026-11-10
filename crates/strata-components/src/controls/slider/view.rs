@@ -6,7 +6,7 @@ use std::rc::Rc;
 use rune::{Cursor, Drag, El, Key, KeyEvent, Phase, Tx, WheelEvent, col, el, text};
 use strata_kit::look::Look;
 
-use super::state::{SliderChange, SliderState};
+use super::state::{SliderChange, SliderState, takes_wheel};
 
 type Get<S> = fn(&S) -> &SliderState;
 type GetMut<S> = fn(&mut S) -> &mut SliderState;
@@ -119,7 +119,8 @@ impl<S: 'static> Slider<S> {
     }
 
     /// The wheel over the slider moves it `amount` a notch. Without it the wheel passes on to
-    /// what scrolls behind the slider (Strata's density sliders in their menu).
+    /// what scrolls behind the slider (Strata's density sliders in their menu); with it, a
+    /// sideways wheel and one with Ctrl, Alt, Cmd or Super held still pass on.
     pub fn wheel(mut self, amount: Option<f64>) -> Self {
         self.wheel = amount;
         self
@@ -295,6 +296,9 @@ impl<S: 'static> Slider<S> {
         if let Some(amount) = self.wheel {
             let t = tell;
             slider = slider.on_wheel(move |s: &mut S, w: WheelEvent, tx: &mut Tx| {
+                if !takes_wheel(&w) {
+                    return false;
+                }
                 let moved = get_mut(s).wheel(w.dy, w.precise, amount);
                 t(s, moved.then_some(SliderChange::Commit), tx);
                 true

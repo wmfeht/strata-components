@@ -3,10 +3,7 @@
 
 use rune::TextEdit;
 
-use crate::controls::slider::Range;
-
-/// Precise wheel travel per step, in points: C13's timeline rule.
-const WHEEL_PITCH: f32 = 40.0;
+use crate::controls::slider::{Range, wheel_notches};
 
 /// A number field's state, held by the host and reached through accessors.
 ///
@@ -165,16 +162,10 @@ impl NumberFieldState {
     }
 
     /// A wheel delta `dy` (positive moves content down: the wheel rolled up, which raises
-    /// the value). A notch is a step; precise deltas count [`WHEEL_PITCH`] points a step.
+    /// the value). A notch is a step; precise deltas count 40 points a step. A delta with no
+    /// vertical part does nothing, and doesn't commit the text.
     pub(super) fn wheel(&mut self, dy: f32, precise: bool) -> Option<f64> {
-        let notches = if precise {
-            self.wheel += dy / WHEEL_PITCH;
-            let whole = self.wheel.trunc();
-            self.wheel -= whole;
-            whole
-        } else {
-            dy.signum()
-        };
+        let notches = wheel_notches(&mut self.wheel, dy, precise);
         if notches == 0.0 {
             return None;
         }

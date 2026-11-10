@@ -1,6 +1,8 @@
 //! The slider's model: its value, its range, the drag in progress and the track's laid-out
 //! width. Pure logic; the view in `view.rs` wires it to Rune.
 
+use rune::WheelEvent;
+
 use super::range::Range;
 
 /// What a change to the value is.
@@ -39,6 +41,32 @@ pub struct SliderState {
 
 /// Precise wheel travel per step, in points: C13's timeline rule.
 const WHEEL_PITCH: f32 = 40.0;
+
+/// Whether a stepping control (a [`super::Slider`] with a wheel amount, a NumberField) takes
+/// this wheel event. It reads the vertical delta only, as GTK's spin button does, so a
+/// sideways one (Shift+wheel on Linux, which Rune turns into `dx`; a tilt wheel) passes on.
+/// So does one with Ctrl, Alt, Cmd or Super held: Ctrl+wheel is Strata's text size and
+/// Ctrl+Shift+wheel its thumbnail size, which the window handles over any control.
+pub(crate) fn takes_wheel(w: &WheelEvent) -> bool {
+    let m = w.mods;
+    w.dy != 0.0 && !(m.ctrl || m.alt || m.cmd || m.logo)
+}
+
+/// Whole notches in a wheel delta `dy`: a mouse notch is one whatever its size, and precise
+/// travel adds up in `pending` until it makes [`WHEEL_PITCH`] points. A delta with no
+/// vertical part is none.
+pub(crate) fn wheel_notches(pending: &mut f32, dy: f32, precise: bool) -> f32 {
+    if dy == 0.0 {
+        return 0.0;
+    }
+    if !precise {
+        return dy.signum();
+    }
+    *pending += dy / WHEEL_PITCH;
+    let whole = pending.trunc();
+    *pending -= whole;
+    whole
+}
 
 impl SliderState {
     /// A slider over `range` at `value` (clamped).
@@ -181,14 +209,7 @@ impl SliderState {
     /// value), `amount` a notch. Precise deltas count [`WHEEL_PITCH`] points a notch. True
     /// when the value moved.
     pub(super) fn wheel(&mut self, dy: f32, precise: bool, amount: f64) -> bool {
-        let notches = if precise {
-            self.wheel += dy / WHEEL_PITCH;
-            let whole = self.wheel.trunc();
-            self.wheel -= whole;
-            whole
-        } else {
-            dy.signum()
-        };
+        let notches = wheel_notches(&mut self.wheel, dy, precise);
         if notches == 0.0 {
             return false;
         }

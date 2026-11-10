@@ -9,7 +9,7 @@
 //! spin buttons, with C21's text menu on the fields. What each change reports shows in the
 //! log line (`c20a-log`), so scripts can tell a live drag from a commit.
 
-use rune::{Cx, El, KeyEvent, ScrollSpec, Tx, col, row, text};
+use rune::{Cx, El, KeyEvent, ScrollSpec, Tx, WheelEvent, col, row, text};
 use rune_kit::Field as KitField;
 use strata_components::context_menu::{FieldMenu, FieldMenuState};
 use strata_components::controls::number_field::{NumberField, NumberFieldState};
@@ -396,11 +396,17 @@ pub fn view(g: &Gallery, cx: &mut Cx<Gallery>) -> El {
     .font(k.ty.small)
     .color(k.c.text_muted);
 
+    // The page hears what a control passes on (a sideways wheel, Ctrl+wheel for the text
+    // size, Ctrl+Shift+wheel for Strata's thumbnail size) and takes none of it.
     rune_kit::root(
         col()
             .key("c20a")
             .w_full()
             .h_full()
+            .on_wheel(|g: &mut Gallery, _: WheelEvent, _: &mut Tx| {
+                g.c20a.log = "Page wheel".to_owned();
+                false
+            })
             .px(look.space.xl)
             .py(look.space.xl)
             .gap(look.space.xl)

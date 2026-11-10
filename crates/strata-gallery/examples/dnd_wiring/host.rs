@@ -1818,3 +1818,6 @@ impl Win {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

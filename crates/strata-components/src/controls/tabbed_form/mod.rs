@@ -36,8 +36,9 @@
 //!
 //! A tablist named by [`FormLabels::tabs`]; each tab by its title, selected when chosen, with
 //! its place in the set. A page with errors: its tab is described "Has errors" and reports
-//! itself invalid. The chosen panel is a `tabpanel` named by its title; hidden panels are out
-//! of the tree, and nothing in them takes focus or the pointer.
+//! itself invalid. The chosen panel is a `tabpanel` named by its title (Rune 5d421fd has no
+//! labelled-by relation to name it by its tab); hidden panels are out of the tree, and nothing
+//! in them takes focus or the pointer.
 //!
 //! # Deviations
 //!
@@ -85,9 +86,10 @@
 //!   first down, flip the flag, run 30 frames, flip it back: its content's `scrolled` is the
 //!   old offset (without `instant_changes`: 0). Ask: one rule, a removed viewport forgets its
 //!   offset (or an explicit keep). Here: a per-visit key.
-//! - **A #173 comment draft (anomalyco/rune#173, `Tx::focus`).** Two more uses: a form's Save
-//!   that moves the keyboard to the invalid field on another page, and a settings search whose
-//!   Enter moves it to the found row's control. The workaround (a zero-size leaf with
+//! - **A #173 comment draft (anomalyco/rune#173, `Tx::focus`).** Three more uses: a form's
+//!   Save that moves the keyboard to the invalid field on another page, a notebook's Ctrl+Page
+//!   Down that moves it from the page it hides into the one it shows (else to its tab, by a
+//!   second leaf), and a settings search whose Enter moves it to the found row's control. The workaround (a zero-size leaf with
 //!   `focus_return`, drawn for a frame and dropped) breaks when the focused control turns
 //!   `inert` in the same commit that draws the leaf: focus drops, `last_focused` is cleared at
 //!   the end of `sync_requested_focus`, and the leaf's removal then has no focus to move. A

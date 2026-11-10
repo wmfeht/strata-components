@@ -3082,10 +3082,12 @@ dependencies = [
  "png 0.18.1",
  "rune",
  "rune-kit",
+ "serde",
  "serde_json",
  "strata-components",
  "strata-kit",
  "strata-platform",
+ "strata-test-peer",
 ]
 
 [[package]]

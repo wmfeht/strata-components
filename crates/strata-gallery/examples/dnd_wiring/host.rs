@@ -123,7 +123,7 @@ pub enum Pane {
         state: ColumnsState,
         /// Where a system drag over the strip would drop, once a move said (`None`: not known
         /// since it reached the strip): see `Win::strip_zone`.
-        over: Cell<Option<Option<(usize, Option<EntryId>)>>>,
+        over: Cell<Option<StripAt>>,
     },
     List(Flat),
     Icons(Flat),
@@ -133,6 +133,9 @@ pub struct TabPane {
     id: TabId,
     pane: Pane,
 }
+
+/// Where a drop on Columns' strip goes: a column, and its folder row or its background.
+type StripAt = Option<(usize, Option<EntryId>)>;
 
 /// The drag this window started.
 struct Out {
@@ -1284,7 +1287,7 @@ impl Win {
         Win::columns_view(tab, &self.wiring).drop_target_at(self, at)
     }
 
-    fn strip_at(&self, tab: TabId) -> Option<Option<(usize, Option<EntryId>)>> {
+    fn strip_at(&self, tab: TabId) -> Option<StripAt> {
         match &self.tab(tab).pane {
             Pane::Columns { over, .. } => over.get(),
             _ => None,

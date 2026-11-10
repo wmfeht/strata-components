@@ -241,4 +241,42 @@ mod element {
         assert_eq!(rt.state.model.camera(), CameraView::FrontLeft);
         assert_eq!(rt.state.model.mesh(), Some(mesh(CameraView::FrontLeft)));
     }
+
+    /// C13 review 1 (the C14b ruling): a plain picture fits the pane's width when the height
+    /// would make it wider. At Rune 5d421fd `aspect_fit` with `max_w` took the cap for the
+    /// cross room (C13's Rune draft U-C13-4), so a wide picture in a narrow, tall pane spilled
+    /// out of it.
+    #[test]
+    fn a_plain_picture_fits_a_narrow_pane() {
+        let mut model = ModelState::default();
+        model.open(crate::viewers::model::ModelFile {
+            name: "wide.3mf".into(),
+            extension: "3mf".into(),
+            position: None,
+            kind: crate::viewers::model::ModelKind::Embedded,
+        });
+        model.image([600.0, 300.0], None);
+        assert!(model.plain());
+        let pixels = Pixels::new();
+        pixels.set(8, 4, vec![200; 8 * 4 * 4]);
+        let app = App {
+            model,
+            pixels,
+            look: Look::fallback(false),
+        };
+        let mut rt = Runtime::new(app, view, (300.0, 600.0), Env::new(false, 1.0));
+        for _ in 0..30 {
+            rt.frame(1.0 / 60.0);
+        }
+        let r = rt
+            .elements()
+            .into_iter()
+            .find(|e| e.key.as_deref() == Some("model-picture"))
+            .expect("the picture")
+            .rect;
+        assert!(
+            r[0] >= 0.0 && r[0] + r[2] <= 300.0,
+            "the picture spills: {r:?}"
+        );
+    }
 }

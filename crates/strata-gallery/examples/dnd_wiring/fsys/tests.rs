@@ -117,3 +117,32 @@ fn ids_are_unique_across_the_process() {
     assert_eq!(one.of(Path::new("/a")), a, "kept for its path");
     assert_eq!(two.path(a), None);
 }
+
+/// A move refused for want of permission (a read-only source folder: EACCES) fails, leaving
+/// the source where it was and nothing in the destination: only another device's EXDEV
+/// copies and removes instead.
+#[test]
+fn a_move_refused_by_permissions_leaves_both_folders_as_they_were() {
+    use std::os::unix::fs::PermissionsExt;
+    let (root, _) = fixture("eacces");
+    std::fs::create_dir(root.join("a/sub")).unwrap();
+    std::fs::write(root.join("a/sub/inner.txt"), "in").unwrap();
+    let mode = |p: &Path, m: u32| std::fs::set_permissions(p, std::fs::Permissions::from_mode(m));
+    mode(&root.join("a"), 0o555).unwrap();
+    let probe = std::fs::write(root.join("a/probe"), "");
+    let got = [
+        apply(&root, &[root.join("a/sub")], &root.join("b"), true),
+        apply(&root, &[root.join("a/notes.txt")], &root.join("b"), true),
+    ];
+    mode(&root.join("a"), 0o755).unwrap();
+    if probe.is_ok() {
+        // Permissions don't bind (run as root): nothing to check.
+        return;
+    }
+    for g in &got {
+        assert!(g.is_err(), "{got:?}");
+    }
+    assert!(root.join("a/sub/inner.txt").exists() && root.join("a/notes.txt").exists());
+    let left: Vec<_> = std::fs::read_dir(root.join("b")).unwrap().collect();
+    assert!(left.is_empty(), "written into the destination: {left:?}");
+}

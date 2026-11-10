@@ -4,8 +4,9 @@
 //!
 //! Tabs: 1 Columns, 2 List (C4), 3 Icons (C3), each on `--root`; a drop on the strip or New
 //! tab opens a List tab per dragged folder. The sidebar (C8) has the root, its top folders,
-//! the Trash (which takes files, logging them as trashed), one pin and the `usb` device (another volume). The
-//! location bar (C6) names the active pane's folder. List and Icons peek folders (C22).
+//! the Trash (which takes files, logging them as trashed), one pin and the `usb` device
+//! (another volume). The location bar (C6) names the active pane's folder. List and Icons
+//! peek folders (C22).
 
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
@@ -1263,7 +1264,8 @@ impl Win {
 
     /// Whether Columns tab `tab` keeping only its first `keep` columns would unmount the
     /// column a running drag started in: P1's rule keeps a drag's source mounted until the
-    /// drag ends, so the navigation to `to` waits (logged `held`) instead.
+    /// drag ends, so the navigation to `to` is dropped (logged `held`), not queued: nothing
+    /// opens when the drag ends.
     fn holds_source(&self, tab: TabId, keep: usize, to: &Path) -> bool {
         let Some(out) = self.out.as_ref().filter(|o| o.tab == tab) else {
             return false;
@@ -1772,7 +1774,8 @@ impl Win {
                     let at = (gap.index + k).min(self.pins.len());
                     self.pins.insert(at, Pin::new(path_id(p), name_of(p)));
                 }
-                self.log("pin", json!({ "gap": gap.index, "folders": folders.iter().map(|p| name_of(p)).collect::<Vec<_>>() }));
+                let names: Vec<String> = folders.iter().map(|p| name_of(p)).collect();
+                self.log("pin", json!({ "gap": gap.index, "folders": names }));
             }
             SidebarIntent::DropHover { site, hover } => {
                 self.log(

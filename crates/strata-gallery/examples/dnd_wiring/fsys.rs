@@ -228,27 +228,39 @@ fn copy_all(from: &Path, to: &Path) -> io::Result<()> {
     }
 }
 
-/// Moves `from` to `to`, which must not exist, never replacing an entry there.
+/// Moves `from` to `to`, which must not exist, never replacing an entry there. Only another
+/// device (EXDEV) copies and removes instead; any other failure (EACCES, say) leaves `from`
+/// where it was and nothing at `to`.
 fn move_all(from: &Path, to: &Path) -> io::Result<()> {
+    let across = |e: &io::Error| e.kind() == io::ErrorKind::CrossesDevices;
     if from.symlink_metadata()?.file_type().is_dir() {
         // Reserve the name with an empty folder of our own, which `rename` replaces (it only
-        // replaces an empty folder); across devices, copy and remove instead.
+        // replaces an empty folder).
         std::fs::create_dir(to)?;
-        if std::fs::rename(from, to).is_ok() {
-            return Ok(());
-        }
-        std::fs::remove_dir(to).map_err(below)?;
-        copy_all(from, to)?;
-        return std::fs::remove_dir_all(from).map_err(below);
+        return match std::fs::rename(from, to) {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                std::fs::remove_dir(to).map_err(below)?;
+                if !across(&e) {
+                    return Err(below(e));
+                }
+                copy_all(from, to)?;
+                std::fs::remove_dir_all(from).map_err(below)
+            }
+        };
     }
     // A hard link fails if `to` exists (and links a link itself, not what it points at).
     match std::fs::hard_link(from, to) {
-        Ok(()) => std::fs::remove_file(from).map_err(below),
-        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Err(e),
-        Err(_) => {
+        Ok(()) => std::fs::remove_file(from).or_else(|e| {
+            // The source stays (its folder is read-only, say): so must nothing else.
+            std::fs::remove_file(to).map_err(below)?;
+            Err(below(e))
+        }),
+        Err(e) if across(&e) => {
             copy_all(from, to)?;
             std::fs::remove_file(from).map_err(below)
         }
+        Err(e) => Err(e),
     }
 }
 

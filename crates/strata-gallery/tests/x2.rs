@@ -547,11 +547,13 @@ mod x2 {
     /// still reports ok, and this line is what says it didn't run (docs/testing.md).
     fn skip(test: &str, why: &str) {
         use std::io::Write;
-        let _ = writeln!(std::io::stderr(), "SKIP x2::{test}: {why}");
+        // One write on the locked handle, so a parallel test's output can't split the line.
+        let line = format!("SKIP x2::{test}: {why}\n");
+        let _ = std::io::stderr().lock().write_all(line.as_bytes());
     }
 
     /// One drop from the peer onto `target` in the demo's main window: the demo's `transfer`
-    /// line for it, or None when nothing was transferred within a second.
+    /// line for it, or None when nothing was transferred within 3 seconds of the release.
     fn drop_on(
         s: &Session,
         demo: &Demo,
@@ -664,6 +666,18 @@ mod x2 {
             "a Columns row, its item's own folder",
             &["Music/track00.ogg"],
             json!({ "tab": 1, "depth": 0, "row": "Music" }),
+        );
+        // A column's background refusing (its own folder) stops it too: the strip's target
+        // around it doesn't take it instead.
+        demo.command(
+            "main",
+            json!({ "cmd": "open", "tab": 1, "path": "Music" }),
+            "navigate",
+        );
+        refused(
+            "a column's background, its item's own folder",
+            &["Music/track00.ogg"],
+            json!({ "tab": 1, "column": 1 }),
         );
         // List and Icons: folder rows, and List's background.
         select_tab(&demo, "main", 2);
@@ -1099,7 +1113,11 @@ mod x2 {
         let top_row = || {
             let v = demo.command(
                 "main",
-                json!({ "cmd": "pick", "x": px + 60.0 - w.content.x, "y": py + 40.0 - w.content.y }),
+                json!({
+                    "cmd": "pick",
+                    "x": px + 60.0 - w.content.x,
+                    "y": py + 40.0 - w.content.y,
+                }),
                 "picked",
             );
             let path = v["path"].as_str().unwrap_or_default().to_owned();

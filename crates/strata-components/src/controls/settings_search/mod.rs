@@ -13,11 +13,12 @@
 //!   navigation entries of pages without a match, opens the best-matching page and scrolls it
 //!   to its top. A query matches row titles, in English and translated, and keywords (aliases,
 //!   the current language's keywords, a page's own words); see [`matching`].
-//! - **No match:** the host shows [`SettingsSearch::empty`], "No settings match your search."
-//!   under the title "Search results". Clearing that query goes back to the first page.
+//! - **No match:** the host shows [`SettingsSearch::empty`], "No settings match your search.",
+//!   under the page title [`SettingsSearch::results_title`], "Search results". Clearing that query goes back to the first page.
 //! - **An empty query** (or one of spaces and punctuation) filters nothing.
-//! - **Escape** with text clears the query and every row comes back; the next Escape goes on
-//!   to the host, which closes Settings. The clear button ("Clear search") does the same.
+//! - **Escape** with text clears the query and every row comes back; the next Escape goes to
+//!   the host's [`SettingsSearch::on_escape`], which closes Settings. The clear button ("Clear
+//!   search") clears as Escape does.
 //! - **Enter** goes to the best row: its page shows (the host picks a table or tab inside it
 //!   from [`Navigate::row`]), it scrolls into view, the keyboard moves to its first control and
 //!   it is highlighted at [`FLASH_ALPHA`] of the accent, full for 0.6 s and faded by 1.5 s
@@ -40,7 +41,8 @@
 //!         |s: &mut App| &mut s.search, |s: &App| &s.index)
 //!     .page_scroll("settings-page")
 //!     .on_navigate(|s: &mut App, to: Navigate, _| s.show_page(&to.page, to.row.as_deref()))
-//!     .on_menu(|s: &mut App, at, tx| s.field_menu.open(s, Field::Search, at, tx));
+//!     .on_menu(|s: &mut App, at, tx| s.field_menu.open(s, Field::Search, at, tx))
+//!     .on_escape(|s: &mut App, _| s.close_settings());
 //! // Navigation: list a page while search.shows_page(s, key).
 //! // The field: search.field(s, look), above the navigation.
 //! // The page: search.empty(look) while s.search.no_results(), else for each section,

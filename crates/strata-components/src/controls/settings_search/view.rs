@@ -3,9 +3,7 @@
 use std::fmt;
 use std::rc::Rc;
 
-use rune::{
-    Beat, El, Key, KeyEvent, LiveRegion, Sequence, TextStyle, Tx, col, el, icon, row, text,
-};
+use rune::{Beat, El, Key, KeyEvent, LiveRegion, Sequence, TextStyle, Tx, el, icon, row, text};
 use rune_kit::{ControlSize, IconButton, IconButtonVariant};
 use strata_kit::icons::IconName;
 use strata_kit::look::Look;
@@ -42,7 +40,7 @@ pub struct SearchLabels {
     pub field: String,
     /// The clear button's name (Strata's shared "Clear search").
     pub clear: String,
-    /// The no-results view's title.
+    /// The page title while a query found nothing.
     pub results_title: String,
     /// The no-results view's text, also heard as the status.
     pub no_match: String,
@@ -78,6 +76,7 @@ impl Default for SearchLabels {
 
 type NavigateFn<S> = Rc<dyn Fn(&mut S, Navigate, &mut Tx)>;
 type MenuFn<S> = Rc<dyn Fn(&mut S, Point, &mut Tx)>;
+type EscapeFn<S> = Rc<dyn Fn(&mut S, &mut Tx) -> bool>;
 
 /// The settings window's search: the field, and the filter its rows, headings, pages and
 /// navigation follow. See the module docs for the host's part.
@@ -90,6 +89,7 @@ pub struct SettingsSearch<S> {
     page_scroll: Option<String>,
     on_navigate: Option<NavigateFn<S>>,
     on_menu: Option<MenuFn<S>>,
+    on_escape: Option<EscapeFn<S>>,
 }
 
 impl<S> Clone for SettingsSearch<S> {
@@ -103,6 +103,7 @@ impl<S> Clone for SettingsSearch<S> {
             page_scroll: self.page_scroll.clone(),
             on_navigate: self.on_navigate.clone(),
             on_menu: self.on_menu.clone(),
+            on_escape: self.on_escape.clone(),
         }
     }
 }
@@ -123,6 +124,7 @@ impl<S: 'static> SettingsSearch<S> {
             page_scroll: None,
             on_navigate: None,
             on_menu: None,
+            on_escape: None,
         }
     }
 
@@ -147,6 +149,14 @@ impl<S: 'static> SettingsSearch<S> {
     /// A menu press on the field, at a window point: the host opens C21's `FieldMenu`.
     pub fn on_menu(mut self, f: impl Fn(&mut S, Point, &mut Tx) + 'static) -> Self {
         self.on_menu = Some(Rc::new(f));
+        self
+    }
+
+    /// Escape in the empty field: the host closes Settings, returning true when it did. Rune's
+    /// text editor takes an Escape a field passes on (it blurs the field), so the field hands
+    /// this one to the host itself. Without it, Escape in the empty field leaves the field.
+    pub fn on_escape(mut self, f: impl Fn(&mut S, &mut Tx) -> bool + 'static) -> Self {
+        self.on_escape = Some(Rc::new(f));
         self
     }
 
@@ -188,7 +198,6 @@ impl<S: 'static> SettingsSearch<S> {
 
     fn apply(&self, s: &mut S, change: Change, tx: &mut Tx) -> bool {
         match change {
-            Change::None => false,
             Change::Rows => true,
             Change::Query(page) => {
                 if let Some(scroll) = &self.page_scroll {
@@ -321,31 +330,27 @@ impl<S: 'static> SettingsSearch<S> {
         MatchedText::new(text, ranges).font(font).build(&look.kit)
     }
 
-    /// The view for a query that found nothing: the title "Search results" over "No settings
-    /// match your search.". The host shows it in place of the page while
-    /// [`SettingsSearchState::no_results`] holds, and names its page title the same.
+    /// The view for a query that found nothing: "No settings match your search.". The host
+    /// shows it in place of the page while [`SettingsSearchState::no_results`] holds, under the
+    /// page title [`SettingsSearch::results_title`] (Strata's "Search results").
     pub fn empty(&self, look: &Look) -> El {
         let k = &look.kit;
-        col()
+        text(self.labels.no_match.clone())
             .key(self.empty_key())
+            .font(k.ty.ui)
+            .color(k.c.text_muted)
             .w_full()
-            .gap(look.space.md)
-            .child(
-                text(self.labels.results_title.clone())
-                    .font(look.ty.title)
-                    .color(k.c.text_base),
-            )
-            .child(
-                text(self.labels.no_match.clone())
-                    .font(k.ty.ui)
-                    .color(k.c.text_muted)
-                    .wrap(),
-            )
+            .wrap()
+    }
+
+    /// The page title while a query found nothing.
+    pub fn results_title(&self) -> &str {
+        &self.labels.results_title
     }
 
     /// The search field: a magnifier, the text, and a clear button while there is text. Escape
-    /// with text clears it (the next Escape goes on to the host, which closes Settings); Enter
-    /// goes to the best row. A hidden status says how many rows the query shows.
+    /// with text clears it; the next goes to [`SettingsSearch::on_escape`], which closes
+    /// Settings. Enter goes to the best row. A hidden status says how many rows the query shows.
     pub fn field(&self, s: &S, look: &Look) -> El {
         let k = &look.kit;
         let st = (self.get)(s);
@@ -427,6 +432,7 @@ impl<S: 'static> SettingsSearch<S> {
                 self.clear(s, tx);
                 true
             }
+            Key::Escape => self.on_escape.as_ref().is_some_and(|f| f(s, tx)),
             Key::Enter if !(m.shift || m.ctrl || m.cmd || m.alt || m.logo) => self.jump(s, tx),
             _ => false,
         }

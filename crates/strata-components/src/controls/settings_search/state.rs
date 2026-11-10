@@ -51,7 +51,6 @@ pub(super) struct Refresh {
 /// What a change of query asks the host to do.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum Change {
-    None,
     /// The query changed: open this page (none: stay), and scroll the page to its top.
     Query(Option<String>),
     /// The index changed under the same query: only the shown rows did.

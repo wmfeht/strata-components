@@ -56,6 +56,16 @@ fn inherited_themes_are_searched_depth_first_then_hicolor() {
 }
 
 #[test]
+fn a_first_parent_and_its_own_parents_come_before_the_second_parent() {
+    // DepthA inherits DepthB, DepthC; DepthB inherits DepthD. Both DepthD and DepthC have
+    // `deep`: depth-first finds DepthD's, breadth-first would find DepthC's.
+    assert_eq!(
+        one("DepthA", "deep", 48, 1).as_deref(),
+        Some("system/DepthD/48x48/apps/deep.png")
+    );
+}
+
+#[test]
 fn a_cycle_ends_and_a_theme_without_an_index_is_skipped() {
     assert_eq!(
         one("Cycle", "only-grand", 48, 1).as_deref(),

@@ -329,6 +329,28 @@ fn a_page_left_out_of_the_index_is_never_found() {
     }
 }
 
+/// The left-out rule holds for group members too: a member whose page (or group's page) the
+/// index leaves out never shows, so the count and the no-results view agree with the page.
+#[test]
+fn a_member_on_a_left_out_page_is_never_found() {
+    let index = SearchIndex {
+        revision: 1,
+        pages: vec![IndexPage::new("one", "One")],
+        rows: vec![
+            IndexRow::new("units", "one", "Units"),
+            IndexRow::new("keys", "two", "Shortcuts"),
+            IndexRow::member("reload", "two", "keys", "Reload folder"),
+        ],
+    };
+    assert_eq!(find(&index, "reload"), (None, Vec::new()));
+    let mut st = SettingsSearchState::new();
+    st.set_text("reload");
+    let r = st.plan(&index).expect("a query");
+    st.store(r);
+    assert_eq!(st.count(), Some(0));
+    assert!(st.no_results());
+}
+
 /// "A query with no match shows \"No settings match your search.\"" and the 128-character
 /// limit; an empty query, or one of spaces, filters nothing.
 #[test]

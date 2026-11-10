@@ -3,7 +3,8 @@
 /// Every page and row a settings search can find. The host builds it (titles translated,
 /// keywords in the current language plus English), leaves out rows and pages this
 /// installation doesn't have, and bumps [`SearchIndex::revision`] whenever it changes (a
-/// language switch, an action renamed, a key rebound).
+/// language switch, an action renamed, a key rebound). A row on a page it leaves out is never
+/// found, nor is a group member on one or of a group on one.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SearchIndex {
     pub revision: u64,

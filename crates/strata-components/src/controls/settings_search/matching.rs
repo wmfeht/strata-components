@@ -243,6 +243,10 @@ impl Prepared {
             let Some(group) = self.row_group[i] else {
                 continue;
             };
+            // A member on a page the index leaves out, or of a group on one, never shows.
+            if self.row_page[i].is_none() || self.row_page[group].is_none() {
+                continue;
+            }
             let scored = self.rows[i].score(query);
             if found[group] || scored.is_some() {
                 m.rows[i] = true;

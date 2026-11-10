@@ -511,7 +511,7 @@ impl LocationBarState {
         self.editing = false;
         self.seen_focus = false;
         self.edit.focused = false;
-        self.edit.preedit = None;
+        self.edit.cancel_composition();
         self.reveal = true;
         self.menu = None;
         self.completion.clear()

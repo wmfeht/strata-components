@@ -114,10 +114,13 @@ fn each_role_reaches_the_tokens_the_map_lists() {
                 "syntax.comment",
             ],
         ),
-        (Key::SyntaxKeyword, &["syntax.keyword"]),
-        (Key::SyntaxString, &["syntax.string"]),
+        (Key::SyntaxKeyword, &["syntax.keyword", "syntax.operator"]),
+        (
+            Key::SyntaxString,
+            &["syntax.string", "syntax.link", "syntax.regex"],
+        ),
         (Key::SyntaxConstant, &["syntax.number"]),
-        (Key::SyntaxType, &["syntax.type"]),
+        (Key::SyntaxType, &["syntax.type", "syntax.attribute"]),
         (Key::SyntaxPreprocessor, &["syntax.preprocessor"]),
     ];
     for (key, names) in exact {
@@ -152,6 +155,7 @@ fn each_role_reaches_the_tokens_the_map_lists() {
                 "syntax.property",
                 "syntax.parameter",
                 "syntax.punctuation",
+                "syntax.variable",
             ],
         ),
         (
@@ -172,6 +176,7 @@ fn each_role_reaches_the_tokens_the_map_lists() {
                 "color.info.border",
                 "color.info.icon",
                 "glow.color",
+                "syntax.heading",
             ],
         ),
     ];

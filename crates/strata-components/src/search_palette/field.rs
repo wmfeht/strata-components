@@ -93,7 +93,7 @@ pub(super) fn on_key(
     key: &str,
     results: &str,
 ) -> (Polled, bool) {
-    if st.edit.preedit.is_some() {
+    if st.edit.is_composing() {
         return (Polled::default(), false);
     }
     let m = ev.mods;

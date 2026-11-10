@@ -261,7 +261,7 @@ fn plain(m: Mods) -> bool {
 fn key<S: 'static>(bar: &FilterBar<S>, s: &mut S, ev: &KeyEvent, tx: &mut Tx) -> bool {
     // Rune gives Enter and Escape to a composition first; every other key an input method is
     // using stays the editor's.
-    if (bar.get)(s).edit.preedit.is_some() {
+    if (bar.get)(s).edit.is_composing() {
         return false;
     }
     let repeat = tx.key_repeat();

@@ -196,7 +196,7 @@ impl BrowserTabsState {
                 _ if wheeled => {}
                 // A strip at rest brings the tab a fade's width clear of the edges in one jump,
                 // once it has drawn and its place can be read (U-C7-7).
-                Some(id) if self.drag.phase == rune_kit::shell::TabDragPhase::Idle => {
+                Some(id) if self.drag.phase() == rune_kit::shell::TabDragPhase::Idle => {
                     self.reveal = Some((id, 0));
                     tx.wake_after(Duration::ZERO);
                 }

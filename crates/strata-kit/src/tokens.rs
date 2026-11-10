@@ -556,6 +556,12 @@ const SYNTAX: &[Token] = syntax!(
     Punctuation => "punctuation",
     Inserted => "inserted",
     Deleted => "deleted",
-    Parameter => "parameter";
+    Parameter => "parameter",
+    Heading => "heading",
+    Link => "link",
+    Operator => "operator",
+    Regex => "regex",
+    Attribute => "attribute",
+    Variable => "variable";
     extra: preprocessor,
 );

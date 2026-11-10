@@ -45,7 +45,7 @@
                         "scroll-into-view"
                       ],
                       "key": "b0",
-                      "name": "Code blocks coloured by syntect on the highlighter thread, through rune-kit's   Markdown   highlight hook. TOML is a language rune-kit's own scanners don't know.",
+                      "name": "Code blocks coloured by syntect on the highlighter thread, through rune-kit's   ⁦Markdown⁩   highlight hook. TOML is a language rune-kit's own scanners don't know.",
                       "role": "label"
                     },
                     {

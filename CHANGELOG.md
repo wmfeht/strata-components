@@ -19,14 +19,19 @@ removed in the next minor release.
 
 ## [Unreleased]
 
-Rune: [`5d421fd`](https://github.com/anomalyco/rune/commit/5d421fd908ba19b760b93a3dcf821e159ec1d4d7)
-(`5d421fd908ba19b760b93a3dcf821e159ec1d4d7`) · Rust 1.99.1
+Rune: [`2a44156`](https://github.com/anomalyco/rune/commit/2a44156b21d63b0342a366b26d9222a6edd4622c)
+(`2a44156b21d63b0342a366b26d9222a6edd4622c`) · Rust 1.99.1
 
 Nothing is released yet. The first release is planned for milestone M1 with the `csd`,
 `settings`, `single-instance` and `glib-bridge` features.
 
 ### Changed
 
+- Rune `5d421fd` → `2a44156` (`dev`, 2026-11-10), on the same Rust. The shims build and pass
+  unchanged: none of the Rune API they use moved. What matters to them:
+  - `App::turn_scope` (Rune `6d8d32b`, #392) runs a hook before and after each turn of a
+    window's event handling. It carries no display handle, so P0's own wake path stays.
+  - `App::on_visibility` (Rune `6bf9124`, #497) hears a window go off screen and back.
 - Rune `78d22ed` → `5d421fd` (`dev`, 2026-11-08), on the same Rust. What matters to the shims:
   - A covered Wayland window's due `wake_after` timer now runs, at most 250 ms late, instead of
     the loop spinning at full CPU and running no `poll` while it waits for a frame the

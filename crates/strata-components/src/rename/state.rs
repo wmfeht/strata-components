@@ -270,7 +270,7 @@ impl RenameState {
     /// `page_scroll`), the row would leave the viewport and the edit would end, dropping the
     /// typed name.
     pub(super) fn key(&mut self, ev: &KeyEvent, repeat: bool) -> Option<Polled> {
-        if self.open.is_none() || self.edit.preedit.is_some() {
+        if self.open.is_none() || self.edit.is_composing() {
             return None;
         }
         let m = ev.mods;

@@ -200,10 +200,6 @@
       ],
       "key": "gallery",
       "role": "group"
-    },
-    {
-      "name": "Next model view",
-      "role": "tooltip"
     }
   ],
   "name": "Strata components",

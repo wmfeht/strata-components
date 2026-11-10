@@ -263,7 +263,7 @@ fn a_held_enter_ends_one_edit() {
 #[test]
 fn keys_stay_the_input_methods_while_it_composes() {
     let mut st = typed("Notes.md", "x.md");
-    st.edit.preedit = Some(("か".into(), None));
+    st.edit.ime(&rune::Ime::Preedit("か".into(), None));
     for key in [Key::Enter, Key::Escape, Key::Tab] {
         assert!(press(&mut st, key, Mods::default(), false).is_none());
     }

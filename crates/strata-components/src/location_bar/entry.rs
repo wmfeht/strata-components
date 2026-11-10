@@ -97,7 +97,7 @@ fn key(
 ) -> (Polled, bool) {
     // Rune gives Escape and Enter to a composition first; the rest of the keys an input
     // method is using stay the editor's.
-    if st.edit.preedit.is_some() {
+    if st.edit.is_composing() {
         return (Polled::default(), false);
     }
     let m = ev.mods;

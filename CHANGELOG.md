@@ -45,8 +45,9 @@ Nothing is released yet. The first release is planned for milestone M1 with the 
 
 - One cargo feature per shim, each gating its own module: `dnd`, `clipboard`, `csd`,
   `foreign-parent`, `settings`, `icon-theme`, `media-audio`, `single-instance` and `glib-bridge`.
-  Apart from `dnd`, `clipboard`, `glib-bridge`, `csd`, `settings`, `single-instance` and
-  `media-audio`, the modules are placeholders until their work packages land.
+  Apart from `dnd`, `clipboard`, `glib-bridge`, `csd`, `settings`, `icon-theme`,
+  `single-instance` and `media-audio`, the modules are placeholders until their work packages
+  land.
 - `dnd`: system drag and drop on Wayland (`wl_data_device`) and X11 (XDND 5), mirroring Rune's
   `drag_out` and `on_drop_files` with any MIME types. Each window has a `Dnd`, attached from
   `App::on_window`.
@@ -194,3 +195,8 @@ Nothing is released yet. The first release is planned for milestone M1 with the 
   It needs GStreamer and gst-plugins-base (`libgstreamer1.0-dev` and
   `libgstreamer-plugins-base1.0-dev` to build), and gst-plugins-good for `autoaudiosink`. The
   bindings are MIT OR Apache-2.0 and share glib 0.22 with `glib-bridge`.
+- `icon-theme`: freedesktop icon theme lookup. `IconLoader` finds application and MIME icons by
+  name (with fallback names) or by file, at a size and scale, the way GTK 4's `GtkIconTheme`
+  does, on its own thread, and hands them over as `rune::Pixels` decoded by Rune's
+  `ImageCache`, with "not found" apart from a broken file. `IconResolver` is the synchronous
+  lookup. Symbolic icons draw as their files paint them; XPM and `icon-theme.cache` aren't read.

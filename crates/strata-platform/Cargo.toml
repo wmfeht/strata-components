@@ -46,8 +46,8 @@ settings = [
     "zbus/tokio",
 ]
 
-# P6 icon theme lookup: src/icon_theme/
-icon-theme = []
+# P6 icon theme lookup: src/icon_theme/. Decodes through Rune's ImageCache; SVG needs rune/svg.
+icon-theme = ["rune/svg"]
 
 # P7 media output: src/media/
 media-audio = ["dep:gstreamer", "dep:gstreamer-app"]

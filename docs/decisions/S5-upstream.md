@@ -64,6 +64,7 @@ Open Rune issues that touch this repository, as of 2026-11-07:
 | [#139](https://github.com/anomalyco/rune/issues/139) | A covered Wayland window's `poll` and timers stop | A risk for P0's driver C and P9, which wake the UI through `AppHandle` |
 | [#203](https://github.com/anomalyco/rune/issues/203) | `virtual_rows` costs O(rows) a frame when the row count changes | C1e and C3, at 100k entries |
 | [#130](https://github.com/anomalyco/rune/issues/130) | Windows: frameless windows can't be moved or resized | The Windows twin of U6 |
+| [#21](https://github.com/anomalyco/rune/issues/21) | App icons off macOS: freedesktop icon-theme lookup and SVG rasterizing, through `ImageCache` (PR #29 closed unmerged) | P6 cites it. Added by P6, after S5's survey missed it; U-P6-1 is a comment on it. |
 
 ## Draft index
 
@@ -105,7 +106,7 @@ For the owner. Rune takes no pull requests and asks for agent-written issues (RE
    [feature table](../../crates/strata-platform/README.md#features).
 5. Each P-module's owner then replaces its `mod.rs` placeholder, `Rune issue: (filed by S5).` or
    (P9's) `Rune issue: S5 drafts.`, with the links from this index. P0 cites U9, P1 U1, U2, U9 and U10, P2 U5 and U9, P3 U6–U8, U9 and
-   #145, P4 U11 and U9, P5 U12 and U13, P6 "none proposed", P7 #30 (related), P8 #22, P9 "none:
+   #145, P4 U11 and U9, P5 U12 and U13, P6 #21 (related), U-P6-1 and U-P6-2, P7 #30 (related), P8 #22, P9 "none:
    outside Rune's scope".
 
 Each draft below gives a title, then the issue body to paste. Bracketed notes such as "(U9's
@@ -1085,7 +1086,7 @@ items selected"); without the hold the tap replaces it.
 | Single instance and activation (P8) | Upstream #22. Not in Rune at `78d22ed` or `dev` head. P8 cites it. |
 | Linux `Player` (P7) | Upstream #30, #100 and #112. P7 is an audio sink and clock, not `Player`. |
 | A GL fallback without Vulkan | Upstream #23. It belongs in a plan §8 note. |
-| Icon theme lookup (P6) | Arguably not Rune core's to own. The owner may ask for a draft. |
+| Icon theme lookup (P6) | S5 missed upstream [#21](https://github.com/anomalyco/rune/issues/21), which asks for exactly this. P6 cites it and adds [U-P6-1](#u-p6-1), a comment on #21, and [U-P6-2](#u-p6-2). |
 | GLib bridge (P9) | Outside Rune's scope. It uses only `AppHandle` and the setup `Waker`. |
 | S1's panic on disconnect | S1 dropped it: `App::try_run` returns the error. |
 | S4 (syntect backend) | S4's record (`docs/decisions/S4-syntect-backend.md`, on S4's branch at `69be683`, not yet merged) makes no Rune ask. It picks syntect with `onig`, and mentions Rune only to note that rune-kit's highlighter has a similar long-line guard. |
@@ -1509,3 +1510,65 @@ a producer allocates and frees 3.7 MB a frame and can't reuse a buffer.
 
 **Ask.** A way to get the replaced buffer back, `Pixels::replace(w, h, rgba) -> Vec<u8>` say, or
 to fill a buffer in place (`Pixels::update(w, h, |rgba| …)`), so a pacer recycles its frames.
+
+### U-P6-1
+
+From P6 (`icon-theme`), cited by `crates/strata-platform/src/icon_theme/mod.rs`. A **comment on
+[#21](https://github.com/anomalyco/rune/issues/21)**, not a new issue.
+
+**Comment.** What `ImageCache::app_icon` lacks on Linux at `dev` `5d421fd`, for an app that
+shows other apps' icons (an Open With list) and MIME icons:
+
+- **The user's theme.** `freedesktop::icon_file` (`image.rs`) scans `icons/hicolor` only:
+  no current theme, no `Inherits`, so an icon that ships only in Adwaita, Yaru or Breeze isn't
+  found.
+- **`index.theme` sizes.** It reads a size from the directory name (`48x48`, `@2`) and takes
+  "the smallest at or above, else scalable, else the largest", not the theme's `Size`, `Type`,
+  `Threshold`, `MinSize`, `MaxSize` and `Scale`.
+- **Lookup by name.** It takes a `.desktop` path only, so a MIME icon name (`text-x-python`) or
+  a list of fallback names (`gio::ThemedIcon::names`) can't be looked up.
+- **Not found.** A missing icon and a broken file both resolve to `Image::error`, so an app
+  can't tell "draw your fallback" from "the theme ships a bad file".
+- It lists every size directory again on each call.
+
+**Steps (headless).** With `XDG_DATA_HOME=$T/share`:
+
+```sh
+mkdir -p $T/share/icons/Fixture/48x48/apps $T/share/applications
+printf '[Icon Theme]\nName=Fixture\nInherits=hicolor\nDirectories=48x48/apps\n\n[48x48/apps]\nSize=48\nType=Fixed\n' \
+  > $T/share/icons/Fixture/index.theme
+cp any-48px.png $T/share/icons/Fixture/48x48/apps/fixture-app.png
+printf '[Desktop Entry]\nType=Application\nName=Fixture\nExec=true\nIcon=fixture-app\n' \
+  > $T/share/applications/fixture.desktop
+```
+
+`ImageCache::new(waker).app_icon_scaled("$T/share/applications/fixture.desktop", 48.0, 1.0).wait()`
+returns `Err("no icon for …")`, and nothing in the API names a theme to look in. (Read from
+`image.rs` at `5d421fd`; not run.)
+
+**Ask.** An image source that takes the theme by name, as #21 proposes:
+`ImageCache::themed_icon(names, theme, size_pt, scale)` following the Icon Theme
+Specification's lookup, with "not found" apart from a decode error. Or, smaller: a way to run a
+path lookup on the cache's worker (`cache.file_with(|| -> Option<PathBuf>, size_pt, scale)`),
+so a crate doing the lookup needs no thread of its own. A file manager does this today in a
+shim that resolves on its own thread and hands the file to `ImageCache::file`.
+
+### U-P6-2
+
+From P6 (`icon-theme`), cited by `crates/strata-platform/src/icon_theme/mod.rs`.
+
+**Title:** Draw a `Pixels` image in the element's colour, for symbolic icons loaded at run time
+
+**Context.** Freedesktop symbolic icons (`*-symbolic.svg`) are drawn in one dark grey
+(Adwaita's paint `#2e3436`) and are meant to be recoloured to the text colour, as GTK does. An
+app that loads them from the icon theme at run time has `Pixels` (or SVG bytes), not a
+`rune::Icon`.
+
+**Steps.** At `dev` `5d421fd`, load
+`/usr/share/icons/Adwaita/symbolic/places/folder-symbolic.svg` through `ImageCache::file` and
+draw it with `El::pixels` on a dark background: it draws dark grey on dark grey.
+`El::icon_one_color` would draw it as a silhouette in the element's colour, but only for a
+`rune::Icon`, whose `body` is `&'static str`, so a body read at run time would have to leak.
+
+**Ask.** `El::pixels_tint()` (or `pixels_mask`): draw an image's alpha in the element's colour,
+as `icon_one_color` draws an icon's. Or a `rune::Icon` with an owned body (`Arc<str>`).

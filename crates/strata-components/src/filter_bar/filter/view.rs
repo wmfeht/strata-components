@@ -130,19 +130,20 @@ impl<S: 'static> FilterBar<S> {
         self
     }
 
-    /// Whether Down in the field sends it a Tab after [`FilterIntent::FocusResults`], so the
-    /// next focus stop (the results) takes the keyboard. On by default. Off, the keyboard
-    /// stays in the field: at Rune 5d421fd a host can't move it to the results itself (no
-    /// `Tx::focus`, upstream #173), so turn it off only where the results aren't the next stop
-    /// and staying in the field is what the host wants.
+    /// Whether Down in the field moves the keyboard to the results after
+    /// [`FilterIntent::FocusResults`]: to [`FilterBar::focus_return`]'s element when set
+    /// (`Tx::focus`, which takes it or its first focusable element), else by a Tab sent to the
+    /// field, so the next focus stop takes it. On by default. Off, the keyboard stays in the
+    /// field, and the host may move it from the intent itself.
     pub fn tab_to_results(mut self, on: bool) -> Self {
         self.tab_to_results = on;
         self
     }
 
-    /// Where the keyboard goes when the bar closes with it (Escape in the field): the
-    /// results' focus stop, the listing's cursor row. Rune has no `Tx::focus` (upstream #173),
-    /// so the bar carries `El::focus_return`. Without it, nothing has the keyboard after.
+    /// The results' focus stop (the listing's pane, or its cursor row): where Down sends the
+    /// keyboard, and where it goes when the bar closes with it (Escape in the field), through
+    /// the bar's `El::focus_return`, which covers every way the bar can go. Without it, Down
+    /// sends a Tab and nothing has the keyboard after a close.
     pub fn focus_return(mut self, key: impl Into<String>) -> Self {
         self.focus_return = Some(key.into());
         self
@@ -302,7 +303,9 @@ fn key<S: 'static>(bar: &FilterBar<S>, s: &mut S, ev: &KeyEvent, tx: &mut Tx) ->
             let mut polled = Polled::default();
             polled.push(FilterIntent::FocusResults { id });
             bar.route(s, polled, tx);
-            if bar.tab_to_results {
+            if let (true, Some(to)) = (bar.tab_to_results, &bar.focus_return) {
+                tx.focus(to.clone(), true);
+            } else if bar.tab_to_results {
                 // Probe P1: a Tab sent from the field moves the keyboard to the next stop.
                 tx.send_key(KeyEvent {
                     key: Key::Tab,

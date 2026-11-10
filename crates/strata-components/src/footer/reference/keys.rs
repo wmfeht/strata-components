@@ -20,6 +20,8 @@ pub(super) struct Route<S> {
     pub get_mut: fn(&mut S) -> &mut ReferenceState,
     pub keys: ReferenceKeys,
     pub categories: String,
+    pub search: String,
+    pub chosen_category: String,
     pub results: String,
     pub line_key: Rc<dyn Fn(usize) -> String>,
     pub lines: Rc<Lines>,
@@ -38,8 +40,8 @@ fn any(chords: &[Chord], ev: &KeyEvent, tx: &Tx) -> bool {
     chords.iter().any(|c| c.matches_tx(ev, tx))
 }
 
-/// Sends `key` through the window's routing on the next frame: the focus moves Rune has no call
-/// for at the pinned rev (upstream #173).
+/// Sends `key` through the window's routing on the next frame: the category group's own
+/// arrows, for the keys that stand for them.
 fn send(tx: &mut Tx, key: Key, shift: bool) {
     tx.send_key(KeyEvent {
         key,
@@ -61,23 +63,19 @@ impl<S: 'static> Route<S> {
         }
     }
 
-    /// Moves focus to `to` from `from` around the panel's three stops (search, the chosen
-    /// category, the results), one Tab or Shift+Tab away whichever it is.
+    /// Moves focus to `to`, one of the panel's three stops (search, the chosen category, the
+    /// results), with its ring.
     fn focus(&self, from: Area, to: Area, tx: &mut Tx) {
-        use Area::*;
-        let forward = matches!(
-            (from, to),
-            (Search, Categories) | (Categories, Results) | (Results, Search)
-        );
-        let back = matches!(
-            (from, to),
-            (Search, Results) | (Categories, Search) | (Results, Categories)
-        );
-        if forward {
-            send(tx, Key::Tab, false);
-        } else if back {
-            send(tx, Key::Tab, true);
+        if from == to {
+            return;
         }
+        let key = match to {
+            Area::Search => &self.search,
+            Area::Categories => &self.chosen_category,
+            Area::Results => &self.results,
+            Area::Other => return,
+        };
+        tx.focus(key.clone(), true);
     }
 
     /// The focus keys (Ctrl+B, Ctrl+F, Ctrl+L): true when `ev` is one.

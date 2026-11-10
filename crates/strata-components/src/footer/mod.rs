@@ -7,14 +7,13 @@
 //! `status.rs`, `indicators.rs`, `catalog.rs`, `reference.rs`, `reference_keys.rs`),
 //! `src/ui/shortcut_reference.rs` and `src/style.css`.
 //!
-//! **Rune dev 5d421fd: partly.** `DialogShell` (C15: Rune's modal, backdrop and Tab trap), core
+//! **Rune 2a44156: partly.** `DialogShell` (C15: Rune's modal, backdrop and Tab trap), core
 //! `text_input` and `TextEdit` (editing, undo, word moves), focus groups with `tablist` and `tab`
 //! roles, `virtual_rows` with `on_visible_rows`, `Tx::scroll_page`, `scroll_into_view` and
-//! `scroll_to_instant`, the table, status and live-region roles, `El::checked` (a toggle's
-//! pressed state) and `Chord::matches` beside `matches_tx` cover it. Missing: focus from code
-//! (upstream #173; `Tx::focus` landed past the pin in 22aa8cde, not adopted), a line scroll for a
-//! focused viewport (draft U-C19-1), a `Keybind` that keeps case (U-C18-1), a hover border colour
-//! (#328), window focus in scripts (U-X1-1) and input-method events in scripts (U-C6-7).
+//! `scroll_to_instant`, the table, status and live-region roles, `El::checked` (a toggle's pressed
+//! state) and `Chord::matches` beside `matches_tx` and `Tx::focus` cover it. Missing: a line scroll
+//! for a focused viewport (draft U-C19-1), a `Keybind` that keeps case (U-C18-1), a hover border
+//! colour (#328), window focus in scripts (U-X1-1) and input-method events in scripts (U-C6-7).
 //!
 //! # Hosting
 //!
@@ -89,8 +88,8 @@
 //! - **Keys.** Rune hands a focused field's keys to the field, then the window, never to its
 //!   ancestors (probe P1), so the search field routes its own and the content routes the
 //!   categories' and the results'. Ctrl+B, Ctrl+F and Ctrl+L move focus among the three stops
-//!   (search, the chosen category, the results) with one sent Tab or Shift+Tab (no `Tx::focus`
-//!   at the pin, #173; probe P2); Tab and Shift+Tab cycle them. In the categories the arrows,
+//!   (search, the chosen category, the results) with `Tx::focus`, from anywhere in the panel;
+//!   Tab and Shift+Tab cycle them. In the categories the arrows,
 //!   Home and End choose (a tab list), `h j k l` as the arrows, and Shift changes nothing. In
 //!   the results, the arrows, `j`, `k`, Page Up, Page Down, Home and End scroll; in the search
 //!   field Up, Down, Page Up and Page Down scroll the results and focus stays; Shift held too
@@ -239,7 +238,6 @@
 //! - **Live regions beyond Strata**: the count (a polite status, as the WP asks), the badge, the
 //!   range mark and the 10X pill (statuses), and the reference's announced row count (as C17's
 //!   palette). Strata's are plain labels.
-//! - **Focus moves by a sent Tab** for Ctrl+B, Ctrl+F and Ctrl+L (#173).
 //! - **The results scroll a line at a time** (a heading or a row of the results), the next line
 //!   out of view brought in, where GTK steps its adjustment (U-C19-1).
 //! - **No crossfade** between the status row and C18's prompt (Strata's 120 ms stack
@@ -271,7 +269,7 @@
 //!   text the platform produced with Alt spent on it (#250's `consumed_mods` would tell), and
 //!   leave an Alt chord whose text is the unmodified key to the app. Searched upstream ("alt
 //!   letter", "Alt+", "alt typing", "mnemonic", "option key text field"): #250 is the nearest.
-//! - Reused: #173 (`Tx::focus`, fixed past the pin), U-C18-1, #328, U-X1-1, U-C6-7, and #203
+//! - Reused: U-C18-1, #328, U-X1-1, U-C6-7, and #203
 //!   (a count change in `virtual_rows` reads every row's key; with 5,000 rows a keystroke and
 //!   its frame took 1.5 to 3 ms in a release build, test
 //!   `a_keystroke_in_a_5000_row_reference_builds_only_the_rows_on_screen`).

@@ -159,6 +159,10 @@
                   "role": "label"
                 },
                 {
+                  "name": "down",
+                  "role": "label"
+                },
+                {
                   "name": "refresh",
                   "role": "label"
                 },
@@ -175,7 +179,15 @@
                   "role": "label"
                 },
                 {
+                  "name": "minus",
+                  "role": "label"
+                },
+                {
                   "name": "close",
+                  "role": "label"
+                },
+                {
+                  "name": "close_panel",
                   "role": "label"
                 },
                 {
@@ -239,6 +251,10 @@
                   "role": "label"
                 },
                 {
+                  "name": "eye",
+                  "role": "label"
+                },
+                {
                   "name": "eye_off",
                   "role": "label"
                 },
@@ -280,6 +296,14 @@
                 },
                 {
                   "name": "success",
+                  "role": "label"
+                },
+                {
+                  "name": "list_checks",
+                  "role": "label"
+                },
+                {
+                  "name": "enter",
                   "role": "label"
                 },
                 {
@@ -517,6 +541,10 @@
                   "role": "label"
                 },
                 {
+                  "name": "down",
+                  "role": "label"
+                },
+                {
                   "name": "refresh",
                   "role": "label"
                 },
@@ -533,7 +561,15 @@
                   "role": "label"
                 },
                 {
+                  "name": "minus",
+                  "role": "label"
+                },
+                {
                   "name": "close",
+                  "role": "label"
+                },
+                {
+                  "name": "close_panel",
                   "role": "label"
                 },
                 {
@@ -597,6 +633,10 @@
                   "role": "label"
                 },
                 {
+                  "name": "eye",
+                  "role": "label"
+                },
+                {
                   "name": "eye_off",
                   "role": "label"
                 },
@@ -638,6 +678,14 @@
                 },
                 {
                   "name": "success",
+                  "role": "label"
+                },
+                {
+                  "name": "list_checks",
+                  "role": "label"
+                },
+                {
+                  "name": "enter",
                   "role": "label"
                 },
                 {

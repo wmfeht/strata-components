@@ -184,8 +184,9 @@ Nothing is released yet. The first release is planned for milestone M1 with the 
     No call blocks on the device: state changes run on a control thread.
   - `FramePacer` writes the RGBA frame the clock is at into a `rune::Pixels` in place, with no
     view commit: it drops frames whose time passed, holds while the next isn't due, counts
-    repeats, and shows the first frame after a flush at once. `WallClock` is the same clock on
-    monotonic time, for clips without sound.
+    repeats (none past the clip's last frame after `FramePacer::finish`), and shows the first
+    frame after a flush at once. `WallClock` is the same clock on monotonic time, for clips
+    without sound.
 
   It needs GStreamer and gst-plugins-base (`libgstreamer1.0-dev` and
   `libgstreamer-plugins-base1.0-dev` to build), and gst-plugins-good for `autoaudiosink`. The

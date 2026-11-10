@@ -160,3 +160,26 @@ fn frames_come_in_order_whole_and_within_the_queue() {
     assert_eq!(pacer.push(short).unwrap_err().1, Refused::BadSize);
     assert!(pacer.push(frame(66, 1)).is_ok());
 }
+
+#[test]
+fn after_the_last_frame_the_picture_holds_while_the_sound_plays_on() {
+    let mut pacer = pacer(&[(0, 1), (33, 2)]);
+    pacer.finish();
+    let clock = clock();
+    pacer.present(clock.at(0));
+    assert!(matches!(
+        pacer.present(clock.at(40)),
+        Presented::Shown { .. }
+    ));
+    // The clip's video ended at 66 ms; its sound goes on.
+    assert_eq!(pacer.present(clock.at(70)), Presented::Held);
+    assert_eq!(pacer.present(clock.at(500)), Presented::Held);
+    assert_eq!(pacer.stats().repeated, 0);
+    // A flush starts a new run of frames: a late one repeats again.
+    pacer.flush();
+    pacer.push(frame(1_000, 3)).expect("queued");
+    pacer.push(frame(1_033, 4)).expect("queued");
+    pacer.present(clock.at(1_000));
+    pacer.present(clock.at(1_040));
+    assert_eq!(pacer.present(clock.at(1_070)), Presented::Repeated);
+}

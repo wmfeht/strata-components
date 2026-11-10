@@ -174,6 +174,9 @@ mod demo {
                     break;
                 }
             }
+            if self.generator.video_done() {
+                self.pacer.finish();
+            }
         }
 
         /// One display frame: feed, show the due frame, record the offset.

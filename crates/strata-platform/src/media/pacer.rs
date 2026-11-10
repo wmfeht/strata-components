@@ -39,8 +39,9 @@ pub enum Presented {
     /// The frame on screen stays: the next one isn't due yet.
     Held,
     /// The frame on screen stays past its time while the clock plays: the next one should be
-    /// showing but hasn't arrived, so the picture repeats. (At the end, paused or stopped,
-    /// a frame past its time is [`Presented::Held`].)
+    /// showing but hasn't arrived, so the picture repeats. Paused, ended, or after
+    /// [`FramePacer::finish`] (the clip's last frame, its sound playing on), a frame past its
+    /// time is [`Presented::Held`].
     Repeated,
     /// Nothing has shown yet and nothing is queued.
     Empty,
@@ -87,6 +88,8 @@ pub struct FramePacer {
     fresh: bool,
     /// The time the frame on screen shows until, when the next frame's time is known.
     shown_until: Option<Duration>,
+    /// No more frames until the next flush.
+    finished: bool,
     shown: Option<Duration>,
     stats: PacerStats,
 }
@@ -100,6 +103,7 @@ impl FramePacer {
             capacity: capacity.max(1),
             fresh: true,
             shown_until: None,
+            finished: false,
             shown: None,
             stats: PacerStats::default(),
         }
@@ -133,11 +137,19 @@ impl FramePacer {
         self.queue.len() < self.capacity
     }
 
+    /// The frames pushed so far are the clip's last, until the next flush: once the last one
+    /// shows, the picture holds ([`Presented::Held`]) however long the sound plays on, rather
+    /// than counting as repeated. Frames pushed after it still show.
+    pub fn finish(&mut self) {
+        self.finished = true;
+    }
+
     /// Drops the queued frames, for a seek: the next frame pushed shows at once. The picture on
     /// screen stays until then.
     pub fn flush(&mut self) {
         self.queue.clear();
         self.fresh = true;
+        self.finished = false;
         self.shown = None;
         self.shown_until = None;
     }
@@ -183,6 +195,7 @@ impl FramePacer {
             return self.show(frame, dropped);
         }
         if let Some(until) = self.shown_until
+            && !self.finished
             && reading.state == ClockState::Playing
             && position >= until
             && self.queue.is_empty()

@@ -105,6 +105,10 @@ impl Decoder {
             }
             self.frame += 1;
         }
+        // The last frame holds to the end rather than counting as repeated.
+        if self.frame * 1_000 / FPS >= CLIP.as_millis() as u64 {
+            pacer.finish();
+        }
     }
 }
 

@@ -1,6 +1,138 @@
-//! Freedesktop icon theme lookup, delivered as `Pixels`.
+//! Freedesktop icon theme lookup, delivered as `rune::Pixels`: application and MIME icons by
+//! name, at a size and scale, the way GTK 4's `GtkIconTheme` finds them.
 //!
-//! Rune lacks: (filled in by P6).
-//! Rune issue: (filed by S5).
+//! Rune lacks, at the pinned rev (`5d421fd`):
+//!
+//! - **The user's icon theme.** `ImageCache::app_icon` on Linux resolves a `.desktop` entry's
+//!   `Icon=` from hicolor only: no current theme and no `Inherits`. It reads sizes from
+//!   directory names, not from `index.theme` (`Size`, `Type`, `Threshold`, `MinSize`,
+//!   `MaxSize`, `Scale`), and lists every size directory again on each call.
+//! - **Lookups by icon name**, so MIME icons and a GIO icon's names, with fallback names.
+//! - **"Not found" apart from a broken file.** `app_icon` fails both with `Image::error`.
+//!
+//! **Rune dev 5d421fd: partly.** `ImageCache` covers the rest: decoding PNG and rasterizing SVG
+//! with resvg on its worker threads, mips, a decoder panic failing one image, sharing handles and
+//! waking the app. This module looks the file up and hands it to `ImageCache::file`. Past the
+//! pin and not adopted: GIF, WebP, BMP, ICO and AVIF decoding (`d7946ee3`); nothing on icon
+//! themes.
+//!
+//! Rune issue: upstream [#21](https://github.com/anomalyco/rune/issues/21) (open; PR #29, a
+//! theme-chain lookup, was closed unmerged). Drafts, not filed:
+//! [U-P6-1](https://github.com/wmfeht/strata-components/blob/main/docs/decisions/S5-upstream.md#u-p6-1)
+//! (a comment on #21 with what the pin lacks) and
+//! [U-P6-2](https://github.com/wmfeht/strata-components/blob/main/docs/decisions/S5-upstream.md#u-p6-2)
+//! (drawing `Pixels` in the element's colour, for symbolic icons).
 //!
 //! Work package: P6, `docs/work/phase-1-leaves/P6-icon-theme.md`.
+//!
+//! # The shape
+//!
+//! [`IconLoader::start`] runs one thread ([`THREAD_NAME`]) that owns an [`IconResolver`].
+//! [`IconLoader::load`] never blocks: it returns a [`LoadedIcon`] at once, shared by every
+//! request for the same icon. The thread resolves it, calls the waker, and hands the file to
+//! the `ImageCache`, which wakes the app again when the pixels land. [`IconLoader::poll`] says
+//! whether to run the view again:
+//!
+//! ```ignore
+//! struct State { icons: Option<IconLoader>, /* … */ }
+//!
+//! fn setup(s: &mut State, waker: rune::Waker) {
+//!     s.icons = IconLoader::start(waker, Options::default()).ok();
+//!     // The theme name comes from the app: its settings, or the desktop's.
+//!     if let Some(icons) = &s.icons { icons.set_theme("Adwaita") }
+//! }
+//!
+//! fn poll(s: &mut State, _: f64, _: &mut rune::Tx) -> bool {
+//!     s.icons.as_ref().is_some_and(IconLoader::poll)
+//! }
+//!
+//! // In the view: `load` hands back the same handle each run (the recent icons keep it).
+//! fn app_icon(s: &State, icon_value: &str, scale: f32) -> El {
+//!     let icon = IconRequest::from_desktop_icon(icon_value, 22, scale)
+//!         .zip(s.icons.as_ref())
+//!         .map(|(request, icons)| icons.load(&request));
+//!     let failed = |i: &LoadedIcon| matches!(i.state(), IconState::NotFound | IconState::Failed(_));
+//!     match icon.as_ref().filter(|i| !failed(i)).and_then(LoadedIcon::pixels) {
+//!         Some(pixels) => el().size(22.0, 22.0).pixels_fit(pixels, SurfaceFit::Fit),
+//!         None => own_fallback_icon(),
+//!     }
+//! }
+//! ```
+//!
+//! Pass the app's own `ImageCache` in [`Options::cache`] to share its decoder threads; by
+//! default the loader makes one (up to 4 threads that sleep while idle). Dropping the last
+//! clone of the loader stops its thread after the lookup it is running; handles keep what
+//! they found. A request whose handles all dropped before its turn is skipped.
+//!
+//! # The lookup
+//!
+//! As GTK 4 (`gtkicontheme.c`), with the differences listed below:
+//!
+//! - **Search path** ([`SearchPath::from_env`]): `$XDG_DATA_HOME/icons`, `~/.icons`, then
+//!   `icons` under each `$XDG_DATA_DIRS`; unthemed icons also in `pixmaps` under each of those
+//!   and in `/usr/share/pixmaps`.
+//! - **Theme chain**: the theme, then what its `Inherits` names, depth-first in order, then
+//!   hicolor. A theme without an `index.theme` in any root is left out, with what it would
+//!   inherit; a cycle stops at the first repeat. A hicolor without an `index.theme` gets one
+//!   derived from its directory names (GTK has a built-in copy).
+//! - **Directories**: `Directories` then `ScaledDirectories`, with the spec's defaults (`Type`
+//!   Threshold, `Threshold` 2, `MinSize` and `MaxSize` the `Size`, `Scale` 1). Directories with
+//!   the same parameters merge into one size class; within it a name keeps the first
+//!   directory that has it, in `Directories` order and then root order, so a user root
+//!   overrides a system one. `Context` is ignored. In one directory PNG beats SVG.
+//! - **Order**: leading `-symbolic` names through the whole chain first, then every theme in
+//!   order with each name in order (themes outside names: a fallback name in the theme beats
+//!   the first name in hicolor), then unthemed icons (PNG before SVG).
+//! - **Size**: GTK's comparison, rule for rule: an exact match, else always an icon to scale
+//!   down over one to scale up, the closest size, the requested scale, a bitmap over a scalable
+//!   directory, then the closest scaled size; a full tie goes to the later directory. Like
+//!   GTK, a Scalable directory's `MaxSize` is compared with the unscaled size.
+//! - **Scale**: directories match at the scale rounded up ([`IconRequest::theme_scale`]); the
+//!   file is drawn at `ceil(size * scale)` device pixels ([`IconRequest::pixels`]). An SVG is
+//!   rasterized at that size, a PNG decoded at its own and drawn through Rune's mips.
+//! - **Names**: [`IconRequest::from_desktop_icon`] reads `Icon=` as `GDesktopAppInfo` does and
+//!   adds the `-symbolic` counterpart as `GThemedIcon` does; [`themed_names`] builds the same
+//!   lists, with GIO's optional dash fallbacks (`text-x-python`, `text-x`, `text`).
+//!
+//! # Differences from GTK
+//!
+//! - **Symbolic icons draw as their files paint them**, usually grey, not recoloured to the
+//!   foreground: Rune can't tint `Pixels`, and `rune::Icon` needs a `'static` body.
+//!   [`LoadedIcon::is_symbolic`] says which they are. Draft U-P6-2.
+//! - **No `.xpm`.** Rune has no XPM decoder, so XPM files are left out of listings and the
+//!   lookup moves on to a file it can draw. `.symbolic.png` (GTK's own encoding) never matches.
+//! - **No `icon-theme.cache`.** Directories are listed instead: a few milliseconds a theme, on
+//!   the thread, once.
+//! - **Nothing found is [`IconState::NotFound`]**, where GTK shows `image-missing`, so the app
+//!   shows its own fallback. A file that fails to decode is [`IconState::Failed`]; neither
+//!   GTK nor this module tries another file then.
+//! - No `-rtl` and `-ltr` variants and no forced regular or symbolic lookups.
+//!
+//! # Changes on disk
+//!
+//! A [`IconLoader::load`] at least [`Options::revalidate_after`] (5 s, as GTK) after the last
+//! check has the thread check the modification time of every root, theme directory and
+//! `index.theme` read so far, and read again the themes where one changed. That also catches
+//! an icon installed into an existing size directory, which GTK only sees once
+//! `icon-theme.cache` is rebuilt. [`IconLoader::rescan`] checks at once. After a change the
+//! loader forgets its handles and [`IconLoader::poll`] turns true, so the view asks again and
+//! gets new ones; handles kept from before keep their icon.
+//!
+//! # Caching
+//!
+//! Handles are shared while one lives, by theme, source, size and scale. Besides those, the
+//! [`Options::lru_entries`] most recent icons drawn at up to [`Options::lru_max_px`] device
+//! pixels stay loaded (128 and 256: GTK keeps 100, up to 128 pixels). A large PNG decodes at
+//! its own size (a 256 px PNG for a 22 pt row is 256 KiB, plus a third for its mips).
+
+mod index;
+mod loader;
+mod matching;
+mod request;
+mod resolver;
+#[cfg(test)]
+mod test_support;
+
+pub use loader::{IconLoader, IconState, LoadedIcon, Options, THREAD_NAME};
+pub use request::{IconRequest, IconSource, themed_names};
+pub use resolver::{FALLBACK_THEME, IconResolver, Resolved, SearchPath};

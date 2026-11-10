@@ -4,16 +4,20 @@
 use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use strata_components::contract::dnd::{VolumeRelation, file_uri, uri_to_path};
 use strata_components::contract::{EntryId, EntryKind, ListEntry, ListSource};
 
-/// Entry ids by path, for one window: an id lives for the process and is never reused (W1).
+/// The next entry id, for every [`Ids`] in the process.
+static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+
+/// Entry ids by path, for one window (or its peek): an id lives for the process and is never
+/// reused (W1), so the ids come from one counter for the whole process.
 #[derive(Default)]
 pub struct Ids {
     by_path: HashMap<PathBuf, EntryId>,
     by_id: HashMap<EntryId, PathBuf>,
-    next: u64,
 }
 
 impl Ids {
@@ -21,8 +25,7 @@ impl Ids {
         if let Some(id) = self.by_path.get(path) {
             return *id;
         }
-        self.next += 1;
-        let id = EntryId::new(self.next);
+        let id = EntryId::new(NEXT_ID.fetch_add(1, Ordering::Relaxed));
         self.by_path.insert(path.to_owned(), id);
         self.by_id.insert(id, path.to_owned());
         id

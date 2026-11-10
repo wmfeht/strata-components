@@ -352,6 +352,18 @@ mod x2 {
         item: Value,
         to: (f64, f64),
     ) -> (usize, Value) {
+        drag_out_then(s, demo, key, item, to, || {})
+    }
+
+    /// [`drag_out`], running `before_release` while the drag rests on the target.
+    fn drag_out_then(
+        s: &Session,
+        demo: &Demo,
+        key: &str,
+        item: Value,
+        to: (f64, f64),
+        before_release: impl FnOnce(),
+    ) -> (usize, Value) {
         // A row's icon is near its start; a tile's `/icon` is the icon itself.
         let fx = if item.get("depth").is_none() && item["tab"] == 3 {
             0.5
@@ -369,6 +381,7 @@ mod x2 {
         std::thread::sleep(Duration::from_millis(200));
         s.input().path((to.0 + 1.0, to.1));
         std::thread::sleep(Duration::from_millis(250));
+        before_release();
         s.input().button(false);
         (
             mark,
@@ -385,7 +398,7 @@ mod x2 {
     /// operations/drag-and-drop: "Dragged items are offered as a GDK file list and a
     /// `text/uri-list`, so other applications can receive them" (the three formats Strata's
     /// port offers instead), from Columns, List and Icons in turn; the outcome reaches the
-    /// demo, and the rows' dimming clears.
+    /// demo; the dragged rows are drawn faded while the drag runs, and not after it.
     fn drag_out_from_each_view(display: Display) {
         let s = Session::start();
         let demo = Demo::start(&s, display, false, false);
@@ -405,8 +418,11 @@ mod x2 {
         ];
         for (tab, item) in views {
             select_tab(&demo, "main", tab);
-            let peer_mark = peer.line_count();
-            let (mark, end) = drag_out(&s, &demo, "main", item, to.at(0.5, 0.5));
+            let faded =
+                || demo.command("main", json!({ "cmd": "state" }), "state")["faded"].clone();
+            let (mark, end) = drag_out_then(&s, &demo, "main", item, to.at(0.5, 0.5), || {
+                assert_eq!(faded(), json!(["notes.txt"]), "tab {tab}: during the drag");
+            });
             assert_eq!(end["outcome"], "copied", "tab {tab}: {end}");
             let got = dropped_on_peer(&peer, 3);
             for (mime, want) in [
@@ -418,10 +434,9 @@ mod x2 {
                 assert_eq!(text.as_deref(), Some(want.as_str()), "tab {tab}, {mime}");
                 assert_eq!(*action, Some(Action::Copy));
             }
-            let _ = peer_mark;
-            // The drag's rows were dimmed; its end clears them (the demo's marks follow it).
             assert!(demo.saw(mark, Duration::ZERO, |v| v["ev"] == "drag-start"
                 && v["items"] == json!(["notes.txt"])));
+            assert_eq!(faded(), json!([]), "tab {tab}: after the drag");
         }
         demo.quit();
     }
@@ -527,6 +542,14 @@ mod x2 {
 
     const BOTH: [Action; 2] = [Action::Copy, Action::Move];
 
+    /// Says a test ran nothing, on stderr past libtest's capture (which takes only `print!`
+    /// and `eprint!`), so it shows in every run. libtest has no "skipped" result: the test
+    /// still reports ok, and this line is what says it didn't run (docs/testing.md).
+    fn skip(test: &str, why: &str) {
+        use std::io::Write;
+        let _ = writeln!(std::io::stderr(), "SKIP x2::{test}: {why}");
+    }
+
     /// One drop from the peer onto `target` in the demo's main window: the demo's `transfer`
     /// line for it, or None when nothing was transferred within a second.
     fn drop_on(
@@ -567,9 +590,12 @@ mod x2 {
     /// another application transfers like an internal drag"; tabs: a tab takes files into its
     /// folder; sidebar: "Sidebar Home,
     /// standard places, pinned folders, and mounted native devices accept file drops", the
-    /// Trash takes none here (the demo's: Strata trashes them); copy-or-move: a plain drop on
+    /// Trash takes files (trash: "Dropping files onto the sidebar Trash row moves them to
+    /// Trash"; the demo logs them as trashed); copy-or-move: a plain drop on
     /// the same volume moves, onto another device asks ("Always ask", the default). New tab
-    /// refuses folders from another app (it opens only this process's).
+    /// refuses folders from another app (it opens only this process's). A folder row that
+    /// refuses a drop (its items' own folder, Strata's guard) stops it: the background around
+    /// it doesn't take it instead.
     fn drop_in_on_each_target(display: Display) {
         let s = Session::start();
         let demo = Demo::start(&s, display, false, false);
@@ -628,10 +654,31 @@ mod x2 {
             json!({ "tab": 1, "column": 0 }),
         );
         check("a column's background", got, &root, "ask", "background");
+        let refused = |what: &str, names: &[&str], target: Value| {
+            let got = drop_on(&s, &demo, &peer, &from, names, target);
+            assert!(got.is_none(), "{what}: {got:?}");
+        };
+        // A folder row that refuses a drop stops it: passed on, the background around it
+        // would take it into the folder shown.
+        refused(
+            "a Columns row, its item's own folder",
+            &["Music/track00.ogg"],
+            json!({ "tab": 1, "depth": 0, "row": "Music" }),
+        );
         // List and Icons: folder rows, and List's background.
         select_tab(&demo, "main", 2);
         let got = drop_on(&s, &demo, &peer, &from, &["notes.txt"], row(2, "Music"));
         check("a List folder row", got, &root.join("Music"), "move", "row");
+        refused(
+            "a List row, its item's own folder",
+            &["Music/track00.ogg"],
+            row(2, "Music"),
+        );
+        refused(
+            "a List row, its folder's own parent",
+            &["Documents/Reports"],
+            row(2, "Documents"),
+        );
         demo.command(
             "main",
             json!({ "cmd": "open", "tab": 2, "path": "Documents" }),
@@ -660,6 +707,11 @@ mod x2 {
             &root.join("Pictures"),
             "move",
             "row",
+        );
+        refused(
+            "an Icons tile, its item's own folder",
+            &["Music/track00.ogg"],
+            row(3, "Music"),
         );
         // Tabs: tab 2 shows Documents.
         let got = drop_on(
@@ -710,7 +762,12 @@ mod x2 {
             &["notes.txt"],
             json!({ "trash": true }),
         );
-        assert!(got.is_none(), "the Trash takes nothing here: {got:?}");
+        let got = got.expect("the Trash takes files");
+        assert_eq!(
+            (&got["into"], &got["action"], &got["sources"]),
+            (&json!("trash"), &json!("trash"), &json!(["notes.txt"])),
+            "{got}"
+        );
         // New tab opens only this process's folder drags.
         let mark = demo.app.line_count();
         let got = drop_on(
@@ -1314,7 +1371,11 @@ mod x2 {
     /// Nautilus installed: `STRATA_TEST_NAUTILUS=1 mise run test-platform x2::nautilus`.
     fn nautilus_both_ways(display: Display) {
         if std::env::var_os("STRATA_TEST_NAUTILUS").is_none() {
-            eprintln!("skipped: set STRATA_TEST_NAUTILUS=1 to run the Nautilus drags");
+            let test = match display {
+                Display::Wayland => "nautilus_wayland_drags_both_ways",
+                _ => "nautilus_x11_drags_both_ways",
+            };
+            skip(test, "set STRATA_TEST_NAUTILUS=1 to run the Nautilus drags");
             return;
         }
         let s = Session::start();

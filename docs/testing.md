@@ -497,6 +497,10 @@ just shown lays out again) and drags with the session's pointer.
 | --- | --- |
 | `STRATA_TEST_NAUTILUS=1` | Also runs the Nautilus drags (both ways, best effort), as P2's opt-in test does |
 
+Without `STRATA_TEST_NAUTILUS=1` the Nautilus tests run nothing, but libtest has no skipped
+result, so they report `ok`. Each prints `SKIP x2::<test>: …` on stderr, past libtest's
+capture, so the line shows in every run. Count those tests as skipped, never as passed.
+
 Traps: a demo window is found by its exact title (the second is `<title> second`), so the
 demo logs C7's title intent instead of applying it; a drop into another window of the app
 needs time for that window to answer the compositor (its next update), so `drag_out` settles

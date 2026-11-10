@@ -4,7 +4,7 @@
 //!
 //! Tabs: 1 Columns, 2 List (C4), 3 Icons (C3), each on `--root`; a drop on the strip or New
 //! tab opens a List tab per dragged folder. The sidebar (C8) has the root, its top folders,
-//! the Trash (which refuses drops), one pin and the `usb` device (another volume). The
+//! the Trash (which takes files, logging them as trashed), one pin and the `usb` device (another volume). The
 //! location bar (C6) names the active pane's folder. List and Icons peek folders (C22).
 
 use std::cell::{Cell, RefCell};
@@ -22,7 +22,8 @@ use strata_components::columns::{
     Opening,
 };
 use strata_components::contract::dnd::{
-    ActionInput, CrossDevice, DragPayload, DropAction, DropOffer, DropZone, Dropped, choose_action,
+    ActionInput, CrossDevice, DragPayload, DropAction, DropActions, DropOffer, DropZone, Dropped,
+    URI_LIST, choose_action,
 };
 use strata_components::contract::{EntryId, EntrySource, ListSource, Point};
 use strata_components::folder_peek::{
@@ -180,6 +181,9 @@ pub struct Win {
     peek_ids: Ids,
     spring: Option<(SpringAt, f64, bool)>,
     out: Option<Out>,
+    /// Whether the drag with this serial opens tabs (all its items are folders): asked on
+    /// every motion over the strip, so the folders are checked once per drag.
+    opens: Cell<Option<(u64, bool)>>,
     covered: bool,
     layout: ColumnLayout,
     widths: ColumnWidths,
@@ -256,6 +260,7 @@ impl Win {
             peek_ids: Ids::default(),
             spring: None,
             out: None,
+            opens: Cell::new(None),
             covered: false,
             layout: ColumnLayout::new(columns().iter().map(|c| c.id().clone())),
             widths: ColumnWidths::new(),
@@ -390,6 +395,16 @@ impl Win {
     /// Shows `folder` in tab `id`: List and Icons go there, Columns opens it as its last
     /// column when it is a child of one, else starts over from it.
     fn navigate(&mut self, id: TabId, folder: &Path, tx: &mut Tx) {
+        if let Pane::Columns { listings, .. } = &self.tab(id).pane {
+            let keep = listings
+                .0
+                .iter()
+                .position(|l| folder.parent() == Some(&l.folder))
+                .map_or(0, |depth| depth + 1);
+            if self.holds_source(id, keep, folder) {
+                return;
+            }
+        }
         let look = self.look.clone();
         let listing = fsys::list(&mut self.ids, folder);
         let from = self.ids.of(folder);
@@ -565,6 +580,33 @@ impl Win {
             self.relist(&folders, tx);
         }
         self.log("transfer", fields);
+    }
+
+    /// A drop on the sidebar Trash: Strata moves the files to Trash. The demo logs a
+    /// `trash` transfer and never trashes anything, even with `--apply`.
+    fn trash(&mut self, dropped: &Dropped, tx: &mut Tx) {
+        if self.out.is_none() {
+            self.end_of_drag(tx);
+        }
+        let local = dropped.data.local.is_some();
+        let uris = match &dropped.data.local {
+            Some(p) => p.uris.clone(),
+            None => dropped.data.uris(),
+        };
+        let offer = dropped.offer.clone().uris(uris.clone());
+        let action = if trash_action(&offer).is_some() {
+            "trash"
+        } else {
+            "none"
+        };
+        let names: Vec<String> = fsys::paths(&uris).iter().map(|p| name_of(p)).collect();
+        self.log(
+            "transfer",
+            json!({
+                "via": "sidebar", "into": "trash", "action": action, "sources": names,
+                "local": local,
+            }),
+        );
     }
 
     // ---- Drags out ----
@@ -762,6 +804,18 @@ impl Win {
             "folder": self.folder_of(self.active),
             "pins": self.pins.iter().map(|p| p.label.clone()).collect::<Vec<_>>(),
         });
+        // The active pane's rows drawn faded as the running drag's (`marks_of`, as drawn).
+        let sources: Vec<&ListSource> = match &tab.pane {
+            Pane::List(f) | Pane::Icons(f) => vec![&f.listing],
+            Pane::Columns { listings, .. } => listings.0.iter().map(|l| &l.source).collect(),
+        };
+        let faded: Vec<String> = sources
+            .into_iter()
+            .flat_map(|src| (0..src.len()).map(|i| src.id_at(i)))
+            .filter(|&id| marks_of(self, self.active, "", id).dragging)
+            .filter_map(|id| self.ids.path(id).map(name_of))
+            .collect();
+        fields["faded"] = json!(faded);
         if let Pane::Columns { listings, .. } = &tab.pane {
             fields["columns"] = json!(
                 listings
@@ -852,6 +906,16 @@ impl Win {
             _ => None,
         }
     }
+}
+
+/// Strata's Trash rule: local files only, moved there (web addresses, alone or with files,
+/// refuse the drop). While the URIs aren't known yet, a file list is taken.
+fn trash_action(offer: &DropOffer) -> Option<DropAction> {
+    let files = match offer.uris.as_deref() {
+        Some(u) => !u.is_empty() && fsys::paths(u).len() == u.len(),
+        None => offer.mime_types.iter().any(|m| m == URI_LIST),
+    };
+    (files && offer.actions.contains(DropActions::MOVE)).then_some(DropAction::Move)
 }
 
 /// The collections' drag hook: P1's guard and the phase a drag starts from, and a `press`
@@ -1112,11 +1176,19 @@ impl Win {
             },
             ColumnsIntent::EnterFolder { id, .. } => self.open_in_columns(tab, id, &look, tx),
             ColumnsIntent::CloseFrom(depth) => {
-                if let Pane::Columns {
-                    listings, state, ..
-                } = &mut self.tab_mut(tab).pane
+                let depth = depth.max(1);
+                let to = match &self.tab(tab).pane {
+                    Pane::Columns { listings, .. } => {
+                        listings.0.get(depth - 1).map(|l| l.folder.clone())
+                    }
+                    _ => None,
+                };
+                if let Some(to) = to
+                    && !self.holds_source(tab, depth, &to)
+                    && let Pane::Columns {
+                        listings, state, ..
+                    } = &mut self.tab_mut(tab).pane
                 {
-                    let depth = depth.max(1);
                     listings.0.truncate(depth);
                     state.truncate(depth, &look, tx);
                 }
@@ -1163,10 +1235,7 @@ impl Win {
             return;
         };
         let source = fsys::list(&mut self.ids, &folder);
-        if let Pane::Columns {
-            listings, state, ..
-        } = &mut self.tab_mut(tab).pane
-        {
+        if let Pane::Columns { listings, .. } = &self.tab(tab).pane {
             let Some(depth) = listings
                 .0
                 .iter()
@@ -1174,9 +1243,42 @@ impl Win {
             else {
                 return;
             };
+            if self.holds_source(tab, depth + 1, &folder) {
+                return;
+            }
+            let Pane::Columns {
+                listings, state, ..
+            } = &mut self.tab_mut(tab).pane
+            else {
+                return;
+            };
             open_column(listings, state, depth, &folder, id, source, look, tx);
         }
         self.log("navigate", json!({ "tab": tab.0, "folder": folder }));
+    }
+
+    /// Whether Columns tab `tab` keeping only its first `keep` columns would unmount the
+    /// column a running drag started in: P1's rule keeps a drag's source mounted until the
+    /// drag ends, so the navigation to `to` waits (logged `held`) instead.
+    fn holds_source(&self, tab: TabId, keep: usize, to: &Path) -> bool {
+        let Some(out) = self.out.as_ref().filter(|o| o.tab == tab) else {
+            return false;
+        };
+        let Pane::Columns { listings, .. } = &self.tab(tab).pane else {
+            return false;
+        };
+        let source = listings.0.iter().position(|l| {
+            let src = &l.source;
+            (0..src.len()).any(|i| out.ids.contains(&src.id_at(i)))
+        });
+        let held = source.is_some_and(|depth| keep <= depth);
+        if held {
+            self.log(
+                "held",
+                json!({ "tab": tab.0, "folder": to, "source": source }),
+            );
+        }
+        held
     }
 
     fn columns_view(tab: TabId, wiring: &Wiring<Win>) -> ColumnsView<Win> {
@@ -1404,12 +1506,20 @@ pub fn view(w: &Win, cx: &mut Cx<Win>) -> El {
     )
     .dnd(wiring.binder())
     .content_types(CONTENT)
-    .opens_tabs(|_: &Win, offer| {
+    .opens_tabs(|w: &Win, offer| {
         // Strata's own folder-only drags open tabs, never folders from another app.
-        offer.local
-            && adapter::running().is_some_and(|p| {
-                !p.uris.is_empty() && fsys::paths(&p.uris).iter().all(|p| p.is_dir())
-            })
+        if !offer.local {
+            return false;
+        }
+        if let Some((serial, opens)) = w.opens.get()
+            && serial == offer.serial
+        {
+            return opens;
+        }
+        let opens = adapter::running()
+            .is_some_and(|p| !p.uris.is_empty() && fsys::paths(&p.uris).iter().all(|p| p.is_dir()));
+        w.opens.set(Some((offer.serial, opens)));
+        opens
     })
     .drop_action(|w: &Win, id, offer, mods| w.action_for(&w.folder_of(id), offer, mods))
     .on_intent(|w: &mut Win, i, tx| w.tabs_intent(i, tx))
@@ -1435,15 +1545,16 @@ pub fn view(w: &Win, cx: &mut Cx<Win>) -> El {
     };
     let sidebar = PlacesSidebar::new(&w.sidebar, |w: &mut Win| &mut w.sidebar, data)
         .dnd(wiring.binder())
-        .drop_action(|w: &Win, item, offer, mods| {
-            let dest = w.sidebar_into(item)?;
-            w.action_for(&dest, offer, mods)
+        .drop_action(|w: &Win, item, offer, mods| match item {
+            ItemId::Place(id) if id == "trash" => trash_action(offer),
+            _ => w.action_for(&w.sidebar_into(item)?, offer, mods),
         })
         .on_intent(|w: &mut Win, i, tx| w.sidebar_intent(i, tx))
         .build(look);
 
-    // Every tab's pane is kept while one of them is a running drag's source (P1's rule: the
-    // source stays mounted at its place), drawn under the active one.
+    // While a drag this window started runs, the pane of the tab it started in stays mounted
+    // when another tab is active (P1's rule: the source stays mounted at its place), drawn
+    // under the active pane, transparent, inert and hidden. No other inactive pane is kept.
     let mut panes = col().key("panes").grow(1.0).min_w(0.0).h_full();
     let keep = w.out.as_ref().map(|o| o.tab);
     for t in &w.tabs {
@@ -1605,10 +1716,7 @@ impl Win {
         match intent {
             SidebarIntent::DropInto { item, dropped } => match self.sidebar_into(&item) {
                 Some(dest) => self.transfer(&dest, &dropped, "sidebar", tx),
-                None => self.log(
-                    "transfer",
-                    json!({ "via": "sidebar", "into": "trash", "action": "none" }),
-                ),
+                None => self.trash(&dropped, tx),
             },
             SidebarIntent::PinHover {
                 serial,

@@ -150,3 +150,82 @@ fn a_sidebar_row_springs_open_its_place() {
         rt.state.root.join("Music")
     );
 }
+
+/// trash: "Dropping files onto the sidebar Trash row moves them to Trash"; "Web addresses
+/// dropped on the sidebar Trash row, alone or with files, are refused".
+#[test]
+fn the_trash_takes_files_and_refuses_web_addresses() {
+    let both = DropActions::COPY | DropActions::MOVE;
+    let offer = |uris: Option<&[&str]>| {
+        let o = DropOffer::new(vec![URI_LIST.into()], both);
+        match uris {
+            Some(u) => o.uris(u.iter().map(|u| (*u).to_owned()).collect()),
+            None => o,
+        }
+    };
+    let file = "file:///home/someone/notes.txt";
+    let web = "https://example.org/page";
+    assert_eq!(trash_action(&offer(Some(&[file]))), Some(DropAction::Move));
+    assert_eq!(
+        trash_action(&offer(None)),
+        Some(DropAction::Move),
+        "not read yet"
+    );
+    assert_eq!(trash_action(&offer(Some(&[web]))), None);
+    assert_eq!(trash_action(&offer(Some(&[file, web]))), None);
+    let text = DropOffer::new(vec!["text/plain".into()], both);
+    assert_eq!(trash_action(&text), None, "content");
+    let copy_only = DropOffer::new(vec![URI_LIST.into()], DropActions::COPY);
+    assert_eq!(trash_action(&copy_only), None);
+}
+
+/// The folders Columns tab 1 shows, column by column.
+fn columns(rt: &Runtime<Win>) -> Vec<PathBuf> {
+    let (listings, state) = rt.state.cols(TabId(1));
+    assert_eq!(listings.0.len(), state.len(), "listings and columns agree");
+    listings.0.iter().map(|l| l.folder.clone()).collect()
+}
+
+/// P1 keeps a drag's source mounted until the drag ends: while a drag from Columns' second
+/// column runs, a spring on a sibling folder, a crumb jump and a Close leave that column be.
+#[test]
+fn a_running_drag_keeps_its_source_column() {
+    let mut rt = mount("source-column");
+    let root = rt.state.root.clone();
+    let (docs, music) = (root.join("Documents"), root.join("Music"));
+    rt.update(|w, tx| w.navigate(TabId(1), &docs, tx));
+    rt.frame(1.0 / 60.0);
+    assert_eq!(columns(&rt), [root.clone(), docs.clone()]);
+    // A drag of Reports, in the Documents column (P1 can't start one headless).
+    let reports = rt.state.ids.of(&docs.join("Reports"));
+    rt.state.out = Some(Out {
+        tab: TabId(1),
+        ids: vec![reports],
+    });
+    let music_id = rt.state.ids.of(&music);
+    rt.update(|w, tx| {
+        let look = w.look.clone();
+        w.open_in_columns(TabId(1), music_id, &look, tx);
+    });
+    rt.update(|w, tx| w.navigate(TabId(1), &music, tx));
+    rt.update(|w, tx| w.navigate(TabId(1), &root, tx));
+    rt.update(|w, tx| w.columns_intent(TabId(1), ColumnsIntent::CloseFrom(1), tx));
+    rt.frame(1.0 / 60.0);
+    assert_eq!(
+        columns(&rt),
+        [root.clone(), docs.clone()],
+        "the source is kept"
+    );
+    // Deeper is fine: Reports opens after the source.
+    rt.update(|w, tx| w.navigate(TabId(1), &docs.join("Reports"), tx));
+    rt.frame(1.0 / 60.0);
+    assert_eq!(
+        columns(&rt),
+        [root.clone(), docs.clone(), docs.join("Reports")]
+    );
+    // Once the drag ends, the spring goes through.
+    rt.state.out = None;
+    rt.update(|w, tx| w.navigate(TabId(1), &music, tx));
+    rt.frame(1.0 / 60.0);
+    assert_eq!(columns(&rt), [root, music]);
+}

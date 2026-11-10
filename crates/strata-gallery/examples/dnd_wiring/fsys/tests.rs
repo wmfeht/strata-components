@@ -105,3 +105,15 @@ fn a_source_outside_the_root_refuses_the_whole_drop() {
     );
     assert!(outside.join("secret.txt").exists());
 }
+
+/// W1: an entry id lives for the process and is never reused, so two windows' ids (and the
+/// peek's) never meet.
+#[test]
+fn ids_are_unique_across_the_process() {
+    let (mut one, mut two) = (super::Ids::default(), super::Ids::default());
+    let a = one.of(Path::new("/a"));
+    let b = two.of(Path::new("/b"));
+    assert_ne!(a, b);
+    assert_eq!(one.of(Path::new("/a")), a, "kept for its path");
+    assert_eq!(two.path(a), None);
+}

@@ -236,7 +236,7 @@ enum Suffix {
 
 impl Suffix {
     fn split(file: &str) -> Option<(&str, Suffix)> {
-        // GTK's pre-rendered symbolic PNGs encode their colours in the channels.
+        // GTK's pre-rendered symbolic PNG files encode their colours in the channels.
         if file.ends_with(".symbolic.png") {
             return None;
         }

@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 
 use rune::Color;
-use rune::color::{srgb_decode, srgb_encode};
+use rune::color::srgb_decode;
 use syntect::highlighting::{Highlighter, Theme};
 use syntect::parsing::Scope;
 
@@ -100,17 +100,5 @@ pub(crate) fn to_rune(c: syntect::highlighting::Color) -> Color {
         g: ch(c.g),
         b: ch(c.b),
         a: f32::from(c.a) / 255.0,
-    }
-}
-
-/// A Rune colour as a syntect colour, rounded to sRGB bytes.
-pub(crate) fn to_syntect(c: Color) -> syntect::highlighting::Color {
-    let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
-    let ch = |v: f32| byte(srgb_encode(v));
-    syntect::highlighting::Color {
-        r: ch(c.r),
-        g: ch(c.g),
-        b: ch(c.b),
-        a: byte(c.a),
     }
 }

@@ -19,9 +19,10 @@ use std::time::Duration;
 use rune::{Cx, El, KeyEvent, ScrollSpec, TextEdit, Tx, col, row, text};
 use rune_kit::{Button, ButtonVariant, Markdown, TextArea};
 use strata_components::code_view::highlight::{
-    CodeBlocks, CodeDoc, Highlighter, LineEdit, Mode as DocMode, Source, theme_from_look,
+    CodeBlocks, CodeDoc, Highlighter, LineEdit, Mode as DocMode, Source,
 };
 use strata_kit::look::Look;
+use strata_kit::theme::syntax::syntect_theme;
 
 use crate::{Gallery, Scene};
 
@@ -93,7 +94,7 @@ pub struct Live {
 
 impl Live {
     fn new(look: &Look, dark: bool, script: &str, wait: bool) -> Live {
-        let highlighter = Highlighter::new(Arc::new(theme_from_look(look)));
+        let highlighter = Highlighter::new(Arc::new(syntect_theme(look)));
         let mut blocks = highlighter.blocks();
         let mut doc = highlighter.open(
             Source::new(script)
@@ -287,8 +288,7 @@ pub fn poll(g: &mut Gallery, _t: f64, _tx: &mut Tx) -> bool {
         live.waker = true;
     }
     if live.dark != g.dark {
-        live.highlighter
-            .set_theme(Arc::new(theme_from_look(&g.look)));
+        live.highlighter.set_theme(Arc::new(syntect_theme(&g.look)));
         live.dark = g.dark;
     }
     changed |= live.blocks.poll();

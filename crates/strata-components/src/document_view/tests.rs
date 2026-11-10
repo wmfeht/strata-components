@@ -8,11 +8,12 @@ use std::time::Duration;
 
 use rune::{Cx, El, Env, Key, KeyEvent, Mods, PhysicalInput, Pixels, Runtime, Tx, clipboard};
 use strata_kit::look::Look;
+use strata_kit::theme::syntax::syntect_theme;
 
 use super::find::{Point, match_ranges};
 use super::shown::{Insert, Shown, math_inserts};
 use super::*;
-use crate::code_view::highlight::{CodeBlocks, Highlighter, theme_from_look};
+use crate::code_view::highlight::{CodeBlocks, Highlighter};
 use crate::preview_drawer::{FindStatus, HostedPreview};
 
 // --- The model ------------------------------------------------------------------------------
@@ -567,7 +568,7 @@ fn code_colours_are_asked_for_near_the_viewport_only() {
         })
         .collect();
     let look = Look::fallback(false);
-    let h = Highlighter::new(Arc::new(theme_from_look(&look)));
+    let h = Highlighter::new(Arc::new(syntect_theme(&look)));
     let blocks = h.blocks();
     let mut rt = runtime_with(doc(units), Some(blocks.clone()));
     let asked = blocks.entry_count();
@@ -602,7 +603,7 @@ fn a_block_in_parts_draws_plain_with_copy_code_on_its_first_part_only() {
         .part(first, last, true)
     };
     let look = Look::fallback(false);
-    let h = Highlighter::new(Arc::new(theme_from_look(&look)));
+    let h = Highlighter::new(Arc::new(syntect_theme(&look)));
     let mut blocks = h.blocks();
     blocks.wait_on_miss(Some(Duration::from_secs(30)));
     let rt = runtime_with(

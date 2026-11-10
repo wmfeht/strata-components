@@ -52,7 +52,6 @@ mod detect;
 mod engine;
 mod palette;
 mod spans;
-mod theme;
 mod worker;
 
 #[cfg(test)]
@@ -70,7 +69,6 @@ use syntect::highlighting::Theme;
 
 pub use blocks::CodeBlocks;
 pub use spans::MAX_SPANS;
-pub use theme::theme_from_look;
 
 use engine::{LineTokens, Lines, OpenArgs, Reply};
 use worker::{Request, WakerSlot, Worker};
@@ -229,7 +227,8 @@ struct Thread {
 }
 
 impl Highlighter {
-    /// A highlighter colouring with `theme` ([`theme_from_look`] until K1's themes).
+    /// A highlighter colouring with `theme`: strata-kit's `theme::syntax::syntect_theme` for the
+    /// look.
     pub fn new(theme: Arc<Theme>) -> Highlighter {
         Highlighter::with_options(theme, Options::default())
     }

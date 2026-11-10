@@ -17,9 +17,10 @@ use std::time::Instant;
 
 use rune::{Cx, El, Env, Key, KeyEvent, Mods, Runtime, clipboard};
 use strata_kit::look::Look;
+use strata_kit::theme::syntax::syntect_theme;
 
 use super::super::*;
-use crate::code_view::highlight::{CodeBlocks, Highlighter, theme_from_look};
+use crate::code_view::highlight::{CodeBlocks, Highlighter};
 use crate::preview_drawer::HostedPreview;
 
 thread_local! {
@@ -134,7 +135,7 @@ fn a_one_mib_document() {
     let doc = Arc::new(big_document());
     let n = doc.units.len();
     let look = Look::fallback(false);
-    let hl = Highlighter::new(Arc::new(theme_from_look(&look)));
+    let hl = Highlighter::new(Arc::new(syntect_theme(&look)));
 
     // First frame, best of three.
     let mut first = f64::INFINITY;

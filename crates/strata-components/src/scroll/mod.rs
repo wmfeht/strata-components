@@ -242,13 +242,12 @@
 //!   source. Repro: a `text_input` and a middle `tap` on it: nothing reaches the field (the
 //!   press goes to the nearest ancestor with `pointer_buttons([Middle])`). Ask: middle-click
 //!   paste of the primary selection in text fields on Linux (and the selection's ownership).
-//! - **U-C24b-4: a modal that leaves the keyboard where it was** (related to anomalyco/rune#173,
-//!   `Tx::focus`). `El::modal` moves focus into itself, so a field that commits on a blur
-//!   commits when one opens, even one with nothing to type into. Repro (C24 review 2's probe
-//!   R2-P3, on the c24 page): focus a `text_input`, then mount a full-window
-//!   `.modal(false, ..)` with no focusable child: the field's `ElementInfo::focused` goes false
-//!   until the modal closes. Ask: an input-capture layer (presses, Escape) that doesn't take
-//!   focus, or a modal option that leaves it.
+//! - **U-C24b-4: a modal that leaves the keyboard where it was.** `El::modal` moves focus into
+//!   itself, so a field that commits on a blur commits when one opens, even one with nothing to
+//!   type into. Repro (C24 review 2's probe R2-P3, on the c24 page): focus a `text_input`, then
+//!   mount a full-window `.modal(false, ..)` with no focusable child: the field's
+//!   `ElementInfo::focused` goes false until the modal closes. Ask: an input-capture layer
+//!   (presses, Escape) that doesn't take focus, or a modal option that leaves it.
 
 pub mod autoscroll;
 pub mod bar;

@@ -691,7 +691,6 @@ pub fn collection() -> Collection<Gallery> {
         |g: &Gallery| g.look(),
         |g: &Gallery| g.c4.version,
     )
-    .clock(|g: &Gallery| g.c4.clock)
     .on_intent(|g: &mut Gallery, intent, _| g.c4.heard(intent))
     .settings(marquee_settings())
     .empty(|g: &Gallery| {

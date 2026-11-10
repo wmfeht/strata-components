@@ -385,6 +385,30 @@
                   "role": "label"
                 },
                 {
+                  "name": "heading",
+                  "role": "label"
+                },
+                {
+                  "name": "link",
+                  "role": "label"
+                },
+                {
+                  "name": "operator",
+                  "role": "label"
+                },
+                {
+                  "name": "regex",
+                  "role": "label"
+                },
+                {
+                  "name": "attribute",
+                  "role": "label"
+                },
+                {
+                  "name": "variable",
+                  "role": "label"
+                },
+                {
                   "name": "preprocessor",
                   "role": "label"
                 }

@@ -555,7 +555,6 @@ fn archive_view(g: &Gallery) -> ArchiveView<Gallery> {
         |g: &Gallery| g.look(),
     )
     .letters(!g.c14b.type_to_search)
-    .clock(|g: &Gallery| g.c14b.now)
     .on_leave(|g: &mut Gallery, _tx| {
         g.c14b.status = "Left at the root: focus returns to the listing".into();
     })

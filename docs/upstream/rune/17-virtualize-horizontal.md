@@ -6,7 +6,8 @@
 | Drafts | U15 (S5), U-C11b-3, R7 (C11) |
 | Affects | C3 (icon grid), C11b (sheet grid), C10b and C11 (wrap-off documents) |
 | Retires | C3's tiles packed into rows and re-keyed on every reflow, C11b's own column windowing from `on_layout_tx`, C10b's min width from an estimate of the widest rows |
-| Checked | U15's repro run at `5d421fd` and `04b38ae`: same output. README still says "Virtual rows are vertical only" (line 384 at the pin, 410 at head). |
+| Checked | Re-checked at `2a44156`: `doc_17`'s output in `run-2a44156.txt` matches the Output block, with the same debug warning. Rune's README still says "Virtual rows are vertical only" (`crates/rune/README.md:410`). In the gallery, C3 still packs tiles into virtual rows (`icons_grid/mod.rs:5`, U15; the `c3-default` accessibility golden reads rows of tiles), C11b still windows its own columns (`sheet_grid/mod.rs:226`, U-C11b-3) and C10b still notes R7 (`document_view/mod.rs:91`, `:129`); `c3::` and `c11b::` passed. Earlier: the repro ran at `5d421fd` and `04b38ae` with the same output (README line 384 at the pin). |
+| Status | Ready to file (re-verified at 2a44156, 2026-11-10; no duplicate as of 2026-11-10) |
 
 Paste from here.
 
@@ -14,10 +15,11 @@ Paste from here.
 
 **Title:** Virtual rows are vertical only: a wrapped grid mounts every tile, `.virtualize` in a horizontal scroll stacks diagonally, and wide rows are cut
 
-Context: a file manager's icon view shows tens of thousands of thumbnails in a wrapped grid, a
-spreadsheet preview has hundreds of columns, and a code view with wrap off scrolls sideways.
+Context: Strata (lgse/strata), a file manager on Rune: its icon view shows tens of thousands of
+thumbnails in a wrapped grid, a spreadsheet preview has hundreds of columns, and a code view with
+wrap off scrolls sideways.
 
-**What's missing** (`5d421fd`, unchanged at `04b38ae`):
+**What's missing** (`5d421fd`, unchanged at `2a44156`):
 - A wrapped grid has no virtualization: every tile mounts. Packing N tiles per virtual row
   works, but the app reflows rows on every width change.
 - `.virtualize` on a row inside `scroll_x` picks the window as if the row were vertical, so
@@ -28,7 +30,7 @@ spreadsheet preview has hundreds of columns, and a code view with wrap off scrol
   lay out at the viewport's width: a 2,000-character unwrapped row is cut at the edge, and the
   sideways offset stays at 0 because the list reports no wider content.
 
-**Repro** (headless; ran at `5d421fd` and `04b38ae`):
+**Repro** (headless; ran at `5d421fd` and `2a44156`):
 
 ```rust
 use rune::{Cx, El, Env, GrowthSpec, Runtime, ScrollSpec, col, el, row};

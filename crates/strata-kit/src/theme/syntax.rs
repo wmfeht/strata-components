@@ -120,7 +120,16 @@ pub(crate) fn themes(kit: &Kit, colors: &Colors) -> (SyntaxTheme, SyntaxExtra) {
         .with(Syntax::Function, text)
         .with(Syntax::Property, text)
         .with(Syntax::Parameter, text)
-        .with(Syntax::Punctuation, text);
+        .with(Syntax::Punctuation, text)
+        // The kinds rune-kit added at `2a44156`, placed as [`SCOPES`] places their scopes:
+        // `markup.heading` in the accent, links and regexes as strings, `keyword.operator`
+        // as a keyword, attribute names as types, and variables as identifiers.
+        .with(Syntax::Heading, kit.c.text_accent)
+        .with(Syntax::Link, p.string.color())
+        .with(Syntax::Regex, p.string.color())
+        .with(Syntax::Operator, p.statement.color())
+        .with(Syntax::Attribute, p.type_.color())
+        .with(Syntax::Variable, text);
     let extra = SyntaxExtra {
         preprocessor: p.preprocessor.color(),
     };

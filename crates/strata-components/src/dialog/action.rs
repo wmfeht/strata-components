@@ -7,7 +7,6 @@ use rune_kit::{Button, ButtonVariant, IconButton, IconButtonVariant, Spinner};
 use strata_kit::icons::IconName;
 use strata_kit::look::Look;
 
-use super::keys::tab_indices;
 use super::shell::DialogShell;
 use super::text::keep_words_whole;
 use super::{FOCUS_RING_ALPHA, FOCUS_RING_WIDTH, ICON_BOX, ICON_BOX_RADIUS};
@@ -70,7 +69,7 @@ struct Action<S> {
 }
 
 impl<S: 'static> Action<S> {
-    fn button(&self, look: &Look, variant: ButtonVariant, ring: rune::Color, tab_index: i32) -> El {
+    fn button(&self, look: &Look, variant: ButtonVariant, ring: rune::Color, initial: bool) -> El {
         let mut b = Button::new(self.label.clone()).variant(variant);
         b = match &self.on_press {
             Some(f) => {
@@ -79,10 +78,12 @@ impl<S: 'static> Action<S> {
             }
             None => b.disabled(true),
         };
-        b.build(&look.kit)
-            .key(self.key.clone())
-            .focus_ring(FOCUS_RING_WIDTH, 0.0, ring.alpha(FOCUS_RING_ALPHA))
-            .tab_index(tab_index)
+        let b = b.build(&look.kit).key(self.key.clone()).focus_ring(
+            FOCUS_RING_WIDTH,
+            0.0,
+            ring.alpha(FOCUS_RING_ALPHA),
+        );
+        if initial { b.autofocus() } else { b }
     }
 }
 
@@ -375,15 +376,9 @@ impl<S: 'static> StrataDialog<S> {
                 Some(key)
             }
         };
-        let initial =
-            initial_key.and_then(|k| focusable.iter().position(|&i| footer[i].0.key == k));
-        let (indices, close_index) = if self.initial == Focus::Close && self.closable {
-            // The close button is last in document order, so starting there leaves Tab's cycle
-            // document order's.
-            (vec![0; focusable.len()], 1)
-        } else {
-            tab_indices(initial, focusable.len())
-        };
+        // The initial button takes focus as the modal opens (`El::autofocus`), and Tab goes on
+        // from there in document order.
+        let initial = initial_key.filter(|k| focusable.iter().any(|&i| footer[i].0.key == *k));
         let footer_keys: Vec<String> = focusable.iter().map(|&i| footer[i].0.key.clone()).collect();
 
         let mut buttons = row()
@@ -394,11 +389,8 @@ impl<S: 'static> StrataDialog<S> {
             .px(space.xl)
             .py(space.lg);
         for (i, (action, variant, ring)) in footer.iter().enumerate() {
-            let index = focusable
-                .iter()
-                .position(|&j| j == i)
-                .map_or(0, |p| indices[p]);
-            let mut b = action.button(look, *variant, *ring, index);
+            let starts = initial.as_deref() == Some(action.key.as_str());
+            let mut b = action.button(look, *variant, *ring, starts);
             if self.default_button && has_primary && i + 1 == footer.len() {
                 // Return presses it from a single-line field or with nothing focused.
                 b = b.default_button();
@@ -478,15 +470,17 @@ impl<S: 'static> StrataDialog<S> {
             );
 
         let dismiss = self.dismiss.clone();
-        let close = IconButton::new(look.icon(IconName::Close))
+        let mut close = IconButton::new(look.icon(IconName::Close))
             .variant(IconButtonVariant::Ghost)
             .label(self.close_label.clone())
             .on_press(move |s: &mut S| dismiss(s))
             .build(kit)
             .key(format!("{}-close", self.key))
             .focus_ring(FOCUS_RING_WIDTH, 0.0, accent_ring.alpha(FOCUS_RING_ALPHA))
-            .tab_index(close_index)
             .pin(None, Some(space.lg), Some(space.lg), None);
+        if self.initial == Focus::Close {
+            close = close.autofocus();
+        }
 
         let mut shell = self
             .shell

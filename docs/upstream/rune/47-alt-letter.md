@@ -6,7 +6,8 @@
 | Drafts | U-C19-2 |
 | Affects | C18 (footer prompt), C19 (shortcut reference search) |
 | Retires | The "Alt+letter types into a prompt" known gap; the prompt's Alt chords |
-| Checked | Repro run at `5d421fd` and `04b38ae`: same output. `edit/input.rs:92` inserts any `Key::Text` at the pin. |
+| Checked | Re-checked at `2a44156`: the repro's output in `run-2a44156.txt` matches the Output block. By source, the editor still inserts any `Key::Text` with a printable character, Alt held or not (`edit/input.rs:86`, `:92` at the pin), and #250 (open) still has no `consumed_mods`. In the gallery, `mise run test c19` passed (10 gallery tests and 3 more, the `unused-chords` scripts among them), and C19's docs still list the Alt+letter gap (`footer/mod.rs:155`, `:265`). Earlier: the repro ran at `5d421fd` and `04b38ae` with the same output. |
+| Status | Ready to file (re-verified at 2a44156, 2026-11-10; no duplicate as of 2026-11-10) |
 
 Paste from here.
 
@@ -14,11 +15,13 @@ Paste from here.
 
 **Title:** Linux: Alt+letter types the letter into a focused text field
 
-Rune's editor inserts any `Key::Text`, Alt held or not (`edit/input.rs:92` at `5d421fd`), so
+Context: Strata (lgse/strata), a file manager on Rune.
+
+Rune's editor inserts any `Key::Text`, Alt held or not (`edit/input.rs:86` at `2a44156`, `:92` at `5d421fd`), so
 Alt+d types "d" in a focused field, where GTK types nothing and leaves the chord to the window's
 accelerators. The window's `on_key` doesn't hear it either.
 
-**Repro** (headless; ran at `5d421fd` and `04b38ae`):
+**Repro** (headless; ran at `5d421fd` and `2a44156`):
 
 ```rust
 use rune::{Cx, El, Env, Key, KeyEvent, Mods, Runtime, TextEdit, col, text_input};

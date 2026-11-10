@@ -6,17 +6,15 @@
 //! `src/ui/search/panel.rs`, `src/ui/search/results.rs`, `src/ui/window/composition/search.rs`
 //! and `.search-*` in `src/style.css`).
 //!
-//! **Rune dev 5d421fd: partly.** C15's modal shell (`El::modal`, `backdrop_blur`, presence
+//! **Rune 2a44156: partly.** C15's modal shell (`El::modal`, `backdrop_blur`, presence
 //! motion), core `text_input` (`on_input_key`, `on_secondary_press`, `active_descendant`),
 //! `virtual_rows` with `on_visible_rows` (and the set size and positions Rune gives virtual
 //! rows), `Tx::scroll_to_y` and `Tx::scroll_into_view_in`, `live_region`, `truncate_middle`
 //! on rich text, `Tx::wake_after` and `rune::Latest` cover it. Missing: the combobox role on an
-//! input (U-C6-1), focusing an element from code (#173; here the leaving frame), a `Tx` in a
-//! modal's dismissal (U-C17-2), virtual rows that show content added above at offset 0
-//! (U-C17-3) and `reveal_selected` on rows built by index (U-C17-4), both worked around with
-//! scroll requests, and input-method events in scripts (U-C6-7). Rune `dev` past the pin (43
-//! commits) adds `Tx::clock`/`Tx::wake_at` (c650fe0) and a tooltip state machine (0cde17e);
-//! neither is adopted here, and U-C17-3 and U-C17-4 are unchanged there.
+//! input (U-C6-1), virtual rows that show content added above at offset 0 (U-C17-3) and
+//! `reveal_selected` on rows built by index (U-C17-4), both worked around with scroll requests,
+//! and input-method events in scripts (U-C6-7). `Tx::focus` and `El::modal_tx` (22aa8cde)
+//! cover the focus an open hands over and the dismissal's intent.
 //!
 //! # Hosting
 //!
@@ -41,7 +39,7 @@
 //! // Open { id, new_tab, .. } / Reveal { id }: navigate, preview, reveal (Strata's policy).
 //! // ResultMenu { id, at }: C21's menu with "Open containing folder" -> s.palette.reveal(&id, tx).
 //! // FieldMenu { at }: C21's field menu.
-//! // Each poll: route(s.palette.tick()).
+//! // Each poll: s.palette.tick().
 //! ```
 //!
 //! The palette owns no I/O and no ranking: the host searches, caps (Strata's 100) and orders
@@ -109,10 +107,9 @@
 //!   result it shows.
 //! - **Closing and focus.** C15's shell: Escape, a click outside and the host's toggle close
 //!   it, and Rune's modal gives focus back to the opener. Opening a result or its folder
-//!   closes it with one *leaving frame*: the panel is built once more, as it was, naming
-//!   [`SearchPalette::return_focus_on_open`] as its `focus_return`, so focus goes to the
-//!   revealed item's view instead (probe P2); the next [`PaletteState::tick`] removes it, and the
-//!   palette asks for that frame's wake itself.
+//!   closes it at once and focuses [`SearchPalette::return_focus_on_open`] with `Tx::focus`, so
+//!   focus goes to the revealed item's view instead: focus the closing change puts outside a
+//!   modal stays there (`runtime/input/modal_focus.rs`).
 //!
 //! # What assistive technology hears
 //!
@@ -233,14 +230,10 @@
 //! - **Kit tokens for the look**: the Kit's hover and selected row fills and its focus border
 //!   for the highlight's outline, where Strata uses accent alphas; the name at the Kit's medium
 //!   weight, not 650.
-//! - **The unavailable field is read-only**, not disabled: at the pin `El::disabled` neither
-//!   stops a `text_input` taking focus nor editing (probe P4; Rune `dev` past the pin changes
-//!   `disabled` to opt out of focus). With no edit handler it takes neither, and reads
+//! - **The unavailable field is read-only**, not disabled: at 5d421fd `El::disabled` neither
+//!   stopped a `text_input` taking focus nor editing (probe P4; later Rune changes `disabled`
+//!   to opt out of focus, not re-probed here). With no edit handler it takes neither, and reads
 //!   read-only.
-//! - **The leaving frame** after an open: the exit motion starts one frame late.
-//! - **A click outside reports a frame later**: Rune's modal dismissal gets no `Tx`, so its
-//!   `Closed { by: Dismiss }` comes from the next tick (U-C17-2). The palette itself closes at
-//!   once.
 //! - **Panel sizes are module constants** citing Strata's CSS (owner ruling).
 //!
 //! # What stays in Strata
@@ -256,16 +249,8 @@
 //! Drafts, not filed (the owner files). Probes are in `strata-spikes/c17-probes`.
 //!
 //! - U-C17-1 is unused: the hidden live region works (probe P5).
-//! - **U-C17-2 (draft, not filed): `El::modal`'s dismissal gets no `Tx`.** `modal(click_outside,
-//!   dismiss: Fn(&mut S))` wraps it as `move |s, _| dismiss(s)`, dropping the `Tx` Rune has, so
-//!   a component closed by Escape (with nothing focused) or a click outside can't raise an
-//!   intent with a `Tx` or request a wake; it must queue the intent for the host's next poll.
-//!   Repro, headless: a view with `col().modal(true, |s: &mut S| s.closed = true)` over a
-//!   `Runtime`; a press outside closes it, and the closure has no `Tx` to raise an intent or
-//!   call `wake_after` with. Ask: `modal_tx(click_outside, dismiss: Fn(&mut S, &mut Tx))`. Searched
-//!   upstream ("modal dismiss", "modal Tx"): none (#291 is rune-kit `Dialog`'s `on_close`).
 //! - Reused: U-C6-1 (the combobox group), U-C21-2 (rune-kit inputs take no secondary press),
-//!   #173 (`Tx::focus`; here the leaving frame), U-C6-7 (no input-method events in scripts:
+//!   U-C6-7 (no input-method events in scripts:
 //!   in-process tests), U-C25-3 (scripts can't see a drawn image), #203 (a `virtual_rows` count
 //!   change re-reads every key: a 10,000-result batch is the slowest figure, about 4 ms).
 //! - **U-C17-3 (draft, not filed): `virtual_rows` keeps its first visible row at offset 0.**

@@ -211,14 +211,12 @@ impl<S: 'static> SettingsSearch<S> {
         }
     }
 
-    /// From the host's poll every frame, with the clock in seconds: searches a changed index,
-    /// runs the jump's focus hop and times its highlight. True when the view changes.
+    /// From the host's poll every frame, with the clock in seconds: searches a changed index
+    /// and times the jump's highlight. True when the view changes.
     pub fn tick(&self, s: &mut S, now: f64, tx: &mut Tx) -> bool {
         let searched = self.refresh(s, tx);
-        let st = (self.get_mut)(s);
-        let hopped = st.hop.tick(tx);
-        let flashed = st.tick_flash(now, tx);
-        searched || hopped || flashed
+        let flashed = (self.get_mut)(s).tick_flash(now, tx);
+        searched || flashed
     }
 
     /// Enter: go to the best row. Its page shows, it scrolls into view, the keyboard moves to
@@ -249,9 +247,9 @@ impl<S: 'static> SettingsSearch<S> {
         }
         // Probe P3 (C20c plan): a reveal in the Tx that shows the page lands on the new row.
         tx.scroll_into_view(target.clone());
-        let st = (self.get_mut)(s);
-        st.flash(row, tx);
-        st.hop.request(target, tx);
+        (self.get_mut)(s).flash(row, tx);
+        // The page shows in this change, and the focus request resolves against it.
+        tx.focus(target, tx.focus_visible() || tx.by_keys());
         true
     }
 
@@ -401,9 +399,6 @@ impl<S: 'static> SettingsSearch<S> {
                     .focusable(false)
                     .key(self.clear_key()),
             );
-        }
-        if let Some(leaf) = st.hop.leaf(&format!("{}-hop", self.key)) {
-            inner = inner.child(leaf);
         }
         let heard = match st.count() {
             None => String::new(),

@@ -17,16 +17,14 @@
 //! // the poll: picker.poll(s, tx)
 //! ```
 //!
-//! **Rune dev 5d421fd: partly.** Covered: virtual lines, 2D keys and the active descendant (C1e
-//! over C3's `IconsGeometry`), the grid, row, grid cell and tab roles, `El::modal` and
-//! rune-kit's `Popover`, core `text_input`, and colour emoji from the system's font (CBDT and
-//! COLRv0, through swash). Missing: emoji whose default presentation is emoji draw as the
-//! outline of a symbol font that covers them (anomalyco/rune#102; worked around, below);
-//! COLRv1-only fonts (Fedora 44's Noto) draw nothing (anomalyco/rune#103); no way to ask
-//! whether a font draws a grapheme (draft U-C20d-1); no `Tx::focus` (anomalyco/rune#173);
-//! rune-kit's Popover has no Escape or first focus of its own (U-C20b-1); an assistive client's
-//! action on a cell does nothing (U-C1e-8). Past the pin (189 commits to `d6ab31b3`,
-//! 2026-11-10): nothing for emoji, colour glyphs, grids or popovers; not adopted.
+//! **Rune 2a44156: partly.** Covered: virtual lines, 2D keys and the active descendant (C1e over
+//! C3's `IconsGeometry`), the grid, row, grid cell and tab roles, `El::modal` and rune-kit's
+//! `Popover`, core `text_input`, and colour emoji from the system's font (CBDT and COLRv0, through
+//! swash), `Tx::focus`. Missing: emoji whose default presentation is emoji draw as the outline of a
+//! symbol font that covers them (anomalyco/rune#102; worked around, below); COLRv1-only fonts
+//! (Fedora 44's Noto) draw nothing (anomalyco/rune#103); no way to ask whether a font draws a
+//! grapheme (draft U-C20d-1); rune-kit's Popover has no Escape or first focus of its own
+//! (U-C20b-1); an assistive client's action on a cell does nothing (U-C1e-8).
 //!
 //! # What it shows
 //!
@@ -58,7 +56,7 @@
 //! # Keys and pointer
 //!
 //! - **Field**: typing searches; Return chooses the grid's cursor (the first result: GTK's
-//!   Enter); Down goes to the grid (a sent Tab, #173); Escape closes the popover at once, or
+//!   Enter); Down goes to the grid; Escape closes the popover at once, or
 //!   inline clears the text and then goes to [`IconPicker::on_escape`] (Rune's field takes an
 //!   Escape its owner leaves); a menu press goes to [`IconPicker::on_menu`] (C21's
 //!   `FieldMenu`; [`IconPicker::edited`] after its edits).
@@ -125,7 +123,8 @@
 //! - **D3: emoji the font lacks still show.** GTK hides emoji Pango can't draw; Rune can't
 //!   tell (U-C20d-1), so the host caps the set by Emoji version instead (15.1 by default).
 //! - **D4 (owner ruling): typing in the grid doesn't search.** GTK sends a key typed anywhere
-//!   to its search entry; Rune can't move focus to the field (#173).
+//!   to its search entry. Ruled when Rune couldn't move focus to the field; `Tx::focus` (Rune
+//!   22aa8cde) now could.
 //! - **D5 (owner ruling): the name line** is new against GTK.
 //! - **D6 (owner ruling): Ctrl doesn't keep the popover open** after a choice (GTK's
 //!   `should_close`).

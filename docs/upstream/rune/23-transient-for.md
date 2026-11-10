@@ -6,7 +6,8 @@
 | Drafts | U11 (S5, from S3) with P4's two amendments (modal on Wayland, a window transient for the app's own window) |
 | Affects | P4 (foreign parent), the portal file chooser |
 | Retires | P4's `zxdg_importer_v2` import on winit's display and its own-connection X11 hints; the "opened hidden, one window per request" rule |
-| Checked | `window/create.rs:13` (`visible = !launcher && (self.started \|\| self.options.visible)`) at `5d421fd` and `04b38ae`. S3's sway measurement; not re-run. |
+| Checked | Re-checked at `2a44156`, by source: `window/create.rs:13` still computes `visible = !launcher && (self.started \|\| self.options.visible)`, the window is created (mapped when visible) at `:44`, and `App::on_window` runs after it (`:243`); no transient, xdg-foreign or `xdg_wm_dialog_v1` API anywhere in `crates/rune/src`. The repro needs a compositor and was not re-run. In the gallery, P4's workaround is still there (`zxdg_importer_v2` on winit's display, `foreign_parent/wayland.rs:1`; the hidden one-window-per-request rule, `foreign_parent/mod.rs:8–9`, `:26`), and `mise run test-platform p4::` passed in a private headless sway (12, incl. `x11_a_parent_applied_after_the_map_reaches_the_window_manager`). Closest issue: #143 (Rune as a portal client passes `""` as the parent on Wayland), the other direction. Earlier: the same line at `5d421fd` and `04b38ae`; S3's sway measurement at `78d22ed`. |
+| Status | Ready to file (re-verified at 2a44156, 2026-11-10; no duplicate as of 2026-11-10) |
 
 Paste from here.
 
@@ -14,13 +15,14 @@ Paste from here.
 
 **Title:** Linux: make a window transient for another app's window, applied before it maps
 
-Context: an XDG portal backend (a file manager's file chooser) gets its caller's window as
-`wayland:<xdg-foreign handle>` or `x11:<xid>`, and its dialog must be transient for that window:
-xdg-foreign v2 `set_parent_of` on Wayland, `WM_TRANSIENT_FOR` on X11. Rune has no API for either.
+Context: Strata's (lgse/strata, a file manager on Rune) file chooser is an XDG portal backend. It
+gets its caller's window as `wayland:<xdg-foreign handle>` or `x11:<xid>`, and its dialog must be
+transient for that window: xdg-foreign v2 `set_parent_of` on Wayland, `WM_TRANSIENT_FOR` on X11.
+Rune has no API for either.
 Reaching winit's display is a separate gap: (link to 01).
 
 **Even with the display, the parent has to be set before the window maps** (`5d421fd`,
-unchanged at `04b38ae`):
+unchanged at `2a44156`):
 - On X11, `App::on_window` runs after winit has mapped the window, unless it was created hidden.
 - `WindowOptions { visible: false }` holds only on a window's first creation:
   `window/create.rs:13` computes `visible = !launcher && (self.started || self.options.visible)`,

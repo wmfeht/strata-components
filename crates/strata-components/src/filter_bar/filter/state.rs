@@ -50,9 +50,8 @@ pub enum FilterIntent {
         id: EntryId,
     },
     /// Down in the field: put the cursor on `id` (selecting it, as Strata's Down does) and
-    /// give the results the keyboard. The bar then sends the field a Tab, so the next focus
-    /// stop after it (the results) takes the keyboard (Rune has no `Tx::focus`, upstream
-    /// #173). It is the pick from now on.
+    /// give the results the keyboard. The bar then moves the keyboard to the results
+    /// ([`super::FilterBar::tab_to_results`]). It is the pick from now on.
     FocusResults {
         /// The result Down lands on.
         id: EntryId,

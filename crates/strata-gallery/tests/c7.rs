@@ -907,7 +907,7 @@ mod c7 {
         });
         assert_eq!(into, Some((TabId(4), Some(&b"hello"[..]))));
         assert!(
-            rt.state.tabs_state.drag.phase == Default::default(),
+            rt.state.tabs_state.drag.phase() == Default::default(),
             "no reorder began"
         );
         // Tab 3 is remote (files only), tab 2 is Trash (nothing: no zone of its own).

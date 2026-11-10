@@ -96,8 +96,6 @@ pub struct PdfState {
     /// The pointer's last point over the view, in window points: the I-beam follows the text
     /// that scrolls under a still pointer.
     pointer: Option<[f32; 2]>,
-    /// Bumped to move focus to the Open button.
-    pub(crate) focus_open: u64,
     pub(crate) feed: ScrollFeed,
     pub(crate) bar: Bar,
     pub(crate) sideways: Bar,
@@ -151,7 +149,6 @@ impl PdfState {
             idle: true,
             level_request: None,
             pointer: None,
-            focus_open: 0,
             feed: ScrollFeed::new(),
             bar: Bar::new(),
             sideways: Bar::new(),
@@ -837,11 +834,6 @@ impl PdfState {
             .iter()
             .enumerate()
             .filter_map(|(p, s)| s.layer.as_ref().map(|l| (p, l)))
-    }
-
-    /// Asks for keyboard focus on the Open button of the locked message.
-    pub(crate) fn focus_open_button(&mut self) {
-        self.focus_open = self.focus_open.wrapping_add(1);
     }
 
     /// Whether the content overflows sideways and isn't at its left edge.

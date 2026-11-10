@@ -8,13 +8,12 @@
 //! does no I/O and holds no policy: what a value means (Strata's density presets, the
 //! thumbnail ladder its shortcuts walk, saving) stays with the host.
 //!
-//! **Rune dev 5d421fd: partly.** The slider role (`on_step`, `on_step_limit`, `range_value`,
+//! **Rune 2a44156: partly.** The slider role (`on_step`, `on_step_limit`, `range_value`,
 //! `range_step`, `a11y_value`, the set-value action as steps), `on_drag` with its cancel,
 //! `on_wheel` that passes on what it doesn't take, an element's `on_key` ahead of the slider's
 //! step keys, `on_layout_tx` and `instant_changes` cover it. Missing: rune-kit has no Slider
 //! (anomalyco/rune#149), and `on_step`'s page is a fixed 10 steps (U-C13-2), so the page keys
-//! go through `on_key`. Past the pin and not adopted: `Tx::focus` (22aa8cde) and `Tx::focused`
-//! in every handler (cd2bd55a); nothing past it touches sliders.
+//! go through `on_key`.
 //!
 //! # What it does
 //!

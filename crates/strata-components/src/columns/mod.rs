@@ -13,7 +13,7 @@
 //!     |s: &App| ColumnsParts { sources: &s.listings, state: &s.columns, look: &s.look },
 //!     |s: &mut App| ColumnsPartsMut { sources: &s.listings, state: &mut s.columns, look: &s.look },
 //! )
-//! .collection(|s, depth, c| c.clock(|s: &App| s.clock))      // the host's per-column extras
+//! .collection(|s, depth, c| c.settings(s.key_settings()))    // the host's per-column extras
 //! .pointer_settings(|s: &App| s.pointer_settings())          // P5's interval, the click modes
 //! .header_actions(|s, cx| s.header_actions(cx))              // Refresh, Sort by, the filter
 //! .show_sizes(|s: &App| s.prefs.columns_show_sizes)          // the size badge's setting
@@ -38,9 +38,8 @@
 //!
 //! - **One focus stop.** The strip is focusable and takes the keys; every column's collection is
 //!   built with C1e's `Collection::keys_by_host`, so a press anywhere focuses the strip, and the
-//!   strip sends each key to the column that holds the keyboard cursor (`Collection::key`). Rune
-//!   can't move focus between elements from code at the pinned rev, and Strata's whole strip is
-//!   one Tab stop anyway. Only the active column shows its cursor.
+//!   strip sends each key to the column that holds the keyboard cursor (`Collection::key`):
+//!   Strata's whole strip is one Tab stop. Only the active column shows its cursor.
 //! - **Left and Right** (and `h`, `l` through C1c's aliases) reach the column's edge, which C1c
 //!   reports: Right goes into the open child column (its cursor on its first entry if it has
 //!   none), else asks the host to open the folder under the cursor
@@ -368,7 +367,7 @@
 //!   own-viewport reveals, an offset worked out from the collection's geometry, which gives up
 //!   Rune's following of a row that layout moves after the reveal (C2's rows don't move).
 //!
-//! Drafts this view leans on, already written: C15's `Tx::focus` (focus by key), U-C24-3 (a
+//! Drafts this view leans on, already written: U-C24-3 (a
 //! vertical gesture's latch), U-C24-7 (headless Shift+wheel), R-C4-2 (no word to a drag whose
 //! element went: [`ColumnsState::reset`]).
 

@@ -3,7 +3,6 @@
 use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::time::Duration;
 
 use rune::{TextEdit, Tx};
 
@@ -60,17 +59,6 @@ impl std::fmt::Debug for HandlerSlot {
     }
 }
 
-/// The palette closing after a result opened: the panel is built once more, so its
-/// `focus_return` can name where focus goes (Rune reads it from the panel's last build), and
-/// the next [`PaletteState::tick`] after that build removes it.
-#[derive(Debug, Default)]
-struct Leaving {
-    /// The mode it was open in: the leaving frame draws the panel as it was, so the exit
-    /// motion fades what was on screen.
-    mode: Option<PaletteMode>,
-    built: Cell<bool>,
-}
-
 /// The palette's state: the mode it is open in, the field's text, the results and the
 /// highlight. The host keeps one per window and hands the palette an accessor to it.
 ///
@@ -83,9 +71,6 @@ pub struct PaletteState {
     /// only through the methods here.
     pub edit: TextEdit,
     model: Model,
-    leaving: Leaving,
-    /// Intents raised where no `Tx` reaches (Rune's modal dismissal), for the next tick.
-    queued: Vec<PaletteIntent>,
     pub(crate) bar: Bar,
     /// The list's scroll position as it last reported it.
     pub(crate) feed: ScrollFeed,
@@ -100,6 +85,9 @@ pub struct PaletteState {
     own_scroll: Cell<bool>,
     /// The palette's key as the latest view built it, for the scroll requests an answer makes.
     pub(crate) key: RefCell<String>,
+    /// Where focus goes when a result opens, as the latest view built it
+    /// ([`super::SearchPalette::return_focus_on_open`]).
+    pub(crate) return_to: RefCell<Option<String>>,
     pub(crate) handler: HandlerSlot,
 }
 
@@ -111,32 +99,6 @@ impl PaletteState {
     /// Whether the palette is open.
     pub fn is_open(&self) -> bool {
         self.mode.is_some()
-    }
-
-    /// Whether the panel is built: open, or in its leaving frame.
-    pub(crate) fn shell_open(&self) -> bool {
-        self.mode.is_some() || self.leaving.mode.is_some()
-    }
-
-    pub(crate) fn leaving(&self) -> bool {
-        self.leaving.mode.is_some()
-    }
-
-    /// The mode the panel draws: the open one, or the one it is leaving.
-    pub(crate) fn drawn_mode(&self) -> Option<&PaletteMode> {
-        self.mode.as_ref().or(self.leaving.mode.as_ref())
-    }
-
-    /// What the panel's body draws: the phase, also in the leaving frame.
-    pub(crate) fn drawn_phase(&self) -> Option<Phase> {
-        Some(self.model.phase(self.drawn_mode()?))
-    }
-
-    /// The view built the leaving frame.
-    pub(crate) fn mark_built(&self) {
-        if self.leaving.mode.is_some() {
-            self.leaving.built.set(true);
-        }
     }
 
     /// The mode it is open in.
@@ -193,7 +155,6 @@ impl PaletteState {
     /// mode and starts over.
     pub fn open(&mut self, mode: PaletteMode) -> Polled {
         self.model.reset();
-        self.leaving = Leaving::default();
         self.edit = TextEdit::new("");
         let query = self.model.request("", &mode);
         self.mode = Some(mode);
@@ -311,9 +272,8 @@ impl PaletteState {
         self.finish(PaletteIntent::Reveal { id: id.to_owned() }, By::Reveal, tx)
     }
 
-    /// One frame: ends the leaving frame once the view built it, and hands over intents
-    /// raised where no `Tx` reached.
-    pub fn tick(&mut self) -> Polled {
+    /// One frame: tells the palette's own scrolls from the user's.
+    pub fn tick(&mut self) {
         let offset = self.feed.get().offset[1];
         self.moving.set(offset != self.settled.replace(offset));
         if !self.moving.get() {
@@ -323,17 +283,6 @@ impl PaletteState {
             // The palette's own scroll, still landing: not the user's.
             self.moving.set(false);
         }
-        let mut out = Polled::default();
-        if self.leaving.mode.is_some() && self.leaving.built.get() {
-            self.leaving = Leaving::default();
-            self.model.reset();
-            self.edit = TextEdit::new("");
-            out.changed = true;
-        }
-        for intent in self.queued.drain(..) {
-            out.push(intent);
-        }
-        out
     }
 
     // The palette's own handlers.
@@ -354,11 +303,9 @@ impl PaletteState {
         self.close_by(By::Escape)
     }
 
-    /// Rune's modal dismissed the panel: no `Tx` reaches here, so the intent waits for the
-    /// next tick.
-    pub(crate) fn dismissed(&mut self) {
-        let out = self.close_by(By::Dismiss);
-        self.queued.extend(out.intents);
+    /// Rune's modal dismissed the panel (a click outside).
+    pub(crate) fn dismissed(&mut self) -> Polled {
+        self.close_by(By::Dismiss)
     }
 
     pub(crate) fn step(&mut self, delta: i32) -> bool {
@@ -394,19 +341,16 @@ impl PaletteState {
         self.finish(intent, By::Open, tx)
     }
 
+    /// Closes after a result opened, focusing the host's
+    /// [`super::SearchPalette::return_focus_on_open`]: focus the closing change puts outside the
+    /// modal stays there, so the modal hands nothing back to its opener.
     fn finish(&mut self, intent: PaletteIntent, by: By, tx: &mut Tx) -> Polled {
         let mut out = Polled::changed();
         out.push(intent);
-        // Closed, but the results and the field stay as they were until the leaving frame
-        // has been built.
-        self.leaving = Leaving {
-            mode: self.mode.take(),
-            built: Cell::new(false),
-        };
-        out.push(PaletteIntent::Closed { by });
-        // A window at rest runs no frame by itself after this one: the tick that ends the
-        // leaving frame needs one.
-        tx.wake_after(Duration::ZERO);
+        out.intents.extend(self.close_by(by).intents);
+        if let Some(to) = self.return_to.borrow().clone() {
+            tx.focus(to, tx.focus_visible() || tx.by_keys());
+        }
         out
     }
 

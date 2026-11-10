@@ -696,8 +696,8 @@ fn a_moved_target_still_takes_the_icons() {
 
 #[test]
 fn an_instant_flip_flies_nothing_at_the_pin() {
-    // At Rune 5d421fd an instant commit turns the matched swap off: the icon shows at its
-    // landing place at once. Re-check at the next bump (5a9f64e8, f7bf9e04).
+    // At Rune 2a44156 an instant commit turns the matched swap off: the icon shows at its
+    // landing place at once.
     let mut host = Host::new(5);
     host.instant = true;
     let mut rt = runtime(host);

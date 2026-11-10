@@ -430,6 +430,8 @@ fn the_panel_takes_keys_with_focus_elsewhere_in_it() {
         get_mut: |s| s,
         keys: ReferenceKeys::default(),
         categories: "r-category-".to_owned(),
+        search: "r-search".to_owned(),
+        chosen_category: "r-category-0".to_owned(),
         results: "r-results".to_owned(),
         line_key: Rc::new(|i| format!("r-line-{i}")),
         lines: Rc::default(),

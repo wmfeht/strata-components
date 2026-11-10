@@ -6,7 +6,8 @@
 | Drafts | R-C4-2, U-C10b-8, U-C24-4 (and C11b's D11, C2's `ColumnsState::reset`, P1's capture paths 2 and 4) |
 | Affects | C2, C4, C10b, C11b, C24, P1 |
 | Retires | `stop()`/`reset()` calls hosts must make on a view switch, C10b's "bar wasn't laid out" check, C24's `Bar::release` |
-| Checked | Repro run at `5d421fd` and `04b38ae`: same output. At head `runtime/input/modal_focus.rs:130` still drops the press with no `Up`, and nothing in `runtime/commit` reads the held press. |
+| Checked | Re-checked at `2a44156`: the repro's output in `run-2a44156.txt` matches the Output block. By source, `ModalEffect::CancelGestures` still drops the press with no `Up` (`runtime/input/modal_focus.rs:129–130`). `cancel_drag` (`runtime/input/pointer.rs:119`) is still called only from Escape (`keys.rs:269`, `physical.rs:40`) and from `cancel_pointer`, and nothing in `runtime/commit` reads the held press. In the gallery, `mise run test a_bar_drag_cut_off_by_a_view_switch` passed (1 test: C4's `ListTableState::reset` workaround). C24's `Bar::release` (`scroll/bar/mod.rs:276`) and C10b's "bar wasn't laid out" check (`code_view/mod.rs:179`) are still there. Earlier: the repro ran at `5d421fd` and `04b38ae` with the same output. |
+| Status | Ready to file (re-verified at 2a44156, 2026-11-10; no duplicate as of 2026-11-10) |
 
 Paste from here.
 
@@ -17,14 +18,14 @@ Paste from here.
 Context: Strata (lgse/strata), a file manager on Rune (column resizes, scroll bar thumbs, range drags).
 
 **What's missing.** Escape mid-drag ends a drag with a cancelled `Phase::Up`
-(`cancel_drag`, `runtime/input/pointer.rs` at `5d421fd`). Two other ends deliver nothing:
+(`cancel_drag`, `runtime/input/pointer.rs:119` at `2a44156`). Two other ends deliver nothing:
 - the element holding the drag leaves the tree (a view switch, a preview closing);
 - a modal mounts while the drag is held: `ModalEffect::CancelGestures` drops the press
-  (`runtime/input/modal_focus.rs:130` at `04b38ae`).
+  (`runtime/input/modal_focus.rs:130` at `2a44156`).
 
 State the handler set at `Down` (a highlighted thumb, a resize in progress) then stays set.
 
-**Repro** (headless; ran at `5d421fd` and `04b38ae`):
+**Repro** (headless; ran at `5d421fd` and `2a44156`):
 
 ```rust
 use rune::{Cx, Drag, El, Env, Key, KeyEvent, Mods, Runtime, col, el};

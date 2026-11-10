@@ -418,7 +418,7 @@ fn drop_hover(g: &mut Gallery, dark: bool) {
 /// The Copy path button just after a press: its check and "Path copied".
 fn copied(g: &mut Gallery, dark: bool) {
     scene(g, dark);
-    g.c6.bar.show_copied();
+    g.c6.bar.show_copied(0.0);
 }
 
 fn menu(g: &mut Gallery, dark: bool) {

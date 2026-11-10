@@ -605,16 +605,11 @@ impl<S: 'static> IconPicker<S> {
                 }
                 true
             }
-            // Down moves to the grid, the next Tab stop: Rune can't move focus from code
-            // (anomalyco/rune#173), so the field sends Tab, as C18's filter bar does.
+            // Down moves to the grid, one focus stop.
             Key::Down if bare => {
-                if (self.get)(s).shown.is_empty() {
-                    return true;
+                if !(self.get)(s).shown.is_empty() {
+                    tx.focus(self.grid_key(), true);
                 }
-                tx.send_key(KeyEvent {
-                    key: Key::Tab,
-                    mods: Default::default(),
-                });
                 true
             }
             _ => false,

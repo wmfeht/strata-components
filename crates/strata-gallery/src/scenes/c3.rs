@@ -693,7 +693,6 @@ pub fn collection(g: &Gallery) -> Collection<Gallery> {
         |g: &Gallery| g.c3.version,
     )
     .name(d.folder.title())
-    .clock(|g: &Gallery| g.c3.clock)
     .marks(|g: &Gallery, id| g.c3.marks.get(&id).copied().unwrap_or_default())
     .settings(KeySettings::default().wrap_rows(true))
     .settings({

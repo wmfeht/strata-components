@@ -6,13 +6,15 @@
 | Drafts | U-C6-3, U-C16-4, U-C1e-4 (its notification half), C9's styled focus-within draft |
 | Affects | C1e, C5, C6, C9, C16, C18, C20a, C20b |
 | Retires | Each host's per-frame poll comparing `TextEdit::focused` (C6, C18, C20a, C20b, a frame late), C16's countdown that focus can't pause, C9's whole-pane ring |
-| Checked | Repro run at `5d421fd` and `04b38ae`: same output. No `on_focus_change` or focus-within callback at head; `Tx::focused` is in every handler since `cd2bd55a`, which doesn't notify. |
+| Checked | Re-checked at `2a44156`: the repro's output in `run-2a44156.txt` matches the line the comment quotes. By source, there is still no `on_focus_change` or focus-within callback, and `2a44156b` (#510, `Tx::return_focus`) adds no notification. `focus_within_ring` and `focus_within_flat` (`el.rs:1143`, `:1153`, both at the pin too) style a ring and a raised edge only. #106 is still open with no comments (checked live 2026-11-10), so the comment adds to an empty thread. In the gallery, `mise run test typed_text_waits_while_the_field_menu_is_open_then_commits_on_the_blur` passed (1 test: C20a's blur noticed by its per-frame poll). The polls are still there (`filter_bar/field.rs:146`, `filter_bar/filter/state.rs:325`). Earlier: the repro ran at `5d421fd` and `04b38ae` with the same output, and `Tx::focused` has been in every handler since `cd2bd55a`, which doesn't notify. |
+| Status | Ready to file (re-verified at 2a44156, 2026-11-10; no duplicate as of 2026-11-10). Post it as a comment on #106, which is still open. |
 
 Paste from here.
 
 ---
 
-A file manager on Rune needs this in several places, and two cases go beyond a single element:
+Strata (lgse/strata), a file manager on Rune, needs this in several places, and two cases go beyond
+a single element:
 
 1. **A text field's blur.** A path bar, a rename field and a number field commit or cancel when
    the field loses focus. Rune clears `TextEdit::focused` without telling anyone, so each host
@@ -41,7 +43,7 @@ fn main() {
 }
 ```
 
-At `5d421fd` and `04b38ae` this prints `after two Tabs focus is on ["cancel"]; the card's
+At `5d421fd` and `2a44156` this prints `after two Tabs focus is on ["cancel"]; the card's
 handlers heard []`.
 
 Could `on_focus_change` come with a `within` form (`El::on_focus_within(|s, bool, tx|)`), and

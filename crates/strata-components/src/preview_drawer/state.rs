@@ -184,8 +184,8 @@ impl DrawerState {
     /// one marked `focus_selected`. Strata calls it for Right from the listing.
     ///
     /// Like the other focus moves, it works while focus is inside the split (the files or the
-    /// drawer), and does nothing while nothing is focused: Rune moves focus only on behalf of
-    /// a focused element at the pinned rev (see the module docs).
+    /// drawer), and does nothing while nothing is focused: a `focus_return` moves focus only
+    /// on behalf of a focused element (see the module docs).
     pub fn focus_content(&mut self) {
         self.focus_content = self.focus_content.wrapping_add(1);
     }

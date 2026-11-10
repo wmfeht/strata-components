@@ -110,8 +110,8 @@ impl<S: 'static, K: Copy + PartialEq + std::fmt::Debug + 'static> FooterPrompt<S
         self
     }
 
-    /// Where the keyboard goes when the prompt closes with it (the listing's focus stop):
-    /// Rune has no `Tx::focus` (upstream #173), so the bar carries `El::focus_return`.
+    /// Where the keyboard goes when the prompt closes with it (the listing's focus stop): the
+    /// bar carries `El::focus_return`, which covers every way the prompt can go.
     pub fn focus_return(mut self, key: impl Into<String>) -> Self {
         self.focus_return = Some(key.into());
         self

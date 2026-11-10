@@ -427,10 +427,6 @@
       ],
       "key": "gallery",
       "role": "group"
-    },
-    {
-      "name": "Compact sidebar (Ctrl+B)",
-      "role": "tooltip"
     }
   ],
   "name": "Strata components",

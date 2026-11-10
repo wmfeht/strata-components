@@ -1,5 +1,4 @@
-//! What the dialog does with a key, as plain decisions the panel's key handler acts on, and the
-//! Tab order that gives a dialog its initial focus.
+//! What the dialog does with a key, as plain decisions the panel's key handler acts on.
 
 use rune::{Key, KeyEvent, Mods, TextEdit, Tx};
 use rune_kit::TextArea;
@@ -13,10 +12,8 @@ pub(crate) enum Route {
     Pass,
     /// Press the focused control: Enter does what Space does.
     Press,
-    /// Move focus to the next Tab stop.
-    Forward,
-    /// Move focus to the previous Tab stop.
-    Back,
+    /// Move focus to the footer button at this index.
+    Focus(usize),
     /// Take the key and do nothing.
     Consume,
 }
@@ -49,35 +46,13 @@ pub(crate) fn route(
             };
             match ev.key {
                 Key::Left if i == 0 => Route::Consume,
-                Key::Left => Route::Back,
+                Key::Left => Route::Focus(i - 1),
                 _ if i + 1 == footer.len() => Route::Consume,
-                _ => Route::Forward,
+                _ => Route::Focus(i + 1),
             }
         }
         _ => Route::Pass,
     }
-}
-
-/// The Tab indices that make footer button `initial` the dialog's first Tab stop, for
-/// `footer_len` footer buttons and the close button after them: `(footer, close)`. Rune visits
-/// positive indices first, in order, then everything else in document order. Numbering the
-/// initial button, the footer buttons after it and the close button (the last element in
-/// document order) keeps Tab's cycle what document order makes it, only starting at the
-/// initial button. With no initial button, every index is 0: document order.
-pub(crate) fn tab_indices(initial: Option<usize>, footer_len: usize) -> (Vec<i32>, i32) {
-    let Some(start) = initial.filter(|&i| i < footer_len) else {
-        return (vec![0; footer_len], 0);
-    };
-    let footer = (0..footer_len)
-        .map(|j| {
-            if j >= start {
-                (j - start + 1) as i32
-            } else {
-                0
-            }
-        })
-        .collect();
-    (footer, (footer_len - start + 1) as i32)
 }
 
 /// A multi-line field's key handler that types a newline on a plain Return:

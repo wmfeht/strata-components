@@ -567,7 +567,7 @@ impl<K: Copy + PartialEq + std::fmt::Debug + 'static> PromptState<K> {
     pub(crate) fn key(&mut self, ev: &KeyEvent, repeat: bool) -> Option<Polled<K>> {
         let o = self.open.as_ref()?;
         // Rune gives Enter and Escape to a composition first; the rest stay the editor's.
-        if self.edit.preedit.is_some() {
+        if self.edit.is_composing() {
             return None;
         }
         let m = ev.mods;

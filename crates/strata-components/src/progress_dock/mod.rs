@@ -16,10 +16,10 @@
 //! dialog. rune-kit's ToastRegion, Toast and Card are too fixed for the dock (below); its
 //! Progress draws the jobs rows. Missing: an accessibility value that follows a `Live`
 //! (U-C16-3), a fill width as a live fraction (U-C16-2), a callback when focus enters or
-//! leaves an element (U-C16-4), and a clock in handlers (U-C1e-6). Past the pin and not
-//! adopted: rune-kit's `ToastStack` (1ea05bc7), a toast registry that merges toasts by key,
-//! where Strata replaces notices by its own rule; `Tx::clock` and `Tx::wake_at` (c650fe0c),
-//! which would retire the stamp-at-the-next-tick pattern below.
+//! leaves an element (U-C16-4). Not adopted: rune-kit's `ToastStack` (1633f8d6), Sonner's
+//! stack that merges toasts by key and pauses every timer while expanded, where Strata pauses
+//! a card and replaces notices by its own rule; and `Tx::clock` (c650fe0c), which could retire
+//! the stamp-at-the-next-tick pattern below once C15's dialog buttons carry a `Tx`.
 //!
 //! # Hosting
 //!
@@ -127,13 +127,12 @@
 //! outside and Minimize hide it; no job is cancelled. The buttons send
 //! [`JobsIntent`](jobs::JobsIntent)s. While open, the button shows C19's checked tint.
 //!
-//! Clear finished on a list of finished jobs empties it: the list stays open on "No
-//! background jobs." (Rune moves focus from the vanished Clear finished to Minimize), and the
-//! button stays while it is open, reading "Jobs". Closing it then sends focus to
-//! [`Jobs::return_focus`](jobs::Jobs::return_focus), the host's fallback (Strata's file list
-//! cursor row): the button goes with the last job, so it can't take focus back, and Rune has no
-//! call that focuses an element from code (#173). A closed list stays closed when a job comes
-//! later.
+//! Clear finished on a list of finished jobs empties it: the list stays open on "No background
+//! jobs." (Rune moves focus from the vanished Clear finished to Minimize), and the button stays
+//! while it is open, reading "Jobs". Closing it then sends focus to
+//! [`Jobs::return_focus`](jobs::Jobs::return_focus), the host's fallback (Strata's file list cursor
+//! row): the button goes with the last job, so it can't take focus back; a `focus_return` covers
+//! every way the list goes. A closed list stays closed when a job comes later.
 //!
 //! # Live values and commits
 //!
@@ -324,14 +323,12 @@
 //!   is set at build, so assistive technology hears a moving bar only on commits (here at most
 //!   four a second). Probe: `LiveText` does reach the tree (its text replaces the placeholder in
 //!   `accessibility_json`), but nothing binds `range_value`. Ask: `El::live_range_value`.
-//! - **U-C16-4, no focus-within callback.** No element hears keyboard focus enter or leave it:
-//!   `Tx::focused` is filled only while keys route (empty in `poll`), Tab never reaches the
-//!   window's `on_key` once a control has focus, and `on_hover_change` doesn't fire for
+//! - **U-C16-4, no focus-within callback.** No element hears keyboard focus enter or leave it: a
+//!   poll can read `Tx::focused` (Rune cd2bd55a) but only by comparing frames, Tab never reaches
+//!   the window's `on_key` once a control has focus, and `on_hover_change` doesn't fire for
 //!   `hover_group_focus`. Repro: a row with `hover_group_focus().on_hover_change(..)` around a
 //!   focusable button, Tab into it: the hover visual turns on, the handler hears nothing. Ask:
 //!   `El::on_focus_within(|s, bool, tx|)`.
-//! - Reused: **U-C1e-6** (handlers have no clock), fixed past the pin by `Tx::clock`
-//!   (c650fe0c), not adopted.
 
 mod countdown;
 mod dialog;

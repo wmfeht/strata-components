@@ -3,7 +3,7 @@
 //!
 //! Work package: C23, `docs/work/phase-1-leaves/C23-motion-effects.md`.
 //!
-//! Rune dev 5d421fd: **partly**. `El::matched` flies the icons (one straight path on a
+//! Rune 2a44156: **partly**. `El::matched` flies the icons (one straight path on a
 //! spring, drawn above the window), `El::sequence` draws their fades and shrinks and the
 //! target's pulses on the render clock, `Live` values move the dissolve's fragments with no
 //! commit, and `Cx::window_layout` finds sources and targets by key. No flight can start late
@@ -64,13 +64,13 @@
 //!
 //! # Host rules
 //!
-//! - **Don't flip on an instant commit.** At the pinned rev, `Tx::instant` (or a settle) on the
-//!   commit that answers [`Event::Launched`] turns the matched swap off: the icons appear at
-//!   their landing places. An instant commit later in the 0.4 s flight lands them early.
-//!   Rune `5a9f64e8` (past the pin) keeps flights an instant change doesn't move, and
-//!   `f7bf9e04` starts a matched flight from where it was seen after an earlier commit in the
-//!   frame; re-check both rules at the next Rune bump. The test
-//!   `an_instant_flip_flies_nothing_at_the_pin` pins today's behaviour.
+//! - **Don't flip on an instant commit.** `Tx::instant` (or a settle) on the commit that
+//!   answers [`Event::Launched`] turns the matched swap off: the icons appear at their landing
+//!   places. The test `an_instant_flip_flies_nothing_at_the_pin` pins it. An instant commit
+//!   later in the 0.4 s flight keeps the flight when it leaves the flyers' layout as it was
+//!   (Rune `5a9f64e8`, `runtime/commit/apply.rs`); one that moves a flyer, a settle, or a flyer
+//!   with `instant_changes` still lands it. `f7bf9e04` (a matched flight starts from where it
+//!   was seen after an earlier commit in the frame) is in the pin too, not re-checked here.
 //! - **Remove the rows at Launched**, not before: the effect reads their rects first.
 //! - **Start an effect from a handler, or in a poll that commits** (returns true), before or
 //!   after the tick: the layer must draw it before it moves, and a poll that doesn't commit

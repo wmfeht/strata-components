@@ -6,7 +6,8 @@
 | Drafts | U10 (S5, from S2 R5) |
 | Affects | P1 |
 | Retires | P1's synthetic Escape through `Tx::send_key`, its proof checks, and the seven capture paths in `dnd/mod.rs` |
-| Checked | Repro run at `5d421fd` and `04b38ae`: same output. `cancel_pointer` is `pub(crate)` at both (`runtime/input/pointer.rs:94`, `:106` at head). |
+| Checked | Re-checked at `2a44156`: the repro's output in `run-2a44156.txt` matches the Output block. By source, `cancel_pointer` is still `pub(crate)` (`runtime/input/pointer.rs:106`), Rune still ends the capture itself only in `start_drag_out` (`:140`), and no `Tx` or `WindowHandle` method releases the pointer. `mise run test dnd::tests::` passed (15 tests: P1's Escape guard, which relies on Rune ending a held drag on Escape and on `Tx::send_key`). Earlier: the repro ran at `5d421fd` and `04b38ae` with the same output (`pointer.rs:94` at the pin). |
+| Status | Ready to file (re-verified at 2a44156, 2026-11-10; no duplicate as of 2026-11-10) |
 
 Paste from here.
 
@@ -14,12 +15,14 @@ Paste from here.
 
 **Title:** No public way to end a pointer capture when a system drag takes the pointer
 
+Context: Strata (lgse/strata), a file manager on Rune.
+
 When an app starts a system drag from a press, the compositor takes the pointer: winit gets
 `wl_pointer.leave` and never the release. Rune stays pressing, and `on_drag` keeps getting
 moves with no button held. Rune ends the capture itself for macOS `drag_out`
 (`start_drag_out`), but an app can't.
 
-**Repro** (headless; ran at `5d421fd` and `04b38ae`):
+**Repro** (headless; ran at `5d421fd` and `2a44156`):
 
 ```rust
 use rune::{Cx, Drag, El, Env, Phase, Runtime, col, el};

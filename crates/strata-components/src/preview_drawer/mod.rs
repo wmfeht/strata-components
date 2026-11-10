@@ -40,12 +40,13 @@
 //!
 //! # Focus moves
 //!
-//! Rune can't focus an element by key from code at the pinned rev (only a text field, through
-//! its `TextEdit`). The drawer moves focus with zero-size stubs carrying `focus_return`: each
-//! request ([`DrawerState::focus_content`] and kin) bumps a counter in the stub's key, so the
-//! old stub is removed and Rune returns focus to the stub's target, as it does when a popover
-//! closes. A stub inside the slot returns focus to the files when the preview closes. Remove
-//! the stubs once Rune ships the `Tx::focus(key, visible)` drafted by C15 (StrataDialog).
+//! The drawer moves focus with zero-size stubs carrying `focus_return`: each request
+//! ([`DrawerState::focus_content`] and kin) bumps a counter in the stub's key, so the old stub
+//! is removed and Rune returns focus to the stub's target, as it does when a popover closes. A
+//! stub inside the slot returns focus to the files when the preview closes. The stubs stay
+//! although Rune 2a44156 has `Tx::focus`: a returned focus goes to the target's
+//! `focus_selected` element first (the files' cursor row, an archive's chosen member), while
+//! `Tx::focus` takes the target's first focusable element (`runtime/input/focus.rs`).
 //!
 //! # Deliberate changes
 //!

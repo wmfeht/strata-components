@@ -6,7 +6,8 @@
 | Drafts | U-C3-3, U-C24-3, U-C24b-2, U-C6-5 (and U-C7-2's wheel half), U-C24-7, C20a's "a gesture keeps its first route" follow-up |
 | Affects | C1e, C2, C3, C6, C7, C20a, C24b |
 | Retires | C1e's `Collection::on_wheel` on the viewport, C6's and C7's vertical-to-sideways mapping (C7's `wheel.rs`, "fragile"), C24b's `OutsideWheel` panel guard |
-| Checked | Repro run at `5d421fd` and `04b38ae`: same output. At head the latch is `WheelOwner` (`runtime/scroll/x.rs:46`): `Vertical` carries no viewport, `Horizontal(NodeId)` does. |
+| Checked | Re-checked at `2a44156`: the repro's five lines in `run-2a44156.txt` match the Output block. By source, the latch is still `WheelOwner` (`runtime/scroll/x.rs:46`): `Vertical` (`:53`) carries no viewport, and `Horizontal(NodeId)` (`:56`) does. `WHEEL_IDLE` is 0.1 s (`:17`), and the Shift turn is in the winit host's `wheel_delta` only (`:114`). `run_wheel` still drops a notch the holding handler declines (`runtime/input/gesture.rs:63–65`), and `scroll_at` is at `runtime/input/pointer.rs:410`. In the gallery, `mise run test a_vertical_wheel_scrolls_an_overflowing_strip_sideways` passed (1 test: C7's own vertical-to-sideways mapping). C1e's `Collection::on_wheel` (`collection/element/mod.rs:653`), C7's "`wheel.rs`, fragile" (`tabs/mod.rs:254`) and C24b's `OutsideWheel` (`scroll/mod.rs:85`) are still there. Earlier: the repro ran at `5d421fd` and `04b38ae` with the same output. |
+| Status | Ready to file (re-verified at 2a44156, 2026-11-10; no duplicate as of 2026-11-10) |
 
 Paste from here.
 
@@ -17,14 +18,14 @@ Paste from here.
 Context: Strata (lgse/strata), a file manager on Rune with Miller columns (vertical lists in a sideways strip), an
 icon grid that zooms on Ctrl+Shift+wheel, a breadcrumb strip and popovers over lists.
 
-**What happens** (`5d421fd`, unchanged at `04b38ae`), five cases from one program:
+**What happens** (`5d421fd`, unchanged at `2a44156`), five cases from one program:
 1. **An ancestor never hears a wheel over a scroll view's content.** `on_wheel` is offered from
    the element under the pointer up to the nearest scroll view. A Ctrl+Shift wheel over the
    content scrolls it; the ancestor's handler hears nothing. A wheel that began as a scroll also
    stays one until it has been still 0.1 s (`WHEEL_IDLE`), so Ctrl+Shift right after a plain
    wheel scrolls too. And once a handler holds a gesture, a notch it declines (returns `false`)
    is dropped: it neither scrolls nor reaches the next handler (`run_wheel`,
-   `runtime/input/gesture.rs:56–58`; by source).
+   `runtime/input/gesture.rs:63–65` at `2a44156`; by source).
 2. **Only the horizontal axis latches.** A vertical gesture that starts over one column scrolls
    whichever column the pointer reaches. The README says a gesture latches "as AppKit latches a
    gesture to the view it began on".
@@ -33,10 +34,10 @@ icon grid that zooms on Ctrl+Shift+wheel, a breadcrumb strip and popovers over l
 4. **A vertical mouse wheel over a sideways-only viewport scrolls nothing**; GTK and AppKit turn
    it sideways there.
 5. **Headless, Shift+wheel stays vertical.** The winit host turns a Shift mouse wheel sideways
-   (`wheel_delta`, `runtime/scroll/x.rs:64`), but `Runtime::wheel_event` and scripts don't, so
+   (`wheel_delta`, `runtime/scroll/x.rs:114`), but `Runtime::wheel_event` and scripts don't, so
    it can't be tested.
 
-**Repro** (headless; ran at `5d421fd` and `04b38ae`):
+**Repro** (headless; ran at `5d421fd` and `2a44156`):
 
 ```rust
 use rune::{Cx, El, Env, GesturePhase, Mods, Runtime, ScrollSpec, WheelEvent, col, el, row};

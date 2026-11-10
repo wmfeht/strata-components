@@ -27,7 +27,6 @@ struct Host {
     look: Look,
     settings: PointerSettings,
     read_only: bool,
-    now: f64,
     intents: Vec<Intent>,
     bands: Rc<RefCell<Vec<(Point, Mods)>>>,
 }
@@ -77,7 +76,6 @@ impl Host {
             look: Look::fallback(false),
             settings,
             read_only: false,
-            now: 0.0,
             intents: Vec::new(),
             bands,
         }
@@ -92,7 +90,6 @@ fn collection(s: &Host) -> Collection<Host> {
         |s: &Host| &s.look,
         |_: &Host| 1,
     )
-    .clock(|s: &Host| s.now)
     .on_intent(|s: &mut Host, intent, _| s.intents.push(intent))
     .settings(s.settings);
     if s.read_only { c.read_only() } else { c }
@@ -146,10 +143,9 @@ fn hold(rt: &mut Runtime<Host>, mods: Mods) {
     rt.physical_input(PhysicalInput::Modifiers(mods));
 }
 
-/// Advances the host's clock and runs a frame.
+/// Advances the clock by a frame `secs` long.
 fn wait(rt: &mut Runtime<Host>, secs: f64) {
-    rt.state.now += secs;
-    rt.frame(1.0 / 60.0);
+    rt.frame(secs);
 }
 
 /// Presses and releases on `part` of entry `i`'s row.

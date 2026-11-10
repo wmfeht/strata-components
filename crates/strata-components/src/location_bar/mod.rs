@@ -16,7 +16,7 @@
 //!
 //! ```ignore
 //! // Each frame, from the host's poll:
-//! let polled = s.loc.tick(now, tx);              // Tx has no clock (U-C1e-6)
+//! let polled = s.loc.tick(now, tx);              // the poll's clock
 //! s.route(polled, tx);
 //! if let Some(answer) = s.latest.take() {        // rune::Latest, fed by LocationIntent::Complete
 //!     let polled = s.loc.deliver(answer);        // a stale generation is dropped
@@ -73,10 +73,9 @@
 //! Each ancestor crumb is a W1 drop zone through the host's `Dnd` ([`LocationBar::dnd`],
 //! [`LocationBar::drop_action`]), keyed [`crumb_key`] for X2's binder, with Strata's drop look
 //! (the highlight tint and an inset accent ring). The current crumb takes no drop. Spring-loading
-//! is the bar's own: see `drops.rs`. An accepting hover arms it and asks for a wake now; the next
-//! [`LocationBarState::tick`] stamps the start on the host's clock and asks for a wake when
-//! [`SPRING_DELAY`] (0.75 s, [`LocationBar::spring_delay`]; `None` turns it off) has passed;
-//! that tick opens the crumb ([`Via::Spring`]). A leave, a drop or a navigation disarms it; the
+//! is the bar's own: see `drops.rs`. An accepting hover arms it at the handler's clock and asks for a
+//! wake when [`SPRING_DELAY`] (0.75 s, [`LocationBar::spring_delay`]; `None` turns it off) has
+//! passed; the [`LocationBarState::tick`] then opens the crumb ([`Via::Spring`]). A leave, a drop or a navigation disarms it; the
 //! same hover reported again (X2's binder may, on each motion) keeps its start. The
 //! Copy path feedback ([`COPIED_FOR`]) runs the same way. Both hold in a window at rest, which
 //! polls only at the wakes it asked for (`tests/c6.rs` steps from wake to wake). C8 and X2 can
@@ -217,8 +216,8 @@
 //!   item can't say so. Here: the current crumb is a label last in the list; the menu item is
 //!   checked.
 //! - **U-C6-3 (draft, not filed; upstream #106 asks the same)** A text field has no focus-change
-//!   hook: the runtime clears `TextEdit::focused` without telling anyone (probe P5), and
-//!   `Tx::focused` is set only in key handlers. Here: [`LocationBarState::tick`] notices.
+//!   hook: the runtime clears `TextEdit::focused` without telling anyone (probe P5). Here:
+//!   [`LocationBarState::tick`] notices, a frame late.
 //! - **U-C6-4 (draft, not filed)** `PopupItem` has no rich label (spans, or `label_with(El)`),
 //!   and `PopupList::build_list` is private. Here: the bar's own list.
 //! - **U-C6-5 (draft, not filed)** A vertical mouse wheel over a sideways-only viewport scrolls
@@ -240,10 +239,9 @@
 //!   it answers None and nothing shows; the entry stays open with its selection. Strata's GTK
 //!   entry shows its menu there. An in-app field menu is C21's to give (known; probe in
 //!   `strata-spikes/c6-probes/r1/w4/rclick.*`).
-//! - Reused: U-C1e-6 (no clock in `Tx`: the host's `tick`), C15's `Tx::focus` draft (the host
-//!   gives its view the keyboard after a cancel) and U3 (a drag's paths only at the drop).
-//!   U-C1b-1 (script pointer events dropped modifiers, probe P6b at 78d22ed) is fixed at the
-//!   current pin, 5d421fd (4805095): scripts hold them with `{"hold": "ctrl"}`.
+//! - Reused: U3 (a drag's paths only at the drop). U-C1b-1 (script pointer events dropped
+//!   modifiers, probe P6b at 78d22ed) is fixed at the current pin, 5d421fd (4805095): scripts hold
+//!   them with `{"hold": "ctrl"}`.
 
 mod build;
 mod completion;

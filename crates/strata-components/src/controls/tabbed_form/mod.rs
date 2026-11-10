@@ -18,17 +18,15 @@
 //! col()
 //!     .child(form.build(s, look, &pages, |s, i| page_body(s, i)))
 //!     .child(footer)                 // Cancel and Save
-//!     .children(form.hop(s))         // in an element holding the form and the footer
 //! ```
 //!
 //! - **Save with an invalid field:** the host validates, sets [`FormPage::has_errors`], and
 //!   calls [`TabbedFormState::show_error`] with the page and the field's key: the page shows
 //!   and the keyboard moves to the field (Strata's `invalid_field`). Every edit stays in the
 //!   host's state, so nothing is lost and nothing is written.
-//! - **Poll:** the host calls [`TabbedFormState::tick`] every frame; it runs the focus hop.
 //! - **Keys:** the host's `on_key` calls [`TabbedForm::window_key`] for Ctrl+Page Up and
-//!   Ctrl+Page Down. Its focus hop needs the host's poll to call
-//!   [`TabbedFormState::tick`], as [`TabbedFormState::show_error`]'s does.
+//!   Ctrl+Page Down, and its poll calls [`TabbedFormState::tick`] every frame, which carries a
+//!   keyboard the switch dropped into the new page.
 //! - The page bodies are the host's, padding and scrolling included (Strata pads 22 px and
 //!   scrolls each page). With [`Mounting::Kept`] each page keeps its scroll offset.
 //!
@@ -36,7 +34,7 @@
 //!
 //! A tablist named by [`FormLabels::tabs`]; each tab by its title, selected when chosen, with
 //! its place in the set. A page with errors: its tab is described "Has errors" and reports
-//! itself invalid. The chosen panel is a `tabpanel` named by its title (Rune 5d421fd has no
+//! itself invalid. The chosen panel is a `tabpanel` named by its title (Rune 2a44156 has no
 //! labelled-by relation to name it by its tab); hidden panels are out of the tree, and nothing
 //! in them takes focus or the pointer.
 //!
@@ -49,10 +47,10 @@
 //!   label only, so it can neither be a tablist nor carry a mark (Rune draft U-C20c-1). The
 //!   tabs are our own elements with tab roles, in Strata's underline look (bullets 43, 44 of
 //!   `integration/custom-actions`).
-//! - **D5:** the keyboard moves to the invalid field, and with Ctrl+Page Up or Down out of
-//!   the page being hidden into the new one, by a one-frame focus hop (`hop.rs`), as
-//!   Rune 5d421fd has no `Tx::focus` (upstream #173). Past the pin Rune adds `Tx::focus` for
-//!   web focus (#384) and `Tx::focused` in every handler (#441); not adopted.
+//! - **D5:** with Ctrl+Page Up or Down, a keyboard on the page being hidden is dropped by the
+//!   switch and carried into the new page a frame later, from the host's poll: Rune's
+//!   `Tx::focused` gives only the focused key, not whether the hidden page holds it, so the
+//!   form waits to see whether the switch dropped it.
 //! - **D6:** a kept page is hidden by opacity 0, `inert` and `a11y_hidden` in a shared grid
 //!   cell, so it still costs layout every frame: Rune has no subtree that stays mounted out of
 //!   layout (Rune draft U-C20c-2).
@@ -62,11 +60,10 @@
 //!
 //! # Rune
 //!
-//! Rune dev 5d421fd: partly. It has the tab, tablist and tabpanel roles, arrow, Home and End
+//! Rune 2a44156: partly. It has the tab, tablist and tabpanel roles, arrow, Home and End
 //! movement in a `focus_group` (wrapping, with `focus_follows` choosing), `inert`,
-//! `instant_changes` and `focus_return`; it lacks a tab-style SegmentedControl, `Tx::focus`
-//! (#173) and an offstage subtree. Rune dev past the pin changes none of these for tabs or
-//! segments (checked to upstream `0fba24cd`, 2026-11-09).
+//! `instant_changes` and `Tx::focus`; it lacks a tab-style SegmentedControl and an offstage
+//! subtree.
 //!
 //! # Rune drafts (not filed)
 //!
@@ -86,16 +83,7 @@
 //!   first down, flip the flag, run 30 frames, flip it back: its content's `scrolled` is the
 //!   old offset (without `instant_changes`: 0). Ask: one rule, a removed viewport forgets its
 //!   offset (or an explicit keep). Here: a per-visit key.
-//! - **A #173 comment draft (anomalyco/rune#173, `Tx::focus`).** Three more uses: a form's
-//!   Save that moves the keyboard to the invalid field on another page, a notebook's Ctrl+Page
-//!   Down that moves it from the page it hides into the one it shows (else to its tab, by a
-//!   second leaf), and a settings search whose Enter moves it to the found row's control. The workaround (a zero-size leaf with
-//!   `focus_return`, drawn for a frame and dropped) breaks when the focused control turns
-//!   `inert` in the same commit that draws the leaf: focus drops, `last_focused` is cleared at
-//!   the end of `sync_requested_focus`, and the leaf's removal then has no focus to move. A
-//!   `Tx::focus(key)` resolved after the commit would cover both.
 
-pub(crate) mod hop;
 mod state;
 mod view;
 

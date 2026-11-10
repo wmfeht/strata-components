@@ -6,7 +6,8 @@
 | Drafts | U-C1f-6 |
 | Affects | C1e/C1f (stuck group header), C13, C14b (route labels), C25 (gallery status lines) |
 | Retires | Built text where a live label was wanted, and the view build per group crossed |
-| Checked | Repro run at `5d421fd` and `04b38ae`: same output. `virtual_only` requires `t.live.is_none()` on every node (`runtime/commit/remount.rs:40` at the pin, `:41` at head). |
+| Checked | Re-checked at `2a44156`: `doc_19`'s output in `run-2a44156.txt` matches the Output block. By source, `virtual_only` (`runtime/commit/remount.rs:41`) still requires `t.live.is_none()` on every node (`:50`). In the gallery, C1e still builds text where a live label was wanted (`collection/element/mod.rs:105`, `:1040`, U-C1f-6); the `collection::element` tests passed. Earlier: the repro ran at `5d421fd` and `04b38ae` with the same output (`remount.rs:40` at the pin). |
+| Status | Ready to file (re-verified at 2a44156, 2026-11-10; no duplicate as of 2026-11-10) |
 
 Paste from here.
 
@@ -14,11 +15,13 @@ Paste from here.
 
 **Title:** One `live_text` anywhere makes every virtual-window shift run the view
 
-A commit that only shifts a virtual window skips `view` unless some node has live text
-(`virtual_only`, `runtime/commit/remount.rs:40` at `5d421fd`), so a single live label anywhere
-in the window costs a view build each time scrolling crosses a row.
+Context: Strata (lgse/strata), a file manager on Rune.
 
-**Repro** (headless; ran at `5d421fd` and `04b38ae`):
+A commit that only shifts a virtual window skips `view` unless some node has live text
+(`virtual_only`, `runtime/commit/remount.rs:41`, the check at `:50`, at `2a44156`), so a single
+live label anywhere in the window costs a view build each time scrolling crosses a row.
+
+**Repro** (headless; ran at `5d421fd` and `2a44156`):
 
 ```rust
 use rune::{Cx, El, Env, GrowthSpec, LiveText, Runtime, ScrollSpec, WheelEvent, col, el, text};

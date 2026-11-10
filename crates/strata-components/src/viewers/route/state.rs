@@ -1,13 +1,13 @@
 //! The route view's state: the route as data, the marker's place on it, and playback.
 //!
-//! Playback runs on the host's clock: Rune's `Tx` has no clock (Rune draft U-C1e-6), so the
-//! host calls [`RouteState::tick`] from its poll on every frame, as it does
-//! `Collection::tick`. A tick moves the markers through `Live` values, which draw with no view
-//! commit. It reports a change, and so a commit, only when the text the view shows changes (the
-//! distance to a tenth, the height to a metre), and then at most every [`TEXT_INTERVAL`]: on a
-//! long route the tenths change faster than frames, and a commit a frame would rebuild the whole
-//! window for a label (C1d's auto-scroll applies at about 10 Hz the same way). Whatever stops
-//! playback (its end, a pause, a seek, a hover) commits the exact text at once.
+//! Playback runs on the poll's clock: the host calls [`RouteState::tick`] from its poll on every
+//! frame, as it does `Collection::tick`. A tick moves the markers through `Live` values, which draw
+//! with no view commit. It reports a change, and so a commit, only when the text the view shows
+//! changes (the distance to a tenth, the height to a metre), and then at most every
+//! [`TEXT_INTERVAL`]: on a long route the tenths change faster than frames, and a commit a frame
+//! would rebuild the whole window for a label (C1d's auto-scroll applies at about 10 Hz the same
+//! way). Whatever stops playback (its end, a pause, a seek, a hover) commits the exact text at
+//! once.
 //!
 //! That holds for what asks the view to commit: [`RouteState::tick`]'s answer, the view's own
 //! handlers and [`RouteState::command_tx`]. [`RouteState::pause`] and [`RouteState::command`]

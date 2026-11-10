@@ -69,7 +69,8 @@
 //!   still gliding to it doesn't end it.
 //! - **Focus afterwards.** The editor carries `El::focus_return` to its collection, so when
 //!   Enter, Escape or a last Tab removes the field, the keyboard goes back to the listing
-//!   (probe P2; Rune has no `Tx::focus`, upstream #173).
+//!   (probe P2). It acts on every way the field goes, and only while the field has the
+//!   keyboard, which `Tx::focus` from each path wouldn't.
 //! - **Input methods.** Rune gives Enter and Escape to a composition, and the editor passes
 //!   every key while one is open. A blur mid-composition keeps only the committed text.
 //! - **Paste.** The field is single-line, so a pasted line break or tab is dropped (Rune).
@@ -225,14 +226,13 @@
 //!
 //! # Rune
 //!
-//! **Rune dev 5d421fd: partly.** `text_input` covers the editing, `set_selection`, undo, IME
+//! **Rune 2a44156: partly.** `text_input` covers the editing, `set_selection`, undo, IME
 //! (Enter and Escape to the composition), single-line paste, Ctrl+A and Ctrl+Z in the field, the
 //! keyboard kept across window deactivation, focused virtual rows kept mounted,
 //! `El::focus_return`, `invalid`, `description`, `live_region`, `on_input_change` and a field's
-//! own `on_secondary_press`. Not covered: a focus-change hook (#106), `Tx::focus` (#173), a
-//! field menu on Linux, an accessor safe after its field is removed (#180). Past the pin, dev
-//! cded95f (`El::dir`, Left and Right across bidi text in a field) matters to right-to-left
-//! names: take it at the next bump.
+//! own `on_secondary_press`. Not covered: a focus-change hook (#106), a field menu on Linux,
+//! an accessor safe after its field is removed (#180). `El::dir` and Left and Right across
+//! bidi text in a field (cded95f) are in the pin, for right-to-left names.
 //!
 //! ## Rune drafts (not filed)
 //!
@@ -252,7 +252,7 @@
 //!   can. Repro: a focused `text_input` beside a `preserve_focus_on_press(true)` button; press
 //!   the button, or right-click beside the field: no handler of the field's runs, and it stays
 //!   focused. Ask: an `El::on_press_outside` for an element and its subtree, any button.
-//! - Reused: #106 (focus change; C6's U-C6-3), #173 (`Tx::focus`), #180, #225 (a focused field
+//! - Reused: #106 (focus change; C6's U-C6-3), #180, #225 (a focused field
 //!   redraws every frame on Wayland), U-C6-7 (scripts have no input-method event), S5's popup
 //!   menus on Linux.
 //!

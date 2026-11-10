@@ -60,10 +60,10 @@ fn cost(code: &str) -> usize {
     code.len() + ENTRY_BYTES
 }
 
-/// A block colours up to its last line end within this many bytes, rune-kit's cut for an
-/// app's highlighter (`rune_kit::syntax`). `Markdown` already hands over no more; C11's own
-/// blocks get the same cut, so a block colours alike either way, and one huge block can't
-/// hold the thread or the cache.
+/// A block colours up to its last line end within this many bytes: the cut rune-kit's
+/// `Markdown` hands an app's highlighter over (`rune_kit::syntax` cut at 32 KiB at 5d421fd;
+/// its built-in highlighter takes 128 KiB at 2a44156). C11's own blocks get the same cut, so a
+/// block colours alike either way, and one huge block can't hold the thread or the cache.
 const BLOCK_CUT: usize = 32 * 1024;
 
 /// How much of `code` gets colour: all of it, or up to its last line end within
@@ -221,7 +221,7 @@ impl CodeBlocks {
     /// `code`'s colours as rune-kit highlights (byte ranges into `code`), or `None` while
     /// the thread works on it: draw it plain meanwhile. A block with no language, or one no
     /// grammar knows, is plain: `Some` of nothing. Colour stops at the last line end within
-    /// 32 KiB, as rune-kit's `Markdown` cuts, and a block past the cache's ceiling for one
+    /// 32 KiB (`BLOCK_CUT`), and a block past the cache's ceiling for one
     /// build is plain.
     pub fn highlight(&self, lang: Option<&str>, code: &str) -> Option<Vec<Highlight>> {
         self.state.borrow_mut().highlight(lang, code)

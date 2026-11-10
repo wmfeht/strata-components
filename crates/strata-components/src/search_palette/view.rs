@@ -150,13 +150,15 @@ impl<S: 'static> SearchPalette<S> {
     /// Pushes the palette onto `layer`, the overlays `rune_kit::root` mounts, while open.
     pub fn build(self, look: &Look, s: &S, layer: &mut Vec<El>) {
         let state = (self.get)(s);
-        if !state.shell_open() {
+        if !state.is_open() {
             return;
         }
-        state.mark_built();
         state.handler.set(self.emit.clone());
         if *state.key.borrow() != self.key {
             state.key.replace(self.key.clone());
+        }
+        if *state.return_to.borrow() != self.return_focus_on_open {
+            state.return_to.replace(self.return_focus_on_open.clone());
         }
         let cx = Ctx {
             key: self.key.clone(),
@@ -165,21 +167,20 @@ impl<S: 'static> SearchPalette<S> {
             new_tab: self.new_tab.into(),
             reveal: self.reveal.into(),
         };
-        // The leaving frame draws the panel as it last was, for the exit motion to fade.
-        let mode = state.drawn_mode();
+        let mode = state.mode();
         let title = mode.map_or(String::new(), |m| m.title.clone());
         let access = self.access;
-        let mut shell = DialogShell::new(self.key.clone(), title, move |s: &mut S| {
-            access(s).dismissed()
-        })
-        .open(true)
-        .width(PANEL_WIDTH)
-        .reduced_motion(self.reduced_motion);
-        if let (Some(target), true) = (self.return_focus_on_open, state.leaving()) {
-            shell = shell.return_focus(target);
-        }
+        let emit = self.emit.clone();
+        let mut shell = DialogShell::new(self.key.clone(), title, |_: &mut S| {})
+            .on_dismiss_tx(move |s: &mut S, tx: &mut Tx| {
+                let polled = access(s).dismissed();
+                route(&emit, s, polled, tx);
+            })
+            .open(true)
+            .width(PANEL_WIDTH)
+            .reduced_motion(self.reduced_motion);
         if let Some(mode) = mode {
-            let phase = state.drawn_phase().unwrap_or(Phase::Results);
+            let phase = state.phase().unwrap_or(Phase::Results);
             let editable = !matches!(phase, Phase::Unavailable(_));
             shell = shell
                 .child(bar(&cx, look, state, mode, &phase, editable))

@@ -51,10 +51,10 @@ type SelectFn<S> = Rc<dyn Fn(&mut S, usize, &mut Tx)>;
 /// - Ctrl+Page Up and Ctrl+Page Down choose the previous or next page from anywhere: the host
 ///   routes them from its `on_key` with [`TabbedForm::window_key`] (a focused field passes them
 ///   on to the window, never to an ancestor). As in GtkNotebook, a keyboard on a tab moves to
-///   the new tab, one on the page being hidden to the new page's first focusable element (its
-///   `focus_selected` one first; Rune keeps no last-focused child), else to its tab, and one
-///   elsewhere stays. The tabs show the choice at once; the page follows two frames on, with
-///   the focus hop, when the keyboard was off the tabs.
+///   the new tab, one on the page being hidden to the new page's first focusable element (the
+///   first in the tree, not a group's `focus_selected` one, as `Tx::focus` picks; Rune keeps no
+///   last-focused child), else to its tab, and one
+///   elsewhere stays. The host's poll calls [`TabbedFormState::tick`] to carry it.
 /// - A page with [`FormPage::has_errors`] shows a dot in the danger colour after its title, and
 ///   its tab is described as having errors and reports itself invalid.
 pub struct TabbedForm<S> {
@@ -113,17 +113,6 @@ impl<S: 'static> TabbedForm<S> {
         format!("{}-panel-{i}", self.key)
     }
 
-    /// The focus hop's leaf while [`TabbedFormState::show_error`] has one pending. Mount it as a
-    /// direct child of an element that holds both the form and whatever has the keyboard when
-    /// the host calls `show_error` (the dialog body around the form and its Save button).
-    pub fn hop(&self, s: &S) -> Option<El> {
-        let state = (self.get)(s);
-        if state.hop_in_form {
-            return None;
-        }
-        state.hop.leaf(&format!("{}-hop", self.key))
-    }
-
     /// Ctrl+Page Up and Ctrl+Page Down: the previous or next page, wrapping. For the host's
     /// `on_key` while the form shows. True when it took the key.
     pub fn window_key(&self, s: &mut S, pages: usize, ev: &KeyEvent, tx: &mut Tx) -> bool {
@@ -143,18 +132,16 @@ impl<S: 'static> TabbedForm<S> {
         }
         // GtkNotebook's `real_switch_page`: a keyboard on a tab moves to the new tab, one on
         // the page being hidden into the new page (its first focusable element, else its tab),
-        // and one elsewhere stays. Only the focused key is known here, so a keyboard not on a
-        // tab holds the shown page until the hop lands; the leaves sit in the form, so they
-        // move a keyboard outside it nowhere.
-        let focused = tx.focused().map(str::to_owned);
-        if let Some(f) = focused {
-            let on_tab = (0..pages).any(|j| f == self.tab_key(j));
-            let targets = if on_tab {
-                vec![self.tab_key(next)]
+        // and one elsewhere stays. Only the focused key is known here, so a keyboard off the
+        // tabs is carried only if the switch drops it (`TabbedFormState::tick`).
+        let ring = tx.focus_visible() || tx.by_keys();
+        if let Some(f) = tx.focused().map(str::to_owned) {
+            if (0..pages).any(|j| f == self.tab_key(j)) {
+                tx.focus(self.tab_key(next), ring);
             } else {
-                vec![self.panel_key(next), self.tab_key(next)]
-            };
-            (self.get_mut)(s).carry(targets, !on_tab, tx);
+                let targets = vec![self.panel_key(next), self.tab_key(next)];
+                (self.get_mut)(s).carry(targets, ring, tx);
+            }
         }
         choose(self.get_mut, &self.on_select, s, next, tx);
         true
@@ -172,8 +159,7 @@ impl<S: 'static> TabbedForm<S> {
         let state = (self.get)(s);
         let last = pages.len().saturating_sub(1);
         let chosen = state.selected().min(last);
-        let (shown_page, visit) = state.shown();
-        let shown_page = shown_page.min(last);
+        let visit = state.visits;
         let k = &look.kit;
         let n = pages.len();
         let tabs = pages
@@ -198,7 +184,7 @@ impl<S: 'static> TabbedForm<S> {
             .equal_columns(1)
             .instant_changes();
         for (i, p) in pages.iter().enumerate() {
-            let shown = i == shown_page;
+            let shown = i == chosen;
             if !shown && self.mounting == Mounting::Rebuilt {
                 continue;
             }
@@ -227,17 +213,11 @@ impl<S: 'static> TabbedForm<S> {
                 panel.opacity(0.0).inert().a11y_hidden()
             });
         }
-        let leaves = if state.hop_in_form {
-            state.hop.leaves(&format!("{}-switch-hop", self.key))
-        } else {
-            Vec::new()
-        };
         col()
             .key(self.key.clone())
             .w_full()
             .child(strip)
             .child(stack)
-            .children(leaves)
     }
 
     fn tab(&self, look: &Look, p: &FormPage, i: usize, n: usize, chosen: bool) -> El {

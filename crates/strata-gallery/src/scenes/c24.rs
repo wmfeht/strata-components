@@ -404,7 +404,6 @@ pub fn collection((marquee, auto): Settings) -> Collection<Gallery> {
         |g: &Gallery| g.look(),
         |g: &Gallery| g.c24.version,
     )
-    .clock(|g: &Gallery| g.c24.clock)
     .settings(marquee)
     .settings(auto)
     .on_intent(|g: &mut Gallery, intent, _| g.c24.heard(intent))
@@ -427,7 +426,6 @@ pub fn column((marquee, auto): Settings, i: usize) -> Collection<Gallery> {
         |g: &Gallery| g.c24.version,
     )
     .row_height(|_: &Gallery, look| look.row.columns)
-    .clock(|g: &Gallery| g.c24.clock)
     .settings(marquee)
     .settings(auto)
     .on_intent(|g: &mut Gallery, intent, _| g.c24.heard(intent))

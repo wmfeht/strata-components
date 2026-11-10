@@ -68,6 +68,7 @@ fn comments_take_dim_text_and_unstyled_kinds_take_text() {
         Syntax::Property,
         Syntax::Parameter,
         Syntax::Punctuation,
+        Syntax::Variable,
     ] {
         assert_eq!(look.syntax.color(kind), t.colors.text.color(), "{kind:?}");
     }

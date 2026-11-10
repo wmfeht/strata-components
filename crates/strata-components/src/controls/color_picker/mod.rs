@@ -10,17 +10,16 @@
 //! The picker does no I/O and holds no policy: what a colour is for, saving it, previewing it
 //! and the recent colours list are the host's ([`remember`] keeps one as GTK does).
 //!
-//! **Rune dev 5d421fd: partly.** Gradients (`linear_gradient`, `gradient`), `Shape` fills, the
+//! **Rune 2a44156: partly.** Gradients (`linear_gradient`, `gradient`), `Shape` fills, the
 //! slider role (`on_step`, `on_step_limit`, `range_value`, `a11y_value`), `on_drag` with its
 //! cancel, radio groups (`focus_group`), `El::modal` (Tab trap, first-stop focus, the opener's
 //! focus back, a press outside) and core `text_input` cover it, as do `rune::Color` and its
 //! sRGB transfer functions. Missing: no picker in rune-kit (no issue); no two-dimensional
 //! control for assistive technology (U-C20b-3); rune-kit's `Popover` has no Escape or initial
-//! focus (U-C20b-1); a modal's dismissal can't tell Escape from a press outside, and gets no
-//! `Tx` (U-C20b-2); no focus-change hook (anomalyco/rune#106). Past the pin and not adopted:
-//! `El::autofocus` and `Tx::focus` (22aa8cde), `Tx::focused` in every handler (cd2bd55a),
-//! `Cx::force_focus_rings` (42f2d354, which would let a golden show focused swatches) and
-//! 16-stop gradients (c9cd9df3); this needs 7.
+//! focus (U-C20b-1); a modal's dismissal can't tell Escape from a press outside (U-C20b-2);
+//! no focus-change hook (anomalyco/rune#106). `El::modal_tx` (22aa8cde) gives the dismissal a
+//! `Tx`. Not adopted: `Cx::force_focus_rings` (42f2d354, which would let a golden show focused
+//! swatches) and 16-stop gradients (c9cd9df3); this needs 7.
 //!
 //! # The colour
 //!
@@ -115,7 +114,7 @@
 //! | `settings/themes`: Add theme opens … 14 color pickers seeded from the selected theme | **Partial**: buttons seeded from the state (PNG goldens); the panel is Strata's |
 //! | `settings/themes`: Each picker change previews across the interface | **Partial**: `Live` and `Commit` reports (`c20b::a_plane_drag_reports_live_then_one_commit`; scripts `plane-arrow-right`, `plane-arrow-up`, `plane-alt-arrow-down`, `hue-arrow-right`, `hue-end`, `alpha-arrow-left`, `swatch-click`, `swatch-arrow`); the preview is Strata's |
 //! | `settings/themes`: A swatch's color chooser draws its … hex entry, sliders … in the active theme | **Partial**: Kit tokens only, light and dark goldens, scripts `names`, `names-popover`, `tab-order`; no Cancel and Select buttons (D2) or value popups (D3) |
-//! | `settings/themes`: Editor color swatches keep rounded corners … | **Partial**: the PNG goldens, at rest only (forced focus rings are past the pin) |
+//! | `settings/themes`: Editor color swatches keep rounded corners … | **Partial**: the PNG goldens, at rest only (`Cx::force_focus_rings` could show them focused; not adopted) |
 //! | `browser/folder-customization`: The custom-color button opens … a color chooser that recolors the dialog's header icon live | **Partial**: `Live` reports while dragging (script `plane-drag`, the page's preview dot); the dialog is Strata's |
 //! | `browser/folder-customization`: Apply saves the chosen color as `#rrggbb` | **Partial**: the reported hex (scripts `hex-entry`, `plane-drag`); Apply is Strata's |
 //! | `browser/folder-customization`: Closing the custom color dialog by … Escape, or a click outside it returns focus to the custom color button | **Partial**, for the popover: scripts `popover-escape`, `popover-shift-escape`, `popover-outside`; Strata's dialog is C15's |
@@ -170,11 +169,10 @@
 //!   `Popover` with a focusable child, opened by a button press: Escape leaves it open, Tab
 //!   reaches the page behind it. Ask: `Popover::modal(true)` (Escape closes, Tab stays in, the
 //!   first stop focused, the trigger focused on close). Here: `El::modal` on the body.
-//! - **U-C20b-2, a modal's dismissal can't say why, and gets no `Tx`.** `El::modal`'s closure is
-//!   `Fn(&mut S)`; Rune calls it for Escape and for a press outside alike (`el.rs:1131`
-//!   ignores the reason it is given). A picker that cancels on Escape and keeps on a press
-//!   outside takes Escape in an ancestor's `on_key` first, and reports a press outside from
-//!   its poll, a frame late. Ask: `modal_with(|s, why: Dismiss, tx| ..)`.
+//! - **U-C20b-2, a modal's dismissal can't say why.** `El::modal_tx`'s closure gets the
+//!   change's `Tx` (22aa8cde) but no reason: Rune calls it for Escape and for a press outside
+//!   alike. A picker that cancels on Escape and keeps on a press outside takes Escape in an
+//!   ancestor's `on_key` first. Ask: `modal_with(|s, why: Dismiss, tx| ..)`.
 //! - **U-C20b-3, no two-dimensional control for assistive technology.** AccessKit (and ARIA)
 //!   have no 2D slider: a saturation and value plane is one slider with a value text and no
 //!   range, set-value or increments. Ask how a two-axis control should expose its two values

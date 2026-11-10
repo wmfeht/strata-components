@@ -6,7 +6,8 @@
 | Drafts | U2 (S5, from S2 R2) |
 | Affects | P1, X2 |
 | Retires | P1's `wl_data_device` drop target and its X11 `XdndProxy` (which turns off Rune's own X11 `on_drop_files`) |
-| Checked | winit 0.30.13 is still the backend at `04b38ae`; `on_drop_hover` takes `(S, bool, Tx)` (`el/drop.rs:85`). S2's sway measurement at `78d22ed`; not re-run. The program compiles at `5d421fd` and `04b38ae` (not run here: it needs a compositor). |
+| Checked | Re-checked at `2a44156` by source and target. winit 0.30.13 is still the backend (`Cargo.lock`). `on_drop_files`, `on_drop_hover` and `on_drop_move` (`el/drop.rs:63`, `:85`, `:97`) still take paths, a bool and a point only. The program compiled at `2a44156` and was not run: it needs a compositor. #424 is still open with no comments (checked live 2026-11-10), so the comment adds to an empty thread. P1's `wl_data_device` target and its `XdndProxy` are still there (`dnd/x11.rs`, `dnd/mod.rs:35–38`). Earlier: S2's sway measurement at `78d22ed`, and it compiled at `5d421fd` and `04b38ae`. |
+| Status | Ready to file (re-verified at 2a44156, 2026-11-10; no duplicate as of 2026-11-10). Post it as a comment on #424, which is still open. |
 
 Paste from here.
 

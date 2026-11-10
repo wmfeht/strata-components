@@ -46,12 +46,13 @@
 //!
 //! # Focus
 //!
-//! Rune can't focus an element from code at the pinned rev (Rune draft U-C1e-4), so
-//! [`ArchiveState::enter`] highlights the first member but can't move focus into the tree:
-//! Strata's "first member highlighted and focused" is half done until Rune has `Tx::focus`
-//! (C15's draft). C9's `focus_return` stubs are the host's way meanwhile
-//! ([`DrawerState::focus_content`](crate::preview_drawer::DrawerState::focus_content)). The
-//! prompt's field can be focused: it is a text field ([`PromptState::focus`]).
+//! [`ArchiveState::enter`] highlights the first member; focus is the host's, for Strata's
+//! "first member highlighted and focused": the list is the collection keyed
+//! [`ArchiveState::scope`], one focus stop, so `tx.focus(archive.scope(), ring)` moves the
+//! keyboard into it, as C9's
+//! [`DrawerState::focus_content`](crate::preview_drawer::DrawerState::focus_content) does from
+//! the listing. The prompt's field can be focused: it is a text field
+//! ([`PromptState::focus`]).
 
 pub mod controllers;
 mod prompt;
@@ -321,7 +322,6 @@ pub struct ArchiveView<S> {
     get_mut: GetMutFn<S>,
     look: fn(&S) -> &Look,
     letters: bool,
-    clock: Option<fn(&S) -> f64>,
     on_leave: Option<LeaveFn<S>>,
 }
 
@@ -332,7 +332,6 @@ impl<S: 'static> ArchiveView<S> {
             get_mut,
             look,
             letters: false,
-            clock: None,
             on_leave: None,
         }
     }
@@ -340,12 +339,6 @@ impl<S: 'static> ArchiveView<S> {
     /// Whether `h j k l` act as the arrows: Strata's Type to search off.
     pub fn letters(mut self, on: bool) -> Self {
         self.letters = on;
-        self
-    }
-
-    /// The host's clock, which the collection's controllers time by (C1e's `clock`).
-    pub fn clock(mut self, clock: fn(&S) -> f64) -> Self {
-        self.clock = Some(clock);
         self
     }
 
@@ -360,7 +353,7 @@ impl<S: 'static> ArchiveView<S> {
         let (get, get_mut, look) = (self.get, self.get_mut, self.look);
         let scope = get(s).scope.clone();
         let on_leave = self.on_leave.clone();
-        let mut coll = Collection::new(
+        let coll = Collection::new(
             scope,
             move |s: &S| {
                 let a = get(s);
@@ -435,9 +428,6 @@ impl<S: 'static> ArchiveView<S> {
                     ),
             )
         });
-        if let Some(clock) = self.clock {
-            coll = coll.clock(clock);
-        }
         let a = get(s);
         let (bar, feed, edge_bar) = (a.bar.clone(), a.feed.clone(), a.bar.clone());
         let (bar_key, target) = (format!("{}-bar", a.scope), viewport_path(&a.scope));

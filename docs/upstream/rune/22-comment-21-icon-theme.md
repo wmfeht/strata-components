@@ -6,22 +6,23 @@
 | Drafts | U-P6-1 |
 | Affects | P6 (icon theme lookup), C21 (Open With), file-type icons everywhere |
 | Retires | P6's GTK-4-style lookup (search path, `Inherits`, `index.theme` sizes, its worker thread and LRU) |
-| Checked | By source: `freedesktop::icon_file` scans `icons/hicolor` only (`image.rs:481–489`) at `5d421fd`; `image.rs` changed past the pin (34 lines) with no theme lookup. The fixture below is from P6; not run here. |
+| Checked | Re-checked at `2a44156`, by running the fixture below headless (`rv_22`, calling `rune::image::app_icon_rgba`, which `app_icon_scaled` runs on its worker): the theme-only icon gives `Err(no icon for $T/share/applications/fixture.desktop)`, and the same PNG under `icons/hicolor/48x48/apps` is found (48×48). By source, `freedesktop::icon_file` (`image.rs:500`) still scans `icons/hicolor` only (`:508`), takes sizes from directory names (`:510–516`), looks in `apps/` only (`:520`), and a missing icon and a decode failure are both an `ImageError` (`:436–444`). #21 is still open; its one comment (2026-10-26) already reports the missing current theme and `Inherits` (it cites a PR #29 and commit `35329d7`; Rune takes no PRs and the commit isn't in its history), so that point is cut to a pointer. In the gallery, P6's own lookup is still there (`strata-platform/src/icon_theme/mod.rs:21`, U-P6-1); the `icon_theme` tests (43) passed. Earlier: by source at `5d421fd` (`image.rs:481–489`). |
+| Status | Ready to file, trimmed: the current theme and `Inherits` are already in #21's 2026-10-26 comment, so that bullet now points to it; the rest is new to the thread (re-verified at 2a44156, 2026-11-10) |
 
 Paste from here.
 
 ---
 
-A file manager on Rune shows other apps' icons (Open With) and MIME-type icons, and hits
-these limits of `ImageCache::app_icon` on Linux at `5d421fd`:
+Strata (lgse/strata), a file manager on Rune, shows other apps' icons (Open With) and MIME-type
+icons, and hits these limits of `ImageCache::app_icon` on Linux at `2a44156`:
 
-- **The user's theme.** `freedesktop::icon_file` (`image.rs:481`) scans `icons/hicolor` only:
-  no current theme and no `Inherits`, so an icon that ships only in Adwaita, Yaru or Breeze isn't
-  found.
+- **The user's theme.** As the 2026-10-26 comment found, `freedesktop::icon_file`
+  (`image.rs:500`) still scans `icons/hicolor` only (`:508`).
 - **`index.theme` sizes.** It reads a size from the directory name (`48x48`, `@2`), not the
   theme's `Size`, `Type`, `Threshold`, `MinSize`, `MaxSize` and `Scale`.
-- **Lookup by name.** It takes a `.desktop` path only, so a MIME icon name (`text-x-python`) or a
-  list of fallback names (as `GThemedIcon` gives) can't be looked up.
+- **Lookup by name.** It takes a `.desktop` path only, and looks in `apps/` only, so a MIME icon
+  name (`text-x-python`, in `mimetypes/`) or a list of fallback names (as `GThemedIcon` gives)
+  can't be looked up.
 - **Not found.** A missing icon and a broken file both resolve to `Image::error`.
 - It lists every size directory again on each call.
 
@@ -37,7 +38,9 @@ printf '[Desktop Entry]\nType=Application\nName=Fixture\nExec=true\nIcon=fixture
 ```
 
 `ImageCache::new(waker).app_icon_scaled("$T/share/applications/fixture.desktop", 48.0, 1.0)`
-returns `Err("no icon for …")` (by source), and nothing names a theme to look in.
+fails with `no icon for $T/share/applications/fixture.desktop` at `2a44156` (we ran
+`rune::image::app_icon_rgba`, which it runs on the worker), while the same PNG under
+`icons/hicolor/48x48/apps` is found. Nothing names a theme to look in.
 
 What would cover it: an image source taking the theme by name,
 `ImageCache::themed_icon(names, theme, size_pt, scale)`, following the Icon Theme

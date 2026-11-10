@@ -28,9 +28,8 @@
 //! (anomalyco/rune#149), accessibility values don't follow `Live` (C16's U-C16-3), a shape's
 //! geometry can't be bound live (U-C13-1), `on_step`'s page is a fixed 10 steps (U-C13-2),
 //! and only icon quads turn without a commit (U-C13-3). `Player` has no Linux backend
-//! (anomalyco/rune#30, #112); P7 replaces it. Past the pin and not adopted: `Tx::clock` and
-//! `Tx::wake_at` (c650fe0c), `Tx::by_keys` (3847cf0a), the tooltip state machine (0cde17ec),
-//! animated GIF, WebP and APNG images (d7946ee3).
+//! (anomalyco/rune#30, #112); P7 replaces it. The timeline follows the playback clock (P7),
+//! not Rune's, so `Tx::clock` (c650fe0c) retires nothing here.
 //!
 //! # What it does
 //!

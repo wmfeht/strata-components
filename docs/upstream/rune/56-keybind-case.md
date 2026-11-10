@@ -6,7 +6,8 @@
 | Drafts | U-C18-1 |
 | Affects | C18 (chord panel), C8 (sidebar keycaps), C19 |
 | Retires | C18's own keycap chip |
-| Checked | Repro run at `5d421fd` and `04b38ae`: same output (`keycap`, `rune-kit/src/keybind.rs:54`). |
+| Checked | At `2a44156`, repro re-run (`doc_56`): same output. Source: `keycap` still upper-cases any single character that maps back (`rune-kit/src/keybind.rs:54`). Gallery: C18's own keycap is still there (`filter_bar/keycap.rs:5`); the `filter_bar` tests pass. Earlier: repro run at `5d421fd` and `04b38ae`, same output. |
+| Status | Ready to file (re-verified at 2a44156, 2026-11-10; no duplicate as of 2026-11-10) |
 
 Paste from here.
 
@@ -14,10 +15,12 @@ Paste from here.
 
 **Title:** rune-kit `Keybind` draws "g" as "G", with no way to keep the case
 
-Vim-style key maps tell `g` from `G` (Shift+g). `keycap` (`rune-kit/src/keybind.rs:54`)
+Context: Strata (lgse/strata), a file manager on Rune.
+
+Vim-style key maps tell `g` from `G` (Shift+g). `keycap` (`rune-kit/src/keybind.rs:54` at `2a44156`)
 upper-cases any single character, so a keycap for `g` shows the wrong key.
 
-**Repro** (headless; ran at `5d421fd` and `04b38ae`):
+**Repro** (headless; ran at `5d421fd` and `2a44156`):
 
 ```rust
 use rune::{Cx, El, Env, Runtime, col};

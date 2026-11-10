@@ -8,12 +8,11 @@
 //! `chord_panel.rs`, `indicators.rs`), `src/ui/tenxer_mode.rs` and
 //! `src/ui/window/keyboard/prompts.rs`.
 //!
-//! **Rune dev 5d421fd: partly.** Core `text_input`, `TextEdit`, `popover::anchored` and
-//! `raised`, `El::focus_return`, `preserve_focus_on_press`, live regions, `Tx::send_key` and
-//! `Tx::wake_after` cover the field, the bar, the panels and the timers. Missing: moving focus
-//! from code (upstream #173), a focus-change hook (#106, U-C6-3), a field menu for rune-kit's
-//! `TextInput` (U-C21-2) and a `Keybind` that keeps case (U-C18-1). Rune `dev` at 565de6b (five
-//! commits past the pin: syntax, web builds, `El::dir`, Luau) touches none of them.
+//! **Rune 2a44156: partly.** Core `text_input`, `TextEdit`, `popover::anchored` and
+//! `raised`, `El::focus_return`, `Tx::focus`, `preserve_focus_on_press`, live regions,
+//! `Tx::send_key` and `Tx::wake_after` cover the field, the bar, the panels and the timers.
+//! Missing: a focus-change hook (#106, U-C6-3), a field menu for rune-kit's `TextInput`
+//! (U-C21-2) and a `Keybind` that keeps case (U-C18-1).
 //!
 //! # Parts
 //!
@@ -70,8 +69,9 @@
 //! - **Keys in the field.** Enter opens the target (a held Enter once). Down lands on the top
 //!   result while Enter opens it, else on the results' cursor (Strata's search results,
 //!   `inline_search.rs`; [`filter::FilterState::landing`]), as
-//!   [`filter::FilterIntent::FocusResults`], picks it, then sends the field a Tab so the next
-//!   focus stop, the results, takes the keyboard (probe P1: Rune has no `Tx::focus`, #173).
+//!   [`filter::FilterIntent::FocusResults`], picks it, then moves the keyboard to the results:
+//!   to the bar's `focus_return` element with `Tx::focus`, else by a Tab sent from the field
+//!   (probe P1).
 //!   Space previews when something is selected and the host's `previews` accepts it; with only
 //!   the outline, or with Shift, it types. Escape closes the bar. A right-click, the Menu key or
 //!   Shift+F10 is [`filter::FilterIntent::FieldMenu`], never the folder menu. Rune hands Enter
@@ -276,9 +276,9 @@
 //!   ruling).
 //! - **Live regions beyond Strata**: the results' status line, the chord pill and the flash are
 //!   polite live regions (Strata's are plain labels; owner's and coordinator's rulings).
-//! - **Down from the field moves the keyboard with a Tab** sent to the field (P1), so the bar
-//!   must come right before the results' focus stop ([`filter::FilterBar::tab_to_results`] turns
-//!   it off).
+//! - **Down from the field moves the keyboard to the bar's `focus_return`** element; without
+//!   one, by a Tab sent to the field (P1), so the bar must then come right before the results'
+//!   focus stop ([`filter::FilterBar::tab_to_results`] turns it off).
 //! - **Losing the keyboard is noticed a frame late**, in `tick` (U-C6-3).
 //! - **The host reports picks** ([`filter::FilterState::pick`]): the bar can't see the results'
 //!   selection change or focus enter them.
@@ -308,11 +308,10 @@
 //!   `--tree` on a view holding `Keybind::new(&["g"]).build(&kit)` shows a text "G". A fix: an
 //!   opt-out (`.keep_case()`), or upper-case only when the key is named as a letter key rather
 //!   than a typed character. Searched upstream issues ("keybind", "uppercase", "keycap"): none.
-//! - Reused: U-C21-2 (rune-kit's text inputs take no secondary press), #173 (`Tx::focus`;
-//!   here the Tab sent from the field), #106 and U-C6-3 (no focus-change hook), U-C1e-6 (no
-//!   clock in `Tx`: the host's `tick`), U-C6-1 (an input is always a text box: the combobox
-//!   group), U-C6-4 (`PopupItem` has no rich label), U-C6-7 (scripts have no input-method
-//!   event: tests use `Runtime::ime`).
+//! - Reused: U-C21-2 (rune-kit's text inputs take no secondary press), #106 and U-C6-3 (no
+//!   focus-change hook), U-C6-1 (an input is always a text box: the combobox group), U-C6-4
+//!   (`PopupItem` has no rich label), U-C6-7 (scripts have no input-method event: tests use
+//!   `Runtime::ime`).
 
 pub mod chord;
 pub(crate) mod field;

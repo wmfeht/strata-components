@@ -18,16 +18,15 @@
 //! // poll: changed |= s.grid.tick(now, &s.look, tx);   on closing the preview: s.grid.stop();
 //! ```
 //!
-//! Rune dev 5d421fd: **partly**. rune-kit's `Table` covers 100,000 virtual rows, a fixed
+//! Rune 2a44156: **partly**. rune-kit's `Table` covers 100,000 virtual rows, a fixed
 //! header with a sort caret and resize handles, and the `grid`, `row`, `columnheader` and
 //! `gridcell` roles; but it selects whole rows only, sorts by one key, can't scroll sideways
 //! (C4's draft R-K6), has no row-header column, and its cells take no presses (R-K5, Rune
 //! #331). Rune core covers `virtual_rows`, `scroll_xy`, `sticky_left`, `live_offset`, the
 //! sorted state and set positions on virtual rows; rune-kit's `TabStrip` covers the sheet
 //! tabs. Nothing covers cell ranges, sorting by several keys, or a grid's row and column
-//! index and count. Rune `dev` past the pin has no `Table` change; `c04d429` (virtual rows on
-//! a resized window), `dece2af` (focus and the pointer's hold as state machines) and
-//! `cded95f` (right to left) are to check at the next bump.
+//! index and count. Since 5d421fd rune-kit's `Table` gained only its column-resize grip
+//! (0b07bc85), which is crate-private.
 //!
 //! # The data and what stays in Strata
 //!

@@ -8,7 +8,7 @@ Strata can move off GTK 4.
 | Input | Version |
 | --- | --- |
 | Strata | `lgse/strata` at `5738aad808ea4cc4671516bc569d85f862664809`, the feature map's watermark (151 nodes, release v1.1.1) |
-| Rune | `anomalyco/rune` `dev` at `5d421fd908ba19b760b93a3dcf821e159ec1d4d7` (2026-11-08), crates `rune`, `rune-kit`, `rune-motion`, `rune-fx` |
+| Rune | `anomalyco/rune` `dev` at `2a44156b21d63b0342a366b26d9222a6edd4622c` (2026-11-10), crates `rune`, `rune-kit`, `rune-motion`, `rune-fx` |
 | Feature map | `wmfeht/strata-feature-map`. Node ids below (`browser/view-modes/columns`) are its ids. |
 
 Rune is pre-release: pin a `dev` rev and move it on purpose. Rune takes no pull requests;
@@ -100,7 +100,7 @@ component here. `Platform`: needs a tier-1 shim or a Rune issue.
 | `operations/trash/animation`, `operations/delete/dissolve` | Shared-element motion, `rune-fx` | Build (small) | C23 |
 | `operations/clipboard/conflicts`, `devices/volumes/*` dialogs | Dialog, RadioGroup, Field | Adopt + compose; mount prompts need C26 | C15, C26 |
 | `preview/preview-panel`, `.../layout` | `SplitView` inspector pane | Extend | C9 |
-| Source previews, `preview/preview-panel/find` (sourceview5) | `rune_kit::syntax` (about 13 languages, colours the first 32 KiB) | Build | C10 |
+| Source previews, `preview/preview-panel/find` (sourceview5) | `rune_kit::syntax` (about 13 languages and a 32 KiB cut when planned; 80 lexers and a 128 KiB cut at `2a44156`) | Build | C10 |
 | `preview/preview-panel/documents/*` | `Markdown` (CommonMark + GFM only) | Build | C11 |
 | `preview/preview-panel/pdf` | `Pixels` | Build | C12 |
 | `preview/preview-panel/media/*` | `Player` fails on Linux | Platform + Build | P7, C13 |
@@ -337,8 +337,10 @@ slot. It hosts C10–C14 and serves both the browser and the chooser.
 **C10 CodeView.** Replaces `sourceview5` for source and plain-text previews and
 `preview/preview-panel/find`.
 - Virtual lines, so large files open instantly, with line numbers and wrap.
-- Highlighting with **syntect**, on a dedicated highlighter thread (C10a). rune-kit's scanners
-  cover about 13 languages and colour only the first 32 KiB of a block.
+- Highlighting with **syntect**, on a dedicated highlighter thread (C10a). When this was planned,
+  rune-kit's scanners covered about 13 languages and coloured only the first 32 KiB of a block.
+  At `2a44156` rune-kit's highlighter is Pierre's Highlights: 80 lexers, kind-based colours and a
+  128 KiB cut. Whether C10a moves to it is open for the owner (it reopens S4).
   - **Grammars:** syntect's default set plus `two-face` (bat's extra syntaxes), to come close
     to sourceview's language coverage. The backend is `onig`, the owner's decision after S4
     (`docs/decisions/S4-syntect-backend.md`): `onig` meets the 8 ms viewport reading on every

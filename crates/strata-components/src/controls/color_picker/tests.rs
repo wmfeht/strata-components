@@ -354,14 +354,12 @@ fn the_popover_cancels_to_its_opening_colour_and_keeps_otherwise() {
     st.open();
     st.pick(Srgba::rgb(1, 2, 3));
     st.edit_mut().replace_text("#456");
-    st.dismiss();
     assert_eq!(
-        st.take_dismissed(),
-        Some((true, true)),
+        st.close(false),
+        (true, true),
         "typed text commits on a press outside"
     );
     assert_eq!(st.value(), Srgba::rgb(0x44, 0x55, 0x66));
-    assert_eq!(st.take_dismissed(), None);
     st.open();
     assert_eq!(st.close(false), (false, false));
 }

@@ -48,6 +48,9 @@ pub(super) fn panel<S: 'static>(r: &ShortcutReference<S>, s: &S, look: &Look) ->
         get_mut: r.get_mut,
         keys: r.keys.clone(),
         categories: format!("{key}-category-"),
+        search: r.search_key(),
+        // Category 0 is All, then each section in order.
+        chosen_category: r.category_key(chosen.map_or(0, |c| c + 1)),
         results: r.results_key(),
         line_key,
         lines: lines.clone(),

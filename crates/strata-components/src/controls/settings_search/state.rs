@@ -1,12 +1,9 @@
-//! The search's state: the field, the cached matches, the pending jump's highlight and focus hop.
-
-use std::time::Duration;
+//! The search's state: the field, the cached matches, and the pending jump's highlight.
 
 use rune::{TextEdit, Tx};
 
 use super::index::SearchIndex;
 use super::matching::{Matches, Prepared, normalized};
-use crate::controls::tabbed_form::hop::Hop;
 
 /// How long a jumped-to row's highlight shows, in seconds: full for [`FLASH_HOLD`], faded out
 /// by this (OWNER ruling; Strata highlights nothing).
@@ -20,8 +17,8 @@ pub(super) struct Flash {
     pub row: String,
     /// Keys the highlight, so a new jump replays it.
     pub generation: u64,
-    /// When it showed: the first tick after the jump stamps it (a key handler has no clock).
-    pub since: Option<f64>,
+    /// When it showed, on `Tx::clock`.
+    pub since: f64,
 }
 
 /// The settings search's state, held by the host.
@@ -39,7 +36,6 @@ pub struct SettingsSearchState {
     revision: Option<u64>,
     pub(super) flash: Option<Flash>,
     generation: u64,
-    pub(super) hop: Hop,
 }
 
 /// A search found by [`SettingsSearchState::plan`], to store.
@@ -173,24 +169,22 @@ impl SettingsSearchState {
         self.flash = Some(Flash {
             row,
             generation: self.generation,
-            since: None,
+            since: tx.clock(),
         });
-        tx.wake_after(Duration::ZERO);
+        tx.wake_at(tx.clock() + FLASH_FOR);
     }
 
-    /// Stamp a new highlight's start and drop one that has shown for [`FLASH_FOR`], asking for
-    /// a wake when it is due. True when the view changes.
+    /// Drop a highlight that has shown for [`FLASH_FOR`], asking for a wake when it is due.
+    /// True when the view changes.
     pub(super) fn tick_flash(&mut self, now: f64, tx: &mut Tx) -> bool {
-        let Some(flash) = &mut self.flash else {
+        let Some(flash) = &self.flash else {
             return false;
         };
-        let since = *flash.since.get_or_insert(now);
-        let left = since + FLASH_FOR - now;
-        if left <= 1e-9 {
+        if flash.since + FLASH_FOR - now <= 1e-9 {
             self.flash = None;
             return true;
         }
-        tx.wake_after(Duration::from_secs_f64(left));
+        tx.wake_at(flash.since + FLASH_FOR);
         false
     }
 }

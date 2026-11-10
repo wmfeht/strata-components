@@ -2,12 +2,12 @@
   "bullets": [
     "app/dialogs: The mount authentication dialog ignores backdrop clicks"
   ],
-  "scene": "c26-sign-in-light",
+  "scene": "c26-luks-light",
   "events": [
     {
       "t": 0.2,
       "type": "type",
-      "text": "pw"
+      "text": "open"
     },
     {
       "t": 0.5,

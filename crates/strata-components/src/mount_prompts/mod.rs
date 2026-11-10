@@ -131,7 +131,7 @@
 //! | network-locations: Trust questions from other schemes and from devices use GTK's native question dialog | **changed** (D5): they use the general question (review scene `c26-question`) |
 //! | location-bar: The sign-in dialog's fields are named after their visible labels | goldens `c26-sign-in`, `c26-luks` |
 //! | connect-to-server: A sign-in prompt raised while connecting stacks above the dialog | **partial**: [`MountPrompts::stacked`]; the stacking is C15's |
-//! | app/dialogs: The mount authentication dialog… ignores backdrop clicks | script `sign-in-backdrop` |
+//! | app/dialogs: The mount authentication dialog ignores backdrop clicks once… has text | scripts `sign-in-backdrop` (typed: it stays), `sign-in-backdrop-untyped` (Abort) |
 //! | app/dialogs: Enter in a single-line text or password field… | script `sign-in-submit` |
 //! | encrypted: Clicking a locked row, its lock button, or Unlock opens the themed "Passphrase required" prompt… | **partial**: script `luks-unlock`, golden `c26-luks`; the row and its menu are C8's and Strata's |
 //! | encrypted: Cancel in the prompt closes it with no error… | **partial**: script `luks-cancel` |

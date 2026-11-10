@@ -17,97 +17,8 @@
                       "actions": [
                         "scroll-into-view"
                       ],
-                      "name": "Password required for share “public” on “nas.local”",
+                      "name": "Enter a passphrase to unlock the volume\nThe passphrase is needed to access encrypted data on SanDisk Ultra (32 GB).",
                       "role": "label"
-                    },
-                    {
-                      "actions": [
-                        "scroll-into-view"
-                      ],
-                      "children": [
-                        {
-                          "actions": [
-                            "click",
-                            "focus",
-                            "scroll-into-view"
-                          ],
-                          "key": "segment0",
-                          "name": "Registered user",
-                          "position": 1,
-                          "role": "radio-button",
-                          "states": [
-                            "checked"
-                          ]
-                        },
-                        {
-                          "actions": [
-                            "click",
-                            "focus",
-                            "scroll-into-view"
-                          ],
-                          "key": "segment1",
-                          "name": "Anonymous",
-                          "position": 2,
-                          "role": "radio-button",
-                          "states": [
-                            "unchecked"
-                          ]
-                        }
-                      ],
-                      "key": "c26-mount-password-connect-as",
-                      "name": "Connect as",
-                      "role": "radio-group",
-                      "setSize": 2
-                    },
-                    {
-                      "actions": [
-                        "context-menu",
-                        "scroll-into-view"
-                      ],
-                      "children": [
-                        {
-                          "actions": [
-                            "click",
-                            "focus",
-                            "context-menu",
-                            "set-value",
-                            "replace-selected-text",
-                            "set-text-selection",
-                            "scroll-into-view"
-                          ],
-                          "key": "c26-mount-password-user",
-                          "name": "Username",
-                          "role": "text-input",
-                          "value": "ann"
-                        }
-                      ],
-                      "key": "c26-mount-password-user-frame",
-                      "role": "group"
-                    },
-                    {
-                      "actions": [
-                        "context-menu",
-                        "scroll-into-view"
-                      ],
-                      "children": [
-                        {
-                          "actions": [
-                            "click",
-                            "focus",
-                            "context-menu",
-                            "set-value",
-                            "replace-selected-text",
-                            "set-text-selection",
-                            "scroll-into-view"
-                          ],
-                          "key": "c26-mount-password-domain",
-                          "name": "Domain",
-                          "role": "text-input",
-                          "value": "WORKGROUP"
-                        }
-                      ],
-                      "key": "c26-mount-password-domain-frame",
-                      "role": "group"
                     },
                     {
                       "actions": [
@@ -126,7 +37,7 @@
                             "scroll-into-view"
                           ],
                           "key": "c26-mount-password-secret",
-                          "name": "Password",
+                          "name": "Passphrase",
                           "role": "password-input",
                           "states": [
                             "focused"
@@ -138,7 +49,7 @@
                             "scroll-into-view"
                           ],
                           "key": "c26-mount-password-reveal",
-                          "name": "Show password",
+                          "name": "Show passphrase",
                           "role": "button"
                         }
                       ],
@@ -235,7 +146,7 @@
               ],
               "description": "Authenticate to access this volume or location",
               "key": "c26-mount-password-dialog",
-              "name": "Authentication required",
+              "name": "Passphrase required",
               "role": "dialog",
               "states": [
                 "modal"

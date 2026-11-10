@@ -493,7 +493,10 @@ with its `open` and `select` commands, and presses Ctrl+C, Ctrl+X and Ctrl+V wit
 session's keyboard. The peer reads what the demo offers and offers what it pastes; the
 demo's JSON lines (`copied`, `badge`, `paste`, `state`) and the files on disk say what it did.
 The data-device variant passes the demo's test-only `--as-if-no-data-control` (P2's
-`TestRoute`), so its writes take the key's serial, as on mutter.
+`TestRoute`), so its writes take the key's serial, as on mutter. It proves the route carries
+the copy, not that the copy runs inside the key's handler: wlroots takes any serial it has sent
+the client. The partial-cut case makes a move fail partway with a read-only folder (a folder
+moves only with write access to it), and restores the mode before it pastes again.
 
 | Variable | Effect |
 | --- | --- |

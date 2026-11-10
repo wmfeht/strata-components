@@ -1808,10 +1808,11 @@ mod c2_drop_action {
     use strata_gallery::{Gallery, scenes};
 
     type Asked = Option<(usize, Option<EntryId>)>;
+    /// A zone the binder attached: its key, its scope, the zone.
+    type Attached = (String, Option<String>, DropZone<Gallery>);
 
     thread_local! {
-        static ZONES: RefCell<Vec<(String, Option<String>, DropZone<Gallery>)>> =
-            const { RefCell::new(Vec::new()) };
+        static ZONES: RefCell<Vec<Attached>> = const { RefCell::new(Vec::new()) };
         static ASKED: RefCell<Vec<Asked>> = const { RefCell::new(Vec::new()) };
     }
 

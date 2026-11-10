@@ -146,3 +146,28 @@ fn a_move_refused_by_permissions_leaves_both_folders_as_they_were() {
     let left: Vec<_> = std::fs::read_dir(root.join("b")).unwrap().collect();
     assert!(left.is_empty(), "written into the destination: {left:?}");
 }
+
+/// A move to another device (EXDEV) copies, then removes the source: a source that can't be
+/// removed (a read-only folder) stays, and so does nothing in the destination. The other
+/// device is out of reach here, so this runs the copy-and-remove step itself.
+#[test]
+fn a_move_across_devices_that_cant_remove_the_source_removes_its_copy() {
+    use std::os::unix::fs::PermissionsExt;
+    let (root, _) = fixture("exdev-eacces");
+    let mode = |p: &Path, m: u32| std::fs::set_permissions(p, std::fs::Permissions::from_mode(m));
+    mode(&root.join("a"), 0o555).unwrap();
+    let probe = std::fs::write(root.join("a/probe"), "");
+    let got = super::copy_then_remove(&root.join("a/notes.txt"), &root.join("b/notes.txt"));
+    mode(&root.join("a"), 0o755).unwrap();
+    if probe.is_ok() {
+        // Permissions don't bind (run as root): nothing to check.
+        return;
+    }
+    assert!(got.is_err(), "{got:?}");
+    assert_eq!(
+        std::fs::read_to_string(root.join("a/notes.txt")).unwrap(),
+        "mine"
+    );
+    let left: Vec<_> = std::fs::read_dir(root.join("b")).unwrap().collect();
+    assert!(left.is_empty(), "the copy stays: {left:?}");
+}

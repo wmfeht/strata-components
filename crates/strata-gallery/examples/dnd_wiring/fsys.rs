@@ -256,12 +256,21 @@ fn move_all(from: &Path, to: &Path) -> io::Result<()> {
             std::fs::remove_file(to).map_err(below)?;
             Err(below(e))
         }),
-        Err(e) if across(&e) => {
-            copy_all(from, to)?;
-            std::fs::remove_file(from).map_err(below)
-        }
+        Err(e) if across(&e) => copy_then_remove(from, to),
         Err(e) => Err(e),
     }
+}
+
+/// Moves the file or link `from` to `to` (which must not exist) on another device: copies it,
+/// then removes the source. A source that can't be removed (its folder is read-only, say)
+/// stays, so the copy is removed again, as the hard-link path removes its link. (A folder's
+/// copy stays: `remove_dir_all` may have removed part of the source by then.)
+fn copy_then_remove(from: &Path, to: &Path) -> io::Result<()> {
+    copy_all(from, to)?;
+    std::fs::remove_file(from).or_else(|e| {
+        std::fs::remove_file(to).map_err(below)?;
+        Err(below(e))
+    })
 }
 
 #[cfg(test)]

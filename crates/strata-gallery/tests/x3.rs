@@ -342,6 +342,9 @@ mod x3 {
         copy_and_cut_offer_the_three_formats(B::W);
     }
 
+    /// That the data-device route carries the copy and its formats (`--as-if-no-data-control`
+    /// attaches as on mutter). It doesn't show that the copy runs inside the key's handler:
+    /// wlroots takes any serial it has sent the client, so a later write would pass too.
     #[test]
     #[ignore = "needs a private session: mise run test-platform"]
     fn wayland_data_device_copy_and_cut_offer_the_three_formats() {
@@ -513,7 +516,8 @@ mod x3 {
         let demo = Demo::start(&s, b);
         let peer = s.peer(b.display());
         let root = demo.root.clone();
-        // operations/clipboard: Completing a cut-paste removes the moved items from the clipboard; text copied after the cut stays on the clipboard.
+        // A cut's paste empties the clipboard of what it moved. (That a newer copy stays, the
+        // other half of the operations/clipboard bullet, is the Board's: adapter/tests.rs.)
         demo.copy(&s, &["todo.txt"], true);
         wait_targets(&peer, b.via(), Some(&[GNOME]));
         demo.open("Music");
@@ -582,6 +586,113 @@ mod x3 {
     #[ignore = "needs a private session: mise run test-platform"]
     fn x11_cut_then_paste_moves_and_empties_the_clipboard() {
         cut_then_paste(B::X);
+    }
+
+    // ---- A paste that takes part of our cut ----
+
+    fn set_mode(path: &Path, mode: u32) {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).expect("chmod");
+    }
+
+    /// The rest of a cut stays cut, after a paste that skipped part of it and after one that
+    /// failed partway. Not on the data device: the rest is copied again from the paste's read,
+    /// outside the key's handler.
+    fn a_partial_cut_paste_keeps_the_rest_cut(b: B) {
+        let s = Session::start();
+        let root = fixture(&s);
+        std::fs::write(root.join("dest/x.txt"), "x").expect("a file");
+        // `a-moves` moves; `b-locked` can't (a folder moves only with write access to it, for
+        // its `..`).
+        for d in ["src/a-moves", "src/b-locked"] {
+            std::fs::create_dir(root.join(d)).expect("a folder");
+        }
+        let locked = root.join("src/b-locked");
+        set_mode(&locked, 0o555);
+        let demo = Demo::start_on(&s, b, root.clone());
+        let peer = s.peer(b.display());
+        let (inner, x) = (root.join("dest/inner"), root.join("dest/x.txt"));
+        demo.open("dest");
+        demo.copy(&s, &["inner", "x.txt"], true);
+        wait_read(
+            &peer,
+            b.via(),
+            GNOME,
+            &format!("cut\n{}\n{}", uri(&inner), uri(&x)),
+        );
+        // Into `inner`: `inner` is skipped, `x.txt` moves.
+        demo.select(&["inner"]);
+        let at = demo.app.line_count();
+        let v = demo.paste(&s);
+        assert_eq!(
+            (&v["dest"], &v["written"], &v["skipped"]),
+            (
+                &json!("dest/inner"),
+                &json!(["x.txt"]),
+                &json!([["inner", "into itself"]])
+            ),
+            "{v}"
+        );
+        assert!(inner.join("x.txt").exists() && !x.exists());
+        // operations/clipboard/file-manager-formats: After a paste consumes part of a cut, the clipboard keeps the remaining items with the `cut` header and the KDE flag `1`.
+        wait_read(&peer, b.via(), GNOME, &format!("cut\n{}", uri(&inner)));
+        wait_read(&peer, b.via(), KDE, "1");
+        wait_read(&peer, b.via(), URIS, &format!("{}\r\n", uri(&inner)));
+        let consumed = demo.wait(at, "the cut consumed", |v| v["ev"] == "cut-consumed");
+        assert_eq!(consumed["clipboard_changed"], true, "{consumed}");
+        demo.open("dest");
+        let st = demo.state();
+        assert_eq!(
+            (&st["marks"], &st["badge"]),
+            (&json!({ "inner": "cut" }), &json!(true)),
+            "{st}"
+        );
+        // A paste that fails partway: what moved leaves the cut, the rest stays cut.
+        demo.open("src");
+        demo.copy(&s, &["a-moves", "b-locked"], true);
+        demo.open("Music");
+        let at = demo.app.line_count();
+        let v = demo.paste(&s);
+        set_mode(&locked, 0o755);
+        assert_eq!(
+            (&v["ev"], &v["written"], &v["failed"]["name"]),
+            (&json!("paste"), &json!(["a-moves"]), &json!("b-locked")),
+            "{v}"
+        );
+        assert!(root.join("Music/a-moves").exists() && !root.join("src/a-moves").exists());
+        wait_read(&peer, b.via(), GNOME, &format!("cut\n{}", uri(&locked)));
+        demo.wait(at, "the cut consumed", |v| v["ev"] == "cut-consumed");
+        let st = demo.state();
+        assert_eq!(
+            (&st["folder"], &st["selected"]),
+            (&json!("Music"), &json!(["Music/a-moves"])),
+            "the destination is shown: {st}"
+        );
+        // Once it can move, the rest pastes, and the clipboard empties.
+        demo.select(&[]);
+        let at = demo.app.line_count();
+        let v = demo.paste(&s);
+        assert_eq!(
+            (&v["written"], &v["failed"]),
+            (&json!(["b-locked"]), &Value::Null),
+            "{v}"
+        );
+        assert!(root.join("Music/b-locked").exists() && !locked.exists());
+        wait_targets(&peer, b.via(), None);
+        demo.badge(at, false);
+        demo.no_errors();
+    }
+
+    #[test]
+    #[ignore = "needs a private session: mise run test-platform"]
+    fn wayland_a_partial_cut_paste_keeps_the_rest_cut() {
+        a_partial_cut_paste_keeps_the_rest_cut(B::W);
+    }
+
+    #[test]
+    #[ignore = "needs a private session: mise run test-platform"]
+    fn x11_a_partial_cut_paste_keeps_the_rest_cut() {
+        a_partial_cut_paste_keeps_the_rest_cut(B::X);
     }
 
     // ---- An image ----

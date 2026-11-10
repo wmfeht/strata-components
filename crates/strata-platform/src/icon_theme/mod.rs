@@ -86,7 +86,8 @@
 //! - **Size**: GTK's comparison, rule for rule: an exact match, else always an icon to scale
 //!   down over one to scale up, the closest size, the requested scale, a bitmap over a scalable
 //!   directory, then the closest scaled size; a full tie goes to the later directory. Like
-//!   GTK, a Scalable directory's `MaxSize` is compared with the unscaled size.
+//!   GTK, a Scalable directory's `MaxSize` is compared with the unscaled size, and a larger
+//!   directory listed after an exact match beats it (GTK checks "scale down" first).
 //! - **Scale**: directories match at the scale rounded up ([`IconRequest::theme_scale`]); the
 //!   file is drawn at `ceil(size * scale)` device pixels ([`IconRequest::pixels`]). An SVG is
 //!   rasterized at that size, a PNG decoded at its own and drawn through Rune's mips.
@@ -117,6 +118,17 @@
 //! `icon-theme.cache` is rebuilt. [`IconLoader::rescan`] checks at once. After a change the
 //! loader forgets its handles and [`IconLoader::poll`] turns true, so the view asks again and
 //! gets new ones; handles kept from before keep their icon.
+//!
+//! # Measured
+//!
+//! The example (`examples/icon-theme.rs`, `--time`) on a desktop with Yaru, Adwaita, Breeze and
+//! hicolor installed, warm file cache, this crate at opt-level 3: the first lookup in Yaru
+//! (reading Yaru's and hicolor's indexes and listing their directories) 25 ms, a warm lookup
+//! 7 µs, a revalidation with nothing changed 0.6 ms, and [`IconLoader::load`] returning a
+//! shared handle 0.5 µs. With `--icon-theme HighContrast`, Firefox's icon comes from
+//! HighContrast and Nautilus's from hicolor's SVG; in Yaru, Nautilus's from Yaru's
+//! `24x24@2x` PNG. That desktop has no Firefox installed, so Firefox's own hicolor icon is
+//! untested.
 //!
 //! # Caching
 //!

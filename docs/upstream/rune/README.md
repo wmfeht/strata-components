@@ -154,6 +154,15 @@ and no pull requests; each entry below is one issue or one comment.
 | 95 | [Whether a `Pixels` is drawn](95-pixels-last-drawn.md) | New issue | C25 (thumbnail store's recency) | C25's recency approximated from builds and visible ranges | By source at pin and head |
 | 96 | [Comment on #354: a text-field menu's Undo and Redo](96-comment-354-undo-state.md) | Comment on #354 | C21 (field menu) | C21's undo of a cloned `TextEdit` when the menu opens, to learn whether Undo would do anything | By source at pin and head |
 
+## Owner decisions (2026-11-10)
+
+- **Hold off filing.** The owner will make a second pass over the entries to avoid flooding the project; until then the packet is documentation only.
+- **Re-verify at a new pin first.** The owner will bump the Rune pin and have each entry re-verified before anything is filed. That covers #173 (`Tx::focus`, fixed upstream in `22aa8cde` but still open) and the 12 entries checked only at `5d421fd`.
+- **Name Strata** in the bodies (done: the context lines say "Strata (lgse/strata), a file manager on Rune").
+- **Entry 24:** attach the fake-portal script as a gist instead of pasting it inline.
+- The scratch in `strata-spikes/rune-packet/` (repro crates and a worktree of Rune head) stays for the re-verification.
+- The comment-vs-new-issue question (U2, U6–U8) waits for the owner's second pass.
+
 ## Owner questions
 
 Each has a recommendation; the packet is written to it.

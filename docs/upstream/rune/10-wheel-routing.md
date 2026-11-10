@@ -14,7 +14,7 @@ Paste from here.
 
 **Title:** Wheel routing: ancestors can't claim a modified wheel, a vertical gesture jumps viewports, and wheels pass through overlays
 
-Context: a file manager on Rune with Miller columns (vertical lists in a sideways strip), an
+Context: Strata (lgse/strata), a file manager on Rune with Miller columns (vertical lists in a sideways strip), an
 icon grid that zooms on Ctrl+Shift+wheel, a breadcrumb strip and popovers over lists.
 
 **What happens** (`5d421fd`, unchanged at `04b38ae`), five cases from one program:

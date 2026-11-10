@@ -12,7 +12,7 @@ Paste from here.
 
 ---
 
-We hit this in a file manager on Rune, and add a measurement and what a file manager needs
+We hit this in Strata (lgse/strata), a file manager on Rune, and add a measurement and what a file manager needs
 beyond file paths.
 
 **Measured** under headless sway at `78d22ed` (unchanged at `5d421fd`): a raw `wl_data_device`

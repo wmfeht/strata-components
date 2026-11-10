@@ -14,7 +14,7 @@ Paste from here.
 
 **Title:** A drag whose element is removed, or under a modal that mounts, never hears `Phase::Up`
 
-Context: a file manager on Rune (column resizes, scroll bar thumbs, range drags).
+Context: Strata (lgse/strata), a file manager on Rune (column resizes, scroll bar thumbs, range drags).
 
 **What's missing.** Escape mid-drag ends a drag with a cancelled `Phase::Up`
 (`cancel_drag`, `runtime/input/pointer.rs` at `5d421fd`). Two other ends deliver nothing:

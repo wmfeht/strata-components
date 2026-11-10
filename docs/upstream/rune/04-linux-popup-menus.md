@@ -14,7 +14,7 @@ Paste from here.
 
 **Title:** Linux: `popup_menu` is unsupported, so a text field's menu shows nothing, and in-window submenus can't leave the window
 
-Context: a file manager on Rune: context menus with an "Open With" submenu, a small file
+Context: Strata (lgse/strata), a file manager on Rune: context menus with an "Open With" submenu, a small file
 chooser window, and text fields everywhere.
 
 **What's missing** (`5d421fd`, unchanged at `04b38ae`):

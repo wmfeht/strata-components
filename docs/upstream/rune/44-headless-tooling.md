@@ -14,7 +14,7 @@ Paste from here.
 
 **Title:** Headless scripts and `--tree`: no IME event, no titlebar action, no image state, no layout-aware key, no window title reader
 
-Context: a file manager on Rune tests each behaviour as a headless script where it can, and
+Context: Strata (lgse/strata), a file manager on Rune tests each behaviour as a headless script where it can, and
 falls back to in-process tests where scripts can't reach.
 
 **What's missing** (`5d421fd`, unchanged at `04b38ae`):

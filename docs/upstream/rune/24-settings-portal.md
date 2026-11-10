@@ -6,6 +6,7 @@
 | Drafts | U12 (S5, from S1 R5) |
 | Affects | P5 (desktop settings), K2 (text scale), C1b (double-click time), C23 (animations) |
 | Retires | P5's zbus reader of `org.freedesktop.portal.Settings` |
+| Filing | Attach the fake-portal script as a gist and link it, instead of pasting it inline (owner, 2026-11-10). |
 | Checked | `platform/portal_appearance.rs:15` `KEY = "color-scheme"`, the only key, at `5d421fd` and `04b38ae`. S1 ran the fake-portal measurement; not re-run. The program compiles at `5d421fd` and `04b38ae` (not run here: it needs a compositor). |
 
 Paste from here.

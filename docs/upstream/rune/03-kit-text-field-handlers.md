@@ -14,7 +14,7 @@ Paste from here.
 
 **Title:** rune-kit `TextInput`, `TextArea` and `TextField` drop `on_secondary_press` and `description` meant for their field
 
-Context: a file manager on Rune draws its own text-field context menu (Cut, Copy, Paste, Undo)
+Context: Strata (lgse/strata), a file manager on Rune draws its own text-field context menu (Cut, Copy, Paste, Undo)
 on Linux, and shows validation errors as a field's description.
 
 **What's missing** (`5d421fd`, unchanged at `04b38ae`). `TextInput::build`

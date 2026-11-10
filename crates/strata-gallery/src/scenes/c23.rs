@@ -53,9 +53,9 @@ pub struct Demo {
     /// What the Trash holds, to restore.
     pub trashed: Vec<ListEntry>,
     /// Each playing effect the page owes rows to, and what it does with them: effects
-    /// overlap (a Move to Trash while a restore's icons are in the air).
+    /// overlap (a Move to Trash while a restore's icons are in the air). A restore's rows are
+    /// owed until Landed, the rest until Done.
     pub owed: Vec<(EffectId, Op, Vec<EntryId>)>,
-    pub vanished: Vec<EntryId>,
     /// An operation asked for, and the clock time it may start (scenes time theirs).
     pub ask: Option<(Op, f64)>,
     pub clock: f64,
@@ -82,7 +82,6 @@ impl Default for Demo {
             version: 1,
             trashed: Vec::new(),
             owed: Vec::new(),
-            vanished: Vec::new(),
             ask: None,
             clock: 0.0,
             log: String::new(),
@@ -123,6 +122,14 @@ fn entry_icon(look: &Look, key: &str) -> &'static rune::Icon {
 }
 
 impl Demo {
+    /// Whether the row `id` is listed but hidden: a restore's until its icons land, a
+    /// dissolve's until it ends, and while any effect still holds it so.
+    pub fn vanished(&self, id: EntryId) -> bool {
+        self.owed
+            .iter()
+            .any(|(_, op, ids)| matches!(op, Op::Restore | Op::Delete) && ids.contains(&id))
+    }
+
     fn selected(&self) -> Vec<EntryId> {
         self.coll.selection.selected_ids(&self.listing)
     }
@@ -194,19 +201,20 @@ impl Demo {
                 self.fx.fly(f, look, tx)
             }
             Op::Release => {
-                let f =
-                    Flight::release(&target, legs(self, &ids, true)).rows_in(viewport_path(SCOPE));
+                let f = Flight::release(&target, legs(self, &ids, true))
+                    .target_in(sidebar_scroll())
+                    .rows_in(viewport_path(SCOPE));
                 self.fx.fly(f, look, tx)
             }
             Op::Delete => {
-                let rows = ids.iter().map(|&id| (row_path(SCOPE, id), id.get()));
-                let started =
-                    self.fx
-                        .dissolve(Dissolve::rows(rows).within(viewport_path(SCOPE)), look, tx);
-                if started.is_some() {
-                    self.vanished.extend_from_slice(&ids);
-                }
-                started
+                // A row already hidden (a restore's icon still in the air) has nothing to
+                // break up: it just stays hidden until it goes.
+                let rows = ids
+                    .iter()
+                    .filter(|&&id| !self.vanished(id))
+                    .map(|&id| (row_path(SCOPE, id), id.get()));
+                self.fx
+                    .dissolve(Dissolve::rows(rows).within(viewport_path(SCOPE)), look, tx)
             }
             Op::Restore => {
                 let back = self.put_back(tx);
@@ -215,9 +223,6 @@ impl Demo {
                     .target_in(sidebar_scroll())
                     .rows_in(viewport_path(SCOPE));
                 let started = self.fx.fly(f, look, tx);
-                if started.is_some() {
-                    self.vanished.extend_from_slice(&back);
-                }
                 self.log = "Restored".into();
                 self.owed.extend(started.map(|id| (id, op, back)));
                 return;
@@ -249,10 +254,10 @@ impl Demo {
             }
             Op::Delete => {
                 self.remove(ids, tx);
-                self.vanished.retain(|v| !ids.contains(v));
                 self.log = format!("Deleted {}", ids.len());
             }
-            Op::Restore => self.vanished.retain(|v| !ids.contains(v)),
+            // Its rows show once the page owes them nothing.
+            Op::Restore => {}
         }
         self.places[4] = Place::trash("Trash", !self.trashed.is_empty());
     }
@@ -275,7 +280,10 @@ impl Demo {
             }
             _ => {}
         }
-        if matches!(event, Event::Done(_)) {
+        if matches!(
+            (event, op),
+            (Event::Done(_), _) | (Event::Landed(_), Op::Restore)
+        ) {
             self.owed.remove(i);
         }
     }
@@ -295,7 +303,7 @@ fn sidebar_state(g: &mut Gallery) -> &mut SidebarState {
 
 fn marks(g: &Gallery, id: EntryId) -> RowMarks {
     let mut m = RowMarks::default();
-    m.vanished = g.c23.vanished.contains(&id);
+    m.vanished = g.c23.vanished(id);
     m
 }
 

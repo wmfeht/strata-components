@@ -4,6 +4,7 @@
 
 mod c23 {
     use rune::{Env, Runtime};
+    use strata_components::contract::EntryId;
     use strata_components::motion::{flyer_key, launch_key};
     use strata_components::sidebar::TRASH_TARGET;
     use strata_gallery::scenes::c23::Op;
@@ -111,23 +112,73 @@ mod c23 {
         let back = rt.state.c23.trashed[0].id;
         rt.update(|g, _| g.c23.ask = Some((Op::Restore, 0.0)));
         rt.frame(FRAME);
-        assert!(
-            rt.state.c23.vanished.contains(&back),
-            "hidden until its icon lands"
-        );
+        assert!(rt.state.c23.vanished(back), "hidden until its icon lands");
         // A second operation while the restore's icon is still in the air.
         ask(&mut rt, 0, Op::Trash);
         for _ in 0..60 {
             rt.frame(FRAME);
         }
         let d = &rt.state.c23;
-        assert!(
-            d.vanished.is_empty(),
-            "the restored row shows: {:?}",
-            d.vanished
-        );
+        assert!(!d.vanished(back), "the restored row shows");
         assert!(d.listing.entries().iter().any(|e| e.id == back));
         assert!(d.owed.is_empty(), "both effects ended");
+    }
+
+    /// Trashes the entry at `index`, lets it land, and restores it: its icon is in the air.
+    fn restoring(rt: &mut Runtime<Gallery>, index: usize) -> EntryId {
+        ask(rt, index, Op::Trash);
+        for _ in 0..60 {
+            rt.frame(FRAME);
+        }
+        let back = rt.state.c23.trashed[0].id;
+        rt.update(|g, _| g.c23.ask = Some((Op::Restore, 0.0)));
+        rt.frame(FRAME);
+        assert!(rt.state.c23.vanished(back));
+        back
+    }
+
+    #[test]
+    fn a_row_deleted_while_its_restore_flies_stays_hidden_and_does_not_break_up() {
+        let mut rt = mount("c23-rest-light");
+        let back = restoring(&mut rt, 3);
+        let row = rect(&rt, &format!("rows/row-{}", back.get()));
+        // Delete it with a row that shows, before its icon lands.
+        rt.update(|g, _| {
+            let d = &mut g.c23;
+            let at = d.listing.entries().iter().position(|e| e.id == back);
+            d.coll.selection.select_only(&d.listing, at.unwrap());
+            d.coll.selection.toggle(&d.listing, 8);
+            d.ask = Some((Op::Delete, 0.0));
+        });
+        rt.frame(FRAME);
+        rt.frame(FRAME);
+        let over_row: Vec<_> = rt
+            .elements()
+            .into_iter()
+            // The fragments, under the dissolve's group.
+            .filter(|e| {
+                e.path
+                    .split_once("/c23-dissolve-")
+                    .is_some_and(|(_, rest)| rest.contains('/'))
+            })
+            .filter(|e| e.rect[1] < row[1] + row[3] - 0.5 && e.rect[1] + e.rect[3] > row[1] + 0.5)
+            .map(|e| (e.path, e.rect))
+            .collect();
+        assert!(
+            over_row.is_empty(),
+            "no ghost of the hidden row breaks up: {over_row:?}"
+        );
+        let mut frames = 0;
+        while rt.state.c23.listing.entries().iter().any(|e| e.id == back) {
+            assert!(
+                rt.state.c23.vanished(back),
+                "still hidden after {frames} frames, with its icon landed"
+            );
+            rt.frame(FRAME);
+            frames += 1;
+            assert!(frames < 120, "it went");
+        }
+        assert!(rt.state.c23.owed.is_empty(), "both effects ended");
     }
 
     #[test]

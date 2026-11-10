@@ -109,8 +109,8 @@ impl SinkOptions {
 
     /// How long a fresh output (the first, or one after a seek, a flush or a reopen) may take
     /// to start before [`SinkEvent::Stalled`]: from its PCM's arrival to the clock's first
-    /// step, counting the time spent loading or seeking with PCM queued and the time spent
-    /// playing, not the time paused. 8 s by default: a Bluetooth headset reconnecting or a
+    /// step, counting the time spent loading or seeking with PCM queued (paused or not) and the
+    /// time spent playing, not the time paused once ready. 8 s by default: a Bluetooth headset reconnecting or a
     /// suspended device waking takes a few seconds, well inside it, and it is the 8 s the app
     /// this was written for allows its decoder for one frame, so neither gives up on a slow
     /// start first.

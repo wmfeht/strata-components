@@ -178,9 +178,12 @@ Nothing is released yet. The first release is planned for milestone M1 with the 
     is queued again, so the PCM that follows doesn't play late.
   - Each change the clock makes on its own is a `SinkEvent` (`Ready`, `SeekLanded`,
     `Underrun`, `Resumed`, `Stalled`, `Ended`, `DeviceLost`, `Error`) and wakes the app once.
-    One failure is one event, and nothing from a pipeline or generation before a seek changes
-    the clock after it. `Stalled` covers a device that stops (`SinkOptions::stall_after`, 3 s)
-    and one that never starts (`SinkOptions::start_timeout`, 8 s of loading or playing).
+    One failure is one event. Nothing from a generation before a seek lands or ends the seek
+    after it, and nothing from a failed pipeline touches the one its rebuild starts; an error
+    from the pipeline a plain seek flushed and kept fails it. `Stalled` covers a device that
+    stops (`SinkOptions::stall_after`, 3 s) and one that never starts
+    (`SinkOptions::start_timeout`, 8 s of loading or seeking with PCM queued, paused or not,
+    and of playing).
     No call blocks on the device: state changes run on a control thread.
   - `FramePacer` writes the RGBA frame the clock is at into a `rune::Pixels` in place, with no
     view commit: it drops frames whose time passed, holds while the next isn't due, counts

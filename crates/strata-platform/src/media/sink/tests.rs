@@ -99,6 +99,60 @@ mod manual_clock {
 }
 use manual_clock::ManualClock;
 
+mod refusing {
+    use gst::glib;
+    use gst::subclass::prelude::*;
+    use gstreamer as gst;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    /// An element that refuses to leave PLAYING until allowed: in a playing bin, it makes the
+    /// bin's pause fail, as a dead device's sink can. (A bin skips children already below the
+    /// state it goes to, so the element has to be playing.)
+    #[derive(Default)]
+    pub struct Imp {
+        allowed: AtomicBool,
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for Imp {
+        const NAME: &'static str = "StrataPlatformMediaRefusing";
+        type Type = Refusing;
+        type ParentType = gst::Element;
+    }
+
+    impl ObjectImpl for Imp {}
+    impl GstObjectImpl for Imp {}
+
+    impl ElementImpl for Imp {
+        fn change_state(
+            &self,
+            transition: gst::StateChange,
+        ) -> Result<gst::StateChangeSuccess, gst::StateChangeError> {
+            if transition == gst::StateChange::PlayingToPaused
+                && !self.allowed.load(Ordering::SeqCst)
+            {
+                return Err(gst::StateChangeError);
+            }
+            self.parent_change_state(transition)
+        }
+    }
+
+    glib::wrapper! {
+        pub struct Refusing(ObjectSubclass<Imp>) @extends gst::Element, gst::Object;
+    }
+
+    impl Refusing {
+        pub fn new() -> Refusing {
+            glib::Object::new()
+        }
+
+        pub fn allow(&self) {
+            self.imp().allowed.store(true, Ordering::SeqCst);
+        }
+    }
+}
+use refusing::Refusing;
+
 /// Holds the one thread that passes it once armed, until the test releases it: the control
 /// thread inside a wake, or a reader inside a clock read.
 #[derive(Default)]
@@ -296,11 +350,14 @@ impl Rig {
     /// sink posts when its server goes away.
     fn lose_device(&self) {
         let element = self.sink.sink_element();
-        let _ = element.post_message(
-            gst::message::Error::builder(gst::ResourceError::Write, "the device went away")
-                .src(&element)
-                .build(),
-        );
+        let _ = element.post_message(self.device_error());
+    }
+
+    /// The resource error a device sink posts when its server goes away.
+    fn device_error(&self) -> gst::Message {
+        gst::message::Error::builder(gst::ResourceError::Write, "the device went away")
+            .src(&self.sink.sink_element())
+            .build()
     }
 
     /// What `appsrc` posts after the output fails: its streaming task stops on the error.
@@ -705,6 +762,86 @@ fn an_error_from_before_a_reopen_leaves_the_new_output_alone() {
     eventually("playing again", || {
         rig.sink.reading().state == ClockState::Playing
     });
+}
+
+#[test]
+fn a_device_error_read_after_a_seek_fails_the_output_that_seek_flushes() {
+    let rig = rig(SinkOptions::default());
+    rig.sink.play();
+    let old = rig.parts();
+    rig.wake_gate.arm();
+    push(&rig.sink, 1_000, 1);
+    rig.wake_gate.wait_held();
+    // The device goes away and the app seeks while the control thread is inside Ready's wake:
+    // it reads the error, tagged with the generation before the seek, after the seek. The
+    // seek flushes this same pipeline, so the error is this output's.
+    rig.lose_device();
+    rig.sink.seek(ms(2_000));
+    rig.wake_gate.release();
+    rig.fence();
+    let events = rig.sink.drain_events();
+    assert!(
+        matches!(
+            events.as_slice(),
+            [SinkEvent::Ready, SinkEvent::DeviceLost { .. }]
+        ),
+        "{events:?}"
+    );
+    assert_eq!(rig.sink.reading().state, ClockState::Failed);
+    // The host reopens: a new output, where the seek went.
+    rig.sink.reopen();
+    eventually("a new output", || rig.parts().sink != old.sink);
+    push(&rig.sink, 500, 2);
+    assert_eq!(rig.next_event(), SinkEvent::SeekLanded { at: ms(2_000) });
+}
+
+#[test]
+fn a_device_error_tagged_before_a_flush_fails_the_flushed_output() {
+    let rig = rig(SinkOptions::default());
+    push(&rig.sink, 1_000, 1);
+    assert_eq!(rig.next_event(), SinkEvent::Ready);
+    rig.sink.seek(ms(2_000));
+    rig.fence();
+    // The output the flush kept posted an error before the flush moved the tag on.
+    rig.sink
+        .control
+        .send(Cmd::Bus(rig.device_error(), 0))
+        .expect("running");
+    assert!(matches!(rig.next_event(), SinkEvent::DeviceLost { .. }));
+    assert_eq!(rig.sink.reading().state, ClockState::Failed);
+}
+
+#[test]
+fn a_seek_out_of_a_failure_leaves_the_failed_pipeline_alone() {
+    let rig = rig(SinkOptions::default());
+    push(&rig.sink, 1_000, 1);
+    rig.sink.play();
+    assert_eq!(rig.next_event(), SinkEvent::Ready);
+    let old = rig.parts();
+    rig.wake_gate.arm();
+    rig.lose_device();
+    rig.wake_gate.wait_held();
+    // The dead output refuses any state change, and the app seeks before the control thread
+    // goes on from the wake: only the rebuild the seek owes may touch the old pipeline.
+    let refusing = Refusing::new();
+    old.pipeline.add(&refusing).expect("added");
+    refusing.sync_state_with_parent().expect("playing");
+    rig.sink.seek(ms(2_000));
+    rig.wake_gate.release();
+    assert!(matches!(rig.next_event(), SinkEvent::DeviceLost { .. }));
+    eventually("a new output", || rig.parts().sink != old.sink);
+    rig.fence();
+    let events = rig.sink.drain_events();
+    assert!(
+        events.is_empty(),
+        "the old pipeline failed the seek: {events:?}"
+    );
+    assert_eq!(rig.sink.reading().state, ClockState::Seeking);
+    push(&rig.sink, 500, 2);
+    assert_eq!(rig.next_event(), SinkEvent::SeekLanded { at: ms(2_000) });
+    // The rebuild's teardown was refused too: stop the old pipeline here.
+    refusing.allow();
+    let _ = old.pipeline.set_state(gst::State::Null);
 }
 
 #[test]

@@ -5,7 +5,8 @@
 //! so none runs on the app's thread. The bus's sync handler runs on GStreamer's threads and only
 //! forwards messages here, tagged with the generation `appsrc` was flushed to when they were
 //! posted: a message from before a flush (or from a pipeline a rebuild replaced) can't land the
-//! seek after it, end it or fail it.
+//! seek after it or end it. An error from before a flush still fails the pipeline that flush
+//! kept; only one from a failed pipeline awaiting its rebuild is dropped.
 
 use std::io;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -128,6 +129,7 @@ impl Control {
         self.target = None;
         self.starting = Some(Starting::default());
         // Before the state change: a device that fails to open posts its error during it.
+        // (Untested: no seam posts during the state change.)
         self.flushed.store(generation, Ordering::SeqCst);
         if self.set_state(gst::State::Paused) {
             self.apply(generation);
@@ -155,6 +157,11 @@ impl Control {
         self.parts.src.send_event(gst::event::FlushStart::new());
         // reset_time: the new generation's PCM starts at running time 0.
         self.parts.src.send_event(gst::event::FlushStop::new(true));
+        // After the flush, unlike `start`: pausing a playing pipeline can preroll the old
+        // generation's PCM, and that AsyncDone mustn't land this seek
+        // (`a_reading_never_mixes_two_generations` fails about half its runs with the store
+        // first). An error the output posts during the pause carries the generation before,
+        // and still fails this output (see `bus`).
         self.flushed.store(generation, Ordering::SeqCst);
         self.apply(generation);
     }
@@ -237,10 +244,12 @@ impl Control {
                 }
             }
             gst::MessageView::Error(error) => {
-                // One from before a seek or reopen leaves the output that seek starts alone:
-                // a pipeline still broken after a flush fails again, or doesn't start (the
-                // start timeout). While failed, `fail` keeps the first failure.
-                if !current {
+                // One from before a seek that owes a rebuild leaves the new output alone: the
+                // old pipeline's errors are the failure already reported. (Once the rebuild
+                // has run, the ancestor check above drops them.) A plain seek flushes and
+                // keeps this pipeline, so an error from before it is this output's: it fails
+                // the generation now playing. While failed, `fail` keeps the first failure.
+                if !current && core.rebuild_owed {
                     return;
                 }
                 drop(core);
@@ -274,10 +283,15 @@ impl Control {
         self.shared.emit(event);
     }
 
-    /// Plays only when ready and wanted; otherwise holds paused.
+    /// Plays only when ready and wanted; otherwise holds paused. While a rebuild is owed the
+    /// pipeline is the failed one: only the rebuild touches it, so a refused state change
+    /// there can't fail the generation that rebuild starts.
     fn settle(&mut self) {
         let desired = {
             let core = lock(&self.shared.core);
+            if core.rebuild_owed {
+                return;
+            }
             match core.phase {
                 Phase::Failed => return,
                 Phase::Running if core.want_play => gst::State::Playing,

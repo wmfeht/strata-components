@@ -130,7 +130,8 @@ pub fn looks_like_rejection(label: &str) -> bool {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct QuestionRequest {
     /// The backend's message: its first line is the title, the rest the body, as GTK shows it.
-    /// A host-key question shows it whole under its own title.
+    /// A host-key question shows it whole under its own title. It is shown as given: taking
+    /// credentials out of a URI in it (Strata's `sanitize_failure_message`) is the host's.
     pub message: String,
     pub choices: Vec<Choice>,
     /// An SSH host key to trust (Strata: a question while mounting an `sftp://` location):
@@ -161,7 +162,7 @@ pub struct BlockingProcess {
 /// A prompt's answer.
 #[derive(Clone, PartialEq, Eq)]
 pub enum MountResponse {
-    /// Connect: set the credentials, then reply `Handled`.
+    /// Connect: clear `anonymous`, set the credentials, then reply `Handled`.
     Password(Credentials),
     /// Connect as Anonymous: set `anonymous`, then reply `Handled`.
     Anonymous,
@@ -187,7 +188,9 @@ impl fmt::Debug for MountResponse {
 pub struct Credentials {
     pub user: Option<String>,
     pub domain: Option<String>,
-    /// The password or passphrase. `Debug` never prints it.
+    /// The password or passphrase. `Debug` never prints it. From the answer on it is the host's,
+    /// a plain `String` that isn't zeroized on drop: the prompt's own secure field has wiped its
+    /// copy, but this one lives as long as the host keeps it.
     pub password: Option<String>,
     /// `password-save`: [`Remember::Never`] unless the request allowed saving.
     pub remember: Remember,

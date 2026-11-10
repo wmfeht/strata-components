@@ -39,19 +39,36 @@
 //!   from the `StrV`; none at all: reply `Unhandled`), and `show-processes` (pids from the
 //!   `GArray`, named by the host). Each handler first calls `stop_signal_emission_by_name`:
 //!   `GMountOperation`'s own handlers run last and reply `Unhandled` from an idle on the
-//!   default main context, which would race the prompt's answer wherever that context runs.
-//! - **The answer:** [`MountResponse::Password`] sets `username`, `domain`, `password` (each
-//!   when `Some`) and `password-save` from [`Remember`] (`Never`, `ForSession`,
-//!   `Permanently`), then replies `Handled`; [`MountResponse::Anonymous`] sets `anonymous`;
-//!   [`MountResponse::Choice`] sets `choice`; [`MountResponse::Abort`], or the request dropped
-//!   unanswered (`ask` resolving to `None`), replies `Aborted`.
-//! - **`aborted`**, and a newer `show-processes`, abort the pending `LocalTask`s: the bridge
-//!   then marks their requests withdrawn and wakes the app, whose `poll` calls
-//!   [`MountPromptState::withdraw`], so the prompt closes without a reply (GTK's
-//!   `GtkMountOperation` does the same).
-//! - **On Rune's loop**, the app's `poll` drains `Requests`, opens each with
+//!   global default main context, which would race the prompt's answer wherever that context
+//!   runs.
+//! - **The answer:** [`MountResponse::Password`] first clears `anonymous`
+//!   (`set_anonymous(false)`: GIO reuses one operation across the retries of a mount, so an
+//!   earlier Anonymous answer would still stand, and Strata's `apply_mount_credentials`
+//!   always sets it), then sets `username`, `domain`, `password` (each when `Some`) and
+//!   `password-save` from [`Remember`] (`Never`, `ForSession`, `Permanently`), and replies
+//!   `Handled`; [`MountResponse::Anonymous`] sets `anonymous`; [`MountResponse::Choice`] sets
+//!   `choice`; [`MountResponse::Abort`], or the request dropped unanswered (`ask` resolving to
+//!   `None`), replies `Aborted`.
+//! - **`aborted`** aborts the pending `LocalTask`s: the bridge then marks their requests
+//!   withdrawn and wakes the app, whose `poll` calls [`MountPromptState::withdraw`], so the
+//!   prompt closes without a reply (GTK's `GtkMountOperation` does the same).
+//! - **A newer `show-processes`** replaces the pending one: in the same synchronous handler,
+//!   `ask` the new request first, then abort the old task. `is_withdrawn` turns true the
+//!   moment the old task is aborted, so the other order lets a `poll` in between close the
+//!   prompt and the next one reopen it (focus reset, the dialog animating in again). The host's
+//!   `respond(Abort)` on the replaced ticket then goes nowhere: the old future is dropped before
+//!   the GLib loop runs it again.
+//! - **On Rune's loop**, the app's `poll` first withdraws the prompt if its ticket
+//!   `is_withdrawn`, then drains `Requests`, opening each with
 //!   `state.open(request.question().clone(), request)` (answering any ticket it replaces with
-//!   `respond(MountResponse::Abort)`), and `on_answer` calls `request.respond(answer)`.
+//!   `respond(MountResponse::Abort)`); `on_answer` calls `request.respond(answer)`. Withdrawal
+//!   comes first so that a withdrawal it sees comes with its replacement, which the binding
+//!   queued before it, in the same drain, and the prompt updates in place. Draining first
+//!   leaves a window: an empty drain, then the binding's ask and abort, then the withdrawal.
+//! - **The host's, past the prompt:** the host-key message is shown as given, so taking
+//!   credentials out of a URI in it (Strata's `sanitize_failure_message`) is the binding's; and
+//!   [`Credentials::password`](Credentials) is a plain `String`, not zeroized on drop, from the
+//!   answer on.
 //! - `show-unmount-progress` isn't a prompt: it goes to Strata's release overlay through the
 //!   bridge's `listen`.
 //!
@@ -108,7 +125,7 @@
 //! | network-locations: When GVfs asks Strata for a key passphrase… "Passphrase required"… "Passphrase" | script `key-passphrase` (review scene `c26-key-passphrase`); golden `c26-luks` |
 //! | network-locations: An unknown or changed SFTP host key opens a "Verify server identity" dialog… Strata never answers it | script `host-key-accept`; golden `c26-host-key` (no default button) |
 //! | network-locations: The host-key dialog warns that a missing fingerprint… | golden `c26-host-key` |
-//! | network-locations: The host-key dialog opens with the rejecting choice… focused | script `host-key-decline`; golden `c26-host-key` |
+//! | network-locations: The host-key dialog opens with the rejecting choice… focused | script `host-key-decline`; golden `c26-host-key`; unit `with_no_choice_marked_declining_a_question_opens_on_close_and_enter_aborts` (none marked: close) |
 //! | network-locations: Declining the host key by its rejecting choice, Escape, or close… | **partial**: scripts `host-key-decline`, `host-key-escape`, `host-key-close`; the rest is Strata's |
 //! | network-locations: A connection that fails on host-key verification shows… | **Strata** (its error text) |
 //! | network-locations: Trust questions from other schemes and from devices use GTK's native question dialog | **changed** (D5): they use the general question (review scene `c26-question`) |
@@ -128,7 +145,9 @@
 //! Also: end process and the live list (test `end_process_leaves_the_prompt_open_on_the_shorter_list`,
 //! unit `a_process_list_over_a_process_list_updates_in_place`), withdrawal (test
 //! `a_withdrawn_request_closes_its_prompt_unanswered`), and the GIO round trip (test
-//! `a_mount_operation_round_trips_through_the_glib_bridge`).
+//! `a_mount_operation_round_trips_through_the_glib_bridge`: Anonymous, then credentials with
+//! each storage choice on one operation, and GIO's own handlers stopped). The replacement
+//! order for a newer `show-processes` is guidance only: no test emits it.
 //!
 //! # Deviations
 //!

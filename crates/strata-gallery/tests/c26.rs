@@ -24,8 +24,8 @@ mod c26 {
     use gio::prelude::*;
     use rune::{Cx, El, Env, Key, KeyEvent, Mods, Runtime, Tx};
     use strata_components::mount_prompts::{
-        Choice, MountPromptState, MountPrompts, MountRequest, MountResponse, PasswordRequest,
-        QuestionRequest, Remember, Secret,
+        Choice, MountPromptState, MountPrompts, MountRequest, MountResponse, PasswordForm,
+        PasswordRequest, QuestionRequest, Remember, Secret,
     };
     use strata_gallery::{Gallery, scenes};
     use strata_kit::look::Look;
@@ -72,7 +72,7 @@ mod c26 {
             .and_then(|e| e.key)
     }
 
-    fn tap(rt: &mut Runtime<Gallery>, key: &str) {
+    fn tap<S>(rt: &mut Runtime<S>, key: &str) {
         let (x, y) = rt.find(key).unwrap_or_else(|| panic!("no element {key}"));
         rt.pointer_move(x, y);
         rt.pointer_down(x, y);
@@ -124,7 +124,7 @@ mod c26 {
     const CHILD_DEADLINE: Duration = Duration::from_secs(30);
 
     /// What the operation replied, read off it in its `reply` handler.
-    #[derive(Debug, PartialEq)]
+    #[derive(Clone, Debug, PartialEq)]
     struct Reply {
         result: String,
         username: Option<String>,
@@ -226,6 +226,9 @@ mod c26 {
             use gio::MountOperationResult::{Aborted, Handled};
             match answer.await {
                 Some(MountResponse::Password(c)) => {
+                    // The operation is reused across retries: an earlier Anonymous answer
+                    // would still stand (Strata's `apply_mount_credentials`).
+                    op.set_anonymous(false);
                     if let Some(user) = &c.user {
                         op.set_username(Some(user));
                     }
@@ -271,16 +274,19 @@ mod c26 {
     /// The host's side, as Strata's poll does it.
     fn poll(s: &mut App, _: f64, _: &mut Tx) -> bool {
         let mut changed = false;
+        // Withdrawal first: a binding that replaces a request asks the new one before it drops
+        // the old, so a withdrawal seen here comes with its replacement in the drain below,
+        // and the prompt updates in place instead of closing for a frame.
+        if s.prompt.ticket().is_some_and(Request::is_withdrawn) {
+            let _ = s.prompt.withdraw();
+            changed = true;
+        }
         for request in s.asks.drain() {
             changed = true;
             let question = request.question().clone();
             if let Some(old) = s.prompt.open(question, request) {
                 old.respond(MountResponse::Abort);
             }
-        }
-        if s.prompt.ticket().is_some_and(Request::is_withdrawn) {
-            let _ = s.prompt.withdraw();
-            changed = true;
         }
         for reply in s.replies.drain() {
             changed = true;
@@ -306,9 +312,16 @@ mod c26 {
 
     impl App {
         /// Emits `signal` on the fake operation, on the GLib thread, as a backend would.
+        ///
+        /// Then runs what is ready on the global default context: GMountOperation's own
+        /// handlers queue their `Unhandled` reply there (`g_idle_add`), and the bridge's loop
+        /// runs a context of its own, so without this a binding that didn't stop them would
+        /// pass.
         fn emit(&mut self, emit: fn(&gio::MountOperation)) {
             self.emits.push(self.glib.spawn(move || async move {
                 OP.with_borrow(|op| emit(op.as_ref().expect("the operation is bound")));
+                let default = glib::MainContext::default();
+                while default.iteration(false) {}
             }));
         }
     }
@@ -316,6 +329,7 @@ mod c26 {
     fn ask_password(op: &gio::MountOperation) {
         let flags = gio::AskPasswordFlags::NEED_USERNAME
             | gio::AskPasswordFlags::NEED_PASSWORD
+            | gio::AskPasswordFlags::ANONYMOUS_SUPPORTED
             | gio::AskPasswordFlags::SAVING_SUPPORTED;
         op.emit_by_name::<()>(
             "ask-password",
@@ -371,6 +385,35 @@ mod c26 {
         keys(rt).iter().any(|k| k == dialog)
     }
 
+    /// Answers one `ask-password` on the operation: `form` sets the choices, then the password
+    /// is typed and Return pressed, or, with none, Connect is clicked. Returns the reply.
+    fn sign_in(
+        rt: &mut Runtime<App>,
+        wakes: &Receiver<()>,
+        password: Option<&str>,
+        form: impl FnOnce(&mut PasswordForm),
+    ) -> Reply {
+        let n = rt.state.seen.len();
+        rt.state.emit(ask_password);
+        frames_until(rt, wakes, "the sign-in prompt", |rt| {
+            open(rt, "m-password-dialog")
+        });
+        run(rt, 0.3);
+        assert_eq!(focused(rt).as_deref(), Some("m-password-secret"));
+        rt.update(|s, _| form(s.prompt.password_form_mut().expect("a password prompt")));
+        run(rt, 0.1);
+        match password {
+            Some(password) => {
+                press(rt, Key::Text(password.into()));
+                press(rt, Key::Enter);
+            }
+            None => tap(rt, "m-password-primary"),
+        }
+        frames_until(rt, wakes, "the sign-in reply", |rt| rt.state.seen.len() > n);
+        assert_eq!(rt.state.seen.len(), n + 1, "one reply: {:?}", rt.state.seen);
+        rt.state.seen[n].clone()
+    }
+
     fn round_trip() {
         let (waker, wakes) = waker();
         let bridge = GlibThread::start(waker).expect("the bridge starts");
@@ -392,27 +435,42 @@ mod c26 {
         rt.poll = Some(poll);
         rt.frame(0.0);
 
-        // Sign in: the password typed and Return.
-        rt.state.emit(ask_password);
-        frames_until(&mut rt, &wakes, "the sign-in prompt", |rt| {
-            open(rt, "m-password-dialog")
-        });
-        run(&mut rt, 0.3);
-        assert_eq!(focused(&rt).as_deref(), Some("m-password-secret"));
-        press(&mut rt, Key::Text("hunter2".into()));
-        press(&mut rt, Key::Enter);
-        frames_until(&mut rt, &wakes, "the sign-in reply", |rt| {
-            rt.state.seen.len() == 1
-        });
-        let signed_in = Reply {
-            result: "Handled".into(),
-            username: Some("ann".into()),
-            password: Some("hunter2".into()),
-            anonymous: false,
-            save: "Never".into(),
-            choice: 0,
-        };
-        assert_eq!(rt.state.seen[0], signed_in);
+        // Sign in on one operation, as GIO reuses it across retries: Anonymous, then
+        // credentials with each storage choice, so a setting one answer leaves behind shows.
+        let anonymous = sign_in(&mut rt, &wakes, None, |form| form.anonymous = true);
+        assert_eq!(
+            anonymous,
+            Reply {
+                result: "Handled".into(),
+                username: None,
+                password: None,
+                anonymous: true,
+                save: "Never".into(),
+                choice: 0,
+            }
+        );
+        for (remember, save) in [
+            (Remember::ForSession, "ForSession"),
+            (Remember::Permanently, "Permanently"),
+            (Remember::Never, "Never"),
+        ] {
+            let reply = sign_in(&mut rt, &wakes, Some("hunter2"), |form| {
+                form.remember = remember;
+            });
+            assert_eq!(
+                reply,
+                Reply {
+                    result: "Handled".into(),
+                    username: Some("ann".into()),
+                    password: Some("hunter2".into()),
+                    anonymous: false,
+                    save: save.into(),
+                    choice: 0,
+                },
+                "{remember:?} after Anonymous"
+            );
+        }
+        let n = rt.state.seen.len();
 
         // The host key, declined with Return on the declining choice, which has focus.
         rt.state.emit(ask_question);
@@ -422,10 +480,11 @@ mod c26 {
         run(&mut rt, 0.3);
         press(&mut rt, Key::Enter);
         frames_until(&mut rt, &wakes, "the host-key reply", |rt| {
-            rt.state.seen.len() == 2
+            rt.state.seen.len() > n
         });
-        assert_eq!(rt.state.seen[1].result, "Handled");
-        assert_eq!(rt.state.seen[1].choice, 1, "Cancel Login, by its index");
+        assert_eq!(rt.state.seen.len(), n + 1, "one reply: {:?}", rt.state.seen);
+        assert_eq!(rt.state.seen[n].result, "Handled");
+        assert_eq!(rt.state.seen[n].choice, 1, "Cancel Login, by its index");
 
         // Escape aborts.
         rt.state.emit(ask_password);
@@ -434,8 +493,10 @@ mod c26 {
         });
         run(&mut rt, 0.3);
         press(&mut rt, Key::Escape);
-        frames_until(&mut rt, &wakes, "the abort", |rt| rt.state.seen.len() == 3);
-        assert_eq!(rt.state.seen[2].result, "Aborted");
+        frames_until(&mut rt, &wakes, "the abort", |rt| {
+            rt.state.seen.len() == n + 2
+        });
+        assert_eq!(rt.state.seen[n + 1].result, "Aborted");
 
         // The backend's `aborted` closes the prompt, and nothing replies.
         rt.state.emit(ask_password);
@@ -451,7 +512,11 @@ mod c26 {
             rt.frame(FRAME);
             thread::sleep(Duration::from_millis(10));
         }
-        assert_eq!(rt.state.seen.len(), 3, "a withdrawn request gets no reply");
+        assert_eq!(
+            rt.state.seen.len(),
+            n + 2,
+            "a withdrawn request gets no reply"
+        );
         assert!(!open(&rt, "m-password-dialog"));
     }
 

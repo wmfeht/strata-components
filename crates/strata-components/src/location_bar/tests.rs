@@ -130,11 +130,14 @@ fn navigating_keeps_an_entry_being_typed_in() {
 fn a_resting_drag_springs_once_after_its_delay() {
     let mut s = LocationBarState::new();
     let mut tx = Tx::default();
-    s.drag_over(1, "/home/demo", DropHover::Accepting, Some(SPRING_DELAY));
-    assert!(
-        intents(s.tick(1.0, &mut tx)).is_empty(),
-        "the first tick stamps it"
+    s.drag_over(
+        1,
+        "/home/demo",
+        DropHover::Accepting,
+        Some(SPRING_DELAY),
+        1.0,
     );
+    assert!(intents(s.tick(1.0, &mut tx)).is_empty());
     assert!(intents(s.tick(1.5, &mut tx)).is_empty());
     assert_eq!(
         intents(s.tick(1.0 + SPRING_DELAY, &mut tx)),
@@ -145,11 +148,17 @@ fn a_resting_drag_springs_once_after_its_delay() {
     );
     assert!(intents(s.tick(3.0, &mut tx)).is_empty(), "once");
     // Leaving before the delay disarms it, and so does spring-loading being off.
-    s.drag_over(1, "/home/demo", DropHover::Accepting, Some(SPRING_DELAY));
+    s.drag_over(
+        1,
+        "/home/demo",
+        DropHover::Accepting,
+        Some(SPRING_DELAY),
+        4.0,
+    );
     let _ = s.tick(4.0, &mut tx);
-    s.drag_over(1, "/home/demo", DropHover::Left, Some(SPRING_DELAY));
-    assert!(intents(s.tick(5.0, &mut tx)).is_empty());
-    s.drag_over(1, "/home/demo", DropHover::Accepting, None);
+    s.drag_over(1, "/home/demo", DropHover::Left, Some(SPRING_DELAY), 4.5);
+    assert!(intents(s.tick(4.0 + SPRING_DELAY, &mut tx)).is_empty());
+    s.drag_over(1, "/home/demo", DropHover::Accepting, None, 6.0);
     let _ = s.tick(6.0, &mut tx);
     assert!(intents(s.tick(7.0, &mut tx)).is_empty());
 }
@@ -158,7 +167,7 @@ fn a_resting_drag_springs_once_after_its_delay() {
 fn the_copy_feedback_lasts_two_seconds() {
     let mut s = LocationBarState::new();
     let mut tx = Tx::default();
-    s.show_copied();
+    s.show_copied(10.0);
     assert!(s.copied());
     let _ = s.tick(10.0, &mut tx);
     let _ = s.tick(10.0 + COPIED_FOR - 0.1, &mut tx);
@@ -183,9 +192,21 @@ fn a_leave_from_another_crumb_keeps_the_hover() {
 fn a_repeated_hover_on_the_same_crumb_keeps_the_spring_s_start() {
     let mut s = LocationBarState::new();
     let mut tx = Tx::default();
-    s.drag_over(1, "/home/demo", DropHover::Accepting, Some(SPRING_DELAY));
+    s.drag_over(
+        1,
+        "/home/demo",
+        DropHover::Accepting,
+        Some(SPRING_DELAY),
+        1.0,
+    );
     let _ = s.tick(1.0, &mut tx);
-    s.drag_over(1, "/home/demo", DropHover::Accepting, Some(SPRING_DELAY));
+    s.drag_over(
+        1,
+        "/home/demo",
+        DropHover::Accepting,
+        Some(SPRING_DELAY),
+        1.5,
+    );
     let _ = s.tick(1.5, &mut tx);
     assert_eq!(
         intents(s.tick(1.0 + SPRING_DELAY, &mut tx)),
@@ -195,9 +216,15 @@ fn a_repeated_hover_on_the_same_crumb_keeps_the_spring_s_start() {
         }]
     );
     // Another crumb starts afresh.
-    s.drag_over(1, "/home/demo", DropHover::Accepting, Some(SPRING_DELAY));
+    s.drag_over(
+        1,
+        "/home/demo",
+        DropHover::Accepting,
+        Some(SPRING_DELAY),
+        5.0,
+    );
     let _ = s.tick(5.0, &mut tx);
-    s.drag_over(0, "/", DropHover::Accepting, Some(SPRING_DELAY));
+    s.drag_over(0, "/", DropHover::Accepting, Some(SPRING_DELAY), 5.5);
     assert!(intents(s.tick(5.0 + SPRING_DELAY, &mut tx)).is_empty());
 }
 
@@ -206,10 +233,10 @@ fn a_repeated_hover_on_the_same_crumb_keeps_the_spring_s_start() {
 fn a_second_copy_restarts_the_feedback() {
     let mut s = LocationBarState::new();
     let mut tx = Tx::default();
-    s.show_copied();
+    s.show_copied(10.0);
     let _ = s.tick(10.0, &mut tx);
     let _ = s.tick(11.5, &mut tx);
-    s.show_copied();
+    s.show_copied(11.5);
     let _ = s.tick(11.5, &mut tx);
     let _ = s.tick(12.5, &mut tx);
     assert!(s.copied(), "still showing 1 s after the second press");

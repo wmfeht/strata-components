@@ -3,7 +3,6 @@
 use std::any::Any;
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::time::Duration;
 
 use rune::{TextEdit, Tx};
 
@@ -49,23 +48,14 @@ impl Polled {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-enum Copied {
-    #[default]
-    Rest,
-    /// Pressed; the next tick stamps the time.
-    Pending,
-    Since(f64),
-}
-
 /// A drag resting on an ancestor crumb, waiting to spring it open.
 #[derive(Clone, Debug, PartialEq)]
 struct Spring {
     index: usize,
     id: String,
     delay: f64,
-    /// When the next tick saw it: a hover handler has no clock (Rune draft U-C1e-6).
-    since: Option<f64>,
+    /// When it arrived, on `Tx::clock`.
+    since: f64,
 }
 
 /// The location bar's state: crumbs or the entry, the entry's text, the suggestions, the
@@ -91,7 +81,8 @@ pub struct LocationBarState {
     hovered: Option<usize>,
     drop: Option<(usize, DropHover)>,
     spring: Option<Spring>,
-    copied: Copied,
+    /// When "Path copied" showed, on `Tx::clock`.
+    copied: Option<f64>,
     reveal: bool,
     /// Navigations so far: the crumb row's key, so each new trail mounts afresh.
     trail_generation: u64,
@@ -135,7 +126,7 @@ impl Default for LocationBarState {
             hovered: None,
             drop: None,
             spring: None,
-            copied: Copied::Rest,
+            copied: None,
             reveal: true,
             trail_generation: 0,
             feed: ScrollFeed::new(),
@@ -187,7 +178,7 @@ impl LocationBarState {
 
     /// Whether the Copy path button says "Path copied".
     pub fn copied(&self) -> bool {
-        self.copied != Copied::Rest
+        self.copied.is_some()
     }
 
     /// Where the hierarchy menu is open, in window points.
@@ -329,9 +320,9 @@ impl LocationBarState {
         out
     }
 
-    /// One frame at `now` seconds on the host's clock (`Tx` has none: Rune draft U-C1e-6):
-    /// ends an edit whose entry lost the keyboard to a press elsewhere (U-C6-3), springs a crumb
-    /// a drag rested on, and ends the copy feedback.
+    /// One frame at `now` seconds on the window's clock (the poll's, as `Tx::clock`): ends an edit
+    /// whose entry lost the keyboard to a press elsewhere (U-C6-3), springs a crumb a drag rested
+    /// on, and ends the copy feedback.
     pub fn tick(&mut self, now: f64, tx: &mut Tx) -> Polled {
         let mut out = Polled::default();
         if self.editing {
@@ -348,8 +339,7 @@ impl LocationBarState {
             }
         }
         if let Some(spring) = self.spring.as_mut() {
-            let since = *spring.since.get_or_insert(now);
-            let left = spring.delay - (now - since);
+            let left = spring.delay - (now - spring.since);
             if left <= 1e-6 {
                 let id = spring.id.clone();
                 self.spring = None;
@@ -358,20 +348,16 @@ impl LocationBarState {
                     via: Via::Spring,
                 });
             } else {
-                tx.wake_after(Duration::from_secs_f64(left));
+                tx.wake_at(spring.since + spring.delay);
             }
         }
         match self.copied {
-            Copied::Rest => {}
-            Copied::Pending => {
-                self.copied = Copied::Since(now);
-                tx.wake_after(Duration::from_secs_f64(COPIED_FOR));
-            }
-            Copied::Since(t) if now - t >= COPIED_FOR - 1e-6 => {
-                self.copied = Copied::Rest;
+            None => {}
+            Some(t) if now - t >= COPIED_FOR - 1e-6 => {
+                self.copied = None;
                 out.changed = true;
             }
-            Copied::Since(t) => tx.wake_after(Duration::from_secs_f64(COPIED_FOR - (now - t))),
+            Some(t) => tx.wake_at(t + COPIED_FOR),
         }
         out
     }
@@ -421,19 +407,22 @@ impl LocationBarState {
         }
     }
 
-    /// Shows "Path copied" for [`COPIED_FOR`], counted from the next tick: the Copy path button
-    /// does this itself; a scene, or a host restoring a tab, may too.
-    pub fn show_copied(&mut self) {
-        self.copied = Copied::Pending;
+    /// Shows "Path copied" for [`COPIED_FOR`] from `now` (`Tx::clock`): the Copy path button
+    /// does this itself; a scene, or a host restoring a tab, may too. The host's next tick asks
+    /// for the wake that ends it.
+    pub fn show_copied(&mut self, now: f64) {
+        self.copied = Some(now);
     }
 
-    /// A drag the crumb `index` (`id`) accepts arrived or left. `delay` is the spring delay.
+    /// A drag the crumb `index` (`id`) accepts arrived or left at `now` (`Tx::clock`). `delay`
+    /// is the spring delay.
     pub(crate) fn drag_over(
         &mut self,
         index: usize,
         id: &str,
         hover: DropHover,
         delay: Option<f64>,
+        now: f64,
     ) {
         self.set_drop_hover(index, hover);
         match (hover, delay) {
@@ -449,7 +438,7 @@ impl LocationBarState {
                     index,
                     id: id.to_owned(),
                     delay,
-                    since: None,
+                    since: now,
                 });
             }
             _ if self.spring.as_ref().is_some_and(|s| s.index == index) => self.spring = None,

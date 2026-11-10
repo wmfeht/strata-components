@@ -1,8 +1,6 @@
 //! The crumb strip: ancestors as buttons, the current folder with its Copy path button, in a
 //! sideways scroll viewport with edge fades and an overflow bar in its own row underneath.
 
-use std::time::Duration;
-
 use rune::{
     El, Key, KeyEvent, PointerButton, PointerEvent, Tx, WheelEvent, col, el, icon, row, text,
 };
@@ -12,6 +10,7 @@ use super::build::{Ctx, crumb_key, route};
 use super::data::{CRUMB_CHARS, Crumb, elide_middle};
 use super::drops;
 use super::intent::{LocationIntent, Via};
+use super::state::COPIED_FOR;
 use crate::contract::dnd::DropHover;
 use crate::header;
 
@@ -248,10 +247,9 @@ fn current<S: 'static>(cx: &Ctx<'_, S>, crumb: &Crumb, n: usize) -> El {
     // The header's action look; its tooltip names it.
     let copy = header::action(look, icon_name, &label)
         .on_press_tx(move |s: &mut S, tx: &mut Tx| {
-            access(s).show_copied();
-            // The handler has no clock: the next poll stamps the press, then asks for the wake that
-            // ends the feedback. A window at rest polls only at the wakes it asked for.
-            tx.wake_after(Duration::ZERO);
+            access(s).show_copied(tx.clock());
+            // A window at rest polls only at the wakes it asked for.
+            tx.wake_at(tx.clock() + COPIED_FOR);
             emit(s, LocationIntent::CopyPath, tx);
         })
         .build(k)

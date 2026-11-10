@@ -1,4 +1,4 @@
-//! The search's state: the field, the cached matches, the pending jump's highlight and focus hop.
+//! The search's state: the field, the cached matches, and the pending jump's highlight.
 
 use std::time::Duration;
 
@@ -6,7 +6,6 @@ use rune::{TextEdit, Tx};
 
 use super::index::SearchIndex;
 use super::matching::{Matches, Prepared, normalized};
-use crate::controls::tabbed_form::hop::Hop;
 
 /// How long a jumped-to row's highlight shows, in seconds: full for [`FLASH_HOLD`], faded out
 /// by this (OWNER ruling; Strata highlights nothing).
@@ -39,7 +38,6 @@ pub struct SettingsSearchState {
     revision: Option<u64>,
     pub(super) flash: Option<Flash>,
     generation: u64,
-    pub(super) hop: Hop,
 }
 
 /// A search found by [`SettingsSearchState::plan`], to store.

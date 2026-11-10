@@ -637,7 +637,6 @@ fn editor_view(g: &Gallery, look: &Look) -> El {
         .child(error)
         .child(form.build(g, look, &pages, |g, i| editor_page(g, look, i)))
         .child(footer)
-        .children(form.hop(g))
 }
 
 pub fn view(g: &Gallery, cx: &mut Cx<Gallery>) -> El {
@@ -677,8 +676,8 @@ pub fn on_key(g: &mut Gallery, key: &KeyEvent, tx: &mut Tx) -> bool {
     key.key == rune::Key::Escape && close(g)
 }
 
-/// Runs at the start of every frame while this page is open, with the clock in seconds. Runs
-/// the search (and a scene's first jump), the form's focus hop and the number fields' blur
+/// Runs at the start of every frame while this page is open, with the clock in seconds. Runs the
+/// search (and a scene's first jump), the form's carry of the keyboard and the number fields' blur
 /// commits. True when state changed.
 pub fn poll(g: &mut Gallery, t: f64, tx: &mut Tx) -> bool {
     g.c20c.now = t;

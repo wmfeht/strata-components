@@ -68,8 +68,6 @@
 //!   there is none, so the accessibility goldens show the searchbox, the status and the
 //!   filtered navigation instead.
 //! - **D4 (OWNER):** the polite count status, as C17's and C19's; Strata announces nothing.
-//! - **D5:** the keyboard reaches the row by a one-frame focus hop (`tabbed_form::hop`), as
-//!   Rune 5d421fd has no `Tx::focus` (upstream #173).
 //! - The matched text is new against Strata, which marks nothing.
 //! - Strata's icon-only navigation turns the field into a button with a popover; that layout
 //!   is the host's (the field fits in a rune-kit `Popover`, and the query lives in the state).
@@ -81,11 +79,9 @@
 //!
 //! # Rune
 //!
-//! Rune dev 5d421fd: partly. It has the searchbox and status roles, polite live regions,
+//! Rune 2a44156: partly. It has the searchbox and status roles, polite live regions,
 //! `scroll_into_view` (which lands on a row mounted by the same commit, probe P3), `Sequence`
-//! and `focus_return`; it lacks `Tx::focus` (#173). Past the pin and not adopted: `Tx::focus`
-//! for web focus (#384) and `Tx::focused` in every handler (#441); nothing on listboxes,
-//! scroll-into-view or sequences (checked to upstream `0fba24cd`, 2026-11-09).
+//! and `Tx::focus` (the jump's, resolved against the page it shows); nothing on listboxes.
 //!
 //! # Rune drafts (not filed)
 //!
@@ -93,7 +89,6 @@
 //!   sequence lands its final pose at once, so a highlight that fades out never shows. Ask:
 //!   `Sequence::reduced(pose, hold)`, a pose held for a time instead of the final one. Here:
 //!   with the Look's animations off the highlight is a static fill the host's tick removes.
-//! - The jump's focus uses `tabbed_form`'s hop: see its #173 comment draft.
 
 #[doc(hidden)]
 pub mod fixture;

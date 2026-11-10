@@ -80,7 +80,6 @@ fn view(h: &Host, _: &mut Cx<Host>) -> El {
         .key("dialog")
         .child(f.build(h, &h.look, &pages(h), body))
         .child(row().key("footer").child(save))
-        .children(f.hop(h))
 }
 
 fn poll(h: &mut Host, _: f64, tx: &mut Tx) -> bool {
@@ -282,10 +281,6 @@ fn a_failed_save_shows_the_invalid_fields_page_and_moves_the_keyboard_to_it() {
             Some("name"),
             "{mounting:?}: and the name field has the keyboard"
         );
-        assert!(
-            info(&rt, "f-hop").is_none_or(|e| e.exiting),
-            "{mounting:?}: the hop's leaf went"
-        );
     }
 }
 
@@ -309,9 +304,8 @@ fn arrows_choose_as_they_move_and_wrap() {
     assert_eq!(seen, want);
 }
 
-/// The keyboard is on the page being hidden, and the host asks from its poll before the
-/// form's tick: the leaf still gets a frame, and the page changes as it goes, so the keyboard
-/// still moves.
+/// The keyboard is on the page being hidden, and the host asks from its poll: the page
+/// changes and the keyboard still moves.
 #[test]
 fn an_error_asked_for_from_inside_the_hidden_page_still_moves_the_keyboard() {
     let mut rt = mount(Mounting::Kept, "");

@@ -127,6 +127,9 @@
                                       "key": "c20c-workers-input",
                                       "name": "Thumbnail workers",
                                       "role": "text-input",
+                                      "states": [
+                                        "focused"
+                                      ],
                                       "value": "4"
                                     }
                                   ],

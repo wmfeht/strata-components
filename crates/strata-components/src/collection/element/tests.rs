@@ -274,10 +274,9 @@ fn collection(s: &Host) -> Collection<Host> {
         );
     }
     if !s.vanished.is_empty() {
-        c = c.marks(|s: &Host, id| {
-            let mut m = RowMarks::default();
-            m.vanished = s.vanished.contains(&id);
-            m
+        c = c.marks(|s: &Host, id| RowMarks {
+            vanished: s.vanished.contains(&id),
+            ..RowMarks::default()
         });
     }
     c.settings(7u32)

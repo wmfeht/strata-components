@@ -46,52 +46,12 @@
       "dx": 0,
       "dy": -40,
       "cmd": true
-    },
-    {
-      "t": 0.8400000000000001,
-      "type": "wheel",
-      "key": "pdf-bar",
-      "dx": 0,
-      "dy": -40,
-      "cmd": true
-    },
-    {
-      "t": 0.88,
-      "type": "wheel",
-      "key": "pdf-bar",
-      "dx": 0,
-      "dy": -40,
-      "cmd": true
-    },
-    {
-      "t": 0.92,
-      "type": "wheel",
-      "key": "pdf-bar",
-      "dx": 0,
-      "dy": -40,
-      "cmd": true
-    },
-    {
-      "t": 0.9600000000000001,
-      "type": "wheel",
-      "key": "pdf-bar",
-      "dx": 0,
-      "dy": -40,
-      "cmd": true
-    },
-    {
-      "t": 1.0,
-      "type": "wheel",
-      "key": "pdf-bar",
-      "dx": 0,
-      "dy": -40,
-      "cmd": true
     }
   ],
   "expect": [
     {
       "key": "pdf",
-      "value": "Page 1 of 12, 100%"
+      "value": "Page 1 of 12, 132%"
     },
     {
       "key": "c12-text-size",

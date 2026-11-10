@@ -8,8 +8,8 @@ mod c12 {
     use rune::text::TextSystem;
     use rune::{Cursor, Cx, El, ElementInfo, Env, Key, KeyEvent, Mods, Runtime, WheelEvent};
     use strata_components::pdf_view::{Landed, PdfDocument, PdfState, PdfView, RenderCaps};
-    use strata_components::preview_drawer::DrawerRules;
-    use strata_gallery::scenes::c12::{fake_doc, render};
+    use strata_components::preview_drawer::{DrawerRules, HostedPreview};
+    use strata_gallery::scenes::c12::{fake_doc, prose, render};
     use strata_gallery::{Gallery, scenes};
     use strata_kit::fonts;
     use strata_kit::look::Look;
@@ -243,11 +243,28 @@ mod c12 {
         rt.pointer_down(x, y);
         rt.pointer_up(x, y);
         rt.frame(FRAME);
+        // Jump just after a render starts, so the cancel can reach it before it's done.
+        let started = rt.state.c12.renderer.busy.map(|(r, _)| r.ticket);
+        for _ in 0..30 {
+            rt.frame(FRAME);
+            if rt.state.c12.renderer.busy.map(|(r, _)| r.ticket) != started {
+                break;
+            }
+        }
         let busy = rt.state.c12.renderer.busy.map(|(r, _)| r.page);
+        let busy = busy.expect("a render in flight when the jump comes");
         rt.key(KeyEvent {
             key: Key::End,
             mods: ctrl(),
         });
+        rt.frame(FRAME);
+        rt.frame(FRAME);
+        rt.frame(FRAME);
+        assert!(
+            rt.state.c12.renderer.cancelled.contains(&busy),
+            "the render in flight for page {} is cancelled as the jump lands",
+            busy + 1
+        );
         run(&mut rt, 1.0);
         let d = &rt.state.c12;
         assert!(d.pdf.visible().contains(&499), "{:?}", d.pdf.visible());
@@ -262,11 +279,6 @@ mod c12 {
             late.iter().all(|&p| p > 490),
             "only the end renders after the jump: {late:?}"
         );
-        if let Some(p) = busy.filter(|&p| p < 3) {
-            assert!(
-                d.renderer.cancelled.contains(&p) || d.renderer.rendered.iter().any(|r| r.0 == p)
-            );
-        }
         assert!(
             d.renderer.rendered.iter().all(|r| r.0 < 3 || r.0 > 490),
             "nothing between"
@@ -285,46 +297,116 @@ mod c12 {
         assert!(d.pdf.held(req.page).is_none());
     }
 
-    // D6: a zoom far down a document of mixed page sizes keeps the centre once its page lands.
+    /// The 500-page scene with every third page landscape, sizes the host knows up front.
+    fn mixed_known(g: &mut Gallery) {
+        g.c12.doc = (0..500)
+            .map(|p| {
+                let mut page = fake_doc(1, false).remove(0);
+                if p % 3 == 1 {
+                    page.size = [792.0, 612.0];
+                }
+                page
+            })
+            .collect();
+        let mut doc = PdfDocument::new(500, [612.0, 792.0]);
+        for p in (0..500).filter(|p| p % 3 == 1) {
+            doc = doc.with_size(p, [792.0, 612.0]);
+        }
+        g.c12.pdf.open(doc);
+    }
+
+    /// Zooms `notches` notches at page `target`, `gap` frames apart: where the centre was, where
+    /// it lands, and the farthest any frame drew it from there, in pages.
+    fn zoom_mixed(target: usize, notches: usize, gap: usize) -> ((usize, f32), (usize, f32), f32) {
+        let mut rt = mount_with("c12-long-light", 1.0, mixed_known);
+        rt.state.c12.pdf.show_page(target, 0.4);
+        run(&mut rt, 2.0);
+        let before = at_centre(&rt);
+        let (x, y) = centre(&page(&rt, before.0).expect("the centre page"));
+        rt.pointer_down(x, y);
+        rt.pointer_up(x, y);
+        rt.frame(FRAME);
+        assert_eq!(at_centre(&rt), before, "a click doesn't move the view");
+        let far = |at: (usize, f32)| (at.0 as f32 + at.1 - before.0 as f32 - before.1).abs();
+        let mut worst: f32 = 0.0;
+        for _ in 0..notches {
+            zoom_wheel(&mut rt, 40.0);
+            rt.frame(FRAME);
+            worst = worst.max(far(at_centre(&rt)));
+            for _ in 0..gap {
+                rt.frame(FRAME);
+                worst = worst.max(far(at_centre(&rt)));
+            }
+        }
+        for _ in 0..12 {
+            rt.frame(FRAME);
+            worst = worst.max(far(at_centre(&rt)));
+        }
+        run(&mut rt, 0.5);
+        (before, at_centre(&rt), worst)
+    }
+
+    // D6: a zoom far down a document of mixed page sizes keeps the centre once its page lands:
+    // one notch, notches on consecutive frames (review 1's B2: each took the centre from pages
+    // the last notch's estimate had put on screen, and landed 3 pages off), and notches apart.
     #[test]
     fn a_zoom_far_down_a_mixed_document_keeps_the_centre() {
-        let mut rt = mount_with("c12-long-light", 1.0, |g| {
-            g.c12.doc = (0..500)
-                .map(|p| {
-                    let mut page = fake_doc(1, false).remove(0);
-                    if p % 7 == 3 {
-                        page.size = [792.0, 612.0];
-                    }
-                    page
-                })
-                .collect();
-            g.c12.pdf.open(PdfDocument::new(500, [612.0, 792.0]));
-        });
-        // Every landscape page above has been seen once: their sizes are known.
+        for (target, notches, gap) in [(300, 1, 0), (300, 4, 0), (300, 4, 20), (30, 4, 0)] {
+            let (before, after, worst) = zoom_mixed(target, notches, gap);
+            eprintln!(
+                "page {target}, {notches} notches {gap} frames apart: {before:?} then {after:?}, \
+                 at most {worst:.2} pages off on the way"
+            );
+            assert_eq!(after.0, before.0, "the same page");
+            assert!(
+                (after.1 - before.1).abs() < 0.02,
+                "the same point: {before:?} then {after:?}"
+            );
+            assert!(worst < 1.0, "no frame more than a page off: {worst}");
+        }
+        // Ctrl+0 back to fitted width lands on the same page.
+        let mut rt = mount_with("c12-long-light", 1.0, mixed_known);
         rt.state.c12.pdf.show_page(300, 0.4);
         run(&mut rt, 2.0);
         let (p0, f0) = at_centre(&rt);
-        // A click gives the pages the keys (a caret: nothing selected).
         let (x, y) = centre(&page(&rt, p0).expect("the centre page"));
         rt.pointer_down(x, y);
         rt.pointer_up(x, y);
         rt.frame(FRAME);
-        assert_eq!(at_centre(&rt), (p0, f0), "a click doesn't move the view");
         for _ in 0..4 {
             zoom_wheel(&mut rt, 40.0);
             rt.frame(FRAME);
         }
-        run(&mut rt, 0.2);
-        let (p1, f1) = at_centre(&rt);
-        assert_eq!(p1, p0, "the same page");
-        assert!((f1 - f0).abs() < 0.02, "the same point: {f0} then {f1}");
+        run(&mut rt, 0.3);
         rt.key(KeyEvent {
             key: Key::Command('0'),
             mods: ctrl(),
         });
-        run(&mut rt, 0.2);
+        run(&mut rt, 0.3);
         assert_eq!(rt.state.c12.pdf.level(), 1.0);
-        assert_eq!(at_centre(&rt).0, p0, "Ctrl+0 lands on the same page");
+        let (p2, f2) = at_centre(&rt);
+        assert_eq!(p2, p0, "Ctrl+0 lands on the same page");
+        assert!((f2 - f0).abs() < 0.02, "{f0} then {f2}");
+    }
+
+    // A Ctrl+wheel in the frame after a plain wheel moved the pages: input comes after the
+    // pages report where the scroll put them, so the zoom keeps the point under the centre.
+    #[test]
+    fn a_ctrl_wheel_right_after_a_scroll_keeps_the_centre() {
+        let mut rt = mount("c12-pages-light");
+        let vp = viewport(&rt);
+        rt.wheel(vp[0] + 50.0, vp[1] + 50.0, -150.0);
+        rt.frame(FRAME);
+        let before = at_centre(&rt);
+        zoom_wheel(&mut rt, 40.0);
+        rt.frame(FRAME);
+        run(&mut rt, 0.3);
+        let after = at_centre(&rt);
+        assert_eq!(after.0, before.0);
+        assert!(
+            (after.1 - before.1).abs() < 0.02,
+            "{before:?} then {after:?}"
+        );
     }
 
     // A zoom asked as the pages first lay out (the zoomed scene zooms from its first poll after
@@ -381,6 +463,154 @@ mod c12 {
                 .iter()
                 .all(|r| d.pdf.visible().contains(&r.0) || r.0 == d.pdf.visible().end)
         );
+    }
+
+    // Review 1's B1: a page whose text layer the budget dropped while it kept its image gets
+    // its text back once it's in view again.
+    #[test]
+    fn a_page_that_lost_its_text_gets_it_back_in_view() {
+        let mut rt = mount_with("c12-long-light", 1.0, |g| {
+            g.c12.pdf.set_budgets(1 << 30, 300 << 10);
+        });
+        assert!(text_of(&rt, 0), "page 1 has its text at first");
+        for _ in 0..30 {
+            let vp = viewport(&rt);
+            rt.wheel(vp[0] + 50.0, vp[1] + 50.0, -300.0);
+            rt.frame(1.0 / 10.0);
+        }
+        run(&mut rt, 1.0);
+        for _ in 0..40 {
+            let vp = viewport(&rt);
+            rt.wheel(vp[0] + 50.0, vp[1] + 50.0, 300.0);
+            rt.frame(1.0 / 10.0);
+        }
+        run(&mut rt, 2.0);
+        let d = &rt.state.c12.pdf;
+        assert!(d.visible().contains(&0) && d.held(0).is_some());
+        assert!(text_of(&rt, 0), "page 1 is back in view with its text");
+        assert!(d.held_bytes().1 <= 300 << 10);
+    }
+
+    fn text_of(rt: &Runtime<Gallery>, i: usize) -> bool {
+        let tail = format!("-p{i}/page/text");
+        rt.elements()
+            .into_iter()
+            .any(|e| e.path.ends_with(&tail) && !e.exiting)
+    }
+
+    // The text budget holds while find is open: pages whose layers it drops stay counted, and
+    // aren't asked for their text again while the query runs.
+    #[test]
+    fn find_holds_the_text_budget_and_keeps_its_count() {
+        let count = |budget: usize| {
+            let mut rt = mount_with("c12-long-light", 1.0, |g| {
+                g.c12.pdf.set_searchable(true);
+                g.c12.pdf.set_budgets(64 << 20, budget);
+            });
+            rt.state.c12.pdf.find("strata");
+            rt.frame(FRAME);
+            run(&mut rt, 40.0);
+            let d = &rt.state.c12;
+            let total = d.pdf.find_status().map(|s| s.total);
+            (total, d.pdf.held_bytes().1, d.renderer.rendered.len())
+        };
+        let (all, _, _) = count(usize::MAX);
+        let (capped, text, renders) = count(4 << 20);
+        assert_eq!(capped, all, "the same count");
+        assert!(text <= 4 << 20, "{text} bytes of text held");
+        assert!(renders <= 502, "each page asked once, not again: {renders}");
+    }
+
+    // Review 1's S3: when the zoom rests, a request still out for a visible page at the width
+    // before it is cancelled at once.
+    #[test]
+    fn the_rest_cancels_a_request_at_the_old_width() {
+        let mut rt = mount_with("c12-pages-light", 1.0, |g| g.c12.renderer.paused = true);
+        let req = rt.state.c12.pdf.pop().expect("a request");
+        assert_eq!(req.page, 0);
+        for _ in 0..3 {
+            zoom_wheel(&mut rt, 40.0);
+            rt.frame(FRAME);
+        }
+        assert!(
+            rt.state.c12.renderer.cancelled.is_empty(),
+            "kept while the zoom moves"
+        );
+        run(&mut rt, 0.2);
+        assert_eq!(
+            rt.state.c12.renderer.cancelled,
+            [0],
+            "cancelled when it rests"
+        );
+    }
+
+    // Strata's `select_all` returns false when no page has text: the key goes on.
+    #[test]
+    fn ctrl_a_with_no_text_goes_on() {
+        let mut rt = mount("c12-loading-light");
+        let (x, y) = centre(&page(&rt, 0).expect("page 1"));
+        rt.pointer_down(x, y);
+        rt.pointer_up(x, y);
+        rt.frame(FRAME);
+        rt.key(KeyEvent {
+            key: Key::Command('a'),
+            mods: ctrl(),
+        });
+        rt.frame(FRAME);
+        assert_eq!(rt.state.c12.last, "Ctrl+A passed on");
+    }
+
+    // The I-beam follows text that scrolls under a still pointer.
+    #[test]
+    fn the_cursor_follows_text_scrolled_under_a_still_pointer() {
+        let mut rt = mount("c12-pages-light");
+        let p0 = page(&rt, 0).expect("page 1");
+        let k = p0.rect[2] / 612.0;
+        // Over the last line of page 1 with text (the fake page's lines are 16 points apart from
+        // 72, their boxes 13 points tall).
+        let last = prose(0, 38)
+            .iter()
+            .rposition(|l| l.len() > 20)
+            .expect("a line of text") as f32;
+        let (x, y) = (
+            p0.rect[0] + (54.0 + 6.6 * 5.0) * k,
+            p0.rect[1] + (72.0 + last * 16.0 + 6.0) * k,
+        );
+        rt.pointer_move(x, y);
+        rt.frame(FRAME);
+        rt.pointer_down(x, y);
+        rt.pointer_up(x, y);
+        rt.frame(FRAME);
+        assert_eq!(rt.cursor(), Cursor::Text);
+        // Down scrolls 40 points: the bottom margin comes under the pointer.
+        rt.key(KeyEvent {
+            key: Key::Down,
+            mods: Mods::default(),
+        });
+        run(&mut rt, 0.3);
+        assert_eq!(rt.cursor(), Cursor::Grab);
+    }
+
+    // A drag from text that ends over a margin shows the grab once released, not the I-beam
+    // it started with.
+    #[test]
+    fn the_cursor_is_worked_out_again_on_release() {
+        let mut rt = mount("c12-pages-light");
+        let p0 = page(&rt, 0).expect("page 1");
+        let (x, y) = centre(&p0);
+        rt.pointer_move(x, y);
+        rt.frame(FRAME);
+        assert_eq!(rt.cursor(), Cursor::Text);
+        rt.pointer_down(x, y);
+        rt.frame(FRAME);
+        let margin = (p0.rect[0] + 8.0, y);
+        for i in 1..=8 {
+            rt.pointer_move(x + (margin.0 - x) * i as f32 / 8.0, y);
+            rt.frame(FRAME);
+        }
+        rt.pointer_up(margin.0, margin.1);
+        rt.frame(FRAME);
+        assert_eq!(rt.cursor(), Cursor::Grab);
     }
 
     #[test]

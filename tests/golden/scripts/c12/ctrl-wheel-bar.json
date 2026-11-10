@@ -58,7 +58,7 @@
                 },
                 {
                   "key": "c12-log",
-                  "name": "Rendered p1 840 p2 840 p3 840 p1 1278 p1 840 · Cancelled none",
+                  "name": "Rendered p1 840 p2 840 p3 840 p1 1278 · Cancelled none",
                   "role": "label"
                 },
                 {
@@ -140,6 +140,7 @@
                               "actions": [
                                 "scroll-up",
                                 "scroll-down",
+                                "scroll-left",
                                 "set-scroll-offset"
                               ],
                               "children": [
@@ -172,7 +173,7 @@
                                           "role": "group"
                                         }
                                       ],
-                                      "key": "pdf-z8-p0",
+                                      "key": "pdf-z6-p0",
                                       "position": 1,
                                       "role": "group"
                                     },
@@ -200,7 +201,7 @@
                                           "role": "group"
                                         }
                                       ],
-                                      "key": "pdf-z8-p1",
+                                      "key": "pdf-z6-p1",
                                       "position": 2,
                                       "role": "group"
                                     },
@@ -228,27 +229,8 @@
                                           "role": "group"
                                         }
                                       ],
-                                      "key": "pdf-z8-p2",
+                                      "key": "pdf-z6-p2",
                                       "position": 3,
-                                      "role": "group"
-                                    },
-                                    {
-                                      "actions": [
-                                        "scroll-into-view"
-                                      ],
-                                      "children": [
-                                        {
-                                          "actions": [
-                                            "scroll-into-view"
-                                          ],
-                                          "description": "Loading page",
-                                          "key": "page",
-                                          "name": "Page 4 of 12",
-                                          "role": "group"
-                                        }
-                                      ],
-                                      "key": "pdf-z8-p3",
-                                      "position": 4,
                                       "role": "group"
                                     }
                                   ],
@@ -267,7 +249,7 @@
                           "key": "pdf",
                           "name": "PDF document",
                           "role": "document",
-                          "value": "Page 1 of 12, 100%"
+                          "value": "Page 1 of 12, 132%"
                         }
                       ],
                       "key": "preview-body",

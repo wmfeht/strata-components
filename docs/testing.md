@@ -25,6 +25,8 @@ Page ids are the component ids (`c1`, `c14a`, `c20b`) or the work package ids (`
 
 Scene rules, which `tests/goldens/registry.rs` enforces:
 
+- Every page in the registry has golden scenes (`Page::implemented`): every work package has
+  landed, so a page added without them fails.
 - A scene name starts with its page id and a dash, and ends in `-light` or `-dark`:
   `c1-ten-rows-light`.
 - Every `-light` scene has a `-dark` twin.

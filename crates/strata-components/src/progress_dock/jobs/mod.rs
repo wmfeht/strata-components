@@ -359,7 +359,7 @@ impl<S: 'static> Jobs<S> {
             .px(space.xl)
             .py(space.lg)
             .border_sides([0.0, 0.0, 1.0, 0.0], c.border_muted)
-            .child(bezel(look, IconName::ViewList))
+            .child(bezel(look, IconName::ListChecks))
             .child(
                 rune::text(words.title.clone())
                     .font(TextStyle {
@@ -532,9 +532,9 @@ impl<S: 'static> Jobs<S> {
         let expanded = state.is_expanded(id);
         if r.status != JobStatus::Queued {
             let (glyph, label) = if expanded {
-                (IconName::ChevronUp, &words.hide)
+                (IconName::EyeOff, &words.hide)
             } else {
-                (IconName::ChevronDown, &words.details)
+                (IconName::Eye, &words.details)
             };
             head = head.child(
                 small_button(look, glyph, label)

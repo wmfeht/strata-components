@@ -176,8 +176,7 @@ pub(super) struct LegRun {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) enum Phase {
-    /// The launch side is mounted; the flight flips at the second tick, a frame after its
-    /// launch side has surely been laid out and drawn.
+    /// The launch side mounts; the flight flips at the first tick after a view drew it.
     Mount { ticks: u8 },
     /// Flying since `t0`: the landing side is mounted until it lands (at the tick in
     /// `landed`), then the target's pulse plays out.
@@ -194,6 +193,8 @@ pub(super) struct FlightRun {
     pub phase: Phase,
     /// The legs that launched, in order: a flyer's place here is its stagger.
     pub flying: Vec<usize>,
+    /// A view has drawn the launch side (set by the layer).
+    pub viewed: Cell<bool>,
 }
 
 impl FlightRun {
@@ -216,6 +217,7 @@ impl FlightRun {
             legs,
             phase: Phase::Mount { ticks: 0 },
             flying: Vec::new(),
+            viewed: Cell::new(false),
         }
     }
 
@@ -241,8 +243,10 @@ impl FlightRun {
         const EPS: f64 = 1e-6;
         let due = |next: &mut Option<f64>, at: f64| *next = Some(next.map_or(at, |n| n.min(at)));
         match self.phase {
-            Phase::Mount { ticks: 0 } => {
-                self.phase = Phase::Mount { ticks: 1 };
+            // Until the layer has drawn the launch side (a host that starts a flight and ticks in
+            // one poll ticks before its view runs), or for 3 ticks with no layer at all.
+            Phase::Mount { ticks } if !self.viewed.get() && ticks < 3 => {
+                self.phase = Phase::Mount { ticks: ticks + 1 };
                 due(next, now);
                 true
             }

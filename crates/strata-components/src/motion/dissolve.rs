@@ -50,7 +50,7 @@ impl Dissolve {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) enum Phase {
-    /// The fragments are mounted at rest; play starts at the second tick.
+    /// The fragments mount at rest; play starts at the first tick after a view planned them.
     Mount {
         ticks: u8,
     },
@@ -108,8 +108,9 @@ impl DissolveRun {
     pub fn step(&mut self, now: f64, events: &mut Vec<Event>, next: &mut Option<f64>) -> bool {
         let due = |next: &mut Option<f64>, at: f64| *next = Some(next.map_or(at, |n| n.min(at)));
         match self.phase {
-            Phase::Mount { ticks: 0 } => {
-                self.phase = Phase::Mount { ticks: 1 };
+            // Until a view has planned and drawn the fragments, or for 3 ticks with no layer.
+            Phase::Mount { ticks } if self.plan.borrow().is_none() && ticks < 3 => {
+                self.phase = Phase::Mount { ticks: ticks + 1 };
                 due(next, now);
                 true
             }

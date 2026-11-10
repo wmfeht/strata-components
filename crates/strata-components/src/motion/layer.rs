@@ -124,6 +124,7 @@ fn flight_view<S>(
     };
     match f.phase {
         Phase::Mount { .. } => {
+            f.viewed.set(true);
             for (i, leg) in f.legs.iter().enumerate() {
                 let rect = if reduced {
                     None

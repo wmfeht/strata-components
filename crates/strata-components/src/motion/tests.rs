@@ -33,6 +33,10 @@ struct Host {
     t: f64,
     /// Answer Launched with an instant commit.
     instant: bool,
+    /// Flights name the list as their rows' viewport.
+    rows_in: bool,
+    /// The list's height: rows below it are laid out but scrolled out of it.
+    list_h: f32,
     ghost: bool,
     clicks: Vec<u64>,
     views: Rc<Cell<usize>>,
@@ -52,6 +56,8 @@ impl Host {
             events: Vec::new(),
             t: 0.0,
             instant: false,
+            rows_in: false,
+            list_h: H,
             ghost: true,
             clicks: Vec::new(),
             views: Rc::default(),
@@ -125,7 +131,7 @@ fn view(s: &Host, cx: &mut Cx<Host>) -> El {
     let list = col()
         .key("list")
         .w(W - 120.0)
-        .h(H)
+        .h(s.list_h)
         .clip_soft(0.0)
         .children(s.rows.iter().map(|&i| row_el(s, i)));
     let mut layer = MotionLayer::new(|s: &Host| &s.fx);
@@ -189,7 +195,10 @@ fn icons(s: &Host, rows: &[u64], part: &str) -> Vec<(String, &'static rune::Icon
 fn trash(rt: &mut Runtime<Host>, rows: &[u64]) -> Option<EffectId> {
     let mut out = None;
     rt.update(|s, tx| {
-        let flight = Flight::into_target("trash", icons(s, rows, "/icon")).target_in("side");
+        let mut flight = Flight::into_target("trash", icons(s, rows, "/icon")).target_in("side");
+        if s.rows_in {
+            flight = flight.rows_in("list");
+        }
         let Host { fx, look, .. } = s;
         out = fx.fly(flight, look, tx);
         match out {
@@ -366,6 +375,38 @@ fn flyers_close_on_the_target_and_land_in_turn() {
 }
 
 #[test]
+fn an_effect_started_before_the_tick_in_the_same_poll_still_plays() {
+    let mut rt = runtime(Host::new(5));
+    let mut id = None;
+    rt.update(|s, tx| {
+        let f = Flight::into_target("trash", icons(s, &[2], "/icon"));
+        let Host { fx, look, t, .. } = s;
+        id = fx.fly(f, look, tx);
+        assert!(
+            fx.tick(*t, tx).is_empty(),
+            "nothing launches before it mounts"
+        );
+    });
+    rt.frame(DT);
+    let id = id.unwrap();
+    rt.state.leaving = Some((id, vec![2]));
+    frames(&mut rt, 1.0, launched);
+    assert!(has(&rt, &flyer_key(id, 0)), "it flies");
+
+    // A dissolve started the same way plays, rather than ending at once with no plan.
+    rt.update(|s, tx| {
+        let d = Dissolve::rows([("row-4".to_owned(), 4)]);
+        let Host { fx, look, t, .. } = s;
+        fx.dissolve(d, look, tx).unwrap();
+        fx.tick(*t, tx);
+    });
+    let start = rt.state.t;
+    rt.frame(DT);
+    frames(&mut rt, 2.0, |s| !s.fx.dissolving());
+    assert!(rt.state.t - start >= DURATION, "it played");
+}
+
+#[test]
 fn at_most_seven_icons_fly_picked_evenly() {
     let mut rt = runtime(Host::new(30));
     let all: Vec<u64> = (0..14).collect();
@@ -419,8 +460,16 @@ fn reduced_motion_draws_nothing_and_each_effect_ends_at_once() {
 #[test]
 fn a_leg_or_target_out_of_sight_flies_nothing_but_still_launches_and_ends() {
     type Setup = fn(&mut Host);
-    let cases: [(&str, Setup, &[u64]); 4] = [
+    let cases: [(&str, Setup, &[u64]); 5] = [
         ("an unmounted row", |_| {}, &[99]),
+        (
+            "a row scrolled out of its list",
+            |s| {
+                s.rows_in = true;
+                s.list_h = 100.0;
+            },
+            &[6],
+        ),
         ("the sidebar hidden", |s| s.target = false, &[1]),
         ("a target off the window", |s| s.target_y = H + 40.0, &[1]),
         (
@@ -430,7 +479,7 @@ fn a_leg_or_target_out_of_sight_flies_nothing_but_still_launches_and_ends() {
         ),
     ];
     for (case, setup, rows) in cases {
-        let mut host = Host::new(5);
+        let mut host = Host::new(30);
         setup(&mut host);
         let mut rt = runtime(host);
         trash(&mut rt, rows).unwrap();

@@ -70,6 +70,9 @@
 //!   frame; re-check both rules at the next Rune bump. The test
 //!   `an_instant_flip_flies_nothing_at_the_pin` pins today's behaviour.
 //! - **Remove the rows at Launched**, not before: the effect reads their rects first.
+//! - **Start an effect anywhere**: from a handler, or from the poll before or after the
+//!   tick. It waits for the layer to draw it before it moves (3 ticks at most, when no layer
+//!   is mounted, then it ends).
 //! - [`Effects::settle`] ends everything at once (a tab or view-mode switch under it).
 //!
 //! # Deliberate changes (owner rulings)

@@ -9,7 +9,7 @@
 //! the effects' events as Strata will. Move to Trash flies the selection into the sidebar's
 //! Trash, Delete permanently dissolves it, Restore flies what was trashed back onto its rows,
 //! and Restore here lifts the selection off its rows as a restore in the Trash's own view
-//! does. Buttons start the effect at the next poll, after the tick, as a host should.
+//! does. Buttons start the effect at the next poll, where scenes time theirs.
 
 use rune::{Cx, El, KeyEvent, Tx, col, el, icon, row, text};
 use rune_kit::Button;
@@ -509,8 +509,8 @@ pub fn on_key(_g: &mut Gallery, _key: &KeyEvent, _tx: &mut Tx) -> bool {
     false
 }
 
-/// Runs at the start of every frame while this page is open, with the clock in seconds. The
-/// effects tick first; an operation asked for starts after, so it mounts before its first tick.
+/// Runs at the start of every frame while this page is open, with the clock in seconds: the
+/// effects' tick and their events, then an operation asked for.
 pub fn poll(g: &mut Gallery, t: f64, tx: &mut Tx) -> bool {
     g.c23.clock = t;
     let mut changed = false;

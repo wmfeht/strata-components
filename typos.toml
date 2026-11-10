@@ -3,6 +3,8 @@ extend-exclude = [
   "Cargo.lock",
   "target/**",
   "tests/golden/**/*.png",
+  # C20d's bundled emoji: CLDR's names and keywords ("Claus", "hashi"), generated, not prose.
+  "crates/strata-components/src/controls/icon_picker/emoji/emoji.tsv",
 ]
 
 [default.extend-words]

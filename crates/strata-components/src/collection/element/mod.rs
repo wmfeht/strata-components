@@ -1042,24 +1042,22 @@ fn background_zone<S: 'static>(cfg: &Rc<Config<S>>, on_drop: row::DropFn<S>) -> 
         (get_mut)(s).1.drop = None;
         on_drop(s, None, dropped, tx);
     });
+    // With the host's action, the background stops what it refuses (an item onto its own
+    // folder) as the rows do, so it hears the refused drag's moves: autoscroll and C2's column
+    // wash go on over it.
     let zone = match cfg.drop_action.clone() {
-        Some(f) => zone.action(move |s: &S, offer, mods| f(s, None, offer, mods)),
+        Some(f) => {
+            let reject_cfg = cfg.clone();
+            zone.action(move |s: &S, offer, mods| f(s, None, offer, mods))
+                .on_reject(move |s: &mut S, _, tx| {
+                    note_drop_hover(&reject_cfg, s, DropOver::Background, DropHover::Left);
+                    drag_over_hover(&reject_cfg, s, DropHover::Left, tx);
+                })
+        }
         None => zone,
     };
     zone.on_hover(move |s: &mut S, hover, _offer, tx| {
-        let st = (hover_cfg.get_mut)(s).1;
-        match hover {
-            DropHover::Accepting | DropHover::Rejecting => {
-                if st.drop.is_none() {
-                    st.drop = Some(DropOver::Background);
-                }
-            }
-            DropHover::Left => {
-                if st.drop == Some(DropOver::Background) {
-                    st.drop = None;
-                }
-            }
-        }
+        note_drop_hover(&hover_cfg, s, DropOver::Background, hover);
         drag_over_hover(&hover_cfg, s, hover, tx);
     })
     .on_move(move |s: &mut S, point, tx| match &edge.on_drag_over {
@@ -1072,8 +1070,44 @@ fn background_zone<S: 'static>(cfg: &Rc<Config<S>>, on_drop: row::DropFn<S>) -> 
     })
 }
 
-/// Tells the host's drag-over hook about a hover: where an accepted drag reached a zone, or
-/// that it left one or was refused.
+/// Records a hover on the zone `over` (a folder row or the background): an accepted drag
+/// highlights it (the background only if no row is), a refused one doesn't and is noted as
+/// refused, and leaving clears both.
+pub(super) fn note_drop_hover<S: 'static>(
+    cfg: &Config<S>,
+    s: &mut S,
+    over: DropOver,
+    hover: DropHover,
+) {
+    let st = (cfg.get_mut)(s).1;
+    let mine = |d: Option<DropOver>| d == Some(over);
+    match hover {
+        DropHover::Accepting => {
+            if mine(st.drop_refused) {
+                st.drop_refused = None;
+            }
+            if over != DropOver::Background || st.drop.is_none() {
+                st.drop = Some(over);
+            }
+        }
+        // No highlight on a zone that refuses the drag: the platform shows "can't drop".
+        DropHover::Rejecting | DropHover::Left => {
+            if mine(st.drop) {
+                st.drop = None;
+            }
+            st.drop_refused = match hover {
+                DropHover::Rejecting => Some(over),
+                _ if mine(st.drop_refused) => None,
+                _ => st.drop_refused,
+            };
+        }
+    }
+}
+
+/// Tells the host's drag-over hook about a hover: where a drag reached a zone, accepted or
+/// refused (the hook drives autoscroll and C2's column wash, which follow any drag, as
+/// Strata's motion controller does), or that it left one. A refusal with no point known yet
+/// keeps the hook's last point; the zone's next move gives the new one.
 pub(super) fn drag_over_hover<S: 'static>(
     cfg: &Config<S>,
     s: &mut S,
@@ -1084,8 +1118,14 @@ pub(super) fn drag_over_hover<S: 'static>(
         return;
     };
     let at = match hover {
-        DropHover::Accepting => tx.drop_point().map(|p| Point::new(p.window_x, p.window_y)),
-        DropHover::Rejecting | DropHover::Left => None,
+        DropHover::Left => None,
+        DropHover::Accepting | DropHover::Rejecting => {
+            let at = tx.drop_point().map(|p| Point::new(p.window_x, p.window_y));
+            if at.is_none() && hover == DropHover::Rejecting {
+                return;
+            }
+            at
+        }
     };
     f(s, at, tx);
 }

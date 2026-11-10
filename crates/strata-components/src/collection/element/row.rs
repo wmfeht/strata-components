@@ -782,36 +782,28 @@ fn row_zone<S: 'static>(cfg: &Rc<Config<S>>, on_drop: DropFn<S>, id: EntryId) ->
             let reject_cfg = cfg.clone();
             zone.action(move |s: &S, offer, mods| f(s, Some(id), offer, mods))
                 .on_reject(move |s: &mut S, _, tx| {
-                    let st = (reject_cfg.get_mut)(s).1;
-                    if st.drop == Some(DropOver::Row(id)) {
-                        st.drop = None;
-                    }
+                    super::note_drop_hover(&reject_cfg, s, DropOver::Row(id), DropHover::Left);
                     super::drag_over_hover(&reject_cfg, s, DropHover::Left, tx);
                 })
         }
         None => zone,
     };
     zone.on_hover(move |s: &mut S, hover, _offer, tx| {
-        let st = (hover_cfg.get_mut)(s).1;
-        match hover {
-            DropHover::Accepting => st.drop = Some(DropOver::Row(id)),
-            // No highlight on a row that refuses the drag: the platform shows "can't drop".
-            DropHover::Rejecting | DropHover::Left => {
-                if st.drop == Some(DropOver::Row(id)) {
-                    st.drop = None;
-                }
-            }
-        }
+        super::note_drop_hover(&hover_cfg, s, DropOver::Row(id), hover);
         super::drag_over_hover(&hover_cfg, s, hover, tx);
     })
     .on_move(move |s: &mut S, point, tx| {
         let under_stuck = super::route::under_stuck_header(&edge, s, point);
         let st = (edge.get_mut)(s).1;
-        let over = Some(if under_stuck {
-            DropOver::Background
+        // A refused drag's moves (P1 sends them to a zone with on_reject) only drive the
+        // hook: no highlight.
+        let over = if st.drop_refused == Some(DropOver::Row(id)) {
+            None
+        } else if under_stuck {
+            Some(DropOver::Background)
         } else {
-            DropOver::Row(id)
-        });
+            Some(DropOver::Row(id))
+        };
         let changed = st.drop != over;
         st.drop = over;
         match &edge.on_drag_over {

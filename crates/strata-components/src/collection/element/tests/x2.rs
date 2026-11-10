@@ -24,6 +24,8 @@ struct Host {
     taking: bool,
     began: usize,
     intents: Vec<String>,
+    /// What the drag-over hook heard: where a drag is, or that it's gone.
+    overs: Vec<Option<crate::contract::Point>>,
 }
 
 thread_local! {
@@ -65,6 +67,10 @@ fn view(s: &Host, _: &mut Cx<Host>) -> El {
         None if offer.local => None,
         None => Some(DropAction::Copy),
     })
+    .on_drag_over(|s: &mut Host, at, _| {
+        s.overs.push(at);
+        false
+    })
     .on_drag_phase(|s: &mut Host, d, key, _| {
         s.phases.push((d.phase, key.to_owned()));
         s.taking
@@ -90,6 +96,7 @@ fn runtime() -> Runtime<Host> {
         taking: false,
         began: 0,
         intents: Vec::new(),
+        overs: Vec::new(),
     };
     let mut rt = Runtime::new(host, view, (400.0, 300.0), Env::new(false, 1.0));
     rt.frame(0.0);
@@ -233,13 +240,12 @@ fn moves_the_hook_takes_start_nothing() {
 
 /// With the host's action, a folder row stops a drop it refuses (its own folder, here) instead
 /// of passing it to the background around it, which would take it into the folder shown; a
-/// refused row draws no drop highlight. The background, refusing, still passes it on.
+/// refused row draws no drop highlight.
 #[test]
 fn a_folder_row_the_action_refuses_stops_the_drop() {
     let mut rt = runtime();
     let refused = zone("row-0");
     assert!(refused.rejects(), "row 0 passes a refused drop on");
-    assert!(!zone(SCOPE).rejects());
     let files = DropOffer::new(vec![URI_LIST.into()], DropActions::MOVE);
     rt.update(|s, tx| {
         refused.hover(s, crate::contract::DropHover::Rejecting, &files, tx);
@@ -256,4 +262,44 @@ fn a_folder_row_the_action_refuses_stops_the_drop() {
     });
     step(&mut rt);
     assert_eq!(rt.state.coll.drop_over(), None, "a refused drop clears it");
+}
+
+/// A drag a zone refuses still drives the host's drag-over hook (autoscroll, C2's column
+/// wash), as Strata's motion controller does whatever accepts: the refusal keeps the hook's
+/// last point and each move gives it the next, with no drop highlight. The background, with
+/// the host's action, stops what it refuses too, so it hears those moves.
+#[test]
+fn a_refused_drag_still_drives_the_drag_over_hook() {
+    use crate::contract::{DropHover, Point};
+    let mut rt = runtime();
+    let files = DropOffer::new(vec![URI_LIST.into()], DropActions::MOVE);
+    let at = |y: f32| {
+        // Non-exhaustive in Rune: built from its default.
+        let mut e = rune::PointerEvent::default();
+        (e.x, e.y, e.window_x, e.window_y) = (20.0, y, 20.0, y);
+        e
+    };
+    for key in ["row-0", SCOPE] {
+        let z = zone(key);
+        assert!(z.rejects(), "{key} passes a refused drop on");
+        rt.state.overs.clear();
+        rt.update(|s, tx| {
+            z.hover(s, DropHover::Rejecting, &files, tx);
+            z.moved(s, at(280.0), tx);
+            z.moved(s, at(290.0), tx);
+        });
+        step(&mut rt);
+        assert_eq!(
+            rt.state.overs,
+            [Some(Point::new(20.0, 280.0)), Some(Point::new(20.0, 290.0))],
+            "{key}: the refusal keeps the point, the moves give it"
+        );
+        assert_eq!(rt.state.coll.drop_over(), None, "{key}: no highlight");
+        rt.update(|s, tx| z.hover(s, DropHover::Left, &files, tx));
+        assert_eq!(
+            rt.state.overs.last(),
+            Some(&None),
+            "{key}: gone when it leaves"
+        );
+    }
 }

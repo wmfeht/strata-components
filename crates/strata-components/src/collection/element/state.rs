@@ -40,6 +40,9 @@ pub struct CollectionState {
     pub(super) scroll_layer: Live<[f32; 2]>,
     pub(super) visible: Range<usize>,
     pub(super) drop: Option<DropOver>,
+    /// The zone (a folder row or the background) a drag is over that refuses it: its moves
+    /// still reach the drag-over hook, but draw no drop highlight.
+    pub(super) drop_refused: Option<DropOver>,
     pub(super) hover_live: bool,
     /// The entry under the pointer at its last move over the collection (the rest hook's).
     pub(super) rest_under: Option<EntryId>,
@@ -102,6 +105,7 @@ impl Default for CollectionState {
             scroll_layer: Live::new([0.0, 0.0]),
             visible: 0..0,
             drop: None,
+            drop_refused: None,
             hover_live: true,
             rest_under: None,
             rest_entered: None,

@@ -10,8 +10,9 @@ pub const FADE: f64 = 0.18;
 /// Due times within this of the clock count as reached.
 const EPS: f64 = 1e-6;
 
-/// A time stamped at the next tick: handlers have no clock (Rune draft U-C1e-6; Rune's
-/// `Tx::clock`, past the pin in c650fe0c, would remove the need).
+/// A time stamped at the next tick. The dock's cards start from handlers that have a `Tx`, so
+/// `Tx::clock` (Rune c650fe0c) could stamp them, except C15's dialog buttons, which carry no
+/// `Tx` ([`super::Dock::cancel_untimed`]).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Since {
     Pending,

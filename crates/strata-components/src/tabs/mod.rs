@@ -12,9 +12,8 @@
 //! shrink-then-scroll with edge fades and auto-scroll while dragging, a keyboard-focused tab's
 //! close button, and the `tablist` and `tab` roles with the selected state; `Tx::set_title`
 //! applies the title. Nothing covers drop targets on tabs, the spring, the closed-tabs stack,
-//! the wheel's sideways mapping or Strata's look. Rune `dev` past the pin has one TabStrip
-//! change, `cded95f` (a tab's title runs in its own direction, for right-to-left titles, and
-//! `WindowTitlebar::rtl`), to take at the next bump.
+//! the wheel's sideways mapping or Strata's look. Since 5d421fd a tab's title runs in its own
+//! direction (cded95f) and `WindowTitlebar::rtl` became `WindowTitlebar::direction`.
 //!
 //! # Parts
 //!

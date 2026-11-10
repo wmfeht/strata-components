@@ -14,10 +14,9 @@
 //!
 //! Work package: P7, `docs/work/phase-1-leaves/P7-media-output.md`.
 //!
-//! **Rune dev 5d421fd: partly.** `Pixels` (in place, any thread, no commit) and
-//! `rune::Waker` cover the video and the waking; nothing covers audio. Past the pin and not
-//! adopted: `Tx::clock` and `Tx::wake_at` (c650fe0c), which would let a host wake at a
-//! frame's time on Rune's clock, and the headless `--realtime` flag (b726a4d1).
+//! **Rune 2a44156: partly.** `Pixels` (in place, any thread, no commit) and `rune::Waker`
+//! cover the video and the waking; nothing covers audio. A host can wake at a frame's time on
+//! Rune's clock with `Tx::wake_at` (c650fe0c); the pacer keeps its own clock.
 //!
 //! # The shape
 //!

@@ -113,8 +113,9 @@
 //!   text to another (a find match across two virtual rows) can't be selected from code.
 //! - **R2** (draft, not filed) Selectable text has no caret: no Shift+arrow, Shift+Home/End
 //!   or word-step extension, no Right collapsing the selection, no grapheme steps.
-//! - **R3** (draft, not filed) Read-only rich text can't hold inline images (inline boxes
-//!   exist for edit-field pills only).
+//! - **R3** (dropped from the filing packet as a duplicate of anomalyco/rune#350) Read-only
+//!   rich text holds inline images only as `El::inline_icon`: square, placed before a word and
+//!   skipped by selection and copy, so it can't hold an equation image or copy its source.
 //! - **R4** (draft, not filed) Copying or reading a selection across unbuilt virtual rows
 //!   stops at 10,000 rows or 4 MiB, silently: `selection_copy` sees a cut list, and nothing
 //!   says it was cut (probe P3: 10,057 of 12,000 texts). C11 copies Ctrl+A's selection from

@@ -230,9 +230,9 @@
 //! - **Kit tokens for the look**: the Kit's hover and selected row fills and its focus border
 //!   for the highlight's outline, where Strata uses accent alphas; the name at the Kit's medium
 //!   weight, not 650.
-//! - **The unavailable field is read-only**, not disabled: at the pin `El::disabled` neither
-//!   stops a `text_input` taking focus nor editing (probe P4; Rune `dev` past the pin changes
-//!   `disabled` to opt out of focus). With no edit handler it takes neither, and reads
+//! - **The unavailable field is read-only**, not disabled: at 5d421fd `El::disabled` neither
+//!   stopped a `text_input` taking focus nor editing (probe P4; later Rune changes `disabled`
+//!   to opt out of focus, not re-probed here). With no edit handler it takes neither, and reads
 //!   read-only.
 //! - **Panel sizes are module constants** citing Strata's CSS (owner ruling).
 //!

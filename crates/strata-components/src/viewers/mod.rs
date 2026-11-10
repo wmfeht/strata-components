@@ -70,8 +70,7 @@
 //!   `text-input` node `--tree` shows. Ask:
 //!   `TextInput::description` (or `error`) applied to the editor.
 //!
-//! Earlier drafts these views meet: U-C1e-6 (no clock on `Tx`: route playback runs on
-//! the host's clock, [`route`]), U-C1f-6 (`live_text` turns off the virtual-window fast path:
+//! Earlier drafts these views meet: U-C1f-6 (`live_text` turns off the virtual-window fast path:
 //! why the route's labels commit instead, [`route`]).
 
 pub mod archive;

@@ -155,10 +155,10 @@
 //!   drawer. Ask: a boundary element for flip and clamp, as Floating UI's `boundary`. Related:
 //!   #362 (report the side a placement flipped to).
 //!
-//! Upstream past the pin (checked 2026-11-09 at `26769da`, 49 commits past it): U-C22-1, U-C22-2
-//! and U-C22-3 still stand there. Hover input moved to new press and focus types with the same
-//! rule (every hit under the pointer), `HoverCard` is unchanged, and anchoring only gained
-//! right-to-left mirroring. `c650fe0` adds `Tx::clock` and `Tx::wake_at`, not adopted.
+//! At Rune 2a44156, U-C22-1, U-C22-2 and U-C22-3 still stand. Hover input moved to new press
+//! and focus types with the same rule (every hit under the pointer), `HoverCard` is unchanged,
+//! and anchoring only gained right-to-left mirroring. The peek owns no timer (`hover_delays`),
+//! so `Tx::clock` changes nothing here.
 //!
 //! Work package: C22, `docs/work/phase-1-leaves/C22-folder-peek.md`.
 //!

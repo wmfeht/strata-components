@@ -16,10 +16,10 @@
 //! dialog. rune-kit's ToastRegion, Toast and Card are too fixed for the dock (below); its
 //! Progress draws the jobs rows. Missing: an accessibility value that follows a `Live`
 //! (U-C16-3), a fill width as a live fraction (U-C16-2), a callback when focus enters or
-//! leaves an element (U-C16-4), and a clock in handlers (U-C1e-6). Past the pin and not
-//! adopted: rune-kit's `ToastStack` (1ea05bc7), a toast registry that merges toasts by key,
-//! where Strata replaces notices by its own rule; `Tx::clock` and `Tx::wake_at` (c650fe0c),
-//! which would retire the stamp-at-the-next-tick pattern below.
+//! leaves an element (U-C16-4). Not adopted: rune-kit's `ToastStack` (1633f8d6), Sonner's
+//! stack that merges toasts by key and pauses every timer while expanded, where Strata pauses
+//! a card and replaces notices by its own rule; and `Tx::clock` (c650fe0c), which could retire
+//! the stamp-at-the-next-tick pattern below once C15's dialog buttons carry a `Tx`.
 //!
 //! # Hosting
 //!
@@ -329,8 +329,6 @@
 //!   `hover_group_focus`. Repro: a row with `hover_group_focus().on_hover_change(..)` around a
 //!   focusable button, Tab into it: the hover visual turns on, the handler hears nothing. Ask:
 //!   `El::on_focus_within(|s, bool, tx|)`.
-//! - Reused: **U-C1e-6** (handlers have no clock), fixed past the pin by `Tx::clock`
-//!   (c650fe0c), not adopted.
 
 mod countdown;
 mod dialog;

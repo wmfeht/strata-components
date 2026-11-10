@@ -126,8 +126,9 @@
 //!   on the first tile and Up from the first row are edges the host hears (`Intent::Edge`).
 //! - **Tooltips are Rune's `El::help`** (owner ruling): the delay is the window's, set by the
 //!   host with `Cx::help_look` (the gallery sets Strata's 900 ms); the grid sets none. A press
-//!   hides it until the pointer leaves the element, not until it moves; moving inside an
-//!   element doesn't restart the wait (Strata restarts after 4 px). Sweeping across tiles shows
+//!   while it waits cancels it until the pointer leaves the element; a press on an open one
+//!   keeps it (Rune 0cde17ec), where Strata hides it. Moving inside an element doesn't restart
+//!   the wait (Strata restarts after 4 px). Sweeping across tiles shows
 //!   none, as each new element starts the wait again. Draft U-C3-2.
 //! - **Ctrl+Shift+wheel right after a plain wheel scrolls** (C3 review round 1): Rune keeps a
 //!   wheel gesture a scroll until it has been still 0.1 s (a trackpad gesture until it ends),
@@ -248,12 +249,12 @@
 //!   an elision mode that
 //!   combines with `max_lines` (`.max_lines(2).elide_middle()`), cutting between graphemes.
 //! - **U-C3-2: per-element tooltip timing.** `El::help`'s delay is the window's
-//!   (`HelpLook::delay`), a press hides a tooltip until the pointer leaves the element, and a
-//!   move inside the element never restarts the wait. Strata's Icons names wait 900 ms where
-//!   its buttons wait the toolkit's, restart after 4 px of movement, and show again after a
-//!   press once the pointer moves. Repro: two elements with `.help`, one wanting 0.9 s; there
-//!   is no builder for it, and `Runtime::help_tooltip` shows both at the window's delay. Ask:
-//!   `El::help_delay(secs)`, and a restart distance.
+//!   (`HelpLook::delay`), a press keeps an open tooltip (one still waiting is cancelled until the
+//!   pointer leaves), and a move inside the element never restarts the wait. Strata's Icons names
+//!   wait 900 ms where its buttons wait the toolkit's, restart after 4 px of movement, and show
+//!   again after a press once the pointer moves. Repro: two elements with `.help`, one wanting
+//!   0.9 s; there is no builder for it, and `Runtime::help_tooltip` shows both at the window's
+//!   delay. Ask: `El::help_delay(secs)`, and a restart distance.
 //! - **U-C3-3: modified wheels over a scroll view's content.** `on_wheel` is offered from the
 //!   element under the pointer up to the nearest scroll view, so an ancestor of a scroll view
 //!   never hears a wheel over its content (C1e's `Collection::on_wheel` sits on the viewport

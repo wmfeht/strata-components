@@ -1,0 +1,19 @@
+{
+  "bullets": [
+    "preview/preview-panel/documents: Ascending sort puts numbers first, then case-insensitive text, then empty cells"
+  ],
+  "scene": "c11b-csv-light",
+  "events": [
+    {
+      "t": 0.2,
+      "type": "tap",
+      "key": "sheet-h2"
+    }
+  ],
+  "expect": [
+    {
+      "key": "sheet-h0",
+      "name": "name"
+    }
+  ]
+}

@@ -64,6 +64,7 @@ pub struct Gallery {
     pub c10: scenes::c10::Demo,
     pub c10a: scenes::c10a::Demo,
     pub c11: scenes::c11::Demo,
+    pub c11b: scenes::c11b::Demo,
     pub c12: scenes::c12::Demo,
     pub c13: scenes::c13::Demo,
     pub c14a: scenes::c14a::Demo,

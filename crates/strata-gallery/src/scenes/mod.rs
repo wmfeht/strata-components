@@ -13,6 +13,7 @@ pub mod c1;
 pub mod c10;
 pub mod c10a;
 pub mod c11;
+pub mod c11b;
 pub mod c12;
 pub mod c13;
 pub mod c14a;
@@ -272,6 +273,14 @@ pub const PAGES: &[Page] = &[
         Preview,
         "C11",
         "DocumentView",
+        "phase-2-composites/C11-document-view.md"
+    ),
+    // No work package doc of its own: split from C11's spreadsheet half.
+    page!(
+        c11b,
+        Preview,
+        "C11b",
+        "SheetGrid",
         "phase-2-composites/C11-document-view.md"
     ),
     page!(

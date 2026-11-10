@@ -553,3 +553,44 @@ fn video_paced_on_the_sink_clock_stays_within_a_frame_of_the_audio() {
         "the decoder kept up, so no frame repeated"
     );
 }
+
+/// The hand test: plays two seconds of a 440 Hz tone on the default output. Run it by hand
+/// with `STRATA_PLATFORM_TONE=1 cargo test -p strata-platform --features media-audio
+/// plays_a_tone -- --ignored`; without the variable it plays nothing and says SKIP.
+#[test]
+#[ignore = "plays a tone on the default audio output; run it by hand"]
+fn plays_a_tone_on_the_default_output() {
+    if std::env::var_os("STRATA_PLATFORM_TONE").is_none_or(|v| v != "1") {
+        let _ = std::io::stderr().lock().write_all(
+            b"SKIP p7::plays_a_tone_on_the_default_output: set STRATA_PLATFORM_TONE=1 to play it\n",
+        );
+        return;
+    }
+    let sink = AudioSink::open(FORMAT, SinkOptions::default(), Arc::new(|| {}))
+        .expect("the default output opens");
+    let frames = FORMAT.frames_in(Duration::from_secs(2));
+    let mut pcm = Vec::with_capacity(frames as usize * FORMAT.frame_bytes());
+    for i in 0..frames {
+        let s = (i as f64 * 440.0 * std::f64::consts::TAU / f64::from(FORMAT.rate)).sin();
+        let v = ((s * 0.2) * f64::from(i16::MAX)) as i16;
+        pcm.extend_from_slice(&v.to_le_bytes());
+        pcm.extend_from_slice(&v.to_le_bytes());
+    }
+    sink.push(pcm).expect("pushed");
+    sink.finish();
+    sink.play();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while sink.reading().state != ClockState::Ended {
+        assert!(
+            Instant::now() < deadline,
+            "the tone never ended: {:?}",
+            sink.reading()
+        );
+        assert!(
+            !matches!(sink.reading().state, ClockState::Failed),
+            "the output failed: {:?}",
+            sink.drain_events()
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}

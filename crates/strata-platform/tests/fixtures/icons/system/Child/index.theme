@@ -3,10 +3,14 @@
 Name=Child
 Name[de]=Child (de)
 Inherits=Parent
-Directories=16x16/apps,51x51/apps,48x48/apps,52x52/apps,bad-size/apps,
+Directories=16x16/apps,47x47/apps,51x51/apps,48x48/apps,extra48/apps,52x52/apps,bad-size/apps,
 
 [16x16/apps]
 Size=16
+Type=Fixed
+
+[47x47/apps]
+Size=47
 Type=Fixed
 
 [51x51/apps]
@@ -15,6 +19,10 @@ Type=Fixed
 
 [48x48/apps]
 Size=48
+
+[extra48/apps]
+Size=48
+Type=Fixed
 
 [52x52/apps]
 Size=52

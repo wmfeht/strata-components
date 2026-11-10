@@ -116,6 +116,11 @@ fn the_closest_size_prefers_an_icon_to_scale_down() {
         steps(70).as_deref(),
         Some("system/Parent/64x64/apps/steps.png")
     );
+    // 100: 256x256 (listed first) is farther than 32x32@2 (64 pixels), but scales down.
+    assert_eq!(
+        one("Parent", "uphill", 100, 1).as_deref(),
+        Some("system/Parent/256x256/apps/uphill.png")
+    );
 }
 
 #[test]
@@ -129,6 +134,20 @@ fn a_threshold_directory_covers_two_pixels_either_side() {
     assert_eq!(
         near(51).as_deref(),
         Some("system/Child/51x51/apps/near.png")
+    );
+    // 46 is inside 48's window, so 48 beats 47 Fixed, which is closer but not exact.
+    assert_eq!(
+        one("Child", "low", 46, 1).as_deref(),
+        Some("system/Child/48x48/apps/low.png")
+    );
+}
+
+#[test]
+fn a_full_tie_goes_to_the_later_directory_as_in_gtk() {
+    // 48 Threshold and 48 Fixed are both exact at 48, at scale 1, both bitmaps.
+    assert_eq!(
+        one("Child", "tie", 48, 1).as_deref(),
+        Some("system/Child/extra48/apps/tie.png")
     );
 }
 
@@ -158,6 +177,11 @@ fn a_scalable_directory_is_the_fallback_and_loses_a_tie_to_a_bitmap() {
     assert_eq!(
         sizes(32).as_deref(),
         Some("system/Parent/32x32/apps/sizes.png")
+    );
+    // 12 is 4 below both 16 Fixed and the scalable MinSize 16: the bitmap wins the tie.
+    assert_eq!(
+        one("Parent", "small", 12, 1).as_deref(),
+        Some("system/Parent/16x16/apps/small.png")
     );
     // Only a scalable file: at any size, even beyond its MaxSize.
     assert_eq!(

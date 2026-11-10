@@ -10,7 +10,6 @@
 //!   drop is [`TabsIntent::OpenTabs`] at the gap. On the New tab button it opens at the end.
 
 use std::rc::Rc;
-use std::time::Duration;
 
 use rune::{Mods, Tx};
 
@@ -121,10 +120,8 @@ pub(super) fn tab<S: 'static>(
             let st = (cx.access)(s);
             st.set_drop_hover(site, hover);
             let arm = cx.spring.filter(|_| !active);
-            if st.hover_tab(id, hover, arm) {
-                // The next tick stamps the spring's start on the host's clock and asks for the
-                // wake that fires it: a wake asked here, a whole delay out, would be stamped late.
-                tx.wake_after(Duration::ZERO);
+            if let (true, Some(delay)) = (st.hover_tab(id, hover, arm, tx.clock()), arm) {
+                tx.wake_at(tx.clock() + delay);
             }
         }
         let offer = offer.clone();

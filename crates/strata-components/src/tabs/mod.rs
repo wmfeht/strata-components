@@ -38,7 +38,7 @@
 //!     .badges(s.ctrl_shift_held)                  // App::on_modifiers
 //!     .on_intent(|s, intent, tx| s.route(intent, tx))
 //!     .build_layered(look, cx, &mut layer);
-//! // Each frame, from the host's poll (Tx has no clock: U-C1e-6):
+//! // Each frame, from the host's poll, with its clock:
 //! let polled = s.strip.tick(now, &data, tx);      // the spring, the title, revealing the active tab
 //! for intent in polled.intents { s.route(intent, tx) }
 //! // TabsIntent::Title(t)        => tx.set_title(t)
@@ -71,13 +71,12 @@
 //!   it: they neither tint nor select. A drop is [`TabsIntent::DropInto`]; the host transfers
 //!   or saves, with its action ([`BrowserTabs::drop_action`]), and selects the tab.
 //! - **The spring.** A file or content drag over a tab that isn't active tints it and arms a
-//!   [`HOVER_DELAY`] (450 ms, Strata's) wait: the hover asks for a wake now, the next
-//!   [`BrowserTabsState::tick`] stamps the start on the host's clock and asks for a wake when
-//!   it is due, re-asking for the time left at every tick, and that tick reports
-//!   [`TabsIntent::Select`] by [`Via::Spring`]. The same hover reported again (X2's binder may,
-//!   on each motion) keeps the start; a leave, a drop, the tab closing or becoming active ends
-//!   it. It holds in a window at rest, which polls only at the wakes it asked for
-//!   (`tests/c7.rs` steps from wake to wake).
+//!   [`HOVER_DELAY`] (450 ms, Strata's) wait: the hover stamps its start on the handler's clock
+//!   (`Tx::clock`) and asks for a wake when it is due, [`BrowserTabsState::tick`] re-asks for the
+//!   time left at every tick, and the tick at the due time reports [`TabsIntent::Select`] by
+//!   [`Via::Spring`]. The same hover reported again (X2's binder may, on each motion) keeps the
+//!   start; a leave, a drop, the tab closing or becoming active ends it. It holds in a window at
+//!   rest, which polls only at the wakes it asked for (`tests/c7.rs` steps from wake to wake).
 //! - **Drags that open tabs.** A drag the host says opens tabs ([`BrowserTabs::opens_tabs`]:
 //!   Strata's own folder-only drags and sidebar rows, never folders from another app) neither
 //!   tints nor selects a tab. Over the strip its moves place rune-kit's incoming gap where it
@@ -276,9 +275,8 @@
 //!   tab took scrolls to its end (review 3). The active tab's marker, keyed by its id and name,
 //!   reports its first layout, which brings the tick a host's selection or rename from a key
 //!   handler needs in a still window.
-//! - Reused: U-C1e-6 (no clock in `Tx`: [`BrowserTabsState::tick`]), U3 (a drag's paths only at
-//!   the drop: under Rune's binder a drag that opens tabs is told only then, and opens after the
-//!   tab it dropped on), U-P1-1 (zones found by key), U-C6-5.
+//! - Reused: U3 (a drag's paths only at the drop: under Rune's binder a drag that opens tabs is
+//!   told only then, and opens after the tab it dropped on), U-P1-1 (zones found by key), U-C6-5.
 
 mod build;
 mod closed;

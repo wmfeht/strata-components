@@ -133,14 +133,11 @@ fn a_repeated_hover_on_the_same_tab_keeps_its_start() {
     let t = tabs(3);
     let d = TabsData::new(&t, Some(TabId(1)));
     let mut st = BrowserTabsState::default();
-    assert!(st.hover_tab(TabId(2), DropHover::Accepting, Some(HOVER_DELAY)));
-    assert!(
-        tick(&mut st, 1.0, &d).is_empty(),
-        "the first tick stamps the start"
-    );
-    assert!(!st.hover_tab(TabId(2), DropHover::Accepting, Some(HOVER_DELAY)));
+    assert!(st.hover_tab(TabId(2), DropHover::Accepting, Some(HOVER_DELAY), 1.0));
+    assert!(tick(&mut st, 1.0, &d).is_empty());
+    assert!(!st.hover_tab(TabId(2), DropHover::Accepting, Some(HOVER_DELAY), 1.3));
     assert!(tick(&mut st, 1.3, &d).is_empty());
-    assert!(!st.hover_tab(TabId(2), DropHover::Accepting, Some(HOVER_DELAY)));
+    assert!(!st.hover_tab(TabId(2), DropHover::Accepting, Some(HOVER_DELAY), 1.45));
     assert_eq!(tick(&mut st, 1.45, &d), sprung(2));
     assert_eq!(st.spring(), None, "it fires once");
 }
@@ -150,19 +147,19 @@ fn another_tab_restarts_the_wait_and_a_leave_ends_it() {
     let t = tabs(3);
     let d = TabsData::new(&t, Some(TabId(1)));
     let mut st = BrowserTabsState::default();
-    st.hover_tab(TabId(2), DropHover::Accepting, Some(HOVER_DELAY));
+    st.hover_tab(TabId(2), DropHover::Accepting, Some(HOVER_DELAY), 1.0);
     let _ = tick(&mut st, 1.0, &d);
-    st.hover_tab(TabId(2), DropHover::Left, None);
-    st.hover_tab(TabId(3), DropHover::Accepting, Some(HOVER_DELAY));
+    st.hover_tab(TabId(2), DropHover::Left, None, 1.3);
+    st.hover_tab(TabId(3), DropHover::Accepting, Some(HOVER_DELAY), 1.3);
     assert!(tick(&mut st, 1.3, &d).is_empty());
     assert!(
         tick(&mut st, 1.5, &d).is_empty(),
         "tab 3's wait began at 1.3"
     );
     assert_eq!(tick(&mut st, 1.75, &d), sprung(3));
-    st.hover_tab(TabId(2), DropHover::Accepting, Some(HOVER_DELAY));
+    st.hover_tab(TabId(2), DropHover::Accepting, Some(HOVER_DELAY), 2.0);
     let _ = tick(&mut st, 2.0, &d);
-    st.hover_tab(TabId(2), DropHover::Left, None);
+    st.hover_tab(TabId(2), DropHover::Left, None, 3.0);
     assert!(tick(&mut st, 3.0, &d).is_empty(), "a leave ends the wait");
 }
 
@@ -172,12 +169,12 @@ fn another_tab_restarts_the_wait_and_a_leave_ends_it() {
 fn nothing_springs_unarmed_or_for_a_tab_now_active_or_gone() {
     let t = tabs(3);
     let mut st = BrowserTabsState::default();
-    assert!(!st.hover_tab(TabId(2), DropHover::Accepting, None));
+    assert!(!st.hover_tab(TabId(2), DropHover::Accepting, None, 0.0));
     assert_eq!(st.spring(), None);
-    st.hover_tab(TabId(2), DropHover::Accepting, Some(HOVER_DELAY));
+    st.hover_tab(TabId(2), DropHover::Accepting, Some(HOVER_DELAY), 1.0);
     let _ = tick(&mut st, 1.0, &TabsData::new(&t, Some(TabId(1))));
     assert!(tick(&mut st, 2.0, &TabsData::new(&t, Some(TabId(2)))).is_empty());
-    st.hover_tab(TabId(3), DropHover::Accepting, Some(HOVER_DELAY));
+    st.hover_tab(TabId(3), DropHover::Accepting, Some(HOVER_DELAY), 3.0);
     let _ = tick(&mut st, 3.0, &TabsData::new(&t, Some(TabId(1))));
     assert!(tick(&mut st, 4.0, &TabsData::new(&t[..2], Some(TabId(1)))).is_empty());
 }

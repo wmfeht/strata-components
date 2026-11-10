@@ -20,9 +20,8 @@ pub const HOVER_DELAY: f64 = 0.45;
 struct Spring {
     id: TabId,
     delay: f64,
-    /// When the wait began, on the host's clock: stamped by the first tick after the hover,
-    /// since a hover handler has no clock (U-C1e-6).
-    since: Option<f64>,
+    /// When the wait began, on `Tx::clock`.
+    since: f64,
 }
 
 /// The gap's slot after the zone holding it left. Both real binders report a zone's leave
@@ -144,8 +143,8 @@ impl BrowserTabsState {
         self.spring.as_ref().map(|s| s.id)
     }
 
-    /// One frame at `now` seconds on the host's clock (`Tx` has none: U-C1e-6), with the tabs
-    /// as they are now. It selects the tab a drag has rested on for the spring delay, emits the
+    /// One frame at `now` seconds on the window's clock (the poll's), with the tabs as they are
+    /// now. It selects the tab a drag has rested on for the spring delay, emits the
     /// window title when it changed, and scrolls a newly active tab into view, however it
     /// became active (a click, the keyboard, a reopen, a restore).
     pub fn tick(&mut self, now: f64, data: &TabsData<'_>, tx: &mut Tx) -> Polled {
@@ -166,8 +165,7 @@ impl BrowserTabsState {
             if data.get(spring.id).is_none() || data.active == Some(spring.id) {
                 self.spring = None;
             } else {
-                let since = *spring.since.get_or_insert(now);
-                let left = spring.delay - (now - since);
+                let left = spring.delay - (now - spring.since);
                 if left <= 1e-6 {
                     let id = spring.id;
                     self.spring = None;
@@ -243,10 +241,17 @@ impl BrowserTabsState {
         }
     }
 
-    /// A drag reached or left tab `id`. `arm` is the spring delay when this drag may select
-    /// the tab (it isn't active and doesn't open tabs). The same hover again keeps the
-    /// spring's start: a binder may report it on each motion.
-    pub(super) fn hover_tab(&mut self, id: TabId, hover: DropHover, arm: Option<f64>) -> bool {
+    /// A drag reached or left tab `id` at `now` (`Tx::clock`). `arm` is the spring delay when
+    /// this drag may select the tab (it isn't active and doesn't open tabs). The same hover
+    /// again keeps the spring's start: a binder may report it on each motion. True when it
+    /// armed a spring.
+    pub(super) fn hover_tab(
+        &mut self,
+        id: TabId,
+        hover: DropHover,
+        arm: Option<f64>,
+        now: f64,
+    ) -> bool {
         match (hover, arm) {
             (DropHover::Accepting, Some(_)) if self.spring.as_ref().is_some_and(|s| s.id == id) => {
                 false
@@ -255,7 +260,7 @@ impl BrowserTabsState {
                 self.spring = Some(Spring {
                     id,
                     delay,
-                    since: None,
+                    since: now,
                 });
                 true
             }

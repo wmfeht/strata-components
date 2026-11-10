@@ -186,8 +186,10 @@ impl<S: 'static> DialogShell<S> {
                 Route::Pass => false,
                 Route::Consume => true,
                 Route::Press => send(tx, Key::Text(" ".into()), false),
-                Route::Forward => send(tx, Key::Tab, false),
-                Route::Back => send(tx, Key::Tab, true),
+                Route::Focus(i) => {
+                    tx.focus(footer[i].clone(), true);
+                    true
+                }
             }
         });
         if let Some(key) = self.return_focus {

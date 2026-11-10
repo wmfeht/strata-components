@@ -1,7 +1,7 @@
 use rune::{Cx, El, Env, Key, KeyEvent, Mods, Runtime, TextEdit, col, text_input};
 use rune_kit::{Button, Kit};
 
-use super::keys::{Route, route, tab_indices};
+use super::keys::{Route, route};
 use super::text::korean_word_ranges;
 use super::{
     Measure, fit, keep_words_whole, limit_on_change, remaining, text_area, trim_insertion,
@@ -63,56 +63,14 @@ fn left_and_right_move_along_the_footer_and_stop_at_its_ends() {
     let f = footer();
     let at = |k: Key, focused: &str| route(&key(k), false, Some(focused), "d-dialog", &f);
     assert_eq!(at(Key::Left, "d-skip"), Route::Consume);
-    assert_eq!(at(Key::Right, "d-skip"), Route::Forward);
-    assert_eq!(at(Key::Left, "d-primary"), Route::Back);
+    assert_eq!(at(Key::Right, "d-skip"), Route::Focus(1));
+    assert_eq!(at(Key::Left, "d-primary"), Route::Focus(1));
     assert_eq!(at(Key::Right, "d-primary"), Route::Consume);
     assert_eq!(
         at(Key::Left, "name-field"),
         Route::Pass,
         "arrows off the footer stay Rune's"
     );
-}
-
-#[test]
-fn the_initial_button_starts_tab_order_and_the_cycle_keeps_document_order() {
-    // Document order: body controls, footer 0..n, close. Rune visits positive indices first,
-    // ascending, then the rest in document order.
-    for (initial, n) in [
-        (Some(0), 3),
-        (Some(1), 3),
-        (Some(2), 3),
-        (None, 3),
-        (Some(0), 1),
-    ] {
-        let (footer, close) = tab_indices(initial, n);
-        let mut doc: Vec<(String, i32)> = vec![("body".into(), 0)];
-        doc.extend(
-            footer
-                .iter()
-                .enumerate()
-                .map(|(i, &t)| (format!("f{i}"), t)),
-        );
-        doc.push(("close".into(), close));
-        let mut order: Vec<(usize, &(String, i32))> = doc.iter().enumerate().collect();
-        order.sort_by_key(|(i, (_, t))| (if *t > 0 { *t } else { i32::MAX }, *i));
-        let names: Vec<&str> = order.iter().map(|(_, (n, _))| n.as_str()).collect();
-        let start = initial.map_or("body".to_owned(), |i| format!("f{i}"));
-        assert_eq!(names[0], start, "{initial:?} of {n} opens there");
-        let doc_names: Vec<&str> = doc.iter().map(|(n, _)| n.as_str()).collect();
-        let at = doc_names
-            .iter()
-            .position(|n| *n == start)
-            .expect("start is in the dialog");
-        let rotated: Vec<&str> = doc_names[at..]
-            .iter()
-            .chain(&doc_names[..at])
-            .copied()
-            .collect();
-        assert_eq!(
-            names, rotated,
-            "{initial:?} of {n}: the cycle is document order's"
-        );
-    }
 }
 
 /// A dialog's multi-line field, limited to `room` characters, beside a default button.
@@ -338,14 +296,16 @@ fn enter_in_a_field_presses_the_primary_only_while_it_is_the_default_button() {
     }
 }
 
-/// A question whose footer buttons both commit, opening on the close button.
+/// A question whose footer buttons both commit, opening on the close button unless `initial`
+/// says otherwise.
 #[derive(Default)]
 struct Commit {
     dismissed: u32,
     pressed: Vec<&'static str>,
+    initial: Option<super::Focus>,
 }
 
-fn commit_view(_s: &Commit, _cx: &mut Cx<Commit>) -> El {
+fn commit_view(s: &Commit, _cx: &mut Cx<Commit>) -> El {
     let look = strata_kit::look::Look::fallback(false);
     let mut layer = Vec::new();
     super::StrataDialog::new("d", "Trust this host?", |s: &mut Commit| s.dismissed += 1)
@@ -356,7 +316,7 @@ fn commit_view(_s: &Commit, _cx: &mut Cx<Commit>) -> El {
         })
         .primary("Log In Anyway", |s: &mut Commit| s.pressed.push("primary"))
         .default_button(false)
-        .initial_focus(super::Focus::Close)
+        .initial_focus(s.initial.clone().unwrap_or(super::Focus::Close))
         .build(&look, &mut layer);
     rune_kit::root(col(), layer)
 }
@@ -396,4 +356,41 @@ fn a_dialog_opening_on_close_dismisses_on_enter_and_tabs_on_in_document_order() 
         cycle.extend(focused(&rt));
     }
     assert_eq!(cycle, ["d-other", "d-primary", "d-close"]);
+}
+
+/// The initial button takes focus as the dialog opens, and Tab cycles in document order from
+/// there: the footer (Log In Once, Log In Anyway), then the close button.
+#[test]
+fn the_initial_button_opens_focused_and_tab_keeps_document_order() {
+    let focused = |rt: &Runtime<Commit>| {
+        rt.elements()
+            .into_iter()
+            .find(|e| e.focused)
+            .and_then(|e| e.key)
+    };
+    for (initial, want) in [
+        (
+            super::Focus::Primary,
+            ["d-primary", "d-close", "d-other", "d-primary"],
+        ),
+        (
+            super::Focus::Action("other".into()),
+            ["d-other", "d-primary", "d-close", "d-other"],
+        ),
+    ] {
+        let state = Commit {
+            initial: Some(initial.clone()),
+            ..Commit::default()
+        };
+        let mut rt = Runtime::new(state, commit_view, (600.0, 400.0), Env::new(false, 1.0));
+        rt.frame(0.0);
+        rt.frame(0.3);
+        let mut seen = vec![focused(&rt).unwrap_or_default()];
+        for _ in 0..3 {
+            rt.key(key(Key::Tab));
+            rt.frame(1.0 / 60.0);
+            seen.push(focused(&rt).unwrap_or_default());
+        }
+        assert_eq!(seen, want, "{initial:?}");
+    }
 }

@@ -22,7 +22,7 @@
 //!
 //! The work package says to wrap `rune_kit::Dialog`. It builds on Rune's primitives instead
 //! (`El::modal`, `El::backdrop_blur`, presence `Transition`s, `El::default_button`,
-//! `El::tab_index`), because rune-kit's `Dialog` at the pinned rev:
+//! `El::autofocus`), because rune-kit's `Dialog` at the pinned rev:
 //!
 //! - has a fixed 368 pt height, or `fit()`, which doesn't scroll, so a long dialog can't stay
 //!   inside the window;
@@ -61,11 +61,9 @@
 //!   while the dialog closed stays where it is.
 //! - Initial focus is the first Tab stop in the dialog: the first body control, so the first
 //!   field. [`Focus::Primary`], [`Focus::Secondary`] or [`Focus::Action`] start on a footer
-//!   button instead, and [`Focus::Close`] on the close button. Rune has no call that focuses a
-//!   button from code, so the dialog gives that button, every footer button after it and the
-//!   close button positive `tab_index`es.
-//!   Rune visits those first, then the rest in document order, which keeps Tab's cycle the
-//!   same, only starting elsewhere. A form starts on another field by setting its
+//!   button instead, and [`Focus::Close`] on the close button: the dialog marks it
+//!   `El::autofocus`, which Rune's modal focuses as it opens. Tab's cycle stays document
+//!   order's, only starting there. A form starts on another field by setting its
 //!   `TextEdit::focused` when it opens.
 //! - The close button comes last in document order and is pinned to the header's corner, so
 //!   that the first field, not the close button, is the first Tab stop. The trade-off: a

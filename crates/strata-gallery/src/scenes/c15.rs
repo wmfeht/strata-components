@@ -7,7 +7,7 @@
 //! path field) and a row of buttons that open each dialog, so scripts can open a dialog from
 //! an opener and check where focus returns. The golden scenes open a dialog at once.
 
-use rune::{Cx, El, Key, KeyEvent, Mods, TextEdit, Tx, col, el, icon, row, text};
+use rune::{Cx, El, KeyEvent, TextEdit, Tx, col, el, icon, row, text};
 use rune_kit::{Button, ButtonVariant, Checkbox, Progress, Select, Switch, TextInput};
 use strata_components::dialog::{
     self, DialogShell, Focus, Measure, StrataDialog, Tone, limit_on_change, remaining, text_area,
@@ -174,21 +174,15 @@ pub fn on_key(_g: &mut Gallery, _key: &KeyEvent, _tx: &mut Tx) -> bool {
 }
 
 /// Runs at the start of every frame while this page is open, with the clock in seconds. A
-/// keyboard scene sends a Tab and a Shift+Tab once its dialog is up, so focus ends where it
-/// started, shown as the keyboard shows it.
+/// keyboard scene focuses its dialog's initial focus again with the ring once the dialog is
+/// up, shown as the keyboard shows it.
 pub fn poll(g: &mut Gallery, t: f64, tx: &mut Tx) -> bool {
     if !g.c15.keyboard || t <= 0.0 {
         return false;
     }
     g.c15.keyboard = false;
-    for shift in [false, true] {
-        tx.send_key(KeyEvent {
-            key: Key::Tab,
-            mods: Mods {
-                shift,
-                ..Mods::default()
-            },
-        });
+    if let Some(f) = tx.focused().map(str::to_owned) {
+        tx.focus(f, true);
     }
     true
 }

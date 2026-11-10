@@ -90,7 +90,7 @@ pub(super) fn header<S: 'static>(
     }
     let sh = shared.clone();
     controls.push(
-        button(IconName::Close, &labels.close)
+        button(IconName::ClosePanel, &labels.close)
             .on_press_tx(move |s: &mut S, tx: &mut Tx| {
                 (sh.access)(s).close_with(sh.animations, tx);
                 sh.emit(s, DrawerIntent::Closed, tx);

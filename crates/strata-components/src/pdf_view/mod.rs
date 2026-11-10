@@ -77,10 +77,12 @@
 //! - **Find** (off unless [`PdfState::set_searchable`]): C9's find bar over the layers, with
 //!   C11's folding. Matches are painted with `look.fill.highlight`, the current one is the
 //!   selection and is centred. While find is open, pages it hasn't counted are asked for their
-//!   text ([`RenderKind::TextOnly`]: the host may render them small), once per query, and their
-//!   matches join in page order. The text budget holds: a page's matches stay counted after its
-//!   layer is dropped, and its text comes back when it's shown (a match on such a page is
-//!   revealed at the page's top until then).
+//!   text ([`RenderKind::TextOnly`]: the host may render them small): once per query for a page
+//!   whose layer the budget dropped, and never again for one the renderer says has none (a
+//!   scan, or a layer Strata's helper leaves out: glyphs that don't match, or one over its size
+//!   cap). Their matches join in page order. The text budget holds: a page's matches stay
+//!   counted after its layer is dropped, and its text comes back when it's shown (a match on
+//!   such a page is revealed at the page's top until then).
 //! - **Locked and failed** ([`PdfState::locked`], [`PdfState::failed`]): "Preview unavailable"
 //!   and the message; a locked PDF has an Open button unless [`PdfView::open_button`] is off
 //!   (the chooser). See [`message`].

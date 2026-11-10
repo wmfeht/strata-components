@@ -177,10 +177,14 @@ impl PdfState {
         self.reveal = None;
         self.settle_at = None;
         self.idle = true;
+        // A new document opens at fitted width, as Strata's viewer does.
+        self.level_request = None;
     }
 
     /// [`PdfState::open`], with the page the preview opened on already rendered: Strata loads
-    /// a PDF by rendering its first page.
+    /// a PDF by rendering its first page. A [`PageReply::Failed`] here is dropped and the page
+    /// asked for once more through [`PdfState::pop`] (Strata fails the whole preview when its
+    /// first page doesn't render: a host doing the same calls [`PdfState::failed`]).
     pub fn open_with(&mut self, doc: PdfDocument, page: usize, reply: PageReply) {
         self.open(doc);
         let ticket = Ticket {
@@ -359,9 +363,12 @@ impl PdfState {
 
     /// Takes a render's reply. Return [`Landed::commits`] from the host's poll.
     pub fn complete(&mut self, ticket: Ticket, reply: PageReply) -> Landed {
+        // Any answer to the request in flight counts the page for this query, even one that
+        // changes nothing (a text-only reply with no text): else the page is asked again.
+        let answered = self.queue.is_wanted(ticket);
         let landed = self.queue.complete(&mut self.doc, ticket, reply);
         let page = ticket.page();
-        if landed != Landed::Dropped
+        if (answered || landed != Landed::Dropped)
             && self.find.active()
             && let Some(slot) = self.queue.slots.get_mut(page)
         {
@@ -758,6 +765,11 @@ impl PdfState {
                 matches!(was, Gesture::Pan(_)) || cursor
             }
         }
+    }
+
+    /// The pointer left the view: text scrolling under where it was no longer moves the I-beam.
+    pub(crate) fn leave(&mut self) {
+        self.pointer = None;
     }
 
     /// The pointer moved over the view: true when the I-beam turns on or off.

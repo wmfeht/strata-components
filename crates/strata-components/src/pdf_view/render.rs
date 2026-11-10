@@ -159,6 +159,12 @@ pub(crate) fn pages<S: 'static>(ctx: Rc<Ctx<S>>, st: &PdfState, look: &Look, sca
                 tx.live_only();
             }
         })
+        .on_hover_change(move |s: &mut S, inside: bool, tx: &mut Tx| {
+            if !inside {
+                get_mut(s).leave();
+            }
+            tx.live_only();
+        })
         .child(body);
     if st.wake > 0 {
         // Requests are waiting and the host may be at rest, or the host asked for a zoom: a

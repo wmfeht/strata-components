@@ -238,7 +238,10 @@ impl Queue {
                     .filter(|&p| p < n)
                 {
                     let s = &self.slots[p];
+                    // A page whose text is known (a scan: the renderer sends no layer) has
+                    // nothing to count; one whose layer the budget dropped is asked again.
                     if s.layer.is_none()
+                        && !s.text_known
                         && s.searched != want.search
                         && !s.failed
                         && s.inflight.is_none()

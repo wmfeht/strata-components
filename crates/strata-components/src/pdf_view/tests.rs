@@ -9,6 +9,9 @@ use super::layer::Layer;
 use super::model::{PageReply, PdfDocument, RenderCaps, RenderKind, Shared, TextLayer, Ticket};
 use super::queue::{Landed, Queue, Want};
 use super::selection::{Selection, Unit};
+use super::state::PdfState;
+use crate::preview_drawer::HostedPreview;
+use rune::Tx;
 
 mod perf;
 
@@ -559,4 +562,87 @@ fn select_all_keeps_the_anchor() {
     s.extend(get, 2, 4);
     assert_eq!(s.ranges.keys().copied().collect::<Vec<_>>(), [1, 2]);
     assert!(s.text(get).starts_with("1 first line"), "{}", s.text(get));
+}
+
+// ---- Review 2 ----
+
+/// A preview of `n` pages laid out in a 500 × 800 viewport, page 1 visible.
+fn state(n: usize) -> PdfState {
+    let mut st = PdfState::new("pdf");
+    st.open(PdfDocument::new(n, [600.0, 800.0]));
+    st.viewport = Some([0.0, 0.0, 500.0, 800.0]);
+    st.visible = 0..1;
+    st
+}
+
+/// Pops and answers every request, each page a scan (an image, no text layer). How many.
+fn answer_all_as_scans(st: &mut PdfState, limit: usize) -> usize {
+    let mut n = 0;
+    while let Some(r) = st.pop() {
+        st.complete(r.ticket, reply(r.box_px[0], None));
+        n += 1;
+        if n == limit {
+            break;
+        }
+    }
+    n
+}
+
+// Review 2's B1: with find open, a page the renderer says has no text (a scan) is asked once,
+// not again for each query, nor again and again for one.
+#[test]
+fn find_asks_a_page_without_text_once() {
+    let mut st = state(3);
+    st.set_searchable(true);
+    st.find("s");
+    let first = answer_all_as_scans(&mut st, 50);
+    assert!(first <= 4, "each page once (and the margin page): {first}");
+    st.find("st");
+    assert_eq!(
+        answer_all_as_scans(&mut st, 50),
+        0,
+        "nothing to ask for the next query"
+    );
+}
+
+// SF1: new work wakes the host only when its last pop found nothing.
+#[test]
+fn new_work_wakes_a_host_whose_last_pop_found_none() {
+    let mut st = state(20);
+    answer_all_as_scans(&mut st, 50);
+    assert!(st.pop().is_none());
+    let wake = st.wake;
+    assert!(st.set_visible(10..11), "the view runs to mount the waker");
+    assert_eq!(st.wake, wake + 1);
+    // The host pops, and a request is out: its own poll takes what comes next.
+    assert!(st.pop().is_some());
+    let wake = st.wake;
+    st.set_visible(15..16);
+    assert_eq!(st.wake, wake, "no wake while the host is popping");
+}
+
+// The pointer left: text scrolling under where it was doesn't move the I-beam.
+#[test]
+fn the_pointer_leaving_stops_the_i_beam_following() {
+    let mut st = state(1);
+    let r = st.pop().unwrap();
+    st.complete(r.ticket, reply(400, Some("hello world")));
+    let mut tx = Tx::default();
+    let z = st.zoom_gen;
+    st.page_laid_out(0, z, [0.0, 0.0, 400.0, 600.0], &mut tx);
+    assert!(st.hover([30.0, 18.0]), "over text: the I-beam");
+    st.leave();
+    // The page scrolls up: margin where the pointer was.
+    assert!(!st.page_laid_out(0, z, [0.0, -100.0, 400.0, 600.0], &mut tx));
+    assert!(st.over_text, "unchanged until the pointer is back");
+}
+
+// A zoom asked for one document doesn't carry into the next: Strata opens each at fit.
+#[test]
+fn a_zoom_asked_before_an_open_is_dropped() {
+    let mut st = state(3);
+    st.set_level(2.0);
+    st.open(PdfDocument::new(3, [600.0, 800.0]));
+    assert!(!st.apply_level_request(&mut Tx::default()));
+    assert_eq!(st.level(), 1.0);
 }

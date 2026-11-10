@@ -63,7 +63,7 @@
 //! | --- | --- | --- | --- |
 //! | Wayland | `wayland:` | `zxdg_importer_v2.import_toplevel`, a round trip, then `set_parent_of` on the window's own surface | Parented, or [`Reason::Destroyed`] for a handle the compositor refuses |
 //! | Wayland | `x11:` | Nothing: no protocol joins them | [`Reason::Mismatch`] |
-//! | X11 | `x11:` | `WM_TRANSIENT_FOR`, `_NET_WM_WINDOW_TYPE_DIALOG`, and `_NET_WM_STATE_MODAL` when modal | Parented, or [`Reason::BadXid`] (centred) for a window that doesn't exist |
+//! | X11 | `x11:` | `WM_TRANSIENT_FOR`, `_NET_WM_WINDOW_TYPE_DIALOG`, and `_NET_WM_STATE_MODAL` when modal | Parented, or [`Reason::BadXid`] (centred) for an id that is no window (gone, a pixmap) or is a root |
 //! | X11 | `wayland:` or none | `_NET_WM_WINDOW_TYPE_DIALOG` only | [`Reason::Mismatch`], [`Reason::NoParent`] |
 //! | Wayland | none | Nothing | [`Reason::NoParent`] |
 //!

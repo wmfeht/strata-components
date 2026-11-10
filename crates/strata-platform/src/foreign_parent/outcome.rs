@@ -81,7 +81,8 @@ pub enum Reason {
     /// The compositor destroyed the import at once: the handle is invalid, stale, or was
     /// already unexported.
     Destroyed,
-    /// The `x11:` window doesn't exist (or is the window itself).
+    /// The `x11:` id names no window that can be a parent: none at all, a pixmap, a root
+    /// window, or the window itself.
     BadXid,
     /// The app's window was closed before the call.
     WindowClosed,
@@ -103,7 +104,7 @@ impl fmt::Display for Reason {
                 "libwayland < 1.23: no wl_proxy_get_display, so winit's display is out of reach",
             ),
             Reason::Destroyed => f.write_str("the compositor refused the handle"),
-            Reason::BadXid => f.write_str("the parent X11 window doesn't exist"),
+            Reason::BadXid => f.write_str("the parent X11 id names no window that can be a parent"),
             Reason::WindowClosed => f.write_str("the window is closed"),
             Reason::NotLinux(kind) => write!(f, "not a Wayland or X11 window: {kind}"),
             Reason::Failed(e) => write!(f, "failed: {e}"),

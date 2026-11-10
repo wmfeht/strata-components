@@ -10,6 +10,7 @@
 //! hints are read from the X server.
 
 use serde_json::{Value, json};
+use x11rb::connection::Connection as _;
 use x11rb::protocol::xproto::{AtomEnum, ConnectionExt};
 use x11rb::rust_connection::RustConnection;
 
@@ -453,5 +454,109 @@ fn x11_stale_xid_and_wayland_handle_leave_it_a_parentless_dialog() {
             "{key}: not modal without a parent"
         );
     }
+    quit(p, true);
+}
+
+/// Review 1, should-fix 3: `GetGeometry` answers for any drawable, so a pixmap passed as a
+/// parent, and the root (`WM_TRANSIENT_FOR` = root is ICCCM's group transient), were taken
+/// for parents.
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn x11_a_pixmap_or_the_root_is_no_parent() {
+    let s = Session::start();
+    let p = probe(&s, Display::X11, &[]);
+    let x = X::new(&s);
+    let screen = &x.conn.setup().roots[0];
+    let (root, depth) = (screen.root, screen.root_depth);
+    let pixmap = x.conn.generate_id().expect("an id");
+    x.conn
+        .create_pixmap(depth, pixmap, root, 1, 1)
+        .expect("create_pixmap")
+        .check()
+        .expect("a pixmap");
+    let dialog = x.atom("_NET_WM_WINDOW_TYPE_DIALOG");
+
+    for (key, xid) in [("c1", pixmap), ("c2", root)] {
+        let handle = format!("x11:{xid:x}");
+        assert_parentless(&open(&p, key, &handle, true), "BadXid", "Centred");
+        let w = s.wait_window_where(&format!("chooser {key} floating"), |w| {
+            w.pid == p.pid() && w.title == format!("chooser {key}") && w.floating
+        });
+        let window = xid_of(&s, w.id);
+        assert!(
+            x.transient_for(window).is_empty(),
+            "{key}: no transient-for"
+        );
+        assert_eq!(
+            x.atoms(window, "_NET_WM_WINDOW_TYPE"),
+            vec![dialog],
+            "{key}"
+        );
+    }
+    quit(p, true);
+}
+
+/// Waits until `window`'s `_NET_WM_STATE` has `_NET_WM_STATE_MODAL` (`on`) or hasn't.
+fn wait_modal(x: &X, window: u32, on: bool) {
+    let modal = x.atom("_NET_WM_STATE_MODAL");
+    let deadline = std::time::Instant::now() + timeout();
+    loop {
+        let states = x.atoms(window, "_NET_WM_STATE");
+        if states.contains(&modal) == on {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "waiting for modal {on}: {states:?}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
+/// Review 1, should-fix 4: once the window is mapped, modality is asked of the window manager
+/// with a `_NET_WM_STATE` client message (EWMH), and the parent is set as a property.
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn x11_a_parent_applied_after_the_map_reaches_the_window_manager() {
+    let s = Session::start();
+    let peer = s.peer(Display::X11);
+    let parent = peer.map("p4 x11 parent").xid.expect("an X window");
+    let handle = peer.export();
+    let p = probe(&s, Display::X11, &[]);
+    let x = X::new(&s);
+    assert_parentless(&open(&p, "c1", "", true), "NoParent", "Compositor");
+    let w = s.wait_window_where("chooser c1 floating", |w| {
+        w.pid == p.pid() && w.title == "chooser c1" && w.floating
+    });
+    let window = xid_of(&s, w.id);
+    wait_modal(&x, window, false);
+
+    let reapply = |parent: &str, modal: bool| {
+        let at = p.line_count();
+        p.send_line(
+            &json!({ "cmd": "reapply", "key": "c1", "parent": parent, "modal": modal }).to_string(),
+        );
+        p.wait_json_from(at, "c1 applied again", |v| {
+            v["ev"] == "applied" && v["key"] == "c1"
+        })
+        .1
+    };
+    let v = reapply(&handle, true);
+    assert_eq!(v["parented"], true, "{v}");
+    assert_eq!(v["late"], true, "applied after the map: {v}");
+    assert_eq!(x.transient_for(window), vec![parent]);
+    wait_node(&s, w.id, "transient_for in the tree", |n| {
+        n["window_properties"]["transient_for"].as_u64() == Some(u64::from(parent))
+    });
+    wait_modal(&x, window, true);
+
+    let v = reapply(&handle, false);
+    assert_eq!(v["late"], true, "{v}");
+    wait_modal(&x, window, false);
+
+    let v = reapply("", true);
+    assert_eq!(v["parented"], false, "{v}");
+    assert!(x.transient_for(window).is_empty(), "the parent is gone");
+    wait_modal(&x, window, false);
     quit(p, true);
 }

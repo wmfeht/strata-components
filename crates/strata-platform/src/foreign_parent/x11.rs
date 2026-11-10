@@ -35,8 +35,8 @@ const SOURCE_APPLICATION: u32 = 1;
 
 /// Sets `window`'s (X11 window `child`) parent hints for `parent`. The window is a dialog
 /// either way, as GTK's portal dialog always is; it is transient for, and modal to, a parent
-/// that exists. A parent that doesn't gets no transient-for, and the window is centred on
-/// its screen (S3's fallback).
+/// that exists. A parent that doesn't, or isn't a window (a pixmap, the root), gets no
+/// transient-for, and the window is centred on its screen (S3's fallback).
 pub(super) fn apply(window: &WindowHandle, child: Window, parent: &Parent, modal: bool) -> Outcome {
     match set(child, parent, modal) {
         Ok(outcome) => {
@@ -151,9 +151,14 @@ fn set(child: Window, parent: &Parent, modal: bool) -> Result<Outcome, String> {
     Ok(outcome)
 }
 
-/// Whether `xid` names a window: a `GetGeometry` that answers.
+/// Whether `xid` names a window that can be a parent: one `GetWindowAttributes` answers for
+/// (`GetGeometry` answers for a pixmap too), and no screen's root, for which
+/// `WM_TRANSIENT_FOR` would mean ICCCM's group transient instead.
 fn exists(conn: &RustConnection, xid: Window) -> Result<bool, String> {
-    match conn.get_geometry(xid).map_err(text)?.reply() {
+    if conn.setup().roots.iter().any(|s| s.root == xid) {
+        return Ok(false);
+    }
+    match conn.get_window_attributes(xid).map_err(text)?.reply() {
         Ok(_) => Ok(true),
         Err(ReplyError::X11Error(_)) => Ok(false),
         Err(e) => Err(e.to_string()),

@@ -148,7 +148,9 @@
 //!   filters its Recent section with the rest, so a recent match shows there and in its group.
 //! - The cursor starts on the current choice where the page shows it, else on the first item;
 //!   a search's results start on the first.
-//! - Each picker shown at once takes its own `IconPickerState::id_base`, so cell keys differ.
+//! - Each picker shown at once takes its own [`IconPickerState::id_base`], so cell keys differ:
+//!   ids are the base plus an item's index, so the ranges `base..base + item count` must not
+//!   overlap.
 //!
 //! # Rune drafts (not filed)
 //!

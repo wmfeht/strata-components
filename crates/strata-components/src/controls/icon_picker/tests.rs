@@ -194,6 +194,23 @@ fn a_recent_tab_comes_first_once_there_are_recents_and_opens_first() {
 }
 
 #[test]
+fn cell_ids_stay_in_base_plus_the_source_length() {
+    use crate::contract::EntrySource;
+    let mut st = IconPickerState::new(two_categories()).id_base(100);
+    let len = st.source().items().len() as u64;
+    let mut ids = Vec::new();
+    for page in st.tabs() {
+        st.select_page(page);
+        ids.extend((0..st.shown.len()).map(|i| st.shown.id_at(i).get()));
+    }
+    ids.sort_unstable();
+    assert_eq!(ids, (100..100 + len).collect::<Vec<_>>());
+    let id = crate::contract::EntryId::new;
+    assert!(st.shown.item_of(id(99)).is_none());
+    assert!(st.shown.item_of(id(100 + len)).is_none());
+}
+
+#[test]
 fn the_cursor_starts_on_the_current_choice_where_the_page_shows_it() {
     let mut st = IconPickerState::new(two_categories());
     st.set_current(Some(&Choice::emoji("🪐")));

@@ -137,9 +137,16 @@ impl IconPickerState {
         st
     }
 
-    /// The same state with its cells' entry ids from `base` on: give each picker shown at
-    /// once its own, so their cells' keys (`row-<id>`) differ.
+    /// The same state with its cells' entry ids from `base` on. A cell's id is `base` plus its
+    /// item's index in the source, and its key (`row-<id>`) lives in one Rune key namespace
+    /// with every other picker's, so pickers shown at once need ranges `base..base + len`
+    /// (`len` the source's item count, the largest source for one given `set_source`) that
+    /// don't overlap: `0` and `10_000` for two pickers of up to 10,000 items, say.
     pub fn id_base(mut self, base: u64) -> Self {
+        debug_assert!(
+            base.checked_add(self.shown.place.len() as u64).is_some(),
+            "id_base {base}: the ids overflow"
+        );
         self.shown.id_base = base;
         self.refresh(None);
         self

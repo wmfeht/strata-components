@@ -2,7 +2,9 @@
 
 strata-components is the component library that moves Strata (`lgse/strata`) off GTK 4 and
 onto [Rune](https://github.com/anomalyco/rune). Read `docs/plan.md` before you start: it maps
-every Strata area to a component (P1–P9, C1–C26, K1–K5) and sets the phases.
+every Strata area to a component (P1–P9, C1–C26, K1–K6) and sets the phases. `docs/work/`
+splits the components into work packages (S1–S5, W0–W4, X1–X3 and the component parts, such as
+C1a–C1f) and `docs/work/STATUS.md` tracks them.
 
 ## Explicit owner consent
 
@@ -15,13 +17,19 @@ as passed.
 
 | Path | What lives there |
 | --- | --- |
-| `crates/strata-platform` | Tier 1: Linux shims Rune lacks (Wayland and X11). A published, generic crate. |
-| `crates/strata-kit` | Tier 3: theme mapping onto `rune_kit::Kit`, icon catalogs, density, text size |
+| `crates/strata-platform` | Tier 1: Linux shims Rune lacks (Wayland and X11). A published, generic crate. Its `examples/` are small Rune apps and the session tests' probes. |
+| `crates/strata-platform/tests/session/`, `tests/support/` | The compositor tests (W3): each in a private headless sway, Xwayland and session bus |
+| `crates/strata-platform/tests/support/strata-test-peer` | The compositor tests' peer process: test tooling, never published |
+| `crates/strata-kit` | Tier 3: theme mapping onto `rune_kit::Kit`, icon catalogs, density, text size, overrides, the bundled JetBrains Mono |
 | `crates/strata-components` | Tier 2 and kit-extension widgets, on rune + rune-kit + strata-kit |
-| `crates/strata-gallery` | One headless scene per component state, plus the golden tests |
-| `tests/golden/` | PNG and accessibility-tree goldens |
+| `crates/strata-gallery` | One headless scene per component state, plus the golden tests; `examples/` holds the X1–X3 demos (`shell`, `dnd_wiring`, `clipboard_wiring`) and `media_playback` |
+| `tests/golden/` | PNG and accessibility-tree goldens per gallery page, and the tree each script ends on |
 | `tests/scripts/` | Rune headless input scripts, one per behavior group |
-| `docs/` | The plan and lasting design and testing notes |
+| `tests/fixtures/` | Shared test inputs (S4's code fixtures) |
+| `docs/` | The plan and lasting design and testing notes (`testing.md`) |
+| `docs/decisions/` | The spike records S1–S5, with the owner's rulings |
+| `docs/work/` | The work packages and their status |
+| `.github/workflows/` | CI (`ci.yml`), the compositor tests (`platform.yml`) and `strata-platform`'s release (`release.yml`) |
 
 ## Crate rules
 
@@ -55,13 +63,15 @@ mise pins the toolchain (`mise.toml`, `mise.lock`). Run `mise install` once, the
 | --- | --- |
 | `mise run fmt` | `cargo fmt --all --check` |
 | `mise run compile` | `cargo check` on every target and feature |
+| `mise run compile-features` | `cargo check` of `strata-platform` with no features, then with each feature alone |
 | `mise run clippy` | Clippy with `-D warnings` |
-| `mise run test [filter]` | The tests, with `DISPLAY` and `WAYLAND_DISPLAY` cleared |
-| `mise run bless` | The tests with `RUNE_BLESS=1`, which rewrites the goldens |
+| `mise run test [filter]` | The tests, with `DISPLAY` and `WAYLAND_SOCKET` unset and `WAYLAND_DISPLAY` naming a socket that doesn't exist |
+| `mise run test-platform [args]` | The compositor tests (`#[ignore]`d in `cargo test`): strata-platform's session tests and the gallery's `x2` and `x3`, each in a private headless sway session. Args go to libtest, e.g. `p4::` |
+| `mise run bless [filter]` | The tests with `RUNE_BLESS=1`, which rewrites the goldens: all, or one page (`c1`), scene (`c1-empty-folder-dark`) or script (`c5/stem-selection`) |
 | `mise run deny` | cargo-deny: advisories, licenses, bans, sources |
 | `mise run typos` | Spelling |
-| `mise run check` | All of the above except `bless`; run it before you push |
-| `mise run gallery [args]` | The gallery app, e.g. `-- --snap out.png --scene empty-dark` |
+| `mise run check` | `fmt`, `compile`, `compile-features`, `clippy`, `test`, `deny` and `typos`; run it before you push |
+| `mise run gallery [args]` | The gallery app, e.g. `-- --snap out.png --scene gallery-index-dark`. Clear the display first, as `mise run test` does |
 
 Add a dependency only if its license is in `deny.toml`'s allow list. Don't widen the list or add
 an advisory ignore without a stated reason.
@@ -69,7 +79,9 @@ an advisory ignore without a stated reason.
 ## Testing
 
 - Tests run headless on Rune's virtual clock (`rune::Runtime`). They never use the desktop
-  display. Rune's `--snap`, `--tree` and `--script` tools work the same way.
+  display. Rune's `--snap`, `--tree` and `--script` tools work the same way. The compositor
+  tests (`mise run test-platform`) run in a private headless sway, never the desktop's
+  (`docs/testing.md`).
 - Each component ships with a gallery scene for each state (light and dark), an accessibility
   golden, and a headless script for each feature-map Behavior bullet it implements. Scripts name
   the bullets they check (`featuremap.py qa --node <id>` lists them).

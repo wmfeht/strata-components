@@ -481,6 +481,29 @@ P0's tests that need winit's own Wayland display ("shared" in `p0.rs`) need libw
 later (`wl_proxy_get_display`). On an older host, Ubuntu 24.04 among them, they check only that
 the probe reports that route Unsupported, and say so on stderr.
 
+### X2's session tests (the gallery's `tests/x2.rs`)
+
+X2's drag-and-drop wiring is tested in the gallery, not in strata-platform: its app is the
+gallery's `dnd_wiring` example, which needs strata-components. `tests/x2.rs` reuses W3's
+harness through `#[path]` (it uses none of the helpers the harness gates on strata-platform's
+features, whose `expect(dead_code)` would otherwise not hold), and `mise run test-platform`
+builds the example and runs these tests after strata-platform's (`mise run test-platform
+x2::` runs only them). Each test makes a fixture folder in the session's runtime directory,
+starts the demo on it, finds targets with its `locate` command (window points from
+`Cx::window_layout`, resolved again at every view until they settle: a grid reflows, a pane
+just shown lays out again) and drags with the session's pointer.
+
+| Variable | Effect |
+| --- | --- |
+| `STRATA_TEST_NAUTILUS=1` | Also runs the Nautilus drags (both ways, best effort), as P2's opt-in test does |
+| `X2_BLOCKED=1` | Also runs the crumb drop, which fails today (P1 can't see a crumb under C24's bar layer) |
+
+Traps: a demo window is found by its exact title (the second is `<title> second`), so the
+demo logs C7's title intent instead of applying it; a drop into another window of the app
+needs time for that window to answer the compositor (its next update), so `drag_out` settles
+on the target before the release; the sidebar lays its pin gaps out again while a drag is
+over it, so a gap is located during the drag.
+
 ### X3's session tests (the gallery's `tests/x3.rs`)
 
 X3's clipboard wiring is tested in the gallery, as X2's drag and drop is: its app is the

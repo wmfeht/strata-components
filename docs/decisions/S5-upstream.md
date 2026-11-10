@@ -1383,6 +1383,47 @@ From P1 (`dnd`): `Tx::element_at` gives a path and key but no rect and no point 
 own coordinates, as Rune's own drops have in `drop_point`. Draft, not filed; the text is in
 `crates/strata-platform/src/dnd/mod.rs`.
 
+X2 adds to U-P1-1: W1's binders were given each element's key and scope (W1e) only because
+Rune lets no shim read it, and C1e's rows needed a scope (P1's `drop_target_in`). To U10: still
+no public way to end a capture at `dev` `f3160022`; upstream #408 (`dece2aff`) rewrote how
+Rune holds a press, so P1's Escape is to be re-checked at the next bump (P1's module docs).
+
+### U-X2-1
+
+From X2 (`examples/dnd_wiring`). Draft, not filed; checked against open issues on 2026-11-09
+(none matches; #265 is the press-side twin: pointer moves reach elements under a pinned
+sibling).
+
+**Title:** `element_at` finds layers that take no input, so a shim's hit test can't see through
+an overlay
+
+**Compositor:** none; it runs headless.
+
+**Steps.** A list of rows, and over them a full-size pinned layer with no handlers that holds a
+scroll bar along one edge (rune-kit's and C24's bar layers are built so):
+
+```rust
+fn view(_: &S, _: &mut Cx<S>) -> El {
+    col().size(300.0, 200.0)
+        .child(col().key("rows").child(el().key("row-1").size(300.0, 30.0).on_press(|_: &mut S| {})))
+        .child(col().pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0)).child(el().key("bar").w(6.0).h_full()))
+}
+// rt.element_at(150.0, 15.0)
+```
+
+**Expected.** A way to find the element a press or a drop would reach there (`row-1`), as
+Rune's own presses and `on_drop_files` do: they skip elements with no handler of the kind.
+
+**Actual** (by source at `5d421fd`, `runtime/elements.rs`): `element_at` returns the topmost
+box, handlers or not (`#0/#1`, the layer), and `Pick` can only add transparent elements. P1
+finds a drop target by the keys along that path (U-P1-1), so every target under such a layer
+is out of reach: Columns' rows and backgrounds under C2's strip bar, and C6's crumbs under
+their bar.
+
+**Ask.** `Pick::reaching(kind)` (or `Pick::handlers_only()`): skip elements with no handler of
+a kind (press, drop), as the press and drop routing do; or a drop-target routing hook for
+non-file payloads (#357), which would make the pick unneeded.
+
 ### U-P8-1
 
 From P8 (`single-instance`), cited by `crates/strata-platform/src/single_instance/mod.rs`.

@@ -84,3 +84,94 @@ fn a_drag_ends_when_it_leaves_every_target_until_the_next_tick() {
     assert_eq!(s.0, 1);
     assert!(!w.tick(&mut s, &mut tx), "once");
 }
+
+mod perf {
+    //! What the P1 binder costs a scrolling collection against Rune's: a report, not a bar
+    //! (`cargo test -p strata-gallery --profile perf --example dnd_wiring -- --ignored perf`).
+
+    use std::cell::RefCell;
+    use std::time::Instant;
+
+    use rune::{Cx, El, Env, Runtime};
+    use strata_components::collection::element::{Collection, CollectionState};
+    use strata_components::contract::{Dnd, EntryId, EntryKind, ListEntry, ListSource};
+    use strata_kit::look::Look;
+
+    use super::super::Wiring;
+
+    struct S {
+        src: ListSource,
+        coll: CollectionState,
+        look: Look,
+        p1: bool,
+    }
+
+    thread_local! {
+        static WIRING: RefCell<Option<Wiring<S>>> = const { RefCell::new(None) };
+    }
+
+    fn view(s: &S, _: &mut Cx<S>) -> El {
+        let dnd: Dnd<S> = if s.p1 {
+            WIRING.with(|w| w.borrow().as_ref().expect("set").binder())
+        } else {
+            Dnd::rune()
+        };
+        let c = Collection::new(
+            "list",
+            |s: &S| (&s.src, &s.coll),
+            |s: &mut S| (&s.src, &mut s.coll),
+            |s: &S| &s.look,
+            |_: &S| 1,
+        )
+        .dnd(dnd)
+        .on_drop(|_: &mut S, _, _, _| {});
+        rune::col().size(600.0, 800.0).child(c.build(s))
+    }
+
+    /// The frame times of 600 wheel steps over 100,000 entries, every fifth a folder (each
+    /// with a zone), p50 and p95 in ms.
+    fn scroll(p1: bool) -> (f64, f64) {
+        WIRING.with(|w| *w.borrow_mut() = Some(Wiring::new(strata_platform::dnd::Dnd::new())));
+        let src = ListSource::new(
+            (0..100_000u64)
+                .map(|i| {
+                    let kind = if i % 5 == 0 {
+                        EntryKind::Folder
+                    } else {
+                        EntryKind::File
+                    };
+                    ListEntry::new(EntryId::new(i + 1), format!("entry {i:06}"), kind, "file")
+                })
+                .collect(),
+        );
+        let s = S {
+            src,
+            coll: CollectionState::new(),
+            look: Look::fallback(false),
+            p1,
+        };
+        let mut rt = Runtime::new(s, view, (600.0, 800.0), Env::new(false, 1.0));
+        rt.frame(0.0);
+        rt.frame(1.0 / 60.0);
+        let mut times = Vec::new();
+        for _ in 0..600 {
+            rt.wheel(300.0, 400.0, -40.0);
+            let t = Instant::now();
+            rt.frame(1.0 / 60.0);
+            times.push(t.elapsed().as_secs_f64() * 1000.0);
+        }
+        times.sort_by(f64::total_cmp);
+        (times[times.len() / 2], times[times.len() * 95 / 100])
+    }
+
+    #[test]
+    #[ignore = "perf: run with --profile perf"]
+    fn perf_scrolling_under_the_p1_binder_against_runes() {
+        let rune = scroll(false);
+        let p1 = scroll(true);
+        eprintln!(
+            "scroll over 100k: Rune's binder p50 {:.3} p95 {:.3} ms; P1's p50 {:.3} p95 {:.3} ms",
+            rune.0, rune.1, p1.0, p1.1
+        );
+    }
+}

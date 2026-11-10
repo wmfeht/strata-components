@@ -111,7 +111,7 @@ fn a_live_window_gets_no_second_turn_while_one_is_outstanding() {
     assert_eq!(w.post(&job), 1, "posted to again once it ran");
 }
 
-/// Should-fix 5: closed windows don't pile up.
+/// Should-fix 5: closed windows don't pile up among those posted to.
 #[test]
 fn a_closed_window_is_pruned_once_two_later_rounds_ran_without_it() {
     let (closed, live) = (App::new("closed"), App::new("live"));
@@ -145,6 +145,74 @@ fn a_hidden_window_whose_turns_run_is_kept() {
         w.prune();
     }
     assert_eq!(w.len(), 2);
+}
+
+/// P4's review 2, should-fix A: Rune orders one app's updates, not one app's against
+/// another's, so the live window's app can run three rounds on its own wakes before the
+/// hidden window's app runs its first. The hidden window is set aside then, but its late turn
+/// brings it back, and the rounds after reach it again.
+#[test]
+fn a_hidden_window_whose_turn_runs_after_three_later_rounds_is_kept() {
+    let (hidden, live) = (App::new("hidden"), App::new("live"));
+    let w = attached(&[&hidden, &live]);
+    let (dispatched, job) = counting();
+    hidden.close();
+    for _ in 0..3 {
+        w.post(&job);
+        live.run();
+        w.prune();
+    }
+    assert_eq!(hidden.queued(), 1, "its first turn is still to run");
+    hidden.run();
+    assert_eq!(dispatched.load(Ordering::SeqCst), 4);
+    assert_eq!(w.len(), 2);
+    assert_eq!(w.post(&job), 2, "both windows are posted to again");
+    assert_eq!(hidden.queued(), 1);
+}
+
+/// The windows set aside are bounded: beyond [`DORMANT`] the oldest go, and a turn of theirs
+/// that runs after brings nothing back. The newest still come back.
+#[test]
+fn closed_windows_set_aside_beyond_the_bound_are_dropped() {
+    let closed: Vec<App> = (0..=DORMANT)
+        .map(|i| App::new(&format!("closed{i}")))
+        .collect();
+    let live = App::new("live");
+    let mut all: Vec<&App> = closed.iter().collect();
+    all.push(&live);
+    let w = attached(&all);
+    let (_, job) = counting();
+    for c in &closed {
+        c.close();
+    }
+    for _ in 0..3 {
+        w.post(&job);
+        live.run();
+        w.prune();
+    }
+    assert_eq!(w.len(), 1);
+    closed[0].run();
+    assert_eq!(w.len(), 1, "the oldest went beyond the bound");
+    closed[DORMANT].run();
+    assert_eq!(w.len(), 2, "the newest was kept aside");
+}
+
+/// A window set aside and then detached (its `on_close` ran late) is gone for good.
+#[test]
+fn a_window_set_aside_then_detached_stays_gone() {
+    let (closed, live) = (App::new("closed"), App::new("live"));
+    let w = attached(&[&closed, &live]);
+    let (_, job) = counting();
+    closed.close();
+    for _ in 0..3 {
+        w.post(&job);
+        live.run();
+        w.prune();
+    }
+    assert!(w.detach("closed"), "it was attached");
+    closed.run();
+    assert_eq!(w.len(), 1);
+    assert_eq!(w.find(|_| true).as_deref(), Some("live"));
 }
 
 #[test]

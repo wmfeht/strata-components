@@ -503,8 +503,8 @@ impl Transfer {
 #[cfg(feature = "foreign-parent")]
 impl Transfer {
     /// Forgets the window keyed `key` and its turn: call it as the window closes, from its
-    /// `on_close`. True if it was attached. A window that closes without it is pruned later
-    /// (see `windows`).
+    /// `on_close`. True if it was attached. A window that closes without it is set aside
+    /// later, and dropped once a few more pile up (see `windows`).
     pub(crate) fn detach(&self, key: &str) -> bool {
         self.0.windows.detach(key)
     }

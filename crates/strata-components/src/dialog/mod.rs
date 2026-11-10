@@ -61,8 +61,9 @@
 //!   while the dialog closed stays where it is.
 //! - Initial focus is the first Tab stop in the dialog: the first body control, so the first
 //!   field. [`Focus::Primary`], [`Focus::Secondary`] or [`Focus::Action`] start on a footer
-//!   button instead. Rune has no call that focuses a button from code, so the dialog gives
-//!   that button, every footer button after it and the close button positive `tab_index`es.
+//!   button instead, and [`Focus::Close`] on the close button. Rune has no call that focuses a
+//!   button from code, so the dialog gives that button, every footer button after it and the
+//!   close button positive `tab_index`es.
 //!   Rune visits those first, then the rest in document order, which keeps Tab's cycle the
 //!   same, only starting elsewhere. A form starts on another field by setting its
 //!   `TextEdit::focused` when it opens.

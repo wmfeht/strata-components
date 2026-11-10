@@ -35,6 +35,10 @@ pub enum Focus {
     /// The extra footer button added as `action(id, …)`; ids can come at runtime (C26's GIO
     /// choices).
     Action(String),
+    /// The close button, for a dialog whose every footer button commits to something (C26's
+    /// questions when no choice declines): Enter then dismisses. Without a close button
+    /// ([`StrataDialog::closable`]`(false)`), as [`Focus::First`].
+    Close,
 }
 
 /// The parts of a dialog keyed `<key>-<part>`, which an action id can't take.
@@ -358,7 +362,7 @@ impl<S: 'static> StrataDialog<S> {
             .filter(|&i| footer[i].0.on_press.is_some())
             .collect();
         let initial_key = match &self.initial {
-            Focus::First => None,
+            Focus::First | Focus::Close => None,
             Focus::Primary => self.primary.as_ref().map(|a| a.key.clone()),
             Focus::Secondary => self.secondary.as_ref().map(|a| a.key.clone()),
             Focus::Action(id) => {
@@ -373,7 +377,13 @@ impl<S: 'static> StrataDialog<S> {
         };
         let initial =
             initial_key.and_then(|k| focusable.iter().position(|&i| footer[i].0.key == k));
-        let (indices, close_index) = tab_indices(initial, focusable.len());
+        let (indices, close_index) = if self.initial == Focus::Close && self.closable {
+            // The close button is last in document order, so starting there leaves Tab's cycle
+            // document order's.
+            (vec![0; focusable.len()], 1)
+        } else {
+            tab_indices(initial, focusable.len())
+        };
         let footer_keys: Vec<String> = focusable.iter().map(|&i| footer[i].0.key.clone()).collect();
 
         let mut buttons = row()

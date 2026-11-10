@@ -624,11 +624,15 @@ impl<S: 'static> Core<S> {
                 f(s, landing.hover(), &offer, tx);
             }
         }
+        // A rejecting target (one with `on_reject` that refuses the drag) hears moves too:
+        // autoscroll follows any drag over a view, not only one it would take.
+        if let Landing::Accepting { key, .. } | Landing::Rejecting { key } = &landing
+            && let Some(f) = self.target(key).and_then(|t| t.on_move.clone())
+        {
+            let point = self.point(key, at);
+            f(s, point, tx);
+        }
         if let Landing::Accepting { key, .. } = &landing {
-            if let Some(f) = self.target(key).and_then(|t| t.on_move.clone()) {
-                let point = self.point(key, at);
-                f(s, point, tx);
-            }
             self.start_peeks(key);
         }
     }

@@ -530,7 +530,9 @@ impl<S: 'static> DropTarget<S> {
         self
     }
 
-    /// Follows a drag the target takes, on every motion, in the target's own points.
+    /// Follows a drag over the target, on every motion, in the target's own points: one it
+    /// takes, and, if the target has [`DropTarget::on_reject`], one it refuses (so a view can
+    /// autoscroll under any drag, as a file manager's does).
     pub fn on_move(mut self, f: impl Fn(&mut S, DropPoint, &mut Tx) + 'static) -> Self {
         self.on_move = Some(Rc::new(f));
         self

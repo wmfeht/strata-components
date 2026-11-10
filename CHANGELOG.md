@@ -63,6 +63,8 @@ Nothing is released yet. The first release is planned for milestone M1 with the 
     ancestor of that key.
   - `DropTarget::action_at`: the target's action, asked with where the drag is (in the target's
     points and the window's), for a target that routes a drop by point.
+  - A target with `on_reject` hears `on_move` while it refuses the drag too, so a view can
+    autoscroll under a drag it won't take.
   - `DragItem::local` and `DropTarget::local`: a typed payload between the app's own windows,
     with nothing serialized.
   - On Wayland, Rune's capture of the press ends once the compositor has taken the pointer

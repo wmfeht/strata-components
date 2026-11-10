@@ -71,9 +71,16 @@
 //!   - After the user moved the highlight in this query, any batch that changes the results
 //!     reveals the highlighted row (Strata's `scroll_row_into_view`), only as far as it takes:
 //!     a row still in view moves nothing, so rows added above stay visible with it. A list the
-//!     user is still scrolling (the offset moved since the last tick: a fling, a wheel landing)
-//!     is left alone, as Strata's `interaction_revision` leaves it.
-//!   - An arrow reveals its row from the key handler, and wins over a batch in its frame.
+//!     user is still scrolling is left alone, as Strata's `interaction_revision` leaves it.
+//!     *Still scrolling* means exactly: the offset the list last reported differs from the one
+//!     at the previous [`PaletteState::tick`], and the palette hasn't asked for a scroll (an
+//!     arrow's reveal or a batch's reveal) since the list was last at rest
+//!     (two ticks with the same offset). So a fling or a wheel still landing counts; the
+//!     palette's own scroll, gliding over frames or not, never does (review round 3, B2). A
+//!     wheel that starts while the palette's own glide is still running counts as the
+//!     palette's until the list comes to rest.
+//!   - An arrow reveals its row from the key handler, only as far as it takes, and wins over a
+//!     batch in its frame.
 //!   - The palette's scrolls are Rune's reveals (`Tx::scroll_into_view_in`), which a wheel or a
 //!     fling wins over. One case still loses: after the user moved the highlight, a batch
 //!     handed over in the very frame a wheel arrives, before Rune has applied the wheel,
@@ -91,7 +98,15 @@
 //!   composition first. Ctrl+K and Ctrl+Shift+K pass through to the host's key map (probe P1).
 //! - **The pointer.** A click opens a result, a middle click opens it in a new tab, a
 //!   right-click highlights it and asks for the host's menu. Rows keep the field's keyboard and
-//!   tint on hover; the pointer never moves the highlight.
+//!   tint on hover; the pointer never moves the highlight. A press acts only when it is released
+//!   on the result it was pressed on, as GTK's ListBox activates only when press and release
+//!   land on the same row: a press held while a batch moves another result into its row opens
+//!   nothing and asks for no menu (review round 3, B1). Each row (keyed by place) holds an inner
+//!   box keyed by its result that takes the presses; Rune resolves a release by the pressed
+//!   element's path and drops it when that path is gone, which covers the right button too
+//!   (Rune has no press-down hook for it at the pin). The inner box is `role("none")`, so
+//!   assistive technology hears the option alone, whose own click and menu actions act on the
+//!   result it shows.
 //! - **Closing and focus.** C15's shell: Escape, a click outside and the host's toggle close
 //!   it, and Rune's modal gives focus back to the opener. Opening a result or its folder
 //!   closes it with one *leaving frame*: the panel is built once more, as it was, naming
@@ -145,12 +160,12 @@
 //! | When indexing stops early, the footer shows "Partial results"; its description… | script `partial-results`; golden `c17-partial` (a11y: the description) |
 //! | Hovering Partial results shows a tooltip…; complete results clear the tooltip | test `the_partial_notice_shows_its_causes_on_hover_until_results_are_complete` |
 //! | While indexing adds results, the highlighted result stays selected by path and unchanged rows are not rebuilt | script `highlight-by-path`; unit `a_same_query_batch_keeps_the_highlight_on_its_result`, `rows_build_again_only_when_their_result_or_highlight_changes` |
-//! | (the same bullet) the list's scroll as batches land | tests `a_batch_above_the_first_row_shows_at_the_top_until_the_user_moves`, `the_streamed_best_result_shows_in_every_frame`, `a_moved_highlight_stays_in_view_when_a_batch_pushes_it_down` (every frame of a resting window); review round 2: `a_batch_in_a_wheel_s_frame_keeps_the_wheel_s_scroll`, `an_arrow_in_a_batch_s_frame_reveals_its_row`, `a_new_query_s_answers_in_one_poll_scroll_to_the_top`, `a_batch_mid_fling_leaves_the_fling_alone`, `a_batch_keeps_a_wheeled_offset_until_the_user_moves`, `after_moving_any_changed_batch_reveals_the_highlighted_row`, `after_moving_rows_added_above_show_while_the_highlight_stays_in_view`, `after_moving_a_batch_during_a_wheel_keeps_the_wheel_s_scroll`; unit `answers_scroll_as_strata_restores_them` |
+//! | (the same bullet) the list's scroll as batches land | tests `a_batch_above_the_first_row_shows_at_the_top_until_the_user_moves`, `the_streamed_best_result_shows_in_every_frame`, `a_moved_highlight_stays_in_view_when_a_batch_pushes_it_down` (every frame of a resting window); review round 2: `a_batch_in_a_wheel_s_frame_keeps_the_wheel_s_scroll`, `an_arrow_in_a_batch_s_frame_reveals_its_row`, `a_new_query_s_answers_in_one_poll_scroll_to_the_top`, `a_batch_mid_fling_leaves_the_fling_alone`, `a_batch_keeps_a_wheeled_offset_until_the_user_moves`, `after_moving_any_changed_batch_reveals_the_highlighted_row`, `after_moving_rows_added_above_show_while_the_highlight_stays_in_view`, `after_moving_a_batch_during_a_wheel_keeps_the_wheel_s_scroll`; review round 3: `a_batch_right_after_an_arrow_scroll_keeps_the_highlight_in_view`, `back_to_back_batches_keep_a_moved_highlight_in_view`, `an_arrow_scrolls_only_as_far_as_it_takes`; unit `answers_scroll_as_strata_restores_them` |
 //! | Up and Down move the highlight while the caret stays in the query field… | scripts `arrows`, `arrows-second`; tests `up_and_down_leave_the_caret_where_it_was`, `arrows_keep_the_highlighted_row_in_view`, `arrows_while_composing_leave_the_highlight`, `a_resting_pointer_never_moves_the_highlight` |
 //! | When the first result is preselected, one Down highlights the second result | script `arrows-second`; unit `a_new_query_highlights_its_first_result_and_arrows_stop_at_the_ends`; test `a_new_query_s_highlighted_first_result_shows_after_arrowing_down` (a new query scrolls to the top: coordinator ruling) |
-//! | Enter or a single click on a result opens it and closes search | scripts `enter-opens`, `click-opens` |
+//! | Enter or a single click on a result opens it and closes search | scripts `enter-opens`, `click-opens`; tests `a_press_held_while_a_batch_moves_its_row_opens_nothing` (left and middle), `a_click_between_batches_still_acts_on_its_row` |
 //! | With an input method composing…, Enter that the input method passes back… opens the highlighted result | test `an_enter_after_the_composition_commits_opens_the_highlighted_result` (scripts have no input-method events: U-C6-7) |
-//! | Alt+Enter, or right-click → Open containing folder, closes search and opens the result's parent… | scripts `reveal-alt-enter`, `reveal-menu` (the menu is a stand-in for C21's; the parent and selection are Strata's) |
+//! | Alt+Enter, or right-click → Open containing folder, closes search and opens the result's parent… | scripts `reveal-alt-enter`, `reveal-menu` (the menu is a stand-in for C21's; the parent and selection are Strata's); test `a_right_press_held_while_a_batch_moves_its_row_asks_for_no_menu` |
 //! | Alt+Enter with Hyper or Meta held also opens the containing folder | script `reveal-alt-super-enter` (Rune reports those as Super) |
 //! | Escape, or a click outside the dialog panel, closes search | scripts `escape-closes`, `click-outside-closes`; test `shift_escape_closes_as_escape_does` (Strata's `ESCAPE_ANY`) |
 //! | With a pinyin input method composing…, Escape cancels only the composition… | test `escape_while_composing_keeps_the_palette_open` |
@@ -192,6 +207,18 @@
 //!
 //! # Deliberate changes
 //!
+//! - **Options are keyed by place** ([`option_key`]), for the scroll policy above (U-C17-3).
+//!   What assistive technology hears changes with it, against Strata, which has no active
+//!   descendant (its rows take focus) and a widget per result:
+//!   - An option's identity follows its place, not its result: when a batch reorders results,
+//!     the option at a place keeps its id and changes its name and position, rather than an
+//!     option moving.
+//!   - The active descendant follows the highlighted result's place: when a batch puts results
+//!     above the same highlighted result, the active descendant moves (say from `option-0` to
+//!     `option-2`), and a screen reader may announce the same result again.
+//!   - When the highlighted result is dropped, the highlight stays at its place (clamped), so
+//!     the active descendant stays put and only that option's name changes.
+//!   - Names (full paths), the selected state and positions stay right in every case.
 //! - **Rune's core `text_input`, frameless**, not rune-kit's `TextInput`: Strata's field has no
 //!   box, and rune-kit's inner field takes no secondary press (U-C21-2), so C21's field menu
 //!   couldn't attach. C18 made the same choice; one shared field is a follow-up.

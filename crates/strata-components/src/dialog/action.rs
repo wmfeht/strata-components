@@ -111,6 +111,7 @@ pub struct StrataDialog<S> {
     primary: Option<Action<S>>,
     initial: Focus,
     primary_enabled: bool,
+    default_button: bool,
     loading: Option<String>,
     close_label: String,
     closable: bool,
@@ -145,6 +146,7 @@ impl<S: 'static> StrataDialog<S> {
             primary: None,
             initial: Focus::First,
             primary_enabled: true,
+            default_button: true,
             loading: None,
             close_label: "Close dialog".into(),
             closable: true,
@@ -215,6 +217,16 @@ impl<S: 'static> StrataDialog<S> {
     /// Call it before or after [`StrataDialog::primary`].
     pub fn primary_enabled(mut self, enabled: bool) -> Self {
         self.primary_enabled = enabled;
+        self
+    }
+
+    /// Makes the primary the dialog's default button while true, as it is unless set: Return
+    /// presses it from a single-line field or with nothing focused. False for a primary that
+    /// must only be pressed on purpose, such as accepting an unverified SSH host key or ending
+    /// the processes that keep a volume busy (C26): Return then presses a button only when it
+    /// has focus.
+    pub fn default_button(mut self, default: bool) -> Self {
+        self.default_button = default;
         self
     }
 
@@ -377,7 +389,7 @@ impl<S: 'static> StrataDialog<S> {
                 .position(|&j| j == i)
                 .map_or(0, |p| indices[p]);
             let mut b = action.button(look, *variant, *ring, index);
-            if has_primary && i + 1 == footer.len() {
+            if self.default_button && has_primary && i + 1 == footer.len() {
                 // Return presses it from a single-line field or with nothing focused.
                 b = b.default_button();
             }

@@ -44,6 +44,9 @@
 //!   into a Space press, which Rune applies on the next frame.
 //! - **Enter** in a single-line field, or with focus on nothing, presses the primary button
 //!   (Rune's `default_button`). A disabled primary drops its handler, so Enter does nothing.
+//!   [`StrataDialog::default_button`]`(false)` keeps the primary from being the default
+//!   button, for one that must be pressed on purpose (C26's host-key and busy-volume
+//!   prompts): Enter then presses only a focused button.
 //! - **Enter** in a multi-line field types a newline only in a field built with
 //!   [`text_area`] (or given [`newline_on_enter`]). Rune's multi-line editor treats a plain
 //!   Return in a paragraph as submit (a chat composer's rule), and a field with nothing to

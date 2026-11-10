@@ -1,4 +1,4 @@
-use rune::{Cx, El, Env, Key, KeyEvent, Mods, Runtime, TextEdit, col};
+use rune::{Cx, El, Env, Key, KeyEvent, Mods, Runtime, TextEdit, col, text_input};
 use rune_kit::{Button, Kit};
 
 use super::keys::{Route, route, tab_indices};
@@ -283,6 +283,57 @@ fn a_dialog_that_is_not_closable_has_no_close_button_and_escape_still_dismisses_
         assert_eq!(
             rt.state.dismissed, 1,
             "Escape dismisses, closable({closable})"
+        );
+    }
+}
+
+/// A form whose single-line field has focus, over a primary that is or isn't the default button.
+struct Form {
+    name: TextEdit,
+    default_button: bool,
+    pressed: u32,
+}
+
+fn form_view(s: &Form, _cx: &mut Cx<Form>) -> El {
+    let look = strata_kit::look::Look::fallback(false);
+    let mut layer = Vec::new();
+    super::StrataDialog::new("d", "Trust this host?", |_: &mut Form| {})
+        .open(true)
+        .child(
+            text_input(&s.name, look.kit.ty.ui)
+                .single_line()
+                .key("name")
+                .label("Name")
+                .on_edit(|s: &mut Form| &mut s.name),
+        )
+        .secondary("Cancel", |_: &mut Form| {})
+        .primary("Log In Anyway", |s: &mut Form| s.pressed += 1)
+        .default_button(s.default_button)
+        .build(&look, &mut layer);
+    rune_kit::root(col(), layer)
+}
+
+#[test]
+fn enter_in_a_field_presses_the_primary_only_while_it_is_the_default_button() {
+    for default_button in [true, false] {
+        let mut name = TextEdit::new("");
+        name.focused = true;
+        let state = Form {
+            name,
+            default_button,
+            pressed: 0,
+        };
+        let mut rt = Runtime::new(state, form_view, (600.0, 400.0), Env::new(false, 1.0));
+        rt.frame(0.0);
+        rt.frame(0.3);
+        assert!(rt.state.name.focused, "the field has the keyboard");
+        rt.key(key(Key::Enter));
+        rt.frame(1.0 / 60.0);
+        rt.frame(1.0 / 60.0);
+        assert_eq!(
+            rt.state.pressed,
+            u32::from(default_button),
+            "default_button({default_button})"
         );
     }
 }

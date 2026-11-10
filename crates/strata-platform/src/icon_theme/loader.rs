@@ -33,7 +33,9 @@ pub struct Options {
     /// How many recent icons stay loaded once no handle holds them. Default: 128 (GTK keeps
     /// 100).
     pub lru_entries: usize,
-    /// Only icons drawn at up to this many device pixels stay loaded that way. Default: 256.
+    /// Only icons drawn at up to this many device pixels stay loaded that way, and together
+    /// they hold at most the decoded pixels of [`lru_entries`](Self::lru_entries) square icons
+    /// this size (the most recent one excepted). Default: 256.
     pub lru_max_px: u32,
     /// A `load` at least this long after the last check has the thread check the themes read
     /// so far for changes on disk. Default: 5 s, as GTK.
@@ -240,18 +242,22 @@ impl IconLoader {
     /// it from `AppSpec::poll` and run the view again when it is true.
     pub fn poll(&self) -> bool {
         let common = &self.inner.common;
-        let mut changed = common.settled.swap(false, Ordering::AcqRel);
-        lock(&common.table)
-            .loading
-            .retain(|slot| match slot.upgrade() {
-                Some(slot) if slot.decoding() => true,
-                Some(_) => {
-                    changed = true;
-                    false
-                }
-                None => false,
-            });
-        changed
+        let changed = common.settled.swap(false, Ordering::AcqRel);
+        let mut decoded = false;
+        let mut table = lock(&common.table);
+        table.loading.retain(|slot| match slot.upgrade() {
+            Some(slot) if slot.decoding() => true,
+            Some(_) => {
+                decoded = true;
+                false
+            }
+            None => false,
+        });
+        if decoded {
+            // A PNG may have decoded larger than it was asked for.
+            table.trim(common);
+        }
+        changed || decoded
     }
 
     /// Checks the themes on disk now, on the thread, without waiting for
@@ -335,7 +341,27 @@ impl Table {
             return;
         }
         self.lru.push_front(slot.clone());
+        self.trim(common);
+    }
+
+    /// Drops the oldest recent icons beyond [`Options::lru_entries`], or beyond the pixels that
+    /// many icons of [`Options::lru_max_px`] hold: a large PNG asked for at a small size
+    /// decodes at its own size, and counts as such. The most recent icon always stays, so a
+    /// view that shows one large icon doesn't have it looked up again each run.
+    fn trim(&mut self, common: &Common) {
         self.lru.truncate(common.lru_entries);
+        let side = u64::from(common.lru_max_px);
+        let budget = common.lru_entries as u64 * side * side;
+        let mut total = 0;
+        let keep = self
+            .lru
+            .iter()
+            .position(|slot| {
+                total += slot.weight();
+                total > budget
+            })
+            .map_or(self.lru.len(), |over| over.max(1));
+        self.lru.truncate(keep);
     }
 }
 
@@ -467,6 +493,21 @@ impl Slot {
     fn ready(&self) -> bool {
         matches!(self.outcome.get(), Some(Outcome::Found { image, .. })
             if image.is_ready() && image.error().is_none())
+    }
+
+    /// The pixels it holds once decoded: its decoded size, or until then the size it was asked
+    /// to draw at (an SVG's, and a guess for a PNG). Nothing if not found or failed.
+    fn weight(&self) -> u64 {
+        let asked = u64::from(self.request.pixels()).pow(2);
+        match self.outcome.get() {
+            None => asked,
+            Some(Outcome::Found { image, .. }) => match (image.size(), image.error()) {
+                (Some([w, h]), _) => u64::from(w) * u64::from(h),
+                (None, None) => asked,
+                (None, Some(_)) => 0,
+            },
+            Some(_) => 0,
+        }
     }
 
     /// Settled, and decoded if found: a view can show it in place of another.

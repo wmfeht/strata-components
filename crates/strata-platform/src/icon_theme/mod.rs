@@ -148,7 +148,14 @@
 //! Handles are shared while one lives, by theme, source, size and scale. Besides those, the
 //! [`Options::lru_entries`] most recent icons drawn at up to [`Options::lru_max_px`] device
 //! pixels stay loaded (128 and 256: GTK keeps 100, up to 128 pixels). A large PNG decodes at
-//! its own size (a 256 px PNG for a 22 pt row is 256 KiB, plus a third for its mips).
+//! its own size (a 256 px PNG for a 22 pt row is 256 KiB, plus a third for its mips), so the
+//! recent icons are counted by their decoded pixels too: together at most what 128 icons of
+//! 256 px hold, 8 Mpx (32 MiB, 43 MiB with mips), plus the most recent icon whatever its size.
+//! A 1024 px PNG for a 22 pt row counts as 16 icons.
+//!
+//! A view that asks for its icons each run and drops the handles relies on the recent icons:
+//! one that shows more than they hold has the oldest looked up again on each run, and each
+//! lookup runs the view again. Such a view keeps its handles in its state instead.
 
 mod index;
 mod loader;

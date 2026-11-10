@@ -262,6 +262,32 @@ fn an_icon_too_large_for_the_recent_ones_goes_when_its_handles_do() {
 }
 
 #[test]
+fn the_recent_icons_count_what_decoded_not_what_was_asked() {
+    // Room for 2 icons of 8 px: 128 pixels. good-png asked at 8 decodes at its own 16x16.
+    let (icons, _) = gated(Options {
+        lru_entries: 2,
+        lru_max_px: 8,
+        ..options(vec![fixtures().join("decode")], "Decode")
+    });
+    let icon = icons.load(&IconRequest::named(["good-png"], 8, 1.0));
+    assert_eq!(icon.wait(WAIT), IconState::Ready);
+    let png = Arc::downgrade(&icon.0);
+    drop(icon);
+    // The most recent icon stays even over the limit, so a view showing it alone doesn't look
+    // it up again each run.
+    assert!(png.upgrade().is_some());
+    let icon = icons.load(&IconRequest::named(["good"], 8, 1.0));
+    assert_eq!(icon.wait(WAIT), IconState::Ready);
+    let svg = Arc::downgrade(&icon.0);
+    drop(icon);
+    assert!(
+        png.upgrade().is_none(),
+        "256 pixels don't fit beside another icon"
+    );
+    assert!(svg.upgrade().is_some());
+}
+
+#[test]
 fn set_theme_changes_later_lookups_only() {
     let root = fixtures();
     let (icons, _) = loader(vec![root.join("user"), root.join("system")], "Child");

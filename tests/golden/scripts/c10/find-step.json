@@ -169,7 +169,7 @@
                         },
                         {
                           "key": "preview-find-status",
-                          "name": "Match 4 of 4",
+                          "name": "Match 1 of 4",
                           "role": "label",
                           "states": [
                             "live-polite"
@@ -928,13 +928,13 @@
                               "key": "code-position",
                               "name": "Document position",
                               "range": [
-                                12.0,
                                 0.0,
-                                12.0,
+                                0.0,
+                                9.0,
                                 1.0
                               ],
                               "role": "slider",
-                              "value": "Line 13 of 37"
+                              "value": "Line 1 of 37"
                             }
                           ],
                           "key": "code",

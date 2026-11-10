@@ -15,6 +15,15 @@
                   "role": "label"
                 },
                 {
+                  "actions": [
+                    "click",
+                    "focus"
+                  ],
+                  "key": "c10-runtime",
+                  "name": "Bash",
+                  "role": "button"
+                },
+                {
                   "children": [
                     {
                       "actions": [

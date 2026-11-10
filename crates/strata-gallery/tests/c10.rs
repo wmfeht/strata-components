@@ -214,14 +214,13 @@ mod c10 {
         assert_eq!(after, y, "the top row stays put");
     }
 
-    /// With wrap off the list is as wide as its widest row before that row scrolls into
-    /// view, so it neither widens nor narrows as rows mount (review 1's repro: a CJK row and
-    /// an emoji row, each shorter in characters than the six longest rows, draw wider).
-    #[test]
-    fn the_unwrapped_width_holds_while_scrolling() {
+    /// The list's widths while scrolling, wrap off, through six 200-character ASCII rows, then
+    /// `wide` at lines 406 on, then short lines.
+    fn widths_while_scrolling(wide: &[String]) -> Vec<f32> {
         use std::fmt::Write as _;
         let mut rt = scene("c10-wrap-off-light");
-        rt.update(|g, _| {
+        let wide = wide.to_vec();
+        rt.update(move |g, _| {
             let mut text = String::new();
             for _ in 0..6 {
                 let _ = writeln!(text, "{}", "a".repeat(200));
@@ -229,9 +228,10 @@ mod c10 {
             for i in 6..406 {
                 let _ = writeln!(text, "line {i}");
             }
-            let _ = writeln!(text, "{}", "漢".repeat(150));
-            let _ = writeln!(text, "{}", "😀".repeat(150));
-            for i in 408..800 {
+            for w in &wide {
+                let _ = writeln!(text, "{w}");
+            }
+            for i in 406 + wide.len()..800 {
                 let _ = writeln!(text, "line {i}");
             }
             let mut st = CodeState::new(text);
@@ -240,16 +240,43 @@ mod c10 {
         });
         settle(&mut rt, 60);
         let width = |rt: &Runtime<Gallery>| info(rt, "code-rows").expect("the list").rect[2];
-        let first = width(&rt);
-        let mut seen = vec![first];
+        let mut seen = vec![width(&rt)];
         for _ in 0..60 {
             wheel(&mut rt, -400.0);
             seen.push(width(&rt));
         }
-        assert!(offset(&rt) > 407.0 * 18.0, "scrolled past the wide rows");
+        assert!(offset(&rt) > 410.0 * 18.0, "scrolled past the wide rows");
         seen.dedup();
-        assert_eq!(seen, [first], "the list's width moved while scrolling");
+        seen
     }
+
+    /// With wrap off the list is as wide as its widest row before that row scrolls into
+    /// view, so it neither widens nor narrows as rows mount (review 1's repro: a CJK row and
+    /// an emoji row, each shorter in characters than the six longest rows, draw wider).
+    #[test]
+    fn the_unwrapped_width_holds_while_scrolling() {
+        let seen = widths_while_scrolling(&["漢".repeat(150), "😀".repeat(150)]);
+        assert_eq!(
+            seen.len(),
+            1,
+            "the list's width moved while scrolling: {seen:?}"
+        );
+    }
+
+    /// The same for characters `unicode-width` rates one column that a fallback face draws
+    /// wider (review 2's repro): a dingbat and an Indic script.
+    #[test]
+    fn the_unwrapped_width_holds_for_narrow_rated_wide_glyphs() {
+        for wide in ["❤".repeat(190), "क".repeat(190)] {
+            let seen = widths_while_scrolling(std::slice::from_ref(&wide));
+            assert_eq!(seen.len(), 1, "{}: the width moved: {seen:?}", &wide[..3]);
+        }
+    }
+
+    // The position-bar tests below read the thumb's and the bar's drawn places. Like
+    // `colours_landing_move_nothing`, that is a sanctioned exception to "no geometry
+    // assertions" (AGENTS.md): each bullet they check is a claim about where the thumb or
+    // the bar is (named in each test's doc comment), and the place is the claim.
 
     /// preview/preview-panel/documents/scrollbar: "Wheel or touchpad scrolling forward over
     /// the content never moves the thumb backward; scrolling backward never moves it forward;
@@ -473,6 +500,143 @@ mod c10 {
         assert!(thumb(&rt).0 > t, "the thumb follows the scroll");
     }
 
+    /// The value the bar reads to assistive technology: "Line N of M".
+    fn bar_line(rt: &Runtime<Gallery>) -> usize {
+        let v = node(rt, "code-position").expect("the bar")["value"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned();
+        v.split(' ')
+            .nth(1)
+            .and_then(|n| n.parse().ok())
+            .expect("a line number")
+    }
+
+    /// The bar's Page Down and Page Up step a page of rows, as a scroll bar's do.
+    #[test]
+    fn the_bar_s_page_keys_step_a_page() {
+        let mut rt = scene("c10-large-light");
+        assert!(rt.accessibility_action("code-position", Action::Focus, None));
+        settle(&mut rt, 2);
+        key(&mut rt, Key::PageDown);
+        settle(&mut rt, 4);
+        let shown = shown_rows(&rt).len();
+        let line = bar_line(&rt);
+        assert!(
+            line > shown / 2,
+            "Page Down went a page, to line {line} ({shown} rows show)"
+        );
+        key(&mut rt, Key::PageUp);
+        settle(&mut rt, 4);
+        assert_eq!(bar_line(&rt), 1);
+    }
+
+    /// A press on the thumb holds it where it was caught: a move of a point moves the
+    /// content a point's worth of rows, not by the thumb jumping to centre on the pointer.
+    #[test]
+    fn a_thumb_press_holds_it_where_caught() {
+        let mut rt = scene("c10-large-light");
+        let b = bar(&rt);
+        let (top, len) = thumb(&rt);
+        let x = b[0] + b[2] / 2.0;
+        press(&mut rt, x, top + len - 3.0);
+        drag_to(&mut rt, x, top + len - 2.0);
+        settle(&mut rt, 4);
+        // One point of the thumb's travel is about 1,600 points of a 50,000-line text.
+        let o = offset(&rt);
+        assert!(o < 6000.0, "the content jumped to {o}");
+        release(&mut rt, x, top + len - 2.0);
+    }
+
+    /// A press on the trough away from the thumb puts the thumb's middle there (GTK's warp).
+    #[test]
+    fn a_trough_press_warps_the_thumb() {
+        let mut rt = scene("c10-large-light");
+        let b = bar(&rt);
+        let x = b[0] + b[2] / 2.0;
+        let y = b[1] + b[3] / 2.0;
+        press(&mut rt, x, y);
+        settle(&mut rt, 6);
+        release(&mut rt, x, y);
+        let lines = rt.state.c10.code.text().lines().count();
+        let line = bar_line(&rt);
+        assert!(
+            line > lines * 3 / 10 && line < lines * 7 / 10,
+            "the middle of the track went to line {line} of {lines}"
+        );
+    }
+
+    /// With wrap off the bar sets the exact row: rows have one height, so an offset is a row.
+    #[test]
+    fn the_bar_sets_a_row_with_wrap_off() {
+        let mut rt = scene("c10-large-light");
+        rt.update(|g, _| g.c10.code.set_wrap(false));
+        settle(&mut rt, 10);
+        assert!(rt.accessibility_action(
+            "code-position",
+            Action::SetValue,
+            Some(ActionData::NumericValue(1000.0))
+        ));
+        settle(&mut rt, 10);
+        let first = shown_rows(&rt).into_iter().min();
+        assert_eq!(first, Some(1000));
+    }
+
+    /// With wrap off the line numbers stay at the left while the code scrolls sideways
+    /// (`sticky_left`). The number's drawn place is the claim, as for the bar.
+    #[test]
+    fn the_numbers_stay_while_the_code_scrolls_sideways() {
+        let mut rt = scene("c10-wrap-off-light");
+        let number = |rt: &Runtime<Gallery>| at_path(rt, "code-l3/n").expect("a number").rect[0];
+        let text = |rt: &Runtime<Gallery>| row_text(rt, 3).expect("a text").rect[0];
+        let (n0, t0) = (number(&rt), text(&rt));
+        rt.update(|_, tx| tx.scroll_to_x("code-scroll", 500.0));
+        settle(&mut rt, 4);
+        assert!(text(&rt) < t0 - 400.0, "the code scrolled sideways");
+        assert_eq!(number(&rt), n0, "the number stayed");
+    }
+
+    /// The current match's highlight is keyed `current`, which find centres.
+    #[test]
+    fn the_current_match_is_keyed() {
+        let mut rt = scene("c10-rust-light");
+        rt.update(|g, _| {
+            g.c10.drawer.start_find("fn");
+            g.c10.code.find("fn");
+            g.c10.code.find_step(true);
+        });
+        settle(&mut rt, 10);
+        let (_, y) = rt.find("current").expect("a highlight keyed current");
+        let row = row_text(&rt, 28)
+            .expect("the second match's row (line 29's comment)")
+            .rect;
+        assert!(
+            y >= row[1] && y <= row[1] + row[3],
+            "on the second match's row"
+        );
+    }
+
+    /// Ctrl+A is the plain chord only: with Shift it selects nothing (Rune's rule, and
+    /// Strata's: Ctrl+Shift+A isn't select-all).
+    #[test]
+    fn ctrl_shift_a_selects_nothing() {
+        let mut rt = scene("c10-rust-light");
+        let t = row_text(&rt, 3).expect("row 3").rect;
+        press(&mut rt, t[0] + 4.0, t[1] + 4.0);
+        release(&mut rt, t[0] + 4.0, t[1] + 4.0);
+        key_with(
+            &mut rt,
+            Key::Command('a'),
+            Mods {
+                shift: true,
+                ..ctrl()
+            },
+        );
+        settle(&mut rt, 2);
+        assert_eq!(rt.state.c10.selection, "");
+        assert!(!rt.state.c10.code.copy_all().is_empty());
+    }
+
     /// preview/preview-panel/documents: "With focus in a rendered or large source document,
     /// Ctrl+A selects the whole loaded document." Ctrl+C after it copies all 50,000 lines,
     /// past Rune's 10,000-row collection cap.
@@ -598,8 +762,9 @@ mod c10 {
             .and_then(|e| e.key)
     }
 
-    /// Ctrl+Tab and Ctrl+Shift+Tab leave the editor, as they leave a GtkTextView, whose Tab
-    /// types: the text stays as it was.
+    /// Ctrl+Tab and Ctrl+Shift+Tab leave the editor, forward and back, as they leave a
+    /// GtkTextView, whose Tab types: the text stays as it was. The page's stops are the
+    /// runtime button, the script, then the Library button.
     #[test]
     fn ctrl_tab_leaves_the_editor() {
         let mut rt = editor();
@@ -616,7 +781,7 @@ mod c10 {
                 ..ctrl()
             },
         );
-        assert_eq!(focused_key(&rt).as_deref(), Some("c10-library"));
+        assert_eq!(focused_key(&rt).as_deref(), Some("c10-runtime"));
         assert_eq!(script(&rt), before, "nothing typed");
         // Plain Tab still types.
         assert!(rt.accessibility_action("field", Action::Focus, None));
@@ -624,6 +789,26 @@ mod c10 {
         key(&mut rt, Key::Tab);
         assert_eq!(focused_key(&rt).as_deref(), Some("field"));
         assert_ne!(script(&rt), before);
+    }
+
+    /// Two Ctrl+Tabs in one frame move focus twice, typing nothing (review 2).
+    #[test]
+    fn two_ctrl_tabs_in_a_frame_move_focus_twice() {
+        let mut rt = editor();
+        let before = script(&rt);
+        for _ in 0..2 {
+            rt.key(KeyEvent {
+                key: Key::Tab,
+                mods: ctrl(),
+            });
+        }
+        settle(&mut rt, 2);
+        assert_eq!(script(&rt), before, "nothing typed");
+        assert_eq!(
+            focused_key(&rt).as_deref(),
+            Some("c10-runtime"),
+            "past the Library button"
+        );
     }
 
     /// Typing re-highlights the edited line: its colours change from a comment's to code's.

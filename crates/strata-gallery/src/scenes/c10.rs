@@ -392,6 +392,13 @@ fn editor_page(g: &Gallery, look: &Look) -> El {
                 .font(k.ty.small)
                 .color(k.c.text_muted),
         )
+        // The stop before the script, as Strata's runtime choice is.
+        .child(
+            rune_kit::Button::new("Bash")
+                .on_press(|g: &mut Gallery| g.c10.last = "Runtime".into())
+                .build(k)
+                .key("c10-runtime"),
+        )
         .child(col().w_full().grow(1.0).min_h(0.0).child(editor))
         // The Script tab's next stop, as Strata's Library button is.
         .child(

@@ -585,6 +585,25 @@ mod x2 {
         };
         // Columns: a folder row; the background of a column showing another folder.
         select_tab(&demo, "main", 1);
+        // A drag's hit test (P1's) reaches the column's row and background, not the bar layers
+        // over them (C24's bars hang from an anchor).
+        let w = demo.window(&s, "main");
+        let pick = |item: Value| {
+            let at = demo.at(&s, "main", item, 0.5, 0.5);
+            let v = demo.command(
+                "main",
+                json!({ "cmd": "pick", "x": at.0 - w.content.x, "y": at.1 - w.content.y }),
+                "picked",
+            );
+            v["path"].as_str().unwrap_or_default().to_owned()
+        };
+        let docs = pick(json!({ "tab": 1, "depth": 0, "row": "Documents" }));
+        assert!(
+            docs.contains("/t1-cols-col-1/") && docs.contains("/row-"),
+            "{docs}"
+        );
+        let bg = pick(json!({ "tab": 1, "column": 0 }));
+        assert!(bg.contains("/t1-cols-col-1/"), "{bg}");
         let got = drop_on(
             &s,
             &demo,
@@ -724,18 +743,9 @@ mod x2 {
         drop_in_on_each_target(Display::X11);
     }
 
-    /// location-bar: "Parent breadcrumbs accept file drops". Blocked: P1 finds a target by the
-    /// topmost element under the drag, and C6's crumb strip lays C24's scroll bar layer over
-    /// the crumbs, so a system drag never reaches a crumb's zone (the demo's `pick` shows it
-    /// lands on the strip's bar layer). Opt-in until that is settled
-    /// (`X2_BLOCKED=1 mise run test-platform x2::`): it fails today.
+    /// location-bar: "Parent breadcrumbs accept file drops" (under P1 since C24's bars hang
+    /// from an anchor: before, the crumbs' bar frame covered them from a drag's hit test).
     fn drop_on_a_crumb(display: Display) {
-        if std::env::var_os("X2_BLOCKED").is_none() {
-            eprintln!(
-                "skipped: crumb drops are blocked under P1 (C24's bar layer); X2_BLOCKED=1 runs it"
-            );
-            return;
-        }
         let s = Session::start();
         let demo = Demo::start(&s, display, false, false);
         let (peer, from) = peer_beside(&s, display, &demo);
@@ -744,6 +754,20 @@ mod x2 {
             "main",
             json!({ "cmd": "open", "tab": 2, "path": "Documents" }),
             "navigate",
+        );
+        let w = demo.window(&s, "main");
+        let at = demo.at(&s, "main", json!({ "crumb": 0 }), 0.5, 0.5);
+        let v = demo.command(
+            "main",
+            json!({ "cmd": "pick", "x": at.0 - w.content.x, "y": at.1 - w.content.y }),
+            "picked",
+        );
+        assert!(
+            v["path"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("loc-crumb-0"),
+            "a drag's hit test reaches the crumb: {v}"
         );
         let got = drop_on(
             &s,
@@ -857,6 +881,27 @@ mod x2 {
             Duration::from_millis(300),
         );
         assert!(!demo.saw(mark, Duration::ZERO, |v| v["ev"] == "spring"));
+        // A crumb (location-bar: "Holding a file drag over a parent breadcrumb for 750 ms
+        // navigates there, and the drag stays held"), from Documents.
+        demo.command(
+            "main",
+            json!({ "cmd": "open", "tab": 2, "path": "Documents" }),
+            "navigate",
+        );
+        let at = demo.at(&s, "main", json!({ "crumb": 0 }), 0.5, 0.5);
+        let mark = rest_on(
+            &s,
+            &demo,
+            &peer,
+            &from,
+            &[files(&root, &["usb/stick.txt"])],
+            at,
+            Duration::from_millis(1200),
+        );
+        assert!(demo.saw(mark, Duration::ZERO, |v| v["ev"] == "crumb-open"
+            && v["via"] == "Spring"
+            && v["folder"].as_str() == root.to_str()));
+        assert!(!demo.saw(mark, Duration::ZERO, |v| v["ev"] == "transfer"));
         // A sidebar place.
         let at = demo.at(&s, "main", json!({ "place": "Pictures" }), 0.5, 0.5);
         let mark = rest_on(

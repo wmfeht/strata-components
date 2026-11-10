@@ -292,14 +292,33 @@ impl<S: 'static> Wiring<S> {
         )
     }
 
-    /// `el`, keyed as `key` says, as a P1 target for `zone`: for a target of the host's own
-    /// (Columns' strip, which routes a drop by point).
+    /// `el`, keyed as `key` says, as a P1 target for `zone` (what the binder does for each
+    /// component's zone).
     pub fn drop_target(&self, el: El, key: &ElementKey, zone: DropZone<S>) -> El {
         let target = target_of(zone, self.hovered.clone());
         match key.scope() {
             Some(scope) => self.p1.drop_target_in(el, scope, key.key(), target),
             None => self.p1.drop_target(el, key.key(), target),
         }
+    }
+
+    /// [`Wiring::drop_target`] for a zone whose action depends on where the drag is over it
+    /// (one that routes a drop by point): `action` is asked with the drag's point, in the
+    /// element's points and the window's (P1's `DropTarget::action_at`), instead of the zone's.
+    pub fn drop_target_by_point(
+        &self,
+        el: El,
+        key: &str,
+        zone: DropZone<S>,
+        action: impl Fn(&S, &DropOffer, Mods, PointerEvent) -> Option<DropAction> + 'static,
+    ) -> El {
+        let target = target_of(zone, self.hovered.clone()).action_at(
+            move |s: &S, o: &P1Offer, mods: Option<Mods>, p: DropPoint| {
+                action(s, &offer_of_p1(o), mods.unwrap_or_default(), point_of_p1(p))
+                    .map(action_to_p1)
+            },
+        );
+        self.p1.drop_target(el, key, target)
     }
 
     /// `el` as a P1 drag source for W1's `source`, which owns its `on_drag`.

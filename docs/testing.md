@@ -496,7 +496,6 @@ just shown lays out again) and drags with the session's pointer.
 | Variable | Effect |
 | --- | --- |
 | `STRATA_TEST_NAUTILUS=1` | Also runs the Nautilus drags (both ways, best effort), as P2's opt-in test does |
-| `X2_BLOCKED=1` | Also runs the crumb drop, which fails today (P1 can't see a crumb under C24's bar layer) |
 
 Traps: a demo window is found by its exact title (the second is `<title> second`), so the
 demo logs C7's title intent instead of applying it; a drop into another window of the app

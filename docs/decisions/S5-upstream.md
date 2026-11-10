@@ -1417,8 +1417,10 @@ Rune's own presses and `on_drop_files` do: they skip elements with no handler of
 **Actual** (by source at `5d421fd`, `runtime/elements.rs`): `element_at` returns the topmost
 box, handlers or not (`#0/#1`, the layer), and `Pick` can only add transparent elements. P1
 finds a drop target by the keys along that path (U-P1-1), so every target under such a layer
-is out of reach: Columns' rows and backgrounds under C2's strip bar, and C6's crumbs under
-their bar.
+was out of reach: Columns' rows and backgrounds under C2's strip bar and each column's edge
+bar, and C6's crumbs under their bar. Worked around in this repository by hanging C24's bars
+from a zero-size anchor (`scroll::anchor`) instead of a layer the viewport's size; any other
+passive layer over a target (an app's own) still hides it.
 
 **Ask.** `Pick::reaching(kind)` (or `Pick::handlers_only()`): skip elements with no handler of
 a kind (press, drop), as the press and drop routing do; or a drop-target routing hook for

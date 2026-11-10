@@ -22,8 +22,7 @@ use strata_components::columns::{
     Opening,
 };
 use strata_components::contract::dnd::{
-    ActionInput, CrossDevice, DragPayload, DropAction, DropOffer, DropZone, Dropped, ElementKey,
-    choose_action,
+    ActionInput, CrossDevice, DragPayload, DropAction, DropOffer, DropZone, Dropped, choose_action,
 };
 use strata_components::contract::{EntryId, EntrySource, ListSource, Point};
 use strata_components::folder_peek::{
@@ -121,9 +120,6 @@ pub enum Pane {
         key: String,
         listings: Listings,
         state: ColumnsState,
-        /// Where a system drag over the strip would drop, once a move said (`None`: not known
-        /// since it reached the strip): see `Win::strip_zone`.
-        over: Cell<Option<StripAt>>,
     },
     List(Flat),
     Icons(Flat),
@@ -133,9 +129,6 @@ pub struct TabPane {
     id: TabId,
     pane: Pane,
 }
-
-/// Where a drop on Columns' strip goes: a column, and its folder row or its background.
-type StripAt = Option<(usize, Option<EntryId>)>;
 
 /// The drag this window started.
 struct Out {
@@ -309,7 +302,6 @@ impl Win {
                     key,
                     listings,
                     state,
-                    over: Cell::new(None),
                 }
             }
             Kind::List | Kind::Icons => {
@@ -384,11 +376,12 @@ impl Win {
         let folder = self.folder_of(self.active);
         let mut crumbs = Vec::new();
         let mut at = self.root.clone();
-        crumbs.push(Crumb::new(path_id(&at), name_of(&at)).icon(IconName::Home));
+        // A crumb's id is no key (crumbs are keyed by index): the folder's path itself.
+        crumbs.push(Crumb::new(at.display().to_string(), name_of(&at)).icon(IconName::Home));
         if let Ok(rest) = folder.strip_prefix(&self.root) {
             for seg in rest.components() {
                 at = at.join(seg);
-                crumbs.push(Crumb::new(path_id(&at), name_of(&at)));
+                crumbs.push(Crumb::new(at.display().to_string(), name_of(&at)));
             }
         }
         self.trail = Trail::new(crumbs, folder.display().to_string());
@@ -1238,14 +1231,11 @@ impl Win {
         }
     }
 
-    /// Columns' own target over the whole strip. P1 finds a target by hit-testing the topmost
-    /// element under the drag, and the strip's scroll bar layer (C24's `overlay`) covers every
-    /// column, so the columns' own zones never hear a system drag: this target routes it by
-    /// point instead, as C2's binder contract has it. Its moves feed C2's autoscroll and
-    /// column highlight (`ColumnsState::drag_over`) and the row highlight (C1e's
-    /// `set_drop_over`, which the host's spring follows too); a drop goes where
-    /// `ColumnsView::drop_target_at` says; the action is asked for where the last move was
-    /// (P1 asks before it reports the move).
+    /// Columns' own target over the whole strip, for what no column's zone covers: the gaps
+    /// between columns. Its moves feed C2's autoscroll and column highlight
+    /// (`ColumnsState::drag_over`); a drop there goes where `ColumnsView::drop_target_at` says
+    /// (the column beside it), and its action is asked with the drag's point (P1's
+    /// `action_at`). Columns' rows and backgrounds take drags themselves, through C1e's zones.
     fn strip_zone(tab: TabId) -> DropZone<Win> {
         DropZone::new(move |w: &mut Win, dropped: Dropped, tx| {
             let at = dropped.point.map(|p| Point::new(p.window_x, p.window_y));
@@ -1267,39 +1257,29 @@ impl Win {
         .on_move(move |w: &mut Win, p, tx| {
             w.strip_over(tab, Some(Point::new(p.window_x, p.window_y)), tx);
         })
-        .action(move |w: &Win, offer, mods| match w.strip_at(tab) {
-            // Where the drag is isn't known yet (P1 reports moves only to a target that takes
-            // the drag): take it as a copy, so the next move says where it is. A copy that a drop
-            // then routes nowhere (with no move in between) moves nothing at the source.
-            None => offer
-                .actions
-                .contains(strata_components::contract::DropActions::COPY)
-                .then_some(DropAction::Copy),
-            Some(None) => None,
-            Some(Some((depth, row))) => {
-                let dest = w.column_dest(tab, depth, row)?;
-                w.action_for(&dest, offer, mods)
-            }
-        })
+    }
+
+    /// The strip's action, by where the drag is.
+    fn strip_action(
+        &self,
+        tab: TabId,
+        offer: &DropOffer,
+        mods: Mods,
+        at: Point,
+    ) -> Option<DropAction> {
+        let (depth, row) = self.strip_target(tab, at)?;
+        let dest = self.column_dest(tab, depth, row)?;
+        self.action_for(&dest, offer, mods)
     }
 
     fn strip_target(&self, tab: TabId, at: Point) -> Option<(usize, Option<EntryId>)> {
         Win::columns_view(tab, &self.wiring).drop_target_at(self, at)
     }
 
-    fn strip_at(&self, tab: TabId) -> Option<StripAt> {
-        match &self.tab(tab).pane {
-            Pane::Columns { over, .. } => over.get(),
-            _ => None,
-        }
-    }
-
-    /// Where a drag over the strip is now (`None`: it left, dropped or was refused).
+    /// Where a drag over the strip's gaps is now (`None`: it left, dropped or was refused).
     fn strip_over(&mut self, tab: TabId, at: Option<Point>, tx: &mut Tx) {
         let target = at.and_then(|at| self.strip_target(tab, at));
-        if let Pane::Columns { state, over, .. } = &mut self.tab_mut(tab).pane {
-            // A move says where the drag is; a leave or a refusal makes it unknown again.
-            over.set(at.map(|_| target));
+        if let Pane::Columns { state, .. } = &mut self.tab_mut(tab).pane {
             let mut wake = state.drag_over(at);
             for depth in 0..state.len() {
                 let drop = match target {
@@ -1331,10 +1311,13 @@ impl Win {
                     .h_full()
                     .min_h(0.0)
                     .child(strip);
-                self.wiring.drop_target(
+                self.wiring.drop_target_by_point(
                     host,
-                    &ElementKey::new(format!("{key}-host")),
+                    &format!("{key}-host"),
                     Win::strip_zone(tab),
+                    move |w: &Win, offer, mods, p| {
+                        w.strip_action(tab, offer, mods, Point::new(p.window_x, p.window_y))
+                    },
                 )
             }
             Pane::List(f) => {

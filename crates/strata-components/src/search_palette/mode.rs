@@ -103,8 +103,8 @@ fn english_count(n: usize) -> String {
 fn hints() -> Vec<Hint> {
     vec![
         Hint::text("↑↓  navigate"),
-        // No corner-down-left icon in the catalog yet (a W2d item): the glyph as text.
-        Hint::text("↵  open"),
+        // Strata's corner-down-left beside "open", which is all assistive technology hears.
+        Hint::icon(IconName::Enter, "open"),
         Hint::icon(IconName::FolderOpen, "Alt+Enter  open containing folder"),
     ]
 }

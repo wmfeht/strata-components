@@ -230,8 +230,6 @@
 //! - **A count live region** (owner ruling), hidden as Strata shows no count.
 //! - **The dialogs are named** "Search files and folders" and "Jump to a folder" (owner ruling);
 //!   Strata's panel is unnamed.
-//! - **"↵" as text** in the footer's open hint, not Strata's corner-down-left icon, which the
-//!   icon catalog lacks (a W2d item).
 //! - **Kit tokens for the look**: the Kit's hover and selected row fills and its focus border
 //!   for the highlight's outline, where Strata uses accent alphas; the name at the Kit's medium
 //!   weight, not 650.
@@ -302,7 +300,6 @@
 //! - A `palette` slot in strata-kit for the panel's sizes (owner ruling).
 //! - One field shared with C18's filter bar and footer prompts, once both have merged.
 //! - One candidates model shared with C18's `go ›` prompt (the same answer shape).
-//! - A corner-down-left icon on W2d's row, for the open hint.
 
 mod data;
 mod field;

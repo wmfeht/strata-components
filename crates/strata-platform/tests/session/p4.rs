@@ -227,6 +227,68 @@ fn wayland_parent_exit_reports_lost_and_keeps_the_window() {
     quit(p, true);
 }
 
+/// Closes chooser `key` (releasing it from `on_close` when `release`), and returns its
+/// `closed` report.
+fn close(s: &Session, p: &Proc, key: &str, release: bool) -> Value {
+    let id = chooser(s, p, key).id;
+    let at = p.line_count();
+    p.send_line(&json!({ "cmd": "close", "key": key, "release": release }).to_string());
+    let (_, closed) = p.wait_json_from(at, &format!("chooser {key} closed"), |v| {
+        v["ev"] == "closed" && v["key"] == key
+    });
+    wait_gone(s, id);
+    closed
+}
+
+/// Review 1, B1: the first window to attach P0's substrate gave it the only turn its reader
+/// asked for. Once that window closed the turn never ran again, so no event on winit's
+/// display reached anyone: a later window never heard its parent go. With or without the
+/// first window's `release`.
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn wayland_a_later_window_hears_its_parent_go_after_the_first_closes() {
+    let s = Session::start();
+    for release in [true, false] {
+        let peer = s.peer(Display::Wayland);
+        peer.map("p4 parent");
+        let handle = peer.export();
+        let p = probe(&s, Display::Wayland, &[]);
+        assert_parented(&open(&p, "c1", &handle, true));
+        let closed = close(&s, &p, "c1", release);
+        assert_eq!(closed["released"], release, "{closed}");
+        assert_parented(&open(&p, "c2", &handle, true));
+        s.wait_window_where("chooser c2 floating", |w| {
+            w.pid == p.pid() && w.title == "chooser c2" && w.floating
+        });
+        let at = p.line_count();
+        drop(peer);
+        p.wait_json_from(at, &format!("c2's parent lost (release {release})"), |v| {
+            v["ev"] == "lost" && v["key"] == "c2"
+        });
+        quit(p, true);
+    }
+}
+
+/// Review 1, should-fix 5: P0 kept every window that ever attached, one more per request.
+#[test]
+#[ignore = "needs a private session: mise run test-platform"]
+fn wayland_requests_one_after_another_leave_one_window_tracked() {
+    let s = Session::start();
+    let peer = s.peer(Display::Wayland);
+    peer.map("p4 parent");
+    let handle = peer.export();
+    let p = probe(&s, Display::Wayland, &[]);
+    for i in 0..8 {
+        let key = format!("c{i}");
+        let applied = open(&p, &key, &handle, true);
+        assert_parented(&applied);
+        assert_eq!(applied["p0_windows"], 1, "request {i}: {applied}");
+        let closed = close(&s, &p, &key, true);
+        assert_eq!(closed["p0_windows"], 0, "request {i}: {closed}");
+    }
+    quit(p, true);
+}
+
 #[test]
 #[ignore = "needs a private session: mise run test-platform"]
 fn wayland_without_winit_display_is_parentless() {

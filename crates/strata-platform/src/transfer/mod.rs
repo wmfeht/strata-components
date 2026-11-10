@@ -499,6 +499,17 @@ impl Transfer {
     }
 }
 
+/// What P4 (`foreign-parent`) builds on: dropping a window as it closes.
+#[cfg(feature = "foreign-parent")]
+impl Transfer {
+    /// Forgets the window keyed `key` and its turn: call it as the window closes, from its
+    /// `on_close`. True if it was attached. A window that closes without it is pruned later
+    /// (see `windows`).
+    pub(crate) fn detach(&self, key: &str) -> bool {
+        self.0.windows.detach(key)
+    }
+}
+
 /// What P1 (`dnd`) builds on: the X11 actor.
 #[cfg(feature = "dnd")]
 impl Transfer {

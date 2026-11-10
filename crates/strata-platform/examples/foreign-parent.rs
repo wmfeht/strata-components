@@ -9,7 +9,10 @@
 //! Commands, as JSON lines on stdin:
 //! - `{"cmd":"open","key":"c1","parent":"wayland:…","modal":true}` opens chooser `c1`
 //!   (`modal` defaults to true);
-//! - `{"cmd":"close","key":"c1"}` closes it;
+//! - `{"cmd":"reapply","key":"c1","parent":"x11:…","modal":true}` applies a parent again to
+//!   chooser `c1`, which is shown by now (the late path);
+//! - `{"cmd":"close","key":"c1"}` closes it; with `"release":false` its `on_close` skips
+//!   `foreign_parent::release`, as an app that forgot it would;
 //! - `{"cmd":"quit","shutdown":true}` quits, calling `foreign_parent::shutdown` first unless
 //!   `shutdown` is false.
 //!
@@ -18,7 +21,8 @@
 //! - `{"ev":"bad-parent","key":…,"error":…}` for a handle `Parent::parse` refuses (the chooser
 //!   then opens with no parent);
 //! - `{"ev":"applied","key":…,"parented":…,"system":…,"late":…,"reason":…,"fallback":…,"text":…}`
-//!   on each native creation of a chooser;
+//!   on each native creation of a chooser and each `reapply`, with `p0_windows`, the windows
+//!   P0's substrate tracks (a test hook);
 //! - `{"ev":"ready","key":…}` at a chooser's first frame, `{"ev":"lost","key":…}` when its
 //!   Wayland parent goes away, `{"ev":"closed","key":…,"released":…}` when it closes;
 //! - `{"ev":"exit","code":0}` after the event loop ends.
@@ -43,19 +47,23 @@ fn main() {
 #[cfg(feature = "foreign-parent")]
 mod probe {
     use std::cell::RefCell;
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
     use std::io::{BufRead, Write};
     use std::sync::atomic::{AtomicBool, Ordering};
 
-    use rune::{App, AppSpec, Cx, El, Tx, WindowHandle, WindowOptions, WindowSpec};
+    use rune::{App, AppHandle, AppSpec, Cx, El, Tx, WindowHandle, WindowOptions, WindowSpec};
     use rune::{col, text};
     use serde_json::{Value, json};
     use strata_platform::foreign_parent::{self, Options, Outcome, Parent};
+    use strata_platform::transfer::Transfer;
 
     static AS_IF_OLD: AtomicBool = AtomicBool::new(false);
 
     thread_local! {
-        static CHOOSERS: RefCell<HashMap<String, WindowHandle>> = RefCell::new(HashMap::new());
+        static CHOOSERS: RefCell<HashMap<String, (WindowHandle, AppHandle<Chooser>)>> =
+            RefCell::new(HashMap::new());
+        /// Choosers whose `on_close` skips `release`.
+        static NO_RELEASE: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
     }
 
     fn log(event: &str, fields: Value) {
@@ -91,6 +99,11 @@ mod probe {
             .child(text(format!("chooser {}", s.key)))
     }
 
+    /// How many windows P0's substrate tracks, for the tests: it must not grow with requests.
+    fn p0_windows() -> Option<usize> {
+        Transfer::current().map(|t| t.attached_windows())
+    }
+
     /// The outcome's variant names, for the tests to match on.
     fn outcome_json(key: &str, o: &Outcome) -> Value {
         let name = |d: String| {
@@ -117,9 +130,43 @@ mod probe {
     }
 
     fn on_close(s: &mut Chooser, _: &mut Tx) {
-        let released = foreign_parent::release(&s.key);
+        let skip = NO_RELEASE.with(|n| n.borrow_mut().remove(&s.key));
+        let released = !skip && foreign_parent::release(&s.key);
         CHOOSERS.with(|c| c.borrow_mut().remove(&s.key));
-        log("closed", json!({ "key": s.key, "released": released }));
+        log(
+            "closed",
+            json!({ "key": s.key, "released": released, "p0_windows": p0_windows() }),
+        );
+    }
+
+    fn applied(key: &str, outcome: &Outcome) {
+        let mut v = outcome_json(key, outcome);
+        v["p0_windows"] = json!(p0_windows());
+        log("applied", v);
+    }
+
+    fn parse(key: &str, parent: &str) -> Parent {
+        Parent::parse(parent).unwrap_or_else(|e| {
+            log("bad-parent", json!({ "key": key, "error": e.to_string() }));
+            Parent::None
+        })
+    }
+
+    fn options(modal: bool) -> Options<Chooser> {
+        let options = Options::new().modal(modal).on_lost(on_lost);
+        if AS_IF_OLD.load(Ordering::Relaxed) {
+            return options.as_if_libwayland_below_1_23();
+        }
+        options
+    }
+
+    /// Applies `parent` again to a chooser that is shown by now.
+    fn reapply(key: &str, parent: &str, modal: bool) {
+        let Some((window, app)) = CHOOSERS.with(|c| c.borrow().get(key).cloned()) else {
+            return log("error", json!({ "error": format!("no chooser {key}") }));
+        };
+        let outcome = foreign_parent::apply(&window, &app, &parse(key, parent), options(modal));
+        applied(key, &outcome);
     }
 
     fn open(key: &str, parent: &str, modal: bool) {
@@ -130,10 +177,7 @@ mod probe {
             );
             return;
         }
-        let parent = Parent::parse(parent).unwrap_or_else(|e| {
-            log("bad-parent", json!({ "key": key, "error": e.to_string() }));
-            Parent::None
-        });
+        let parent = parse(key, parent);
         let title: &'static str = Box::leak(format!("chooser {key}").into_boxed_str());
         let app = App::new(AppSpec::new(
             title,
@@ -147,15 +191,13 @@ mod probe {
         })
         .on_close(on_close);
         let handle = app.handle();
-        let mut options = Options::new().modal(modal).on_lost(on_lost);
-        if AS_IF_OLD.load(Ordering::Relaxed) {
-            options = options.as_if_libwayland_below_1_23();
-        }
+        let kept = handle.clone();
+        let options = options(modal);
         let k = key.to_owned();
         let app = app
             .on_window(move |w| {
                 let outcome = foreign_parent::apply(w, &handle, &parent, options);
-                log("applied", outcome_json(&k, &outcome));
+                applied(&k, &outcome);
                 w.show();
             })
             .on_ready({
@@ -166,7 +208,7 @@ mod probe {
             key: key.to_owned(),
         });
         let window = rune::open_window(spec);
-        CHOOSERS.with(|c| c.borrow_mut().insert(key.to_owned(), window));
+        CHOOSERS.with(|c| c.borrow_mut().insert(key.to_owned(), (window, kept)));
     }
 
     fn command(line: &str, tx: &mut Tx) {
@@ -181,8 +223,18 @@ mod probe {
                 v["parent"].as_str().unwrap_or_default(),
                 v["modal"].as_bool().unwrap_or(true),
             ),
+            Some("reapply") => reapply(
+                key,
+                v["parent"].as_str().unwrap_or_default(),
+                v["modal"].as_bool().unwrap_or(true),
+            ),
             Some("close") => match CHOOSERS.with(|c| c.borrow().get(key).cloned()) {
-                Some(w) => w.close(),
+                Some((w, _)) => {
+                    if v["release"] == false {
+                        NO_RELEASE.with(|n| n.borrow_mut().insert(key.to_owned()));
+                    }
+                    w.close();
+                }
                 None => log("error", json!({ "error": format!("no chooser {key}") })),
             },
             Some("quit") => {

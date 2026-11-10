@@ -105,7 +105,10 @@ impl<W: Window> Windows<W> {
     }
 
     /// Drops the window keyed `key`: it closed. True if it was attached.
-    #[cfg_attr(not(test), expect(dead_code, reason = "for a module's close hook"))]
+    #[cfg_attr(
+        not(any(test, feature = "foreign-parent")),
+        expect(dead_code, reason = "P4 detaches a window as it closes")
+    )]
     pub(crate) fn detach(&self, key: &str) -> bool {
         let mut inner = self.lock();
         let before = inner.entries.len();

@@ -212,21 +212,27 @@ pub fn apply<S: 'static>(
             wayland::apply(window, app, handle, lost, options.test)
         }
         Parent::X11(_) => {
-            release(window.key());
+            wayland::release(window.key());
             policy::x11_parent_on_wayland()
         }
         Parent::None => {
-            release(window.key());
+            wayland::release(window.key());
             Outcome::parentless(Reason::NoParent, Fallback::Compositor)
         }
     }
 }
 
-/// Drops the Wayland import of the window keyed `window_key`, which ends its parenting. Call
-/// it on the UI thread, from the window's `on_close`. True if it had one. X11 has nothing to
-/// drop: the hints go with the window.
+/// The window keyed `window_key` is closing: drops its Wayland import, which ends its
+/// parenting, and detaches it from P0's substrate (shared with `dnd` and `clipboard`), which
+/// stops asking its app to dispatch. Call it on the UI thread, from the window's `on_close`,
+/// and only there. True if it had an import. X11 has nothing to drop: the hints go with the
+/// window.
 pub fn release(window_key: &str) -> bool {
-    wayland::release(window_key)
+    let had = wayland::release(window_key);
+    if let Some(t) = crate::transfer::Transfer::current() {
+        t.detach(window_key);
+    }
+    had
 }
 
 /// Destroys every import and tears down P0's substrate (shared with `dnd` and `clipboard`),

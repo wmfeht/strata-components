@@ -28,6 +28,10 @@ pub enum Outcome {
         /// Applied after the window mapped (X11) or drew its first frame (Wayland). The
         /// compositor may already have placed it as a normal window: sway then keeps it
         /// tiled. Open the window hidden and apply from `App::on_window` to avoid it.
+        ///
+        /// On Wayland it is `WindowHandle::is_ready`, which turns true only once the first
+        /// frame has completed: between the first commit (when the compositor maps the
+        /// window) and then, a late call still reads false.
         late: bool,
     },
     /// The window has no parent: why, and what places it instead.

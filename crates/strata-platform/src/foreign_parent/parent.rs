@@ -34,6 +34,7 @@ pub enum Parent {
 pub struct WaylandHandle(String);
 
 impl WaylandHandle {
+    /// The handle as the exporting client's compositor made it, without the `wayland:`.
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -44,6 +45,7 @@ impl WaylandHandle {
 pub struct Xid(NonZeroU32);
 
 impl Xid {
+    /// The window id, never 0.
     pub fn get(self) -> u32 {
         self.0.get()
     }

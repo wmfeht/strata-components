@@ -91,10 +91,11 @@ Nothing is released yet. The first release is planned for milestone M1 with the 
     refused handle; on X11 (and Xwayland) through `WM_TRANSIENT_FOR`, `_NET_WM_WINDOW_TYPE_DIALOG`
     and `_NET_WM_STATE_MODAL` for a modal request. It returns an `Outcome`: parented (and
     whether too late, after the map), or parentless with the `Reason` and the `Fallback` (the
-    compositor's placement, or centred for an X11 parent that doesn't exist).
+    compositor's placement, or centred for an `x11:` id that is no window, a pixmap or a root).
   - `Options::on_lost` hears a Wayland parent going away; the window stays open. `release`
-    drops a window's import from its `on_close`, and `shutdown` destroys every import with the
-    transfer substrate before the event loop ends.
+    drops a window's import from its `on_close` and detaches it from the transfer substrate,
+    and `shutdown` destroys every import with the transfer substrate before the event loop
+    ends.
   - Parentless where no route exists: an `x11:` parent for a Wayland window and libwayland
     below 1.23 (S3's decisions 2 and 1, pending the owner's rulings), and a compositor without
     `zxdg_importer_v2`. No modality on Wayland: Rune hands out no `xdg_toplevel` for

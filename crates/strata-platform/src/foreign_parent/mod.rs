@@ -49,8 +49,9 @@
 //!   is reported ([`Outcome::Parented`]'s `late`).
 //! - **Wayland recreates a window on every show** (Rune destroys it on close): call
 //!   [`apply`] again from `on_window` each time. A new call replaces the window's import.
-//! - **[`release`]** from the window's `on_close` drops its import. A later [`apply`] also
-//!   drops the imports of windows that have closed.
+//! - **[`release`]** from the window's `on_close` drops its import and detaches the window
+//!   from P0's substrate. A later [`apply`] also drops the imports of windows that have
+//!   closed.
 //! - **[`shutdown`]** on the UI thread before the event loop ends (before `Tx::quit` or
 //!   `AppHandle::quit`, and in the last window's `on_close`), as with `dnd` and `clipboard`:
 //!   it destroys the imports and tears down P0's substrate while winit's display lives. Any
@@ -70,7 +71,7 @@
 //! An X11 window is a dialog whatever the parent, as GTK's portal dialog always is: sway, for
 //! one, floats it. Only a bad xid makes the shim place the window ([`Fallback::Centred`]);
 //! anything else parentless is left to the compositor ([`Fallback::Compositor`]), and the
-//! caller may place it (Strata's Hyprland rule).
+//! caller may place it (a window rule of the host's, say).
 //!
 //! # S3's owner decisions
 //!
@@ -81,7 +82,7 @@
 //!    window opens parentless ([`Reason::NoDisplay`]). Pending the owner's ruling (S3
 //!    decision 1).
 //! 2. **An `x11:` parent for a Wayland window** (Electron, Java, Wine and other Xwayland
-//!    apps): parentless ([`Reason::Mismatch`]), as Strata's GTK chooser is today. Pending the
+//!    apps): parentless ([`Reason::Mismatch`]), as a GTK portal dialog is today. Pending the
 //!    owner's ruling (S3 decision 2).
 //! 3. **No activation token**: the FileChooser request carries none, so a parentless window is
 //!    placed and focused by the compositor's policy. The shim calls no `focus()`; whether to
@@ -93,7 +94,13 @@
 //!   window stays open, parentless. On X11 nothing is reported: the window manager handles a
 //!   transient whose parent is gone.
 //! - **Wayland: one round trip** on the UI thread per [`apply`], to hear at once whether the
-//!   compositor refused the handle.
+//!   compositor refused the handle. Its wait has no limit: a compositor that stops answering
+//!   blocks the UI thread until it answers or the connection ends (as it stalls winit's own
+//!   frames meanwhile). A socket too full to take the request is waited out briefly, then
+//!   the call is [`Reason::Failed`] and the connection lives on.
+//! - **Wayland: [`release`] in `on_close`.** It also detaches the window from P0's substrate,
+//!   which asks a window's app to dispatch winit's display's events. A window closed without
+//!   it is pruned once the substrate sees it never runs, a few events later.
 //! - **Wayland: v2 only.** A compositor with `zxdg_importer_v1` alone is
 //!   [`Reason::NoImporter`]. Of Hyprland, GNOME, KDE and sway, only sway has v1 at all, and it
 //!   imports a v1-exported handle (Chromium's there) through v2.

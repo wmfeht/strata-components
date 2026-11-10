@@ -19,7 +19,7 @@ pub(super) fn without_winit_display() -> Outcome {
 }
 
 /// S3 decision 2, pending the owner's ruling: a Wayland window can't be transient for an X11
-/// window, so it opens parentless (option a, what Strata does today). Option b would run the
+/// window, so it opens parentless (option a, what a GTK portal dialog does today). Option b would run the
 /// window in a helper process on Xwayland; option c would ask Rune for an Xwayland window.
 pub(super) fn x11_parent_on_wayland() -> Outcome {
     Outcome::parentless(

@@ -100,6 +100,11 @@
 //! standing in for Strata's Customize); in-process tests in `crates/strata-gallery/tests/c20d.rs`;
 //! unit tests in `tests.rs` and `emoji/tests.rs`; perf in `tests/perf.rs`.
 //!
+//! **Perf**: the plan's bar (§6) is `RUNE_COMMIT_BUDGET_MS=8` per UI commit, and over about
+//! 2,370 choices no single commit passes it. Key plus frame at p95: a keystroke 1.17 ms, a tab
+//! switch 11.32 ms, a page 9.31 ms, the last two mostly drawing new colour glyphs into the
+//! atlas (`tests/perf.rs`'s own bars: 4 ms and a 60 Hz frame).
+//!
 //! | Bullet (`browser/folder-customization`) | Check |
 //! | --- | --- |
 //! | The ICON grid offers 16 bundled icons: Documents, … Tasks | **Partial**: the 16 as the host's data, by K3 name, inline: script `icon-choices`, a11y golden `c20d-icons`; the dialog is Strata's |

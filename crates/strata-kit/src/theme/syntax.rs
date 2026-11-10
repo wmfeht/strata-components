@@ -214,6 +214,11 @@ pub const SCOPES: &[(&str, Role)] = &[
     ("storage.type.extends", Role::Keyword),
     // JavaScript has no type keywords: Babel's `storage.type.js` is `const`, `let`, `async`.
     ("storage.type.js", Role::Keyword),
+    // Go's `func`, `type`, `struct`, `interface`, `var` and `const`, which go.lang lists as
+    // keywords; it lists `map` and `chan` as types.
+    ("storage.type.keyword", Role::Keyword),
+    ("storage.type.keyword.map", Role::Type),
+    ("storage.type.keyword.chan", Role::Type),
     // String prefixes (`r""`, `b""`, `f""`) are part of the string in GtkSourceView.
     ("storage.type.string", Role::String),
     ("entity.name.type", Role::Type),
@@ -221,8 +226,15 @@ pub const SCOPES: &[(&str, Role)] = &[
     ("entity.other.inherited-class", Role::Type),
     ("support.type", Role::Type),
     ("support.class", Role::Type),
-    // xml.lang's `attribute-name`, which html.lang uses, maps to `def:type`.
-    ("entity.other.attribute-name", Role::Type),
+    // xml.lang's `attribute-name`, which html.lang uses, maps to `def:type`, as css.lang's
+    // `attribute-selector-name` (`[href]`) does. The CSS grammar files class and id selectors
+    // under attribute names too: css.lang's `class-selector` is `def:identifier`, in the text
+    // colour, and its `id-selector` is `def:statement`.
+    (
+        "entity.other.attribute-name - entity.other.attribute-name.class.css",
+        Role::Type,
+    ),
+    ("entity.other.attribute-name.id.css", Role::Keyword),
     ("meta.preprocessor", Role::Preprocessor),
     ("keyword.control.import", Role::Preprocessor),
     ("keyword.control.directive", Role::Preprocessor),

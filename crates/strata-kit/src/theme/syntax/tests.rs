@@ -124,7 +124,7 @@ mod syntect_theme {
 
     use crate::look::Look;
     use crate::theme::bundled_theme;
-    use crate::theme::syntax::{Role, syntect_theme, to_syntect};
+    use crate::theme::syntax::{Role, SCOPES, syntect_theme, to_syntect};
     use crate::tokens::{self, Value};
 
     /// The foreground `look`'s syntect theme gives a token under `stack`.
@@ -161,7 +161,7 @@ mod syntect_theme {
                 assert_ne!(role(&look, *a), role(&look, *b), "{a:?} and {b:?} differ");
             }
         }
-        for (stack, want) in [
+        let cases = [
             (&["source.rust", "storage.type.rust"][..], Role::Type),
             (
                 &["source.rust", "storage.type.function.rust"],
@@ -193,9 +193,86 @@ mod syntect_theme {
             ),
             (&["source.diff", "markup.inserted.diff"], Role::Inserted),
             (&["source.rust", "entity.name.function.rust"], Role::Text),
-        ] {
-            assert_eq!(fg(&look, stack), role(&look, want), "{stack:?}");
-        }
+            // css.lang: a class selector is an identifier, an id selector a statement, and
+            // an attribute selector's name a type; html.lang's attribute names stay types.
+            (
+                &[
+                    "source.css",
+                    "meta.selector.css",
+                    "entity.other.attribute-name.class.css",
+                    "punctuation.definition.entity.css",
+                ],
+                Role::Text,
+            ),
+            (
+                &[
+                    "source.css",
+                    "meta.selector.css",
+                    "entity.other.attribute-name.class.css",
+                ],
+                Role::Text,
+            ),
+            (
+                &[
+                    "source.css",
+                    "meta.selector.css",
+                    "entity.other.attribute-name.id.css",
+                ],
+                Role::Keyword,
+            ),
+            (
+                &[
+                    "source.css",
+                    "meta.selector.css",
+                    "meta.attribute-selector.css",
+                    "entity.other.attribute-name.css",
+                ],
+                Role::Type,
+            ),
+            (
+                &[
+                    "text.html.basic",
+                    "meta.tag.inline.a.html",
+                    "meta.attribute-with-value.class.html",
+                    "entity.other.attribute-name.class.html",
+                ],
+                Role::Type,
+            ),
+            // go.lang lists `func`, `type`, `struct`, `var`, `const` and `interface` as
+            // keywords, and `map` and `chan` as types.
+            (
+                &["source.go", "storage.type.keyword.function.go"],
+                Role::Keyword,
+            ),
+            (
+                &["source.go", "meta.type.go", "storage.type.keyword.map.go"],
+                Role::Type,
+            ),
+            (
+                &["source.go", "meta.type.go", "storage.type.keyword.chan.go"],
+                Role::Type,
+            ),
+        ];
+        // Every mismatch at once, each with the role it drew in.
+        let wrong: Vec<String> = cases
+            .iter()
+            .filter_map(|&(stack, want)| {
+                let got = fg(&look, stack);
+                (got != role(&look, want)).then(|| {
+                    let drew = roles.iter().find(|&&r| role(&look, r) == got);
+                    format!("{stack:?}: want {want:?}, drew {drew:?}")
+                })
+            })
+            .collect();
+        assert!(wrong.is_empty(), "{wrong:#?}");
+    }
+
+    /// Every [`SCOPES`] row parses into a theme item: `syntect_theme` skips a selector that
+    /// doesn't parse rather than failing.
+    #[test]
+    fn every_scope_row_becomes_a_theme_item() {
+        let look = bundled_theme("nord").expect("bundled").look();
+        assert_eq!(syntect_theme(&look).scopes.len(), SCOPES.len());
     }
 
     /// A user's `syntax.*` override, applied after the theme, reaches the syntect theme.

@@ -231,4 +231,54 @@ mod c4 {
         run(&mut rt, 0.2);
         assert!(!rt.state.c4.auto.active());
     }
+
+    /// The rows' bar's band, as drawn.
+    fn rows_bar(rt: &Runtime<Gallery>) -> ElementInfo {
+        element(rt, &format!("{SCOPE}-bar")).expect("the rows' bar")
+    }
+
+    /// browser/scrolling: "Scrollbars fade in on hover or scrolling and stay hidden at rest".
+    /// A thumb drag cut off by a view switch (Ctrl+1 hides the table) leaves the bar hidden at
+    /// rest once the table is back: Rune tells the removed bar nothing (Rune draft R-C4-2), so
+    /// `ListTableState::reset` lets go of it (review round 1, SF1).
+    #[test]
+    fn a_bar_drag_cut_off_by_a_view_switch_leaves_the_bar_hidden_at_rest() {
+        let ctrl_1 = KeyEvent {
+            key: Key::Command('1'),
+            mods: Mods {
+                cmd: true,
+                ..Mods::default()
+            },
+        };
+        let mut rt = mount("c4-hundred-k-light");
+        let v = rt.state.c4.coll.viewport();
+        rt.pointer_move(v.x + v.w / 2.0, v.y + v.h / 2.0);
+        rt.frame(FRAME);
+        rt.wheel(v.x + v.w / 2.0, v.y + v.h / 2.0, -100.0);
+        run(&mut rt, 0.1);
+        let [x, y, w, h] = element(&rt, &format!("{SCOPE}-bar/trough/thumb"))
+            .expect("the thumb")
+            .visible;
+        let (tx, ty) = (x + w / 2.0, y + h / 2.0);
+        rt.pointer_move(tx, ty);
+        rt.frame(FRAME);
+        rt.pointer_down(tx, ty);
+        rt.frame(FRAME);
+        rt.pointer_move(tx, ty + 30.0);
+        rt.frame(FRAME);
+        rt.key(ctrl_1.clone());
+        run(&mut rt, 0.2);
+        assert!(!rt.state.c4.shown);
+        rt.pointer_up(tx, ty + 30.0);
+        run(&mut rt, 0.2);
+        rt.pointer_move(5.0, 5.0);
+        rt.key(ctrl_1);
+        run(&mut rt, 3.0);
+        assert!(rt.state.c4.shown);
+        assert_eq!(
+            rows_bar(&rt).opacity,
+            0.0,
+            "the rows' bar is hidden at rest"
+        );
+    }
 }

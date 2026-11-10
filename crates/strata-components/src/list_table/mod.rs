@@ -123,7 +123,9 @@
 //! - **Autoscroll** is the host's to install: `AutoscrollPointer` with
 //!   [`ListTableState::feed`] and [`ListTable::sideways_target`].
 //! - **A view switch mid-drag**: Rune tells an element removed under a drag nothing (Rune draft
-//!   [R-C4-2]), so the host calls [`ListTableState::reset`] when the table leaves the view.
+//!   [R-C4-2]), so the host calls [`ListTableState::reset`] when the table leaves the view. It
+//!   drops a heading drag or resize and lets go of both scroll bars, which would otherwise
+//!   come back held and stay on screen after a thumb drag the switch cut off.
 //! - **Cells don't know their column** to assistive technology: Rune has no column index or
 //!   count (Rune draft [R-C4-3]).
 //! - **A resize commits each move**, rebuilding the rows on screen, as rune-kit's Table does

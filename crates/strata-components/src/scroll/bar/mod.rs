@@ -268,6 +268,15 @@ impl Bar {
         self.0.layout();
     }
 
+    /// Lets go of the bar: its thumb no longer held, the pointer no longer over it, an overlay
+    /// bar hidden. Call it when the bar leaves the view (a view switch) mid-drag or under the
+    /// pointer: Rune tells an element removed under a drag or the pointer nothing (Rune draft
+    /// R-C4-2), so without it the bar comes back held, and shows until the pointer leaves it
+    /// again.
+    pub fn release(&self) {
+        self.0.release();
+    }
+
     /// A handler for `El::on_scroll_offset` that calls [`Bar::follow`].
     pub fn watch(&self) -> impl Fn(ScrollPos) + 'static {
         let bar = self.clone();
@@ -515,6 +524,18 @@ impl Inner {
         // Held while inside; once it leaves (and nothing holds the thumb), the fade's hold
         // starts again.
         self.reveal();
+    }
+
+    fn release(&self) {
+        self.over.set(false);
+        self.dragging.set(false);
+        if let Some(look) = self.look() {
+            self.fill.snap(look.trough);
+        }
+        if self.mode.get() == BarMode::Overlay {
+            self.opacity.snap(0.0);
+        }
+        self.settle();
     }
 
     fn tint(&self) {

@@ -39,6 +39,11 @@
 //! messages, and the routing around the tree: which keys enter it from the listing, Escape and
 //! Space closing the preview, and where focus goes.
 //!
+//! The list's scroll bar (C24's, C24b) has no reset hook: Rune tells an element removed under a
+//! drag nothing (Rune draft R-C4-2, in C4's docs), so a thumb drag cut off by the preview
+//! closing leaves the bar held. If the host keeps the [`ArchiveState`] and shows it again, the
+//! overlay bar shows until a later press on it ends; a fresh state starts clear.
+//!
 //! # Focus
 //!
 //! Rune can't focus an element from code at the pinned rev (Rune draft U-C1e-4), so

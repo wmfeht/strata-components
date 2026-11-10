@@ -70,13 +70,16 @@ impl ListTableState {
         Self::default()
     }
 
-    /// Drops a heading drag or resize in progress, as Strata does when its headings unmap. Call
-    /// it when the table leaves the view (a view switch) mid-gesture: Rune tells an element
-    /// removed under a drag nothing (Rune draft R-C4-2).
+    /// Drops a heading drag or resize in progress, as Strata does when its headings unmap, and
+    /// lets go of both scroll bars (C24's `Bar::release`: a thumb drag cut off, or the pointer
+    /// over a bar). Call it when the table leaves the view (a view switch) mid-gesture: Rune
+    /// tells an element removed under a drag nothing (Rune draft R-C4-2).
     pub fn reset(&mut self) {
         self.drag = None;
         self.resize = None;
         self.suppress_press.set(false);
+        self.bar.release();
+        self.sideways_bar.release();
     }
 
     /// The end of the frame's input, as the view builds: a sort click a reorder drag's release

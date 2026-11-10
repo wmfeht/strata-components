@@ -145,6 +145,12 @@
 //! - **The size keys are data** ([`SizeKeys`]): Strata's chords; rebinding and routing window
 //!   keys are the host's.
 //! - **Tiles over 128 pt at scale 2** draw a 256 px image up (above).
+//! - **A view switch mid-drag on the scroll bar** (C24b review round 1): Rune tells an element
+//!   removed under a drag nothing (Rune draft R-C4-2, in C4's docs), so a thumb drag a view
+//!   switch cuts off leaves [`IconsGridState`]'s bar held: if the host keeps the state, the
+//!   overlay bar shows when the grid comes back, until a later press on it ends. The grid has
+//!   no reset hook for it yet, unlike C4's `ListTableState::reset`; C24's `Bar::release` is
+//!   what one would call.
 //!
 //! # Left to other work packages and hosts
 //!

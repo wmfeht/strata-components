@@ -120,6 +120,9 @@ pub enum Pane {
         key: String,
         listings: Listings,
         state: ColumnsState,
+        /// Where a system drag over the strip would drop, once a move said (`None`: not known
+        /// since it reached the strip): see `Win::strip_zone`.
+        over: Cell<Option<Option<(usize, Option<EntryId>)>>>,
     },
     List(Flat),
     Icons(Flat),
@@ -298,6 +301,7 @@ impl Win {
                     key,
                     listings,
                     state,
+                    over: Cell::new(None),
                 }
             }
             Kind::List | Kind::Icons => {
@@ -642,6 +646,31 @@ impl Win {
                 self.select_tab(id, "command", tx);
             }
             "select" => self.select(cmd, tx),
+            "pick" => {
+                // What a drag's hit test (P1's) finds at window point (x, y).
+                let (x, y) = (
+                    cmd["x"].as_f64().unwrap_or(0.0) as f32,
+                    cmd["y"].as_f64().unwrap_or(0.0) as f32,
+                );
+                tx.element_at_with(
+                    x,
+                    y,
+                    rune::Pick::new().transparent(true),
+                    move |w: &mut Win, picked: Option<rune::Picked>, _: &mut Tx| {
+                        let path = picked.map(|p| p.path().to_owned());
+                        w.log("picked", json!({ "x": x, "y": y, "path": path }));
+                    },
+                );
+            }
+            "open" => {
+                let id = TabId(cmd["tab"].as_u64().unwrap_or(self.active.0));
+                let path = self.root.join(cmd["path"].as_str().unwrap_or(""));
+                if self.tabs.iter().any(|t| t.id == id) && path.starts_with(&self.root) {
+                    self.navigate(id, &path, tx);
+                } else {
+                    self.log("bad-command", json!({ "cmd": "open" }));
+                }
+            }
             "state" => self.state(),
             "cancel" => {
                 self.wiring.p1().cancel_drag();
@@ -777,7 +806,7 @@ impl Win {
     fn sidebar_into(&self, item: &ItemId) -> Option<PathBuf> {
         match item {
             ItemId::Place(id) | ItemId::Pin(id) | ItemId::Device(id) if id != "trash" => {
-                Some(PathBuf::from(id))
+                Some(PathBuf::from(id.replace(':', "/")))
             }
             _ => None,
         }
@@ -801,8 +830,10 @@ enum Kind {
     Icons,
 }
 
+/// A sidebar row's id for folder `p`. Row keys carry the id (`ItemId::key`), and a key holds no
+/// `/`, which separates a key path's segments: P1 finds targets by those segments.
 fn path_id(p: &Path) -> String {
-    p.display().to_string()
+    p.display().to_string().replace('/', ":")
 }
 
 fn find(source: &dyn EntrySource, name: &str) -> Option<EntryId> {
@@ -957,13 +988,15 @@ impl Win {
                 let Some(folder) = self.ids.path(t.folder).map(Path::to_owned) else {
                     return;
                 };
-                let rows = fsys::list(&mut self.peek_ids, &folder);
-                let n = rows.len();
+                // The first 64 rows (Strata's cap), and how many more.
+                let all = fsys::list(&mut self.peek_ids, &folder);
+                let n = all.len();
+                let rows = ListSource::new(all.entries().iter().take(64).cloned().collect());
                 self.peeked = Peeked {
                     name: name_of(&folder),
                     status: PeekStatus::Ready,
                     rows,
-                    more: (n > 64).then_some(More::Exactly(n - 64)),
+                    more: n.checked_sub(64).filter(|m| *m > 0).map(More::Exactly),
                 };
                 self.log("peek", json!({ "open": true, "folder": folder }));
             }
@@ -1157,44 +1190,86 @@ impl Win {
         }
     }
 
-    /// Columns' own target over the whole strip, outside the columns' zones (their headers,
-    /// the gaps between them): its moves feed C2's autoscroll and drop highlight
-    /// (`ColumnsState::drag_over`), and a drop goes where `ColumnsView::drop_target_at` says.
+    /// Columns' own target over the whole strip. P1 finds a target by hit-testing the topmost
+    /// element under the drag, and the strip's scroll bar layer (C24's `overlay`) covers every
+    /// column, so the columns' own zones never hear a system drag: this target routes it by
+    /// point instead, as C2's binder contract has it. Its moves feed C2's autoscroll and
+    /// column highlight (`ColumnsState::drag_over`) and the row highlight (C1e's
+    /// `set_drop_over`, which the host's spring follows too); a drop goes where
+    /// `ColumnsView::drop_target_at` says; the action is asked for where the last move was
+    /// (P1 asks before it reports the move).
     fn strip_zone(tab: TabId) -> DropZone<Win> {
         DropZone::new(move |w: &mut Win, dropped: Dropped, tx| {
             let at = dropped.point.map(|p| Point::new(p.window_x, p.window_y));
-            if let Pane::Columns { state, .. } = &mut w.tab_mut(tab).pane {
-                state.drag_over(None);
-            }
-            let wiring = w.wiring.clone();
-            let target = at.and_then(|at| Win::columns_view(tab, &wiring).drop_target_at(w, at));
-            if let Some((depth, row)) = target
-                && let Some(dest) = w.column_dest(tab, depth, row)
-            {
-                w.transfer(&dest, &dropped, "strip", tx);
+            let target = at.and_then(|at| w.strip_target(tab, at));
+            w.strip_over(tab, None, tx);
+            match target.and_then(|(depth, row)| Some((w.column_dest(tab, depth, row)?, row))) {
+                Some((dest, row)) => {
+                    let via = if row.is_some() { "row" } else { "background" };
+                    w.transfer(&dest, &dropped, via, tx);
+                }
+                None => w.log("strip-miss", json!({})),
             }
         })
         .on_hover(move |w: &mut Win, h, _, tx| {
-            if h != strata_components::contract::dnd::DropHover::Accepting
-                && let Pane::Columns { state, .. } = &mut w.tab_mut(tab).pane
-                && state.drag_over(None)
-            {
-                tx.wake_after(Duration::ZERO);
+            if h != strata_components::contract::dnd::DropHover::Accepting {
+                w.strip_over(tab, None, tx);
             }
         })
         .on_move(move |w: &mut Win, p, tx| {
-            if let Pane::Columns { state, .. } = &mut w.tab_mut(tab).pane
-                && state.drag_over(Some(Point::new(p.window_x, p.window_y)))
-            {
-                tx.wake_after(Duration::ZERO);
+            w.strip_over(tab, Some(Point::new(p.window_x, p.window_y)), tx);
+        })
+        .action(move |w: &Win, offer, mods| match w.strip_at(tab) {
+            // Where the drag is isn't known yet (P1 reports moves only to a target that takes
+            // the drag): take it as a copy, so the next move says where it is. A copy that a drop
+            // then routes nowhere (with no move in between) moves nothing at the source.
+            None => offer
+                .actions
+                .contains(strata_components::contract::DropActions::COPY)
+                .then_some(DropAction::Copy),
+            Some(None) => None,
+            Some(Some((depth, row))) => {
+                let dest = w.column_dest(tab, depth, row)?;
+                w.action_for(&dest, offer, mods)
             }
         })
-        .action(move |w: &Win, offer, mods| {
-            // Where a drop would go is known by point only at the drop: refuse nothing here
-            // that the columns would take (the drop routes by point).
-            let dest = w.folder_of(tab);
-            w.action_for(&dest, offer, mods)
-        })
+    }
+
+    fn strip_target(&self, tab: TabId, at: Point) -> Option<(usize, Option<EntryId>)> {
+        Win::columns_view(tab, &self.wiring).drop_target_at(self, at)
+    }
+
+    fn strip_at(&self, tab: TabId) -> Option<Option<(usize, Option<EntryId>)>> {
+        match &self.tab(tab).pane {
+            Pane::Columns { over, .. } => over.get(),
+            _ => None,
+        }
+    }
+
+    /// Where a drag over the strip is now (`None`: it left, dropped or was refused).
+    fn strip_over(&mut self, tab: TabId, at: Option<Point>, tx: &mut Tx) {
+        let target = at.and_then(|at| self.strip_target(tab, at));
+        if let Pane::Columns { state, over, .. } = &mut self.tab_mut(tab).pane {
+            // A move says where the drag is; a leave or a refusal makes it unknown again.
+            over.set(at.map(|_| target));
+            let mut wake = state.drag_over(at);
+            for depth in 0..state.len() {
+                let drop = match target {
+                    Some((d, Some(id))) if d == depth => Some(DropOver::Row(id)),
+                    Some((d, None)) if d == depth => Some(DropOver::Background),
+                    _ => None,
+                };
+                if let Some(c) = state.column_mut(depth)
+                    && c.collection.drop_over() != drop
+                {
+                    c.collection.set_drop_over(drop);
+                    wake = true;
+                }
+            }
+            if wake {
+                tx.wake_after(Duration::ZERO);
+            }
+        }
     }
 
     fn pane_el(&self, tab: TabId, cx: &mut Cx<Win>, layer: &mut Vec<El>) -> El {

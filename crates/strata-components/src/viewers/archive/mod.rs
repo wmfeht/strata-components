@@ -62,9 +62,12 @@ use rune_kit::{Button, ButtonVariant, ControlSize, IconButton, IconButtonVariant
 use strata_kit::icons::IconName;
 use strata_kit::look::Look;
 
-use crate::collection::element::{Collection, CollectionState, ContentSlot, Describe, Intent};
+use crate::collection::element::{
+    Collection, CollectionState, ContentSlot, Describe, Intent, viewport_path,
+};
 use crate::collection::selection::Listing;
 use crate::contract::{Direction, EntrySource};
+use crate::scroll::{Bar, BarLook, BarMode, ScrollFeed};
 
 pub use prompt::{ArchivePrompt, PromptLabels, PromptState};
 pub use tree::{ArchiveDir, ArchiveItem, ArchiveListing, ArchiveTree};
@@ -147,6 +150,9 @@ pub struct ArchiveState {
     pub coll: CollectionState,
     labels: ArchiveLabels,
     version: u64,
+    /// The list's scroll bar (C24) and where the list stands.
+    bar: Bar,
+    feed: ScrollFeed,
 }
 
 impl ArchiveState {
@@ -162,6 +168,8 @@ impl ArchiveState {
             coll,
             labels: ArchiveLabels::default(),
             version: 0,
+            bar: Bar::new(),
+            feed: ScrollFeed::new(),
         }
     }
 
@@ -172,6 +180,16 @@ impl ArchiveState {
 
     pub fn scope(&self) -> &str {
         &self.scope
+    }
+
+    /// Where the list stands, as its scroll bar follows it.
+    pub fn feed(&self) -> &ScrollFeed {
+        &self.feed
+    }
+
+    /// When the list's scroll bar shows: overlay (Strata's, the default) or always.
+    pub fn set_bar_mode(&mut self, mode: BarMode) {
+        self.bar.set_mode(mode);
     }
 
     pub fn listing(&self) -> &ArchiveListing {
@@ -415,7 +433,15 @@ impl<S: 'static> ArchiveView<S> {
         if let Some(clock) = self.clock {
             coll = coll.clock(clock);
         }
-        coll.name(get(s).labels.list.clone())
+        let a = get(s);
+        let (bar, feed, edge_bar) = (a.bar.clone(), a.feed.clone(), a.bar.clone());
+        let (bar_key, target) = (format!("{}-bar", a.scope), viewport_path(&a.scope));
+        coll.on_scroll(move |p| {
+            feed.set(p);
+            bar.follow(p);
+        })
+        .edge(move |s: &S| Some(edge_bar.build::<S>(&bar_key, &target, BarLook::app(look(s)))))
+        .name(a.labels.list.clone())
     }
 
     /// Runs the collection's controller timeouts (C1e's `tick`); call it from the host's poll.
@@ -488,6 +514,12 @@ impl<S: 'static> ArchiveView<S> {
             .padding(look.space.sm)
             .child(row().w_full().scroll_x().child(crumbs))
             .child(count)
-            .child(col().w_full().grow(1.0).min_h(0.0).child(list))
+            .child(
+                col()
+                    .w_full()
+                    .grow(1.0)
+                    .min_h(0.0)
+                    .child((self.get)(s).bar.area(list)),
+            )
     }
 }

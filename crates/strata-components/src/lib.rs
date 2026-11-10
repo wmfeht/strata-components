@@ -30,6 +30,7 @@ pub mod progress_dock;
 pub mod rename;
 pub mod scroll;
 pub mod search_palette;
+pub mod sheet_grid;
 pub mod sidebar;
 pub mod tabs;
 pub mod thumbnails;

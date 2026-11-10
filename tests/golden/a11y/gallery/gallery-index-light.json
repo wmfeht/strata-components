@@ -310,6 +310,15 @@
                 "click",
                 "focus"
               ],
+              "key": "index-c11b",
+              "name": "C11b SheetGrid",
+              "role": "button"
+            },
+            {
+              "actions": [
+                "click",
+                "focus"
+              ],
               "key": "index-c12",
               "name": "C12 PdfView",
               "role": "button"

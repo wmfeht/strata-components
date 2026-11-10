@@ -118,7 +118,11 @@
 mod clock;
 mod format;
 mod pacer;
+mod sink;
 
 pub use clock::{ClockState, MediaClock, Reading, WallClock};
 pub use format::{FormatError, PcmFormat, SampleFormat};
 pub use pacer::{FramePacer, PacerStats, Presented, Refused, VideoFrame};
+pub use sink::{
+    AudioSink, MediaError, Output, PushError, SinkClock, SinkEvent, SinkOptions, THREAD_NAME,
+};

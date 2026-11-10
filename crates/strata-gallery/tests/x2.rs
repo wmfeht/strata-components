@@ -62,6 +62,11 @@ mod x2 {
         for i in 0..60 {
             std::fs::write(root.join(format!("Music/track{i:02}.ogg")), "x").expect("track");
         }
+        // Folders then files, for List's file-type groups and their stuck header.
+        for i in 0..20 {
+            std::fs::create_dir_all(root.join(format!("Mixed/folder{i:02}"))).expect("folder");
+            std::fs::write(root.join(format!("Mixed/file{i:02}.txt")), "x").expect("file");
+        }
         root.canonicalize().expect("the root")
     }
 
@@ -1182,5 +1187,172 @@ mod x2 {
     #[ignore = "needs a private session: mise run test-platform"]
     fn x11_pin_gaps_take_folders_only() {
         pin_gaps(Display::X11);
+    }
+
+    /// C1f's stuck group header takes no input, so a drop over it goes to the folder the list
+    /// shows, not to the row it covers (List's "Dropping onto the background of a pane…"); just
+    /// under it, the folder row there takes the drop. Under P1 the drag's hit test finds the
+    /// stuck header itself, inside the collection but in no row, so the background zone
+    /// takes it by path: C1e's drop-by-point routing in `row.rs` (for binders that route
+    /// through the header to the row under it, Rune's) isn't reached.
+    fn stuck_header(display: Display) {
+        let s = Session::start();
+        let demo = Demo::start(&s, display, false, false);
+        let (peer, from) = peer_beside(&s, display, &demo);
+        let root = demo.root.clone();
+        select_tab(&demo, "main", 2);
+        demo.command(
+            "main",
+            json!({ "cmd": "open", "tab": 2, "path": "Mixed" }),
+            "navigate",
+        );
+        demo.command("main", json!({ "cmd": "group", "tab": 2 }), "grouped");
+        demo.command(
+            "main",
+            json!({ "cmd": "scroll", "tab": 2, "y": 130.0 }),
+            "scrolled",
+        );
+        let got = drop_on(
+            &s,
+            &demo,
+            &peer,
+            &from,
+            &["notes.txt"],
+            json!({ "tab": 2, "stuck": true }),
+        );
+        let got = got.expect("a drop over the stuck header");
+        assert_eq!(got["via"], "background", "{got}");
+        assert_eq!(
+            got["into"].as_str().map(PathBuf::from),
+            Some(root.join("Mixed"))
+        );
+        // A visible folder row under the header takes its own drops.
+        let got = drop_on(&s, &demo, &peer, &from, &["notes.txt"], row(2, "folder10"));
+        let got = got.expect("a drop on a folder row");
+        assert_eq!(got["via"], "row", "{got}");
+        assert_eq!(
+            got["into"].as_str().map(PathBuf::from),
+            Some(root.join("Mixed/folder10"))
+        );
+        demo.quit();
+    }
+
+    #[test]
+    #[ignore = "needs a private session: mise run test-platform"]
+    fn wayland_a_drop_over_the_stuck_header_goes_to_the_folder_shown() {
+        stuck_header(Display::Wayland);
+    }
+
+    #[test]
+    #[ignore = "needs a private session: mise run test-platform"]
+    fn x11_a_drop_over_the_stuck_header_goes_to_the_folder_shown() {
+        stuck_header(Display::X11);
+    }
+
+    // ---- Nautilus (opt-in, best effort) ----
+
+    /// Nautilus in the nested sway, both ways: a file dragged from Nautilus onto a List
+    /// folder row transfers into it (Nautilus's GTK drag reaches the demo through P1), and a
+    /// file dragged from the demo onto Nautilus's folder lands there. Best effort: Nautilus's
+    /// layout isn't known, so its file is looked for at a few likely points. Opt-in, with
+    /// Nautilus installed: `STRATA_TEST_NAUTILUS=1 mise run test-platform x2::nautilus`.
+    fn nautilus_both_ways(display: Display) {
+        if std::env::var_os("STRATA_TEST_NAUTILUS").is_none() {
+            eprintln!("skipped: set STRATA_TEST_NAUTILUS=1 to run the Nautilus drags");
+            return;
+        }
+        let s = Session::start();
+        let demo = Demo::start(&s, display, false, false);
+        let root = demo.root.clone();
+        let mut cmd = s.command("nautilus", display);
+        cmd.env("GSK_RENDERER", "cairo")
+            .env("GTK_A11Y", "none")
+            .env(
+                "GDK_BACKEND",
+                if display == Display::X11 {
+                    "x11"
+                } else {
+                    "wayland"
+                },
+            )
+            .arg("--new-window")
+            .arg(root.join("usb"));
+        let nautilus = s.spawn("nautilus", cmd);
+        let window = s.wait_window(nautilus.pid());
+        let _ = s.wait_windows(&[nautilus.pid(), demo.app.pid()]);
+        let window = s.wait_window_where("Nautilus", |w| w.id == window.id);
+        std::thread::sleep(Duration::from_millis(2500));
+        select_tab(&demo, "main", 2);
+        // Nautilus → the demo: stick.txt, the folder's only file, onto Music.
+        let to = demo.at(&s, "main", row(2, "Music"), 0.5, 0.5);
+        let mut landed = None;
+        'points: for fy in [0.18, 0.25, 0.32] {
+            for fx in [0.08, 0.15, 0.3, 0.45] {
+                let at = window.at(fx, fy);
+                s.focus(&window);
+                std::thread::sleep(Duration::from_millis(300));
+                s.input().pointer_move(at);
+                std::thread::sleep(Duration::from_millis(200));
+                let mark = demo.app.line_count();
+                s.input().button(true);
+                // Past GTK's threshold, and time for Nautilus to start its drag.
+                s.input().path((at.0 + 20.0, at.1 + 10.0));
+                std::thread::sleep(Duration::from_millis(300));
+                s.input().path(to);
+                std::thread::sleep(Duration::from_millis(500));
+                s.input().path((to.0 + 1.0, to.1));
+                std::thread::sleep(Duration::from_millis(400));
+                s.input().button(false);
+                if demo.saw(mark, Duration::from_secs(2), |v| v["ev"] == "transfer") {
+                    landed = demo
+                        .lines_from(mark)
+                        .into_iter()
+                        .find(|v| v["ev"] == "transfer");
+                    break 'points;
+                }
+            }
+        }
+        // Both ways run before either is judged, so a failure says which.
+        let inward = landed.filter(|got| {
+            got["into"].as_str().map(PathBuf::from) == Some(root.join("Music"))
+                && got["sources"] == json!(["stick.txt"])
+                && got["local"] == false
+        });
+        eprintln!("Nautilus → demo: {inward:?}");
+        // The demo → Nautilus: notes.txt into the folder Nautilus shows (usb, another volume
+        // to the demo; Nautilus decides its own action).
+        // (The drag above may have sprung List into Music.)
+        demo.command(
+            "main",
+            json!({ "cmd": "open", "tab": 2, "path": "" }),
+            "navigate",
+        );
+        let to = window.at(0.6, 0.7);
+        let (_, end) = drag_out(&s, &demo, "main", row(2, "notes.txt"), to);
+        let deadline = Instant::now() + timeout();
+        while !root.join("usb/notes.txt").exists() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        let outward = root.join("usb/notes.txt").exists();
+        eprintln!("demo → Nautilus: {end}, written: {outward}");
+        drop(nautilus);
+        demo.quit();
+        assert!(
+            inward.is_some(),
+            "no drag from Nautilus reached the demo's Music row"
+        );
+        assert!(outward, "Nautilus didn't write notes.txt into usb: {end}");
+    }
+
+    #[test]
+    #[ignore = "needs a private session: mise run test-platform"]
+    fn nautilus_wayland_drags_both_ways() {
+        nautilus_both_ways(Display::Wayland);
+    }
+
+    #[test]
+    #[ignore = "needs a private session: mise run test-platform"]
+    fn nautilus_x11_drags_both_ways() {
+        nautilus_both_ways(Display::X11);
     }
 }

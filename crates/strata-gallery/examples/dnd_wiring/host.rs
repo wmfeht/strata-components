@@ -14,7 +14,7 @@ use std::time::Duration;
 use rune::{Cx, DragOutcome, El, Mods, Tx, col, row, text};
 use serde_json::{Value, json};
 use strata_components::collection::element::{
-    Collection, CollectionState, DropOver, Intent, RowMarks, entry_path, row_path,
+    Collection, CollectionState, DropOver, Intent, RowMarks, entry_path, row_path, viewport_path,
 };
 use strata_components::collection::selection::{CursorGone, Listing, SyncRule};
 use strata_components::columns::{
@@ -32,6 +32,7 @@ use strata_components::folder_peek::{
 use strata_components::icons_grid::{IconsGrid, IconsGridState, IconsParts};
 use strata_components::list_table::{
     Cell as ListCell, Column, ColumnLayout, ColumnWidths, ListParts, ListTable, ListTableState,
+    groups_from_runs,
 };
 use strata_components::location_bar::{
     Crumb, LocationBar, LocationBarState, LocationIntent, Trail, crumb_key,
@@ -655,6 +656,33 @@ impl Win {
                 self.select_tab(id, "command", tx);
             }
             "select" => self.select(cmd, tx),
+            "group" => {
+                // List's file-type groups (C4's), folders first: the stuck header.
+                let id = TabId(cmd["tab"].as_u64().unwrap_or(self.active.0));
+                if let Pane::List(f) = &mut self.tab_mut(id).pane {
+                    let groups = groups_from_runs(f.listing.len(), |i| {
+                        if f.listing.entry(i).kind.is_folder_like() {
+                            (0, "Folders".into())
+                        } else {
+                            (1, "Files".into())
+                        }
+                    });
+                    f.coll.set_groups(groups);
+                    f.version += 1;
+                    let (key, l) = (f.key.clone(), &f.listing);
+                    f.coll
+                        .sync(&key, l, SyncRule::complete(CursorGone::Neighbor), tx);
+                }
+                self.log("grouped", json!({ "tab": id.0 }));
+            }
+            "scroll" => {
+                let id = TabId(cmd["tab"].as_u64().unwrap_or(self.active.0));
+                let y = cmd["y"].as_f64().unwrap_or(0.0) as f32;
+                if let Pane::List(f) | Pane::Icons(f) = &self.tab(id).pane {
+                    tx.scroll_to_instant(viewport_path(&f.key), 0.0, y);
+                }
+                self.log("scrolled", json!({ "tab": id.0, "y": y }));
+            }
             "pick" => {
                 // What a drag's hit test (P1's) finds at window point (x, y).
                 let (x, y) = (
@@ -787,6 +815,14 @@ impl Win {
                 Pane::List(f) | Pane::Icons(f) => f.key.clone(),
                 Pane::Columns { key, .. } => format!("{key}-host"),
             });
+        }
+        if item["stuck"].as_bool() == Some(true) {
+            // The stuck group header over List's top line.
+            let tab = TabId(item["tab"].as_u64().unwrap_or(self.active.0));
+            return match &self.tab(tab).pane {
+                Pane::List(f) => Some(format!("{}/stuck", f.key)),
+                _ => None,
+            };
         }
         if let Some(i) = item["crumb"].as_u64() {
             return Some(crumb_key(LOC, i as usize));

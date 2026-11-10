@@ -19,7 +19,7 @@
 //!
 //! Commands arrive as JSON lines on stdin (`"window"` picks one, else all):
 //! `{"cmd":"locate","what":[{"name":…,"row":…,"depth":…}|{"crumb":i}|{"tab":id}|{"new-tab":true}|{"gap":i}|{"place":rel}|{"trash":true}|{"device":true}|{"pane":true}|{"column":d}]}`
-//! (logs `rect` lines), `{"cmd":"tab","id":n}`, `{"cmd":"open","tab":n,"path":rel}`, `{"cmd":"select","tab":n,"depth":d,"names":[…]}`,
+//! (logs `rect` lines), `{"cmd":"tab","id":n}`, `{"cmd":"open","tab":n,"path":rel}`, `{"cmd":"group","tab":n}`, `{"cmd":"scroll","tab":n,"y":y}`, `{"cmd":"select","tab":n,"depth":d,"names":[…]}`,
 //! `{"cmd":"state"}`, `{"cmd":"peek","on":bool}`, `{"cmd":"cancel"}`, `{"cmd":"quit"}`. What
 //! happens goes to stdout as JSON lines (`{"ev":…,"window":…}`).
 

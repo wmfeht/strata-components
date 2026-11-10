@@ -480,3 +480,29 @@ and P4 test through their own public APIs.
 P0's tests that need winit's own Wayland display ("shared" in `p0.rs`) need libwayland 1.23 or
 later (`wl_proxy_get_display`). On an older host, Ubuntu 24.04 among them, they check only that
 the probe reports that route Unsupported, and say so on stderr.
+
+### X3's session tests (the gallery's `tests/x3.rs`)
+
+X3's clipboard wiring is tested in the gallery, as X2's drag and drop is: its app is the
+gallery's `clipboard_wiring` example, which needs strata-components. `tests/x3.rs` reuses W3's
+harness through `#[path]` (it uses none of the helpers the harness gates on strata-platform's
+features), and `mise run test-platform` builds the example and runs these tests after
+strata-platform's (`mise run test-platform x3::` runs only them). Each test makes a fixture
+folder in the session's runtime directory, starts the demo on it with `--apply`, sets it up
+with its `open` and `select` commands, and presses Ctrl+C, Ctrl+X and Ctrl+V with the
+session's keyboard. The peer reads what the demo offers and offers what it pastes; the
+demo's JSON lines (`copied`, `badge`, `paste`, `state`) and the files on disk say what it did.
+The data-device variant passes the demo's test-only `--as-if-no-data-control` (P2's
+`TestRoute`), so its writes take the key's serial, as on mutter.
+
+| Variable | Effect |
+| --- | --- |
+| `STRATA_TEST_NAUTILUS=1` | Also runs the Nautilus round trips (copy in Nautilus, paste in the demo; cut in the demo, paste in Nautilus), best effort |
+
+Without `STRATA_TEST_NAUTILUS=1` the Nautilus tests run nothing but report `ok`; each prints
+`SKIP x3::<test>: …` on stderr, past libtest's capture. Count those tests as skipped, never as
+passed.
+
+Trap: the demo hears another app's copy only as a change of the badge, so a test that offers
+files twice in a row first offers text (the badge turns off), then the files (it turns on
+again): otherwise a paste could read the clipboard before the demo heard the new copy.

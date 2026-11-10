@@ -433,6 +433,42 @@ fn a_vanished_row_keeps_its_slot_but_draws_and_announces_nothing_and_takes_no_pr
     assert_eq!(s.coll.selection.cursor(), Some(id(1)));
 }
 
+#[test]
+fn a_vanished_cursor_row_is_not_the_active_descendant() {
+    // AccessKit's own update: the JSON dump leaves out a reference it can't resolve.
+    let dangling = |rt: &Runtime<Host>| {
+        let tree = rt.accessibility_tree();
+        let present = |a| tree.nodes.iter().any(|(id, _)| *id == a);
+        tree.nodes
+            .iter()
+            .filter_map(|(_, n)| n.active_descendant())
+            .filter(|&a| !present(a))
+            .count()
+    };
+    let mut rt = runtime(Host::new(5));
+    click(&mut rt, "row-2");
+    let tree = rt.accessibility_json().to_string();
+    assert!(tree.contains(r#""activeDescendant":"row-2""#), "{tree}");
+    rt.state.vanished = vec![id(2)];
+    rt.invalidate();
+    rt.frame(1.0 / 60.0);
+    settle(&mut rt);
+    assert_eq!(
+        dangling(&rt),
+        0,
+        "nothing points at the cursor's row once it leaves the tree"
+    );
+    rt.state.vanished.clear();
+    rt.invalidate();
+    rt.frame(1.0 / 60.0);
+    settle(&mut rt);
+    let tree = rt.accessibility_json().to_string();
+    assert!(
+        tree.contains(r#""activeDescendant":"row-2""#),
+        "it is back once the row shows: {tree}"
+    );
+}
+
 // Controllers.
 
 struct Pointer(Rc<RefCell<Log>>);

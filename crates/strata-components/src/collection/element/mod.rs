@@ -916,8 +916,16 @@ impl<S: 'static> Collection<S> {
         if let Some(name) = &cfg.name {
             root = root.label(name.clone());
         }
+        // A vanished row (`RowMarks::vanished`) has left the tree: point at nothing rather than
+        // at it.
+        let vanished = |i: usize| {
+            cfg.marks
+                .as_ref()
+                .is_some_and(|f| f(s, src.id_at(i)).vanished)
+        };
         if !cfg.keys_by_host
             && let Some(index) = st.selection.cursor_index(src)
+            && !vanished(index)
         {
             // A path under this collection, so a second collection showing the same folder
             // (another pane) can't answer for it.

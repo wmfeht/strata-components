@@ -36,9 +36,16 @@ pub struct RowMarks {
     pub active_parent: bool,
     /// The row a folder peek is open from.
     pub peek_anchor: bool,
-    /// Gone from view while its entry stays listed: the row draws nothing, leaves the
-    /// accessibility tree and takes no input (a press there is on empty space), but keeps its
-    /// slot. C23 hides the rows it dissolves this way, and the rows a restore flies onto.
+    /// Gone from view while its entry stays listed: the row draws nothing and leaves the
+    /// accessibility tree, a pointer press there is on empty space, and the cursor on it is no
+    /// one's active descendant; but it keeps its slot. C23 hides the rows it dissolves this
+    /// way, and the rows a restore flies onto, for the length of one effect.
+    ///
+    /// It stays an entry of the listing for the keyboard and the marquee (C1c, C1d): arrows,
+    /// type-ahead and Select All can move the cursor onto it or select it, and a marquee over
+    /// its slot selects it. A host that hides rows for longer keeps the cursor and selection
+    /// off them itself, and one that takes the keys
+    /// ([`keys_by_host`](super::Collection::keys_by_host)) its active descendant too.
     pub vanished: bool,
 }
 

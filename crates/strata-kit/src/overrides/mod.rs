@@ -97,7 +97,7 @@
 //!
 //! # Rulings
 //!
-//! - **Q1, icons.** No icon overrides here (above); the owner decides plan §10 question 2.
+//! - **Q1, icons.** No icon overrides here (above): the owner deferred plan §10 question 2.
 //! - **Scripts.** K4 has no input behaviour, so it has no headless scripts, as K1 (its Q8):
 //!   the unit tests name the feature-map bullets they check.
 //! - **Q5, syntax errors.** The rows that survive one still apply.

@@ -170,7 +170,13 @@ impl<'a, S: 'static> ModelView<'a, S> {
                 .min_h(0.0)
                 .padding(look.space.lg)
                 .center()
-                .child(picture.aspect_fit(aspect).max_w(layout::MAX_CONTENT_WIDTH));
+                // The cap as the height it gives: an `aspect_fit` box with a `max_w` takes the
+                // cap for the cross room at Rune 5d421fd (C13's Rune draft U-C13-4).
+                .child(
+                    picture
+                        .aspect_fit(aspect)
+                        .max_h(layout::MAX_CONTENT_WIDTH / aspect.max(f32::EPSILON)),
+                );
         }
 
         let file = st.file();

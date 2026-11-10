@@ -34,7 +34,15 @@ pub(crate) struct Anchor {
     pub page: usize,
     pub down: f32,
     pub across: f32,
+    /// The host's clock when it was taken.
+    pub at: f64,
+    /// Its page has laid out and been asked to scroll into place; the scroll lands on a later
+    /// frame, so a zoom before then still uses this anchor.
+    pub placed: bool,
 }
+
+/// How long a zoom's anchor waits for its page to lay out before it's let go.
+const ANCHOR_WAIT: f64 = 0.25;
 
 /// A find match to bring into view: its page, and its centre as fractions of the page.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -61,9 +69,8 @@ pub struct PdfState {
     pub(crate) scale: f32,
     /// The scroll viewport's rect in window points, from its last layout.
     pub(crate) viewport: Option<[f32; 4]>,
-    /// Each mounted page's rect in window points from its last layout, and the scroll offset
-    /// when it was reported ([`PdfState::rect_now`]).
-    pub(crate) rects: BTreeMap<usize, ([f32; 4], [f32; 2])>,
+    /// Each mounted page's rect in window points, from its last layout.
+    pub(crate) rects: BTreeMap<usize, [f32; 4]>,
     pub(crate) visible: Range<usize>,
     forward: bool,
     /// The page under the viewport's centre.
@@ -81,6 +88,14 @@ pub struct PdfState {
     settle_at: Option<f64>,
     /// Bumped when requests are waiting, to mount the element that wakes the host.
     pub(crate) wake: u64,
+    /// The host's last [`PdfState::pop`] found nothing: it may be at rest, so new work wakes
+    /// it. While it pops, its own poll takes the work and no wake is needed.
+    idle: bool,
+    /// A zoom the host asked for ([`PdfState::set_level`]), applied from a layout report.
+    level_request: Option<f32>,
+    /// The pointer's last point over the view, in window points: the I-beam follows the text
+    /// that scrolls under a still pointer.
+    pointer: Option<[f32; 2]>,
     /// Bumped to move focus to the Open button.
     pub(crate) focus_open: u64,
     pub(crate) feed: ScrollFeed,
@@ -133,6 +148,9 @@ impl PdfState {
             clock: 0.0,
             settle_at: None,
             wake: 0,
+            idle: true,
+            level_request: None,
+            pointer: None,
             focus_open: 0,
             feed: ScrollFeed::new(),
             bar: Bar::new(),
@@ -158,6 +176,7 @@ impl PdfState {
         self.anchor = None;
         self.reveal = None;
         self.settle_at = None;
+        self.idle = true;
     }
 
     /// [`PdfState::open`], with the page the preview opened on already rendered: Strata loads
@@ -289,7 +308,12 @@ impl PdfState {
 
     /// The height Rune places a row it hasn't laid out at: the default page's.
     pub(crate) fn row_estimate(&self) -> f32 {
-        zoom::drawn_height(self.page_width(), self.doc.default_size()) + GAP
+        let n = self.doc.pages().max(1);
+        let w = self.page_width();
+        let sum: f32 = (0..n)
+            .map(|p| zoom::drawn_height(w, self.doc.size(p)))
+            .sum();
+        (sum / n as f32).round() + GAP
     }
 
     /// The content's width: the pages and their gaps, or the pane.
@@ -306,6 +330,7 @@ impl PdfState {
             width_px: self.page_width() * self.scale,
             settled: self.settle_at.is_none(),
             text_lane: self.searchable && self.find.active(),
+            search: self.find.generation,
         }
     }
 
@@ -317,7 +342,9 @@ impl PdfState {
             return None;
         }
         let want = self.want();
-        self.queue.pop(&self.doc, &want)
+        let next = self.queue.pop(&self.doc, &want);
+        self.idle = next.is_none();
+        next
     }
 
     /// Requests handed out that are no longer wanted: the host may stop them.
@@ -334,6 +361,12 @@ impl PdfState {
     pub fn complete(&mut self, ticket: Ticket, reply: PageReply) -> Landed {
         let landed = self.queue.complete(&mut self.doc, ticket, reply);
         let page = ticket.page();
+        if landed != Landed::Dropped
+            && self.find.active()
+            && let Some(slot) = self.queue.slots.get_mut(page)
+        {
+            slot.searched = self.find.generation;
+        }
         if landed == Landed::Shown {
             let layer = self.layer(page).cloned();
             if self.find.add(page, layer.as_ref()) {
@@ -349,9 +382,7 @@ impl PdfState {
         }
         let want = self.want();
         let ranges = &self.selection.ranges;
-        let evicted = self
-            .queue
-            .enforce(&want, |p| want.text_lane || ranges.contains_key(&p));
+        let evicted = self.queue.enforce(&want, |p| ranges.contains_key(&p));
         if evicted && landed != Landed::Shown {
             return Landed::Shown;
         }
@@ -362,6 +393,10 @@ impl PdfState {
     /// render again at the new level. True when the view changed.
     pub fn tick(&mut self, now: f64) -> bool {
         self.clock = now;
+        if self.anchor.is_some_and(|a| now - a.at > ANCHOR_WAIT) {
+            // Its page never laid out (the jump was clamped, or something else scrolled).
+            self.anchor = None;
+        }
         if let Some(at) = self.settle_at
             && now + 1e-6 >= at
         {
@@ -397,7 +432,7 @@ impl PdfState {
         let (Some(r), Some(vp)) = (self.reveal.take(), self.viewport) else {
             return;
         };
-        let Some(rect) = self.rect_now(r.page) else {
+        let Some(&rect) = self.rects.get(&r.page) else {
             return;
         };
         tx.scroll_key_to(
@@ -438,9 +473,19 @@ impl PdfState {
     }
 
     /// Zooms to `level` (1 to 4), about the view's centre, as Ctrl+wheel does: a host restoring
-    /// a zoom. True when the level changed.
-    pub fn set_level(&mut self, level: f32, tx: &mut Tx) -> bool {
-        self.zoom_to(level, tx)
+    /// a zoom. It applies once the view has laid out again, where the pages are known; return
+    /// true from the poll that calls it.
+    pub fn set_level(&mut self, level: f32) {
+        self.level_request = Some(level);
+        self.wake = self.wake.wrapping_add(1);
+    }
+
+    /// From the wake element's layout: a zoom the host asked for.
+    pub(crate) fn apply_level_request(&mut self, tx: &mut Tx) -> bool {
+        match self.level_request.take() {
+            Some(level) => self.zoom_to(level, tx),
+            None => false,
+        }
     }
 
     // ---- From the view's handlers ----
@@ -455,16 +500,22 @@ impl PdfState {
             self.visible = r;
         }
         let want = self.want();
-        self.queue.reconcile(&self.doc, &want);
+        let retried = self.queue.reconcile(&self.doc, &want);
         let ranges = &self.selection.ranges;
-        let evicted = self
-            .queue
-            .enforce(&want, |p| want.text_lane || ranges.contains_key(&p));
-        let work = self.queue.has_work(&self.doc, &want);
-        if work {
-            self.wake = self.wake.wrapping_add(1);
+        let evicted = self.queue.enforce(&want, |p| ranges.contains_key(&p));
+        let woke = self.wake_if_idle();
+        woke || evicted || retried
+    }
+
+    /// Mounts the element that wakes the host when work is waiting and the host may be at
+    /// rest. True when it did (the view runs again).
+    fn wake_if_idle(&mut self) -> bool {
+        if !self.idle || !self.queue.has_work(&self.doc, &self.want()) {
+            return false;
         }
-        work || evicted
+        self.idle = false;
+        self.wake = self.wake.wrapping_add(1);
+        true
     }
 
     /// The viewport's layout. A new width refits the pages, keeping the centre. The `Tx` asks
@@ -474,7 +525,7 @@ impl PdfState {
         self.scale = scale;
         let widened = old.is_some_and(|o| (o[2] - rect[2]).abs() > 0.25);
         if widened {
-            let anchor = self.anchor_now();
+            let anchor = self.pending_anchor().or_else(|| self.anchor_now());
             self.viewport = Some(rect);
             self.rezoom(self.level, anchor, tx);
             return true;
@@ -490,8 +541,9 @@ impl PdfState {
     }
 
     /// A page's layout, from the row built at zoom generation `zoom_gen`. Places a zoom's
-    /// anchor or a find's match once its page is laid out. True when the page under the centre
-    /// changed (assistive technology reads it).
+    /// anchor or a find's match once its page is laid out, and turns the I-beam on or off for
+    /// text moving under a still pointer. True when the page under the centre changed
+    /// (assistive technology reads it) or the cursor did.
     ///
     /// A row of an earlier generation can still report its layout after a zoom (its handler
     /// runs on the next turn): that rect is the old size, and is ignored.
@@ -505,41 +557,49 @@ impl PdfState {
         if zoom_gen != self.zoom_gen {
             return false;
         }
-        self.rects.insert(page, (rect, self.feed.get().offset));
+        self.rects.insert(page, rect);
         if let (Some(a), Some(vp)) = (self.anchor, self.viewport)
             && a.page == page
         {
-            self.anchor = None;
-            tx.scroll_key_to(self.row_key(page), vp[3] / 2.0 - (GAP + a.down * rect[3]));
+            if a.placed {
+                // Laid out again after the placing scroll: the anchor has landed.
+                self.anchor = None;
+            } else {
+                self.anchor = Some(Anchor { placed: true, ..a });
+                tx.scroll_key_to(self.row_key(page), vp[3] / 2.0 - (GAP + a.down * rect[3]));
+            }
         }
         if self.reveal.is_some_and(|r| r.page == page) {
             self.place_reveal(tx);
         }
+        // Text scrolled under a still pointer, or away from it: the I-beam follows.
+        let cursor = self.pointer.is_some_and(|p| self.hover(p));
         let Some(vp) = self.viewport else {
-            return false;
+            return cursor;
         };
         let cy = vp[1] + vp[3] / 2.0;
         if rect[1] - GAP <= cy && cy < rect[1] + rect[3] && self.current != page {
             self.current = page;
             return true;
         }
-        false
+        cursor
     }
 
-    /// Page `page`'s rect in window points now. Rune reports a layout on the turn after it, so
-    /// after a scroll the host's poll can run before the pages report where the scroll put
-    /// them: the rect moves by however far the viewport has scrolled since it was reported.
-    pub(crate) fn rect_now(&self, page: usize) -> Option<[f32; 4]> {
-        let (r, at) = self.rects.get(&page)?;
-        let now = self.feed.get().offset;
-        Some([r[0] - (now[0] - at[0]), r[1] - (now[1] - at[1]), r[2], r[3]])
-    }
-
-    /// The visible pages laid out, with their rects now.
+    /// The visible pages laid out, with their rects.
+    ///
+    /// Rune reports layouts as queued actions, handled after the host's poll and before the
+    /// frame's input: a handler for input sees where the last frame put the pages, while the
+    /// poll can run before the last scroll's reports. So the poll's zoom waits for a layout
+    /// report of its own ([`PdfState::set_level`]).
     fn shown(&self) -> impl Iterator<Item = (usize, [f32; 4])> + '_ {
         self.rects
             .range(self.visible.clone())
-            .filter_map(|(&p, _)| Some((p, self.rect_now(p)?)))
+            .map(|(&p, &r)| (p, r))
+    }
+
+    /// The last zoom's anchor, while it waits for its page.
+    fn pending_anchor(&self) -> Option<Anchor> {
+        self.anchor.filter(|a| self.clock - a.at <= ANCHOR_WAIT)
     }
 
     /// The point under the viewport's centre, from the pages laid out last.
@@ -555,7 +615,13 @@ impl PdfState {
         let down = ((cy - rect[1]) / rect[3].max(1.0)).clamp(0.0, 1.0);
         let off = self.feed.get().offset[0];
         let across = ((off + vp[2] / 2.0) / self.content_width()).clamp(0.0, 1.0);
-        Some(Anchor { page, down, across })
+        Some(Anchor {
+            page,
+            down,
+            across,
+            at: self.clock,
+            placed: false,
+        })
     }
 
     /// Zooms by Ctrl+wheel `dy` (a wheel turned away zooms in), about the view's centre.
@@ -574,7 +640,9 @@ impl PdfState {
         if (level - self.level).abs() < 1e-4 || self.content != Content::Pages {
             return false;
         }
-        let anchor = self.anchor_now();
+        // A notch on the frame after the last one: that one's anchor hasn't landed yet, and the
+        // pages on screen are still where its estimate put them, not where it will.
+        let anchor = self.pending_anchor().or_else(|| self.anchor_now());
         self.rezoom(level, anchor, tx);
         self.settle_at = Some(self.clock + SETTLE);
         tx.wake_after(Duration::from_secs_f64(SETTLE));
@@ -596,7 +664,11 @@ impl PdfState {
             - vp[3] / 2.0;
         let x = a.across * self.content_width() - vp[2] / 2.0;
         tx.scroll_to_instant(self.scroll_key(), x.max(0.0), y.max(0.0));
-        self.anchor = Some(a);
+        self.anchor = Some(Anchor {
+            at: self.clock,
+            placed: false,
+            ..a
+        });
     }
 
     /// The text under window point `p`: a visible page, and the point in its layer's pixels.
@@ -682,14 +754,20 @@ impl PdfState {
             Phase::Up => {
                 let was = self.gesture;
                 self.gesture = Gesture::Idle;
-                matches!(was, Gesture::Pan(_))
+                let cursor = self.hover(p);
+                matches!(was, Gesture::Pan(_)) || cursor
             }
         }
     }
 
     /// The pointer moved over the view: true when the I-beam turns on or off.
     pub(crate) fn hover(&mut self, p: [f32; 2]) -> bool {
-        let over = self.gesture == Gesture::Idle && self.text_at(p).is_some();
+        self.pointer = Some(p);
+        if self.gesture != Gesture::Idle {
+            // A drag shows its own cursor; the I-beam is worked out again on release.
+            return false;
+        }
+        let over = self.text_at(p).is_some();
         if over == self.over_text {
             return false;
         }
@@ -786,12 +864,16 @@ impl HostedPreview for PdfState {
         let mut find = std::mem::take(&mut self.find);
         find.run(query, self.layers());
         self.find = find;
+        if self.find.active() {
+            let generation = self.find.generation;
+            for s in self.queue.slots.iter_mut().filter(|s| s.layer.is_some()) {
+                s.searched = generation;
+            }
+        }
         self.select_hit();
         let want = self.want();
         self.queue.reconcile(&self.doc, &want);
-        if self.queue.has_work(&self.doc, &want) {
-            self.wake = self.wake.wrapping_add(1);
-        }
+        self.wake_if_idle();
     }
 
     fn find_step(&mut self, forward: bool) {

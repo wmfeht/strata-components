@@ -212,8 +212,8 @@ fn five_hundred_pages() {
     let end_jump = ms(t);
     let end = frames(&mut rt, 10, |_| {});
     let at_end = rt.state.pdf.visible();
-    rt.update(|h, tx| {
-        h.pdf.set_level(1.0, tx);
+    rt.update(|h, _| {
+        h.pdf.set_level(1.0);
     });
     for _ in 0..30 {
         rt.frame(1.0 / 120.0);

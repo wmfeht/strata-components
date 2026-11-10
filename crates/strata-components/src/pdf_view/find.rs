@@ -19,6 +19,8 @@ pub(crate) struct Find {
     /// In page order, then text order.
     pub hits: Vec<Hit>,
     pub current: Option<usize>,
+    /// Counts the runs: a page's text joins the count once per run.
+    pub generation: u64,
 }
 
 impl Find {
@@ -31,6 +33,7 @@ impl Find {
         self.query = query.to_owned();
         self.hits.clear();
         self.current = None;
+        self.generation += 1;
         if query.is_empty() {
             return;
         }
@@ -93,7 +96,9 @@ impl Find {
     }
 
     pub fn clear(&mut self) {
+        let generation = self.generation;
         *self = Find::default();
+        self.generation = generation;
     }
 
     /// The matches on `page`.

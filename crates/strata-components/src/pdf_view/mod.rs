@@ -52,24 +52,35 @@
 //!   then the next page in the scroll direction, then (with find open) pages whose text isn't
 //!   known. Replies from an earlier document, or older than the image a page holds, are
 //!   dropped; a request handed out for a page no longer wanted goes to
-//!   [`PdfState::take_cancelled`]. Images and text layers live under byte budgets (192 MiB and
-//!   32 MiB, [`PdfState::set_budgets`]); a page dropped from the budget shows its placeholder
-//!   and asks again when visible. A selected page's layer stays, so its text still copies.
+//!   [`PdfState::take_cancelled`]; a failure reported for such a request is dropped too (a
+//!   host may report a stopped render that way). A page that failed asks once more when it
+//!   comes back into view, as Strata's rows ask again when bound again. Images and text layers
+//!   live under byte budgets (192 MiB and 32 MiB, [`PdfState::set_budgets`]), with find open
+//!   too; the visible pages and the page either side are never dropped. A page dropped from the
+//!   image budget shows its placeholder, and one that kept its image but lost its layer asks
+//!   for a `Page` render again once in view, so its layer comes with the image it draws on
+//!   (Strata's protocol renders a page and its text together anyway). A selected page's layer
+//!   stays, so its text still copies.
 //! - **Selection** is the view's own model over the glyph boxes, as Strata's is (`layer.rs`,
 //!   `selection.rs`, ported): a drag over text selects, a double-click a word and a
 //!   triple-click a line (without its break), dragging on by words or lines after them;
 //!   Shift-click extends, across pages; a drag on a margin, a scan or a page still loading
 //!   pans. Bands cover each line's box, cut short below the baseline on runs without
-//!   descenders. Ctrl+A selects every page whose layer the view holds; Ctrl+C copies in page
-//!   order with the document's line breaks. With nothing selected Ctrl+C copies nothing and the
+//!   descenders (a unit test and the selection scene's PNG). Ctrl+A selects every page whose
+//!   layer the view holds and leaves the anchor where it was, as Strata's `select_all` does, so
+//!   a Shift-click after it extends from the last press. Ctrl+C copies in page order with the
+//!   document's line breaks; a page between the ends with no layer (a scan, or one never laid
+//!   out) adds nothing, as in Strata. With nothing selected Ctrl+C copies nothing and the
 //!   key goes on (owner ruling 6): Strata's `copy_selection` returns false for empty text, and
 //!   `install_keys` then lets the key propagate (`src/ui/preview/pdf.rs`); Ctrl+A goes on the
 //!   same way when no page has text.
 //! - **Find** (off unless [`PdfState::set_searchable`]): C9's find bar over the layers, with
 //!   C11's folding. Matches are painted with `look.fill.highlight`, the current one is the
-//!   selection and is centred. While find is open, pages whose text isn't known are asked for
-//!   it ([`RenderKind::TextOnly`]: the host may render them small), and their matches join in
-//!   page order.
+//!   selection and is centred. While find is open, pages it hasn't counted are asked for their
+//!   text ([`RenderKind::TextOnly`]: the host may render them small), once per query, and their
+//!   matches join in page order. The text budget holds: a page's matches stay counted after its
+//!   layer is dropped, and its text comes back when it's shown (a match on such a page is
+//!   revealed at the page's top until then).
 //! - **Locked and failed** ([`PdfState::locked`], [`PdfState::failed`]): "Preview unavailable"
 //!   and the message; a locked PDF has an Open button unless [`PdfView::open_button`] is off
 //!   (the chooser). See [`message`].
@@ -86,11 +97,23 @@
 //!
 //! Hit tests, the zoom's anchor and find's reveal use the mounted pages' rects as Rune laid
 //! them out (each page's `on_layout_tx`), never sums of estimated heights, as Strata maps
-//! points through its bound rows. Rune reports a layout on the turn after it, so the host's
-//! poll can run between a scroll and the pages' reports of where it put them: each rect keeps
-//! the scroll offset it was reported at and moves by however far the viewport has scrolled
-//! since (`PdfState::rect_now`). A row built before a zoom can still report after it; its rect
-//! is ignored.
+//! points through its bound rows. Rune queues those reports for the next frame, after the
+//! host's poll and before input: a handler for input sees where the last frame put the pages,
+//! but the poll can run before a scroll's reports. So [`PdfState::set_level`], called from a
+//! poll, zooms from a fresh element's layout report, which runs after the pages' own. A row
+//! built before a zoom can still report after it; its rect is ignored. Selection extends to the
+//! nearest point on any page, measured in window points, so pages drawn at different sizes
+//! compare fairly (Strata measures in each page's own pixels).
+//!
+//! A zoom keeps its anchor until its page has laid out again after the scroll that places it:
+//! a notch on the next frame zooms about the same point rather than about pages the last
+//! notch's estimate put on screen. The
+//! estimate for rows not laid out is the mean of the pages' sizes, so a jump far down a mixed
+//! document lands near the right page in its first frame.
+//!
+//! The I-beam follows the text under the pointer, also when the pages scroll under a still
+//! pointer (each page's layout checks the last pointer point); a drag keeps its own cursor and
+//! the I-beam is worked out again on release.
 //!
 //! # Tests
 //!
@@ -99,9 +122,13 @@
 //! gallery (`crates/strata-gallery/tests/c12.rs`) for request widths and the 1280-point cap,
 //! the zoom's rest from wake to wake, cancelling on a jump, where zooms land, the budgets, the
 //! cursor and a margin pan, a new display scale and a rebound reset key; one script per
-//! Behavior bullet in `tests/scripts/c12/`. Rune's script key names have no keypad keys at the
-//! pinned rev, so "With Num Lock on, Ctrl+keypad 0 also resets" has no script: with Num Lock
-//! on, keypad 0 arrives as the same logical "0" a script's `"0"` sends, which the reset reads.
+//! Behavior bullet in `tests/scripts/c12/`, with two exceptions. Rune's script key names have no
+//! keypad keys at the pinned rev, so "With Num Lock on, Ctrl+keypad 0 also resets" has no
+//! script: with Num Lock on, keypad 0 arrives as the same logical "0" a script's `"0"` sends,
+//! which the reset reads. "In 10xer mode, Ctrl+0 on a focused zoomed PDF also resets its zoom"
+//! has none either: the view's reset doesn't depend on the mode (10xer's key map and chords are
+//! Strata's), so a script would repeat `ctrl-zero-same-page`. "Highlight bands … stop short
+//! below the baseline" is checked by a unit test and the selection scene's PNG golden.
 //!
 //! # Measured
 //!
@@ -114,7 +141,10 @@
 //! drag selecting across pages as the wheel scrolls under it p95 0.11 ms, max 1.8 to 2.0 ms;
 //! find over 500 layers 3.0 to 4.2 ms (36,000 matches); Ctrl+A then Ctrl+C 1.6 to 2.0 ms for
 //! 1.26 MB; `pop` with nothing to do 0.02 µs. No frame over 8 ms, and
-//! `RUNE_COMMIT_BUDGET_MS=8` reports no commit over it.
+//! `RUNE_COMMIT_BUDGET_MS=8` reports no commit over it. After review 1, three runs at load
+//! average 20 to 35 (other work on the machine): the same figures within 0.6 ms, except the
+//! wheel's slowest frames, max 9.4 to 10.9 ms with 4 to 6 of 600 over 8 ms; the code before
+//! review 1, run at the same load, gave max 11.1 ms with 6 over, and no commit was over budget.
 //!
 //! **At scale 2 the caps leave little to zoom into**: a page in a 700-point pane already asks
 //! 1,376 pixels, and Strata's caps allow about 1,390 for a Letter page, so a zoom asks nothing
@@ -142,10 +172,15 @@
 //!   one page.
 //! - **D5** Click counting is Rune's (`Drag::clicks`: the double-click interval, 0.5 s on
 //!   Linux, and 4 points), not Strata's 450 ms and 6 pixels.
-//! - **D6** A zoom on a document of mixed page sizes can draw one frame up to a page off before
-//!   it lands (probe P1): Rune places a row only once it has laid it out, so the zoom jumps to
-//!   where the centre's page would be if every row above were the default's height, then that
-//!   page places itself. Strata corrects in an idle callback, a frame late, too.
+//! - **D6** A zoom on a document of mixed page sizes can draw a frame off before it lands (probe
+//!   P1): Rune places a row only once it has laid it out, so the zoom jumps to where the
+//!   centre's page would be if every row above were the mean row's height, then that page
+//!   places itself. Strata corrects in an idle callback, a frame late, too. Measured on 500
+//!   pages, every third landscape (`a_zoom_far_down_a_mixed_document_keeps_the_centre`): one
+//!   notch at page 300 draws one frame 0.13 pages off, four notches on consecutive frames at
+//!   most 0.40 pages off on the way, at page 30 at most 0.14; each lands within 0.003 of the
+//!   page's height of where it was. Before review 1 one notch drew a frame 1.6 pages off, and
+//!   four on consecutive frames landed 3 pages off.
 //! - **D7** (owner ruling 8) Each page's text is a `paragraph` for assistive technology, and the
 //!   root reads the page and zoom; Strata exposes an image named "PDF page text".
 //! - **D8** Text layers stay under a budget plus every selected page, so Ctrl+A's "every

@@ -539,7 +539,8 @@ pub fn poll(g: &mut Gallery, t: f64, tx: &mut Tx) -> bool {
         && !d.pdf.visible().is_empty()
     {
         d.zoom_once = None;
-        changed |= d.pdf.set_level(level, tx);
+        d.pdf.set_level(level);
+        changed = true;
     }
     changed |= d.pdf.flush(tx);
     let log = d.renderer.line();

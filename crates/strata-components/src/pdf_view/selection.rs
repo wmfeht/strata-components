@@ -82,14 +82,13 @@ impl Selection {
         true
     }
 
-    /// Every page's whole text, for the pages `layers` holds.
+    /// Every page's whole text, for the pages `layers` holds. The anchor stays where it was,
+    /// as Strata's `select_all` leaves it: a Shift-click after it extends from the last press.
     pub fn all<'a>(&mut self, layers: impl Iterator<Item = (usize, &'a Shared)>) {
         self.ranges = layers
             .filter(|(_, l)| l.has_text())
             .map(|(p, l)| (p, (0, l.len())))
             .collect();
-        self.anchor = self.ranges.keys().next().map(|&p| (p, 0));
-        self.unit = Unit::Char;
     }
 
     /// The selected text in page order, a line break between pages unless the text before

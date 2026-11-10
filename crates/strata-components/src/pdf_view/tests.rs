@@ -176,6 +176,7 @@ fn want(visible: std::ops::Range<usize>, centre: usize) -> Want {
         width_px: 500.0,
         settled: true,
         text_lane: false,
+        search: 0,
     }
 }
 
@@ -344,6 +345,7 @@ fn find_asks_for_unknown_text_after_the_pages_shown() {
     let mut q = queue(6);
     let w = Want {
         text_lane: true,
+        search: 1,
         ..want(2..3, 2)
     };
     let asked = drain(&mut q, &d, &w);
@@ -408,4 +410,153 @@ fn the_first_match_to_arrive_becomes_current() {
     assert_eq!(f.current, None);
     assert!(f.add(1, Some(&ls[1])));
     assert_eq!(f.current_hit().map(|h| h.page), Some(1));
+}
+
+// ---- Review 1 ----
+
+/// A queue for `n` pages, each rendered once at 500 pixels with a layer.
+fn rendered(n: usize, d: &mut PdfDocument) -> Queue {
+    let mut q = queue(n);
+    for p in 0..n {
+        let w = want(p..p + 1, p);
+        let r = q.pop(d, &w).unwrap();
+        q.complete(d, r.ticket, reply(500, Some("text")));
+    }
+    q
+}
+
+// B1: a page whose layer the text budget dropped while it kept its image asks again once it's
+// back in view, with a `Page` render, so its layer comes with the image it draws on.
+#[test]
+fn a_page_back_in_view_without_its_layer_asks_again() {
+    let mut d = doc(10);
+    let mut q = rendered(10, &mut d);
+    q.text_budget = 0;
+    assert!(q.enforce(&want(8..9, 8), |_| false));
+    assert!(q.slots[0].held.is_some() && q.slots[0].layer.is_none());
+    let back = want(0..1, 0);
+    let r = q.pop(&d, &back).expect("a request for page 1");
+    assert_eq!((r.page, r.kind), (0, RenderKind::Page));
+    q.complete(&mut d, r.ticket, reply(500, Some("text")));
+    assert!(q.slots[0].layer.is_some(), "its text is back");
+    // The margin page too.
+    let mut q = rendered(10, &mut d);
+    q.text_budget = 0;
+    q.enforce(&want(8..9, 8), |_| false);
+    let asked: Vec<usize> = drain(&mut q, &d, &want(2..4, 2))
+        .into_iter()
+        .map(|r| r.0)
+        .collect();
+    assert_eq!(asked, [2, 3, 4], "the visible pages, then the margin page");
+}
+
+// A host may report a render the view cancelled as a failure: that says nothing of the page.
+#[test]
+fn a_failure_for_a_request_no_longer_wanted_is_dropped() {
+    let mut d = doc(20);
+    let mut q = queue(20);
+    let r = q.pop(&d, &want(0..1, 0)).unwrap();
+    q.reconcile(&d, &want(10..11, 10));
+    assert_eq!(q.take_cancelled(), vec![r.ticket]);
+    assert_eq!(
+        q.complete(&mut d, r.ticket, PageReply::Failed),
+        Landed::Dropped
+    );
+    assert!(!q.slots[0].failed);
+    let again = q.pop(&d, &want(0..1, 0)).expect("page 1 asks again");
+    assert_eq!(again.page, 0);
+}
+
+// Strata asks again when a row is bound again: a failed page back in view asks once more.
+#[test]
+fn a_failed_page_asks_once_more_when_it_comes_back() {
+    let mut d = doc(20);
+    let mut q = queue(20);
+    let w = want(0..1, 0);
+    let r = q.pop(&d, &w).unwrap();
+    assert_eq!(
+        q.complete(&mut d, r.ticket, PageReply::Failed),
+        Landed::Shown
+    );
+    assert!(
+        q.pop(&d, &w).is_some_and(|r| r.page == 1),
+        "the margin, not page 1 again"
+    );
+    q.take_cancelled();
+    let mut q2 = queue(20);
+    let r = q2.pop(&d, &w).unwrap();
+    q2.complete(&mut d, r.ticket, PageReply::Failed);
+    assert!(
+        drain(&mut q2, &d, &want(0..1, 0)).iter().all(|r| r.0 != 0),
+        "not while it stays"
+    );
+    q2.reconcile(&d, &want(10..11, 10));
+    q2.take_cancelled();
+    assert!(q2.reconcile(&d, &w), "back in view");
+    let r = q2.pop(&d, &w).expect("asked once more");
+    assert_eq!(r.page, 0);
+    q2.complete(&mut d, r.ticket, PageReply::Failed);
+    assert!(drain(&mut q2, &d, &w).iter().all(|r| r.0 != 0), "once");
+}
+
+// R5: a page whose text doesn't end in a line break is still parted from the next by one.
+#[test]
+fn pages_whose_text_ends_without_a_break_are_parted_by_one() {
+    let bare = |t: &str| {
+        let glyphs = (0..t.chars().count())
+            .map(|i| [i as f32 * 10.0, 0.0, i as f32 * 10.0 + 10.0, 16.0])
+            .collect();
+        Rc::new(Layer::new(TextLayer::new(400.0, 600.0, t, glyphs)))
+    };
+    let ls = [bare("one"), bare("two")];
+    let mut s = Selection::default();
+    s.all(ls.iter().enumerate());
+    assert_eq!(s.text(|p| ls.get(p)), "one\ntwo");
+}
+
+// Q3: scrolling back, the margin page is the one before the view.
+#[test]
+fn scrolling_back_the_margin_page_is_the_one_before() {
+    let d = doc(20);
+    let mut q = queue(20);
+    let back = Want {
+        forward: false,
+        ..want(5..7, 5)
+    };
+    let asked: Vec<usize> = drain(&mut q, &d, &back).into_iter().map(|r| r.0).collect();
+    assert_eq!(asked, [5, 6, 4]);
+}
+
+// Q8: no budget drops what's on screen or the page either side.
+#[test]
+fn the_budgets_never_drop_the_visible_pages_or_the_margin() {
+    let mut d = doc(10);
+    let mut q = rendered(10, &mut d);
+    q.image_budget = 0;
+    q.text_budget = 0;
+    q.enforce(&want(4..6, 4), |_| false);
+    // The visible pages, and the page on either side (the margin either way it scrolls).
+    for p in [3, 4, 5, 6] {
+        assert!(
+            q.slots[p].held.is_some() && q.slots[p].layer.is_some(),
+            "page {p}"
+        );
+    }
+    assert!(q.slots[2].held.is_none() && q.slots[7].held.is_none());
+}
+
+// Strata's `select_all` leaves the anchor: a Shift-click after Ctrl+A extends from the last
+// press, not from the document's start.
+#[test]
+fn select_all_keeps_the_anchor() {
+    let ls = layers(3);
+    let get = |p: usize| ls.get(p);
+    let mut s = Selection::default();
+    s.press(&ls[1], 1, 5, Unit::Char);
+    s.all(ls.iter().enumerate());
+    assert_eq!(s.ranges.len(), 3);
+    s.unit = Unit::Char;
+    s.extend(get, 2, 4);
+    assert_eq!(s.ranges.keys().copied().collect::<Vec<_>>(), [1, 2]);
+    assert!(s.text(get).starts_with("1 first line"), "{}", s.text(get));
 }

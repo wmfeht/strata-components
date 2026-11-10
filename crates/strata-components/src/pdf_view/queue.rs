@@ -54,6 +54,19 @@ pub(crate) struct Slot {
     pub text_known: bool,
     pub inflight: Option<Inflight>,
     pub failed: bool,
+    /// A failed page that has since left the view: it asks once more when it comes back, as
+    /// Strata's rows ask again when bound again.
+    pub failed_away: bool,
+    /// The find run ([`Want::search`]) that has counted this page's text.
+    pub searched: u64,
+}
+
+impl Slot {
+    /// An image the page shows, with no text layer to select on: the budget dropped it. The
+    /// page asks for a `Page` render again, so its layer comes with the image it draws on.
+    fn lost_text(&self) -> bool {
+        self.held.is_some() && self.layer.is_none() && !self.text_known
+    }
 }
 
 /// Where the view stands, for ranking requests.
@@ -70,6 +83,8 @@ pub(crate) struct Want {
     pub settled: bool,
     /// Find is open: pages with no text yet are asked for theirs.
     pub text_lane: bool,
+    /// The find run whose count pages join: a page counted by it isn't asked again.
+    pub search: u64,
 }
 
 /// What [`Queue::complete`] did.
@@ -175,6 +190,7 @@ impl Queue {
         }
         match s.held {
             None => true,
+            Some(_) if s.lost_text() => true,
             Some(h) => {
                 want.settled
                     && ((h.width as f32) < w as f32 * 0.98 || h.width as f32 > w as f32 * 1.5)
@@ -210,7 +226,7 @@ impl Queue {
         };
         if let Some(p) = margin {
             let s = &self.slots[p];
-            if s.held.is_none() && !s.failed && s.inflight.is_none() {
+            if (s.held.is_none() || s.lost_text()) && !s.failed && s.inflight.is_none() {
                 out.push((p, self.width_for(doc, p, want), RenderKind::Page));
             }
         }
@@ -222,7 +238,11 @@ impl Queue {
                     .filter(|&p| p < n)
                 {
                     let s = &self.slots[p];
-                    if s.layer.is_none() && !s.text_known && !s.failed && s.inflight.is_none() {
+                    if s.layer.is_none()
+                        && s.searched != want.search
+                        && !s.failed
+                        && s.inflight.is_none()
+                    {
                         out.push((p, self.width_for(doc, p, want), RenderKind::TextOnly));
                     }
                 }
@@ -232,8 +252,8 @@ impl Queue {
     }
 
     /// Cancels requests in flight for pages no longer wanted: off the view and its margin
-    /// (and not asked for their text), or asked at a width the rested zoom no longer wants.
-    /// True when any was cancelled.
+    /// (and not asked for their text), or asked at a width the rested zoom no longer wants;
+    /// and lets a failed page back in view ask once more. True when either happened.
     pub fn reconcile(&mut self, doc: &PdfDocument, want: &Want) -> bool {
         let n = self.slots.len();
         let vis = want.visible.start.min(n)..want.visible.end.min(n);
@@ -244,10 +264,19 @@ impl Queue {
         };
         let mut any = false;
         for p in 0..n {
+            let near = vis.contains(&p) || p == margin;
+            let s = &mut self.slots[p];
+            if s.failed && !near {
+                s.failed_away = true;
+            } else if s.failed && s.failed_away && near {
+                // Back in view after a failure: ask once more.
+                s.failed = false;
+                s.failed_away = false;
+                any = true;
+            }
             let Some(f) = self.slots[p].inflight else {
                 continue;
             };
-            let near = vis.contains(&p) || p == margin;
             let keep = match f.kind {
                 RenderKind::Page if vis.contains(&p) => {
                     !want.settled || f.width == self.width_for(doc, p, want)
@@ -304,13 +333,16 @@ impl Queue {
             return Landed::Dropped;
         }
         let slot = &mut self.slots[page];
-        if slot.inflight.is_some_and(|f| f.ticket == ticket) {
+        let wanted = slot.inflight.is_some_and(|f| f.ticket == ticket);
+        if wanted {
             slot.inflight = None;
         }
         let text_only = ticket.kind == RenderKind::TextOnly;
         match reply {
             PageReply::Failed => {
-                if slot.held.is_some_and(|h| h.ticket > ticket) {
+                // A render the view no longer wanted (cancelled, or asked again since) says
+                // nothing about the page: a host may report a stopped render as a failure.
+                if !wanted || slot.held.is_some_and(|h| h.ticket > ticket) {
                     return Landed::Dropped;
                 }
                 slot.text_known = true;
@@ -378,8 +410,11 @@ impl Queue {
     }
 
     /// Drops what's over budget, farthest from the centre first, never the visible pages or
-    /// the margin, never a layer `keep_layer` keeps (a selected page's, or any while find is
-    /// open). True when a mounted page has to show its placeholder again.
+    /// the margin, never a layer `keep_layer` keeps (a selected page's). True when a mounted
+    /// page has to show its placeholder again.
+    ///
+    /// Find's count outlives a dropped layer: its matches stay counted, and the page isn't asked
+    /// for its text again while the same query runs ([`Slot::searched`]).
     pub fn enforce(&mut self, want: &Want, keep_layer: impl Fn(usize) -> bool) -> bool {
         let n = self.slots.len();
         let vis = want.visible.start.min(n)..want.visible.end.min(n);

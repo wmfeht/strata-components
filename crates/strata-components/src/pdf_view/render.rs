@@ -161,15 +161,20 @@ pub(crate) fn pages<S: 'static>(ctx: Rc<Ctx<S>>, st: &PdfState, look: &Look, sca
         })
         .child(body);
     if st.wake > 0 {
-        // Requests are waiting and the host may be at rest: a fresh element's first layout
-        // asks for a frame, whose poll pops them.
+        // Requests are waiting and the host may be at rest, or the host asked for a zoom: a
+        // fresh element's first layout asks for a frame, whose poll pops them, and applies the
+        // zoom.
         root = root.child(
             el().key(format!("{key}-wake-{}", st.wake))
                 .pin(Some(0.0), Some(0.0), None, None)
                 .size(0.0, 0.0)
                 .a11y_hidden()
-                .on_layout_tx(|_: &mut S, _r: [f32; 4], tx: &mut Tx| {
-                    tx.live_only();
+                .on_layout_tx(move |s: &mut S, _r: [f32; 4], tx: &mut Tx| {
+                    // Reported after the pages' own reports of the same layout, so a zoom the
+                    // host asked for finds them where they are.
+                    if !get_mut(s).apply_level_request(tx) {
+                        tx.live_only();
+                    }
                     tx.wake_after(Duration::ZERO);
                 }),
         );

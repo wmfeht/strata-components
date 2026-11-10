@@ -259,7 +259,7 @@
                           ],
                           "description": "Choose any emoji for this item",
                           "key": "c20d-emoji-button",
-                          "name": "Emoji  😁",
+                          "name": "Emoji  😁️",
                           "role": "button",
                           "states": [
                             "focused",

@@ -5,6 +5,7 @@
 //! them: C1e's virtual lines, C3's [`IconsGeometry`] (2D keys, a short last row as GTK's), C1c's
 //! keyboard with a map of its own and C1b's pointer intent in single-click mode.
 
+use std::borrow::Cow;
 use std::hash::{Hash, Hasher};
 
 use rune::{Chord, ChordKey, ChordMod, El, TextStyle, col, icon, text};
@@ -175,25 +176,28 @@ pub(super) fn glyph(look: &Look, m: &Metrics, choice: &Choice) -> El {
                 .unwrap_or_else(|| look.icon(IconName::File));
             icon(art, m.icon).color(k.c.icon_accent).a11y_hidden()
         }
-        Choice::Emoji(e) => text(drawn(e))
+        Choice::Emoji(_) => text(drawn_text(choice).into_owned())
             .font(TextStyle::new(m.emoji, 400.0).lh(m.emoji))
             .color(k.c.text_base)
             .a11y_hidden(),
     }
 }
 
-/// The text an emoji is drawn with: its own, with U+FE0F after it when it has none.
+/// The text to draw for `choice`, for display only: an emoji's own text with U+FE0F after it
+/// when it holds none, an icon's name as it is. Save and compare the choice itself, never
+/// this. Hosts drawing a saved emoji (a button label, a preview) draw it through this.
 ///
 /// Rune 5d421fd sends a grapheme to the colour emoji font first only when it holds U+FE0F
 /// (anomalyco/rune#102), so an emoji whose default presentation is already emoji (♈, ⛺, 🆎)
 /// draws as the outline of the first symbol font covering it (Noto Sans Symbols here; DejaVu
 /// Sans in #102). Probe P1 (C20d): 23 of the 1,898 bundled emoji drew so, and every one in
-/// colour with U+FE0F after it. The choice keeps the emoji's own text.
-pub(super) fn drawn(emoji: &str) -> String {
-    if emoji.contains('\u{fe0f}') {
-        emoji.to_owned()
-    } else {
-        format!("{emoji}\u{fe0f}")
+/// colour with U+FE0F after it.
+///
+/// Used by: hosts.
+pub fn drawn_text(choice: &Choice) -> Cow<'_, str> {
+    match choice {
+        Choice::Emoji(e) if !e.contains('\u{fe0f}') => Cow::Owned(format!("{e}\u{fe0f}")),
+        Choice::Icon(t) | Choice::Emoji(t) => Cow::Borrowed(t),
     }
 }
 

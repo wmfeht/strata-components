@@ -3,7 +3,6 @@ mod perf;
 use std::borrow::Cow;
 use std::rc::Rc;
 
-use super::grid::drawn;
 use super::matching::{Hit, Query, fold, name_ranges, words};
 use super::*;
 
@@ -230,7 +229,28 @@ fn the_cursor_starts_on_the_current_choice_where_the_page_shows_it() {
 }
 
 #[test]
-fn an_emoji_draws_with_an_emoji_presentation_selector() {
-    assert_eq!(drawn("♈"), "♈\u{fe0f}");
-    assert_eq!(drawn("❤\u{fe0f}"), "❤\u{fe0f}");
+fn an_emoji_draws_with_one_emoji_presentation_selector() {
+    let drawn = |c: Choice| drawn_text(&c).into_owned();
+    assert_eq!(
+        drawn(Choice::emoji("♈")),
+        "♈\u{fe0f}",
+        "added where missing"
+    );
+    assert_eq!(
+        drawn(Choice::emoji("❤\u{fe0f}")),
+        "❤\u{fe0f}",
+        "never twice"
+    );
+    // A keycap holds its selector before U+20E3, a ZWJ sequence in the middle.
+    assert_eq!(
+        drawn(Choice::emoji("#\u{fe0f}\u{20e3}")),
+        "#\u{fe0f}\u{20e3}"
+    );
+    let rainbow = "🏳\u{fe0f}\u{200d}🌈";
+    assert_eq!(drawn(Choice::emoji(rainbow)), rainbow);
+    assert_eq!(
+        drawn(Choice::icon("strata-pin")),
+        "strata-pin",
+        "icons as they are"
+    );
 }

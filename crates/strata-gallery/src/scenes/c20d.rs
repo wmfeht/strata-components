@@ -26,7 +26,7 @@ use strata_components::context_menu::{FieldMenu, FieldMenuState};
 use strata_components::contract::Point;
 use strata_components::controls::icon_picker::{
     Choice, DEFAULT_VERSION, IconPicker, IconPickerState, PickerCategory, PickerItem, PickerSource,
-    PickerWords, remember,
+    PickerWords, drawn_text, remember,
 };
 use strata_components::dialog::DialogShell;
 use strata_kit::icons::{IconName, lucide};
@@ -157,10 +157,11 @@ impl Demo {
         }
     }
 
-    /// What the emoji button reads: Strata's "Choose Emoji…", or "Emoji" and the saved emoji.
+    /// What the emoji button reads: Strata's "Choose Emoji…", or "Emoji" and the saved emoji,
+    /// drawn through `drawn_text` (anomalyco/rune#102).
     pub fn emoji_label(&self) -> String {
         match &self.current {
-            Some(Choice::Emoji(e)) => format!("Emoji  {e}"),
+            Some(c @ Choice::Emoji(_)) => format!("Emoji  {}", drawn_text(c)),
             _ => "Choose Emoji…".to_owned(),
         }
     }
@@ -362,7 +363,7 @@ fn preview(g: &Gallery) -> El {
     let look = g.look();
     let k = &look.kit;
     let art: El = match &g.c20d.current {
-        Some(Choice::Emoji(e)) => text(format!("{e}\u{fe0f}"))
+        Some(c @ Choice::Emoji(_)) => text(drawn_text(c).into_owned())
             .font(rune::TextStyle::new(48.0, 400.0).lh(56.0))
             .a11y_hidden(),
         Some(Choice::Icon(name)) => icon(

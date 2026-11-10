@@ -81,7 +81,8 @@ mod c20d {
         assert_eq!(d.recent, [Choice::emoji("😀")]);
         assert!(!d.emoji.is_open());
         assert_eq!(d.closed, 1);
-        assert_eq!(d.emoji_label(), "Emoji  😀");
+        // The label draws it with U+FE0F (anomalyco/rune#102); the choice stays canonical.
+        assert_eq!(d.emoji_label(), "Emoji  😀\u{fe0f}");
         assert_eq!(focused(&rt).as_deref(), Some("c20d-emoji-button"));
         // The inline icons no longer mark one: the saved icon is an emoji.
         assert_eq!(d.icons.current(), None);

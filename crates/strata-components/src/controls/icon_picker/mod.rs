@@ -135,7 +135,9 @@
 //!   Emoji whose default presentation is emoji draw with U+FE0F after them, so Rune sends them
 //!   to the colour font (#102): probe P1 found 23 of the 1,898 (♈ to ♓, ⛎, ⛪, ⛲, ⛺, ⛽, ⚓,
 //!   ⛵, ⚡, ⛳, 🆎, 😐) drawn as Noto Sans Symbols outlines here without it, every one in colour
-//!   with it. The choice keeps the emoji's own text.
+//!   with it. The choice keeps the emoji's own text. A host hits #102 too wherever it draws
+//!   an emoji, so Strata must draw a saved emoji (the button's label, the 56 px preview, the
+//!   item's icons) through [`drawn_text`], and save and compare the [`Choice`] itself.
 //! - **D9 (owner ruling): no emoji in PNG goldens.** The font is the system's (CI has none,
 //!   and its art moves between versions), so emoji scenes are review scenes, whose scripts end
 //!   on accessibility trees.
@@ -196,6 +198,7 @@ mod tests;
 
 pub use data::{Choice, PickerCategory, PickerItem, PickerSource};
 pub use emoji::DEFAULT_VERSION;
+pub use grid::drawn_text;
 pub use recent::{RECENT_MAX, remember};
 pub use state::{IconPickerState, Page};
 pub use view::IconPicker;

@@ -4,7 +4,7 @@
 use super::fixture::{self, KEYBOARD_SHORTCUTS, SHORTCUTS};
 use super::matching::{MAX_QUERY_CHARS, Prepared, normalized, title_ranges};
 use super::state::Change;
-use super::{IndexPage, IndexRow, SearchIndex, SettingsSearchState};
+use super::{IndexPage, IndexRow, SearchIndex, SettingsSearch, SettingsSearchState};
 
 #[cfg(not(debug_assertions))]
 mod perf;
@@ -495,5 +495,89 @@ fn a_new_index_revision_refilters_without_opening_a_page() {
         st.count(),
         Some(before - 2),
         "the action's row is gone, and the group it alone showed"
+    );
+}
+
+/// Strata's title bonus: a query equal to a title outranks one inside a title, which
+/// outranks the same words matched separately, whatever the index order.
+#[test]
+fn a_whole_title_match_ranks_first() {
+    let index = SearchIndex {
+        revision: 1,
+        pages: vec![IndexPage::new("one", "One"), IndexPage::new("two", "Two")],
+        rows: vec![
+            IndexRow::new("limit", "one", "Size limit"),
+            IndexRow::new("size", "two", "Size"),
+        ],
+    };
+    assert_eq!(
+        find(&index, "size").0.as_deref(),
+        Some("two"),
+        "equal to a title"
+    );
+    let index = SearchIndex {
+        revision: 1,
+        pages: vec![IndexPage::new("one", "One"), IndexPage::new("two", "Two")],
+        rows: vec![
+            IndexRow::new("apart", "one", "Limit size"),
+            IndexRow::new("inside", "two", "Size limits"),
+        ],
+    };
+    assert_eq!(
+        find(&index, "size limit").0.as_deref(),
+        Some("two"),
+        "inside a title"
+    );
+}
+
+struct Host {
+    search: SettingsSearchState,
+    index: SearchIndex,
+}
+
+fn search() -> SettingsSearch<Host> {
+    SettingsSearch::new(
+        "s",
+        |h: &Host| &h.search,
+        |h: &mut Host| &mut h.search,
+        |h: &Host| &h.index,
+    )
+}
+
+/// Strata's `heading_shown`: a heading shows while a row under it does, and always when no
+/// indexed row is under it; navigation lists pages with a shown row.
+#[test]
+fn headings_and_pages_follow_the_rows_under_them() {
+    let mut h = Host {
+        search: SettingsSearchState::new(),
+        index: SearchIndex {
+            revision: 1,
+            pages: vec![IndexPage::new("one", "One"), IndexPage::new("two", "Two")],
+            rows: vec![
+                IndexRow::new("units", "one", "Units").section("language-units"),
+                IndexRow::new("language", "one", "Language").section("language-units"),
+                IndexRow::new("glow", "two", "Element glow").section("effects"),
+            ],
+        },
+    };
+    let s = search();
+    assert!(
+        s.shows_section(&h, "effects") && s.shows_page(&h, "two"),
+        "nothing filters yet"
+    );
+    h.search.set_text("units");
+    let r = h.search.plan(&h.index).expect("a query");
+    h.search.store(r);
+    assert!(s.shows_section(&h, "language-units"));
+    assert!(!s.shows_section(&h, "effects"), "no row under it shows");
+    assert!(
+        s.shows_section(&h, "about-links"),
+        "no indexed row is under it"
+    );
+    assert!(s.shows_page(&h, "one") && !s.shows_page(&h, "two"));
+    assert!(s.shows_row(&h, "units") && !s.shows_row(&h, "language"));
+    assert!(
+        s.shows_row(&h, "not-indexed"),
+        "a row the index doesn't list always shows"
     );
 }

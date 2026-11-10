@@ -201,4 +201,75 @@ mod c20c {
             "the row's switch has the keyboard"
         );
     }
+
+    /// Strata resets each page's scroll on every change of query (`reset_scroll`): with forty
+    /// rows still matching, the page goes back to its top.
+    #[test]
+    fn a_new_query_scrolls_the_page_to_its_top() {
+        let mut rt = mount_with("c20c-settings-light", |g| {
+            g.c20c.index = SearchIndex {
+                revision: 9,
+                pages: vec![IndexPage::new("general", "General")],
+                rows: (0..40)
+                    .map(|i| {
+                        IndexRow::new(format!("r{i}"), "general", format!("Row {i}"))
+                            .keywords("alpha")
+                    })
+                    .collect(),
+            };
+        });
+        run(&mut rt, 0.3);
+        let page = element(&rt, "c20c-page").expect("the page").rect;
+        rt.pointer_move(page[0] + 50.0, page[1] + 50.0);
+        rt.frame(FRAME);
+        rt.wheel(page[0] + 50.0, page[1] + 50.0, -400.0);
+        run(&mut rt, 1.0);
+        let offset = |rt: &Runtime<Gallery>| {
+            element(rt, "c20c-search-row-r0").map_or(f32::NAN, |e| e.scrolled[1])
+        };
+        assert!(offset(&rt) > 0.0, "the wheel scrolled the page");
+        tap(&mut rt, FIELD);
+        typ(&mut rt, "a");
+        assert_eq!(
+            rt.state.c20c.search.count(),
+            Some(40),
+            "every row still shows"
+        );
+        assert_eq!(offset(&rt), 0.0, "the query scrolled the page back");
+    }
+
+    /// Only a plain Enter jumps: with Ctrl, Shift or Alt it goes on.
+    #[test]
+    fn a_modified_enter_does_not_jump() {
+        let mut rt = mount_with("c20c-settings-light", |_| {});
+        tap(&mut rt, FIELD);
+        typ(&mut rt, "license");
+        for mods in [
+            Mods {
+                ctrl: true,
+                cmd: true,
+                ..Mods::default()
+            },
+            Mods {
+                shift: true,
+                ..Mods::default()
+            },
+            Mods {
+                alt: true,
+                ..Mods::default()
+            },
+        ] {
+            rt.key(KeyEvent {
+                key: Key::Enter,
+                mods,
+            });
+            run(&mut rt, 0.1);
+        }
+        assert_eq!(rt.state.c20c.search.highlighted(), None);
+        assert!(
+            !rt.state.c20c.heard.iter().any(|h| h.contains('>')),
+            "no jump: {:?}",
+            rt.state.c20c.heard
+        );
+    }
 }

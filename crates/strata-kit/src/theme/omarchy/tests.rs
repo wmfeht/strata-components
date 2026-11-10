@@ -274,3 +274,97 @@ fn without_mode_the_background_decides() {
     assert!(!is_light(hex("#ffffff"), Some("dark")));
     assert!(is_light(hex("#000000"), Some("light")));
 }
+
+/// Strata's extreme-palette check (`src/ui/theme/omarchy/tests.rs` at lgse/strata 35ee677ab):
+/// Contrast over every bundled theme read as a Quattro palette, and over washed-out, light,
+/// monochrome, all-black and all-white palettes. settings/themes/omarchy: "Contrast raises
+/// text to 7:1", "dim text, accent, and danger to 4.5:1, and borders to 3:1, against those four
+/// surfaces", "code-preview syntax colors to 4.5:1 against the window and pane surfaces", and a
+/// palette keeps its appearance.
+#[test]
+fn contrast_keeps_every_pair_readable_on_dark_light_and_extreme_palettes() {
+    let mut palettes: Vec<(String, [Rgba8; 5])> = crate::theme::bundled()
+        .iter()
+        .map(|t| {
+            let c = &t.colors;
+            (
+                t.id.clone(),
+                [c.background, c.text, c.accent, c.highlight, c.surface],
+            )
+        })
+        .collect();
+    for (name, colours) in [
+        (
+            "washed-out",
+            ["#191123", "#7199cb", "#917baa", "#a8b1ff", "#b18a9b"],
+        ),
+        (
+            "light",
+            ["#fff9ec", "#372c2d", "#873f94", "#87abcf", "#f2ecdf"],
+        ),
+        ("monochrome", ["#777777"; 5]),
+        ("black", ["black"; 5]),
+        ("white", ["white"; 5]),
+    ] {
+        palettes.push((name.to_owned(), colours.map(hex)));
+    }
+    for (name, [background, foreground, accent, selection, dark_background]) in palettes {
+        let src = format!(
+            "background = '{}'\nforeground = '{}'\naccent = '{}'\nselection = '{}'\n\
+             dark_background = '{}'\ngreen = '{}'\n",
+            background.hex(),
+            foreground.hex(),
+            accent.hex(),
+            selection.hex(),
+            dark_background.hex(),
+            accent.hex(),
+        );
+        let c = map(&src, Variant::Contrast);
+        let look = theme(&name, &src, Variant::Contrast).expect("maps").look();
+        for t in crate::tokens::all() {
+            if let crate::tokens::Value::Color(v) = t.get(&look) {
+                assert!(
+                    [v.r, v.g, v.b, v.a].iter().all(|x| x.is_finite()),
+                    "{name}: {}",
+                    t.name()
+                );
+            }
+        }
+        for s in surfaces(&c) {
+            for (fg, floor) in [
+                (c.text, 7.0),
+                (c.dim_text, 4.5),
+                (c.accent, 4.5),
+                (c.danger, 4.5),
+                (c.border, 3.0),
+            ] {
+                assert!(
+                    contrast(fg, s) >= floor,
+                    "{name}: {} on {}",
+                    fg.hex(),
+                    s.hex()
+                );
+            }
+        }
+        let syn = c.syntax;
+        for fg in [
+            syn.keyword,
+            syn.string,
+            syn.constant,
+            syn.type_,
+            syn.preprocessor,
+        ] {
+            let fg = fg.expect("resolved");
+            assert!(
+                contrast(fg, c.surface) >= 4.5,
+                "{name}: syntax {}",
+                fg.hex()
+            );
+        }
+        assert_eq!(
+            luminance(c.background) > 0.45,
+            luminance(background) > 0.45,
+            "{name} keeps its appearance"
+        );
+    }
+}

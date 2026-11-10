@@ -78,7 +78,7 @@ done
 # the peer and the examples first: a test can't make cargo build another package's binary, and
 # `cargo test` leaves examples under hashed names only.
 [tasks.test-platform]
-description = "Run strata-platform's compositor tests, each in a private headless sway session"
+description = "Run the compositor tests (strata-platform's and X3's), each in a private headless sway session"
 usage = '''
 arg "[args]..." help="libtest arguments: a filter (w3::, p2::), --test-threads=1, --nocapture" var=#true
 '''
@@ -90,8 +90,11 @@ export STRATA_OUTER_XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-}"
 unset DISPLAY WAYLAND_SOCKET HYPRLAND_INSTANCE_SIGNATURE SWAYSOCK I3SOCK DBUS_SESSION_BUS_ADDRESS
 export WAYLAND_DISPLAY=strata-test-no-wayland
 cargo build -p strata-test-peer -p strata-platform --bins --examples --all-features --locked
+# X3's demo, which the gallery's session tests (tests/x3.rs) drive against the peer.
+cargo build -p strata-gallery --example clipboard_wiring --all-features --locked
 eval "set -- ${usage_args:-}"
 cargo test -p strata-platform --all-targets --all-features --locked -- --ignored "$@"
+cargo test -p strata-gallery --test x3 --all-features --locked -- --ignored "$@"
 '''
 
 [tasks.deny]

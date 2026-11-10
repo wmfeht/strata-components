@@ -202,13 +202,12 @@ where
         .key(key)
 }
 
+type FieldGet = fn(&Gallery) -> &NumberFieldState;
+type FieldGetMut = fn(&mut Gallery) -> &mut NumberFieldState;
+
 /// The NumberField for `f`, as the view and the poll both build it.
 fn number_field(f: Field) -> NumberField<Gallery> {
-    let (key, get, get_mut): (
-        &str,
-        fn(&Gallery) -> &NumberFieldState,
-        fn(&mut Gallery) -> &mut NumberFieldState,
-    ) = match f {
+    let (key, get, get_mut): (&str, FieldGet, FieldGetMut) = match f {
         Field::Workers => ("c20a-workers", |g| &g.c20a.workers, |g| &mut g.c20a.workers),
         Field::TextSize => (
             "c20a-text-size",

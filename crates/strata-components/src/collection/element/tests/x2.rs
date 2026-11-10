@@ -266,9 +266,9 @@ fn a_folder_row_the_action_refuses_stops_the_drop() {
 
 /// A drag a zone refuses still drives the host's drag-over hook (autoscroll, C2's column
 /// wash) when it offers files, as Strata's motion controller does whatever accepts: the
-/// refusal keeps the hook's
-/// last point and each move gives it the next, with no drop highlight. The background, with
-/// the host's action, stops what it refuses too, so it hears those moves.
+/// refusal keeps the hook's last point and each move gives it the next, with no drop
+/// highlight. The background, with the host's action, stops what it refuses too, so it hears
+/// those moves.
 #[test]
 fn a_refused_drag_still_drives_the_drag_over_hook() {
     use crate::contract::{DropHover, Point};

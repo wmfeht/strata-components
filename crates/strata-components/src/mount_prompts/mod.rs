@@ -37,7 +37,9 @@
 //!   `connect_ask_password` (flags to the `needs_*`, `anonymous_allowed` and `saving_allowed`
 //!   switches), `connect_local("ask-question", ..)` (gio-rs binds no typed handler; choices
 //!   from the `StrV`; none at all: reply `Unhandled`), and `show-processes` (pids from the
-//!   `GArray`, named by the host).
+//!   `GArray`, named by the host). Each handler first calls `stop_signal_emission_by_name`:
+//!   `GMountOperation`'s own handlers run last and reply `Unhandled` from an idle on the
+//!   default main context, which would race the prompt's answer wherever that context runs.
 //! - **The answer:** [`MountResponse::Password`] sets `username`, `domain`, `password` (each
 //!   when `Some`) and `password-save` from [`Remember`] (`Never`, `ForSession`,
 //!   `Permanently`), then replies `Handled`; [`MountResponse::Anonymous`] sets `anonymous`;
@@ -83,6 +85,45 @@
 //! its visible label; "Connect as" and "Password storage" as radio groups; the process list as
 //! a list of items named by program, described by pid and command line; the buttons, named by
 //! their choices.
+//!
+//! # Coverage
+//!
+//! What checks each feature-map Behavior bullet. Scripts are `tests/scripts/c26/<name>.json`;
+//! "golden" is a scene's accessibility or PNG golden; "unit" is in `mount_prompts/tests.rs`;
+//! "test" is in `crates/strata-gallery/tests/c26.rs`. **Partial**: the prompt's half is here,
+//! the rest (navigation, error dialogs, retry detection) is Strata's.
+//!
+//! | Bullet (node: opening words) | Checked by |
+//! | --- | --- |
+//! | network-locations: When the backend asks for credentials… only the fields the backend requested | unit `a_password_prompt_shows_only_the_fields_and_choices_its_request_allows`; scripts `sign-in-submit`, `sign-in-focus`; goldens `c26-sign-in`, `c26-luks` |
+//! | network-locations: An SMB sign-in can show Username, Domain, Password… Password storage | golden `c26-sign-in`; scripts `sign-in-remember`, `sign-in-anonymous-submit` |
+//! | network-locations: Choosing Anonymous disables the credential and Password storage fields | script `sign-in-anonymous`; unit `choosing_anonymous_disables_the_fields_and_the_storage_choice` |
+//! | network-locations: Wrong credentials reopen the dialog with "Those credentials weren't accepted…" | **partial**: golden `c26-sign-in-retry`, units `the_retry_message_names_only_the_fields_shown`, `each_refusal_is_a_new_node_so_a_second_one_is_heard_too`; that a request is a retry is Strata's |
+//! | network-locations: Cancel or Escape on the sign-in dialog returns… | **partial**: scripts `sign-in-cancel`, `sign-in-escape` (Abort); the navigation is Strata's |
+//! | network-locations: When GVfs asks Strata for a key passphrase… "Passphrase required"… "Passphrase" | script `key-passphrase` (review scene `c26-key-passphrase`); golden `c26-luks` |
+//! | network-locations: An unknown or changed SFTP host key opens a "Verify server identity" dialog… Strata never answers it | script `host-key-accept`; golden `c26-host-key` (no default button) |
+//! | network-locations: The host-key dialog warns that a missing fingerprint… | golden `c26-host-key` |
+//! | network-locations: The host-key dialog opens with the rejecting choice… focused | script `host-key-decline`; golden `c26-host-key` |
+//! | network-locations: Declining the host key by its rejecting choice, Escape, or close… | **partial**: scripts `host-key-decline`, `host-key-escape`, `host-key-close`; the rest is Strata's |
+//! | network-locations: A connection that fails on host-key verification shows… | **Strata** (its error text) |
+//! | network-locations: Trust questions from other schemes and from devices use GTK's native question dialog | **changed** (D5): they use the general question (review scene `c26-question`) |
+//! | location-bar: The sign-in dialog's fields are named after their visible labels | goldens `c26-sign-in`, `c26-luks` |
+//! | connect-to-server: A sign-in prompt raised while connecting stacks above the dialog | **partial**: [`MountPrompts::stacked`]; the stacking is C15's |
+//! | app/dialogs: The mount authentication dialog… ignores backdrop clicks | script `sign-in-backdrop` |
+//! | app/dialogs: Enter in a single-line text or password field… | script `sign-in-submit` |
+//! | encrypted: Clicking a locked row, its lock button, or Unlock opens the themed "Passphrase required" prompt… | **partial**: script `luks-unlock`, golden `c26-luks`; the row and its menu are C8's and Strata's |
+//! | encrypted: Cancel in the prompt closes it with no error… | **partial**: script `luks-cancel` |
+//! | encrypted: A rejected passphrase reopens the prompt with a retry message… | **partial**: as the sign-in retry above |
+//! | encrypted: A correct passphrase unlocks and mounts the volume… | **partial**: script `luks-unlock` (the answer); the unlock is GIO's |
+//! | encrypted: the Unlocking and Locking overlays, Forget saved password | **not applicable**: Strata and C15 |
+//! | release: Cancelling GVfs's own busy dialog during Disconnect shows no "Unable to disconnect" dialog | **partial**, **changed** (D5): script `processes-cancel` answers Cancel by its index; the busy dialog is this one now; the error handling is Strata's |
+//! | release: A GIO unmount-progress message replaces the overlay body… | **not applicable**: Strata's release overlay |
+//! | volumes, release: Cancelling a mount's (a release's) authentication prompt shows no error | **partial**: scripts `sign-in-cancel`, `luks-cancel` |
+//!
+//! Also: end process and the live list (test `end_process_leaves_the_prompt_open_on_the_shorter_list`,
+//! unit `a_process_list_over_a_process_list_updates_in_place`), withdrawal (test
+//! `a_withdrawn_request_closes_its_prompt_unanswered`), and the GIO round trip (test
+//! `a_mount_operation_round_trips_through_the_glib_bridge`).
 //!
 //! # Deviations
 //!

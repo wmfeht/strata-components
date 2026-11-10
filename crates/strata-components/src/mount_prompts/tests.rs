@@ -337,3 +337,30 @@ fn declining_choices_are_told_by_their_leading_word() {
         assert!(!looks_like_rejection(label), "{label}");
     }
 }
+
+#[test]
+fn each_refusal_is_a_new_node_so_a_second_one_is_heard_too() {
+    let refused = || {
+        let request = smb();
+        MountRequest::Password(PasswordRequest {
+            error: Some(MountLabels::retry_message(&request)),
+            ..request
+        })
+    };
+    let mut rt = mount(refused());
+    let errors = |rt: &Runtime<Host>| -> Vec<String> {
+        keys(rt)
+            .into_iter()
+            .filter(|k| k.starts_with("m-password-error-"))
+            .collect()
+    };
+    let first = errors(&rt);
+    assert_eq!(first.len(), 1);
+    rt.update(|s, _| {
+        let _ = s.prompt.open(refused(), 8);
+    });
+    rt.frame(1.0 / 60.0);
+    let second = errors(&rt);
+    assert_eq!(second.len(), 1);
+    assert_ne!(first, second);
+}

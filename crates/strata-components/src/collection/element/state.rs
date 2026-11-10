@@ -43,6 +43,9 @@ pub struct CollectionState {
     /// The zone (a folder row or the background) a drag is over that refuses it: its moves
     /// still reach the drag-over hook, but draw no drop highlight.
     pub(super) drop_refused: Option<DropOver>,
+    /// Whether that refused drag offers files: only a file drag drives the hook (autoscroll
+    /// follows file drags only).
+    pub(super) drop_refused_files: bool,
     pub(super) hover_live: bool,
     /// The entry under the pointer at its last move over the collection (the rest hook's).
     pub(super) rest_under: Option<EntryId>,
@@ -106,6 +109,7 @@ impl Default for CollectionState {
             visible: 0..0,
             drop: None,
             drop_refused: None,
+            drop_refused_files: false,
             hover_live: true,
             rest_under: None,
             rest_entered: None,

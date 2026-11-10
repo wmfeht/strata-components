@@ -782,22 +782,33 @@ fn row_zone<S: 'static>(cfg: &Rc<Config<S>>, on_drop: DropFn<S>, id: EntryId) ->
             let reject_cfg = cfg.clone();
             zone.action(move |s: &S, offer, mods| f(s, Some(id), offer, mods))
                 .on_reject(move |s: &mut S, _, tx| {
-                    super::note_drop_hover(&reject_cfg, s, DropOver::Row(id), DropHover::Left);
+                    super::note_drop_hover(
+                        &reject_cfg,
+                        s,
+                        DropOver::Row(id),
+                        DropHover::Left,
+                        None,
+                    );
                     super::drag_over_hover(&reject_cfg, s, DropHover::Left, tx);
                 })
         }
         None => zone,
     };
-    zone.on_hover(move |s: &mut S, hover, _offer, tx| {
-        super::note_drop_hover(&hover_cfg, s, DropOver::Row(id), hover);
+    zone.on_hover(move |s: &mut S, hover, offer, tx| {
+        super::note_drop_hover(&hover_cfg, s, DropOver::Row(id), hover, Some(offer));
         super::drag_over_hover(&hover_cfg, s, hover, tx);
     })
     .on_move(move |s: &mut S, point, tx| {
         let under_stuck = super::route::under_stuck_header(&edge, s, point);
         let st = (edge.get_mut)(s).1;
         // A refused drag's moves (P1 sends them to a zone with on_reject) only drive the
-        // hook: no highlight.
-        let over = if st.drop_refused == Some(DropOver::Row(id)) {
+        // hook, and only a file drag's: no highlight.
+        let refused = st.drop_refused == Some(DropOver::Row(id));
+        if refused && !st.drop_refused_files {
+            tx.live_only();
+            return;
+        }
+        let over = if refused {
             None
         } else if under_stuck {
             Some(DropOver::Background)

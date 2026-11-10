@@ -1050,34 +1050,42 @@ fn background_zone<S: 'static>(cfg: &Rc<Config<S>>, on_drop: row::DropFn<S>) -> 
             let reject_cfg = cfg.clone();
             zone.action(move |s: &S, offer, mods| f(s, None, offer, mods))
                 .on_reject(move |s: &mut S, _, tx| {
-                    note_drop_hover(&reject_cfg, s, DropOver::Background, DropHover::Left);
+                    note_drop_hover(&reject_cfg, s, DropOver::Background, DropHover::Left, None);
                     drag_over_hover(&reject_cfg, s, DropHover::Left, tx);
                 })
         }
         None => zone,
     };
-    zone.on_hover(move |s: &mut S, hover, _offer, tx| {
-        note_drop_hover(&hover_cfg, s, DropOver::Background, hover);
+    zone.on_hover(move |s: &mut S, hover, offer, tx| {
+        note_drop_hover(&hover_cfg, s, DropOver::Background, hover, Some(offer));
         drag_over_hover(&hover_cfg, s, hover, tx);
     })
-    .on_move(move |s: &mut S, point, tx| match &edge.on_drag_over {
-        Some(f) => {
-            if !f(s, Some(Point::new(point.window_x, point.window_y)), tx) {
-                tx.live_only();
-            }
+    .on_move(move |s: &mut S, point, tx| {
+        let st = (edge.get_mut)(s).1;
+        if st.drop_refused == Some(DropOver::Background) && !st.drop_refused_files {
+            tx.live_only();
+            return;
         }
-        None => route::drop_edge_scroll(&edge, s, point, false, tx),
+        match &edge.on_drag_over {
+            Some(f) => {
+                if !f(s, Some(Point::new(point.window_x, point.window_y)), tx) {
+                    tx.live_only();
+                }
+            }
+            None => route::drop_edge_scroll(&edge, s, point, false, tx),
+        }
     })
 }
 
 /// Records a hover on the zone `over` (a folder row or the background): an accepted drag
 /// highlights it (the background only if no row is), a refused one doesn't and is noted as
-/// refused, and leaving clears both.
+/// refused (with whether `offer` offers files), and leaving clears both.
 pub(super) fn note_drop_hover<S: 'static>(
     cfg: &Config<S>,
     s: &mut S,
     over: DropOver,
     hover: DropHover,
+    offer: Option<&crate::contract::DropOffer>,
 ) {
     let st = (cfg.get_mut)(s).1;
     let mine = |d: Option<DropOver>| d == Some(over);
@@ -1096,7 +1104,13 @@ pub(super) fn note_drop_hover<S: 'static>(
                 st.drop = None;
             }
             st.drop_refused = match hover {
-                DropHover::Rejecting => Some(over),
+                DropHover::Rejecting => {
+                    st.drop_refused_files = offer.is_some_and(|o| {
+                        o.uris.is_some()
+                            || o.mime_types.iter().any(|m| m == crate::contract::URI_LIST)
+                    });
+                    Some(over)
+                }
                 _ if mine(st.drop_refused) => None,
                 _ => st.drop_refused,
             };
@@ -1121,7 +1135,8 @@ pub(super) fn drag_over_hover<S: 'static>(
         DropHover::Left => None,
         DropHover::Accepting | DropHover::Rejecting => {
             let at = tx.drop_point().map(|p| Point::new(p.window_x, p.window_y));
-            if at.is_none() && hover == DropHover::Rejecting {
+            let refused = hover == DropHover::Rejecting;
+            if refused && (at.is_none() || !(cfg.get)(s).1.drop_refused_files) {
                 return;
             }
             at

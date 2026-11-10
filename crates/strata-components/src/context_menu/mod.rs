@@ -203,10 +203,9 @@
 //! - **U-C21-4 (draft, not filed)** rune-kit's submenus open only when the app sets them
 //!   open, and nothing in them moves the keyboard: no Right or Left, and the keyboard can't
 //!   enter one, and no hover opens one. Ask: Right, Left, Enter and Space on a submenu row, focus
-//!   into it, and hover-open with a delay. Its focus part goes as a comment on #173 (`Tx::focus`),
-//!   not a new issue, with the first-arrow case: after a pointer input a menu's first row has
-//!   the keyboard unshown, and an app can't show it there (GTK moves on the first arrow).
-//!   Here: C21's own keys, and a sent Tab that moves the keyboard into a submenu.
+//!   into it, and hover-open with a delay. `Tx::focus` and `Tx::by_keys` (Rune 22aa8cde,
+//!   3847cf0a) cover the focus part. Here: C21's own keys, and a sent Tab that moves the
+//!   keyboard into a submenu, whose rows are keyed by position (U-C21-5).
 //! - **U-C21-5 (draft, not filed)** `MenuItem` is keyed by position, so a row added above the
 //!   focused one moves the keyboard. Ask: `MenuItem::key`. Its menu-name half is U-C6-8 (extend
 //!   it; C21 names the surface it finds in the layer).

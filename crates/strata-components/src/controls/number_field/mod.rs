@@ -9,13 +9,12 @@
 //! [`NumberField::poll`] from its poll. It reports committed values only; saving is the
 //! host's.
 //!
-//! **Rune dev 5d421fd: partly.** A core `text_input` (`on_input_key`, `on_input_change`,
+//! **Rune 2a44156: partly.** A core `text_input` (`on_input_key`, `on_input_change`,
 //! `on_secondary_press`, `align`, `invalid`), a `textbox` frame that keeps the field's focus
 //! through a press on a stepper inside it (probe P2b), `on_step` on a spin button that isn't
 //! focusable (probe P3), `on_wheel` and `range_value` cover it. Missing: a text field can't
 //! take the spin button role (U-C20a-1), there's no focus-change hook (anomalyco/rune#106,
-//! U-C6-3), and rune-kit's TextInput takes no menu press (U-C21-2). Past the pin and not
-//! adopted: `Tx::focus` (22aa8cde) and `Tx::focused` in every handler (cd2bd55a).
+//! U-C6-3), and rune-kit's TextInput takes no menu press (U-C21-2).
 //!
 //! # What it does
 //!

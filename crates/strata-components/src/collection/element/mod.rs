@@ -54,10 +54,11 @@
 //!
 //! # Decisions
 //!
-//! - **Focus.** Rune (at the pinned rev) has no programmatic focus for elements other than
-//!   text fields, no focus-change notification and no focus-within styles (Rune draft
-//!   U-C1e-4). So the element never moves focus: the position-restore bullets on focus after
-//!   Back, Forward and Up, and the first-visit refocus, wait for that API. A selection looks
+//! - **Focus.** Rune 2a44156 has no focus-change notification and no focus-within styles
+//!   (Rune draft U-C1e-4; anomalyco/rune#106). The element never moves focus itself: the
+//!   position-restore bullets on focus after Back, Forward and Up, and the first-visit
+//!   refocus, are the host's, which can focus the collection by its key with `Tx::focus`
+//!   (Rune 22aa8cde). A selection looks
 //!   the same whether or not the collection has focus (Strata dims it when unfocused), and the
 //!   cursor outline follows keyboard mode (the last input that moved the cursor was a key)
 //!   instead of keyboard focus.
@@ -591,8 +592,7 @@ impl<S: 'static> Collection<S> {
     /// [`Collection::key`] and names the cursor's row as its own active descendant
     /// ([`Collection::cursor_path`]). A press in it focuses that ancestor, the nearest one with
     /// a key handler. Columns (C2) builds every column this way, so the whole strip is one Tab
-    /// stop, as in Strata, and the strip sends each key to the column that holds the cursor:
-    /// Rune can't move focus between elements from code at the pinned rev.
+    /// stop, as in Strata, and the strip sends each key to the column that holds the cursor.
     pub fn keys_by_host(mut self) -> Self {
         self.cfg.keys_by_host = true;
         self

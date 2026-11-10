@@ -46,12 +46,13 @@
 //!
 //! # Focus
 //!
-//! Rune can't focus an element from code at the pinned rev (Rune draft U-C1e-4), so
-//! [`ArchiveState::enter`] highlights the first member but can't move focus into the tree:
-//! Strata's "first member highlighted and focused" is half done until Rune has `Tx::focus`
-//! (C15's draft). C9's `focus_return` stubs are the host's way meanwhile
-//! ([`DrawerState::focus_content`](crate::preview_drawer::DrawerState::focus_content)). The
-//! prompt's field can be focused: it is a text field ([`PromptState::focus`]).
+//! [`ArchiveState::enter`] highlights the first member; focus is the host's, for Strata's
+//! "first member highlighted and focused": the list is the collection keyed
+//! [`ArchiveState::scope`], one focus stop, so `tx.focus(archive.scope(), ring)` moves the
+//! keyboard into it, as C9's
+//! [`DrawerState::focus_content`](crate::preview_drawer::DrawerState::focus_content) does from
+//! the listing. The prompt's field can be focused: it is a text field
+//! ([`PromptState::focus`]).
 
 pub mod controllers;
 mod prompt;

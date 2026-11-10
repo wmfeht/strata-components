@@ -226,8 +226,8 @@ fn build<S: 'static>(cfg: &Rc<RenameEditor<S>>, s: &S, rcx: &RowCx<'_>) -> El {
             },
         )
         // Enter, Escape or a last Tab removes the field with the keyboard in it: give the
-        // keyboard back to the collection, as Strata keeps it in the listing (Rune has no
-        // `Tx::focus`, upstream #173).
+        // keyboard back to the collection, as Strata keeps it in the listing. A `focus_return`
+        // covers every way the field goes, and only while it holds the keyboard.
         .focus_return(rcx.scope.to_owned())
         .child(field)
 }

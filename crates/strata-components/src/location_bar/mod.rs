@@ -217,8 +217,8 @@
 //!   item can't say so. Here: the current crumb is a label last in the list; the menu item is
 //!   checked.
 //! - **U-C6-3 (draft, not filed; upstream #106 asks the same)** A text field has no focus-change
-//!   hook: the runtime clears `TextEdit::focused` without telling anyone (probe P5), and
-//!   `Tx::focused` is set only in key handlers. Here: [`LocationBarState::tick`] notices.
+//!   hook: the runtime clears `TextEdit::focused` without telling anyone (probe P5). Here:
+//!   [`LocationBarState::tick`] notices, a frame late.
 //! - **U-C6-4 (draft, not filed)** `PopupItem` has no rich label (spans, or `label_with(El)`),
 //!   and `PopupList::build_list` is private. Here: the bar's own list.
 //! - **U-C6-5 (draft, not filed)** A vertical mouse wheel over a sideways-only viewport scrolls
@@ -240,9 +240,8 @@
 //!   it answers None and nothing shows; the entry stays open with its selection. Strata's GTK
 //!   entry shows its menu there. An in-app field menu is C21's to give (known; probe in
 //!   `strata-spikes/c6-probes/r1/w4/rclick.*`).
-//! - Reused: U-C1e-6 (no clock in `Tx`: the host's `tick`), C15's `Tx::focus` draft (the host
-//!   gives its view the keyboard after a cancel) and U3 (a drag's paths only at the drop).
-//!   U-C1b-1 (script pointer events dropped modifiers, probe P6b at 78d22ed) is fixed at the
+//! - Reused: U-C1e-6 (no clock in `Tx`: the host's `tick`) and U3 (a drag's paths only at the
+//!   drop). U-C1b-1 (script pointer events dropped modifiers, probe P6b at 78d22ed) is fixed at the
 //!   current pin, 5d421fd (4805095): scripts hold them with `{"hold": "ctrl"}`.
 
 mod build;

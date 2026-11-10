@@ -15,6 +15,7 @@ use std::time::Duration;
 
 use rune::{Color, Span};
 use strata_kit::look::Look;
+use strata_kit::theme::syntax::syntect_theme;
 use syntect::highlighting::{
     HighlightState, Highlighter as SynHighlighter, RangedHighlightIterator, Theme,
 };
@@ -40,11 +41,11 @@ fn head(name: &str, n: usize) -> String {
 }
 
 pub(super) fn light() -> Arc<Theme> {
-    Arc::new(theme_from_look(&Look::fallback(false)))
+    Arc::new(syntect_theme(&Look::fallback(false)))
 }
 
 fn dark() -> Arc<Theme> {
-    Arc::new(theme_from_look(&Look::fallback(true)))
+    Arc::new(syntect_theme(&Look::fallback(true)))
 }
 
 type Runs = Vec<(Range<usize>, Color)>;
@@ -1046,7 +1047,9 @@ fn text_spans_are_offset_into_the_whole_text() {
 
 #[test]
 fn text_spans_stop_below_runes_span_limit() {
-    let line = format!("x = [{}]\n", "1,".repeat(1000));
+    // About 2,000 coloured numbers a line (the commas between them draw as text), so 40
+    // lines hold well over the limit.
+    let line = format!("x = [{}]\n", "1,".repeat(2000));
     let text = line.repeat(40);
     let mut pump = Pump::new(light());
     let mut doc = pump.open(
@@ -1060,33 +1063,73 @@ fn text_spans_stop_below_runes_span_limit() {
     assert_eq!(doc.text_spans(0..40).len(), MAX_SPANS);
 }
 
+/// K1's done-when, "the syntect themes colour the S4 fixtures": the look's syntect theme
+/// (strata-kit's `SCOPES`) gives each fixture's first 200 lines the colours of the roles
+/// they hold.
 #[test]
-fn the_look_theme_colours_kinds_from_the_look() {
-    let look = Look::fallback(false);
-    let theme = theme_from_look(&look);
-    let mut pump = Pump::new(Arc::new(theme));
+fn the_look_theme_colours_the_s4_fixtures_by_role() {
+    use strata_kit::theme::syntax::Role;
+
+    let look = strata_kit::theme::bundled_theme("catppuccin-mocha")
+        .expect("bundled")
+        .look();
+    let mut pump = Pump::new(Arc::new(syntect_theme(&look)));
     let mut blocks = pump.blocks();
-    blocks.highlight(Some("c"), "#include <stdio.h>\n// note\n");
+    let code = [
+        (
+            "rs",
+            "rust-50k.rs",
+            &[Role::Comment, Role::String, Role::Keyword, Role::Type][..],
+        ),
+        (
+            "c",
+            "c-50k.c",
+            &[
+                Role::Comment,
+                Role::String,
+                Role::Keyword,
+                Role::Preprocessor,
+            ],
+        ),
+        (
+            "js",
+            "js-50k.js",
+            &[Role::Comment, Role::String, Role::Keyword, Role::Constant],
+        ),
+        (
+            "py",
+            "python-50k.py",
+            &[Role::Comment, Role::String, Role::Keyword],
+        ),
+        (
+            "sh",
+            "shell-5k.sh",
+            &[Role::Comment, Role::String, Role::Keyword],
+        ),
+        ("md", "markdown-50k.md", &[Role::Heading, Role::String]),
+    ]
+    .map(|(lang, name, roles)| (lang, head(name, 200), roles));
+    for (lang, text, _) in &code {
+        blocks.highlight(Some(lang), text);
+    }
     pump.run();
     blocks.poll();
-    let runs = highlight_runs(
-        &blocks
-            .highlight(Some("c"), "#include <stdio.h>\n// note\n")
-            .expect("landed"),
-    );
     let near = |a: Color, b: Color| {
         (a.r - b.r).abs() < 0.01 && (a.g - b.g).abs() < 0.01 && (a.b - b.b).abs() < 0.01
     };
-    let comment = look.syntax.color(rune_kit::syntax::Syntax::Comment);
-    assert!(
-        runs.iter()
-            .any(|(_, c)| near(*c, look.syntax_extra.preprocessor)),
-        "the preprocessor colour"
-    );
-    assert!(
-        runs.iter().any(|(_, c)| near(*c, comment)),
-        "the comment colour"
-    );
+    for (lang, text, roles) in &code {
+        let runs = highlight_runs(&blocks.highlight(Some(lang), text).expect("landed"));
+        for role in *roles {
+            assert!(
+                runs.iter().any(|(_, c)| near(*c, role.color(&look))),
+                "{lang}: {role:?}"
+            );
+        }
+        assert!(
+            !runs.iter().any(|(_, c)| near(*c, Role::Text.color(&look))),
+            "{lang}: text-role tokens get no span"
+        );
+    }
 }
 
 #[test]

@@ -229,3 +229,27 @@ fn every_bundled_theme_maps_in_its_own_appearance() {
         assert_eq!(look.fill.highlight, theme.colors.highlight.color());
     }
 }
+
+/// A translucent theme colour keeps its opacity in the tokens drawn from it: the stylesheet's
+/// `alpha(@strata_border, 0.6)` is 60 % of the border's own alpha, as GTK multiplies.
+#[test]
+fn a_translucent_theme_colour_scales_its_own_opacity() {
+    let src = r##"name = "Glass"
+background = "#0c1a2b"
+surface = "#122438"
+text = "#c9deed"
+accent = "#4fd6ff"
+muted = "#1e3a52"
+highlight = "#244d68"
+border = "rgba(49, 91, 117, 0.5)"
+dim_text = "#6f8da3"
+"##;
+    let theme = crate::theme::parse_custom("glass", src).expect("loads");
+    let look = theme.look();
+    let border = theme.colors.border.color();
+    assert!((border.a - 0.5).abs() < 0.01);
+    let kit = &look.kit;
+    assert_eq!(kit.c.border_base, kit.alpha(border, border.a * 0.60));
+    assert_ne!(kit.c.border_base, kit.alpha(border, 0.60));
+    assert_eq!(kit.c.std_border, border, "the border itself is as written");
+}

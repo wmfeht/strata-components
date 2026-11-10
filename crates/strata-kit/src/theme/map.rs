@@ -4,7 +4,9 @@
 //! ring in the accent (Strata's `outline: 2px solid @strata_accent`). Then each semantic
 //! token takes the Strata role its widgets draw with. Translucent tokens go through
 //! `Kit::alpha` at the opacities Strata's stylesheet uses (`src/style.css` at lgse/strata
-//! 35ee677ab), so a window that blends in linear light still matches.
+//! 35ee677ab), so a window that blends in linear light still matches. Each opacity is a share
+//! of the colour's own, as GTK's `alpha()` multiplies, so a translucent theme colour stays
+//! translucent.
 //!
 //! | Kit tokens | Value | Strata's use |
 //! | --- | --- | --- |
@@ -105,7 +107,7 @@ pub(crate) fn kit(colors: &Colors) -> Kit {
         accent,
     })
     .c;
-    let a = |c, x| kit.alpha(c, x);
+    let a = |c: rune::Color, x: f32| kit.alpha(c, c.a * x);
     let mut p = kit.c;
 
     p.page = bg;

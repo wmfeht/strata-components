@@ -24,19 +24,43 @@
 //!
 //! - Strata's scheme draws keywords and types bold, comments italic and the shebang bold.
 //!   rune-kit highlights change colour only, never weight or style, so those are dropped.
-//! - Strata's scheme leaves diff lines unstyled; rune-kit's diff kinds keep green and red.
+//! - Strata's scheme leaves diff lines unstyled; rune-kit's diff kinds keep green and red,
+//!   and so do [`Role::Inserted`] and [`Role::Deleted`].
+//! - Strata's scheme draws errors (`def:error`) bold, in the background colour on a danger
+//!   fill. C10a's spans change colour only, so [`Role::Error`] draws in the danger colour on
+//!   the code's own background: the fill is dropped, and the background-coloured text with it.
 //!
 //! # Scopes
 //!
 //! [`SCOPES`] maps TextMate scope selectors, which syntect's grammars emit, onto a [`Role`],
-//! following GtkSourceView's `def:` groups, and [`Role::color`] reads each role's colour from
-//! a finished [`Look`], so a user's `syntax.*` override reaches it. They are plain data: the
-//! syntect `Theme` built from them comes in a follow-up (K1b), after C10a's highlighter lands.
+//! following GtkSourceView's `def:` groups and the language files that map onto them, and
+//! [`Role::color`] reads each role's colour from a finished [`Look`], so a user's `syntax.*`
+//! override reaches it. [`syntect_theme`] builds C10a's syntect theme from both (K1b), and
 //! [`editor`] gives the colours around the code.
+//!
+//! Known gaps, where these selectors don't follow Strata:
+//!
+//! - Rust's `let`, `const` and `Self` draw as types: the grammar scopes them
+//!   `storage.type.rust`, as it does the primitive types, so no selector tells them apart.
+//! - C's `struct`, `enum`, `union` and `typedef` draw as types: the grammar scopes them
+//!   `storage.type.c`, as it does `int`, though c.lang lists them as keywords.
+//! - C++'s `class`, `struct` and `typename` (`storage.type.c++`) and `template`
+//!   (`storage.type.template.c++`) draw as types; cpp.lang lists them as keywords.
+//! - C's number suffixes (`storage.type.numeric` inside a number) draw as types.
+//! - TypeScript's `const`, `let` and `var` (`storage.type.ts`), `interface` and `namespace`
+//!   draw as types; Strata's TypeScript files draw them as keywords.
+//! - A variable or command substitution inside a shell string (`"$dir"`) draws as the
+//!   string; sh.lang draws it as an identifier, in the text colour. Following it would need
+//!   text-role rows that override an enclosing string.
+//! - A Markdown fence's language name (`constant.other.language-name`) draws as a constant.
+
+use std::str::FromStr;
 
 use rune::Color;
+use rune::color::srgb_encode;
 use rune_kit::Kit;
 use rune_kit::syntax::{Syntax, SyntaxTheme};
+use syntect::highlighting::{ScopeSelectors, StyleModifier, Theme, ThemeItem, ThemeSettings};
 
 use super::color::{Rgba8, blend};
 use super::colors::Colors;
@@ -119,12 +143,16 @@ pub enum Role {
     Preprocessor,
     /// Markup headings, in the accent, as Strata's Markdown headings are.
     Heading,
-    /// Invalid code, in the danger colour.
+    /// Invalid code, in the danger colour (Strata's danger fill is dropped: see the module).
     Error,
+    /// Added diff lines, in the kit's success colour.
+    Inserted,
+    /// Removed diff lines, in the kit's danger colour.
+    Deleted,
 }
 
 impl Role {
-    pub const ALL: [Role; 9] = [
+    pub const ALL: [Role; 11] = [
         Role::Text,
         Role::Comment,
         Role::String,
@@ -134,6 +162,8 @@ impl Role {
         Role::Preprocessor,
         Role::Heading,
         Role::Error,
+        Role::Inserted,
+        Role::Deleted,
     ];
 
     /// The role's colour in `look`, after the user's overrides.
@@ -149,6 +179,8 @@ impl Role {
             Role::Preprocessor => look.syntax_extra.preprocessor,
             Role::Heading => look.kit.c.text_accent,
             Role::Error => look.kit.c.danger.fg,
+            Role::Inserted => s.color(Syntax::Inserted),
+            Role::Deleted => s.color(Syntax::Deleted),
         }
     }
 }
@@ -173,11 +205,41 @@ pub const SCOPES: &[(&str, Role)] = &[
     ("storage", Role::Keyword),
     ("storage.modifier", Role::Keyword),
     ("storage.type", Role::Type),
+    // Declaration keywords some grammars file under `storage.type`: Strata's language files
+    // list them as keywords (`def:keyword`, then `def:statement`), as rust.lang and js.lang do
+    // `fn`, `struct`, `impl`, `class`, `function` and `const`.
+    ("storage.type.function", Role::Keyword),
+    ("storage.type.class", Role::Keyword),
+    ("storage.type.struct", Role::Keyword),
+    ("storage.type.enum", Role::Keyword),
+    ("storage.type.trait", Role::Keyword),
+    ("storage.type.impl", Role::Keyword),
+    ("storage.type.module", Role::Keyword),
+    ("storage.type.type", Role::Keyword),
+    ("storage.type.extends", Role::Keyword),
+    // JavaScript has no type keywords: Babel's `storage.type.js` is `const`, `let`, `async`.
+    ("storage.type.js", Role::Keyword),
+    // Go's `func`, `type`, `struct`, `interface`, `var` and `const`, which go.lang lists as
+    // keywords; it lists `map` and `chan` as types.
+    ("storage.type.keyword", Role::Keyword),
+    ("storage.type.keyword.map", Role::Type),
+    ("storage.type.keyword.chan", Role::Type),
+    // String prefixes (`r""`, `b""`, `f""`) are part of the string in GtkSourceView.
+    ("storage.type.string", Role::String),
     ("entity.name.type", Role::Type),
     ("entity.name.class", Role::Type),
     ("entity.other.inherited-class", Role::Type),
     ("support.type", Role::Type),
     ("support.class", Role::Type),
+    // xml.lang's `attribute-name`, which html.lang uses, maps to `def:type`, as css.lang's
+    // `attribute-selector-name` (`[href]`) does. The CSS grammar files class and id selectors
+    // under attribute names too: css.lang's `class-selector` is `def:identifier`, in the text
+    // colour, and its `id-selector` is `def:statement`.
+    (
+        "entity.other.attribute-name - entity.other.attribute-name.class.css",
+        Role::Type,
+    ),
+    ("entity.other.attribute-name.id.css", Role::Keyword),
     ("meta.preprocessor", Role::Preprocessor),
     ("keyword.control.import", Role::Preprocessor),
     ("keyword.control.directive", Role::Preprocessor),
@@ -187,7 +249,60 @@ pub const SCOPES: &[(&str, Role)] = &[
     ("markup.heading", Role::Heading),
     ("entity.name.section", Role::Heading),
     ("invalid", Role::Error),
+    ("markup.inserted", Role::Inserted),
+    ("markup.deleted", Role::Deleted),
 ];
+
+/// The syntect theme for `look`, after the user's overrides: each [`SCOPES`] selector in its
+/// role's colour, the most specific match winning. The default foreground is the look's
+/// text, so a scope in [`Role::Text`] gets no span and draws in the host's own text colour.
+/// The settings take [`editor`]'s colours; C10a reads only the foregrounds.
+///
+/// Build a new one when the look changes and hand it to C10a's `Highlighter::set_theme`, which
+/// re-colours open texts without re-parsing them.
+pub fn syntect_theme(look: &Look) -> Theme {
+    let scopes = SCOPES
+        .iter()
+        .filter_map(|&(selector, role)| {
+            Some(ThemeItem {
+                scope: ScopeSelectors::from_str(selector).ok()?,
+                style: StyleModifier {
+                    foreground: Some(to_syntect(role.color(look))),
+                    background: None,
+                    font_style: None,
+                },
+            })
+        })
+        .collect();
+    let e = editor(look);
+    Theme {
+        name: Some("Strata".into()),
+        author: None,
+        settings: ThemeSettings {
+            foreground: Some(to_syntect(e.foreground)),
+            background: Some(to_syntect(e.background)),
+            caret: Some(to_syntect(e.caret)),
+            selection: Some(to_syntect(e.selection)),
+            selection_foreground: Some(to_syntect(e.selection_foreground)),
+            gutter: Some(to_syntect(e.gutter_background)),
+            gutter_foreground: Some(to_syntect(e.gutter)),
+            line_highlight: Some(to_syntect(e.line_highlight)),
+            ..ThemeSettings::default()
+        },
+        scopes,
+    }
+}
+
+/// A Rune colour (linear light) as a syntect colour (sRGB bytes, straight alpha).
+fn to_syntect(c: Color) -> syntect::highlighting::Color {
+    let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+    syntect::highlighting::Color {
+        r: byte(srgb_encode(c.r)),
+        g: byte(srgb_encode(c.g)),
+        b: byte(srgb_encode(c.b)),
+        a: byte(c.a),
+    }
+}
 
 /// The colours around code, as Strata's source scheme sets them.
 #[derive(Clone, Copy, Debug, PartialEq)]

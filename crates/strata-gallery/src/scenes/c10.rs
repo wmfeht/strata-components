@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use rune::{Cx, El, KeyEvent, TextEdit, Tx, col, el, text};
-use strata_components::code_view::highlight::{Highlighter, theme_from_look};
+use strata_components::code_view::highlight::Highlighter;
 use strata_components::code_view::{CodeEditor, CodeIntent, CodeState, CodeView, EditorState};
 use strata_components::context_menu::{FieldMenu, FieldMenuState};
 use strata_components::preview_drawer::{
@@ -22,6 +22,7 @@ use strata_components::preview_drawer::{
 };
 use strata_kit::icons::IconName;
 use strata_kit::look::Look;
+use strata_kit::theme::syntax::syntect_theme;
 
 use crate::{Gallery, Scene};
 
@@ -70,7 +71,7 @@ pub struct Live {
 impl Live {
     fn new(look: &Look, dark: bool) -> Live {
         Live {
-            highlighter: Highlighter::new(Arc::new(theme_from_look(look))),
+            highlighter: Highlighter::new(Arc::new(syntect_theme(look))),
             dark,
             waker: false,
         }
@@ -520,8 +521,7 @@ pub fn poll(g: &mut Gallery, _t: f64, tx: &mut Tx) -> bool {
             live.waker = true;
         }
         if live.dark != g.dark {
-            live.highlighter
-                .set_theme(Arc::new(theme_from_look(&g.look)));
+            live.highlighter.set_theme(Arc::new(syntect_theme(&g.look)));
             live.dark = g.dark;
         }
     }

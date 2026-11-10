@@ -16,9 +16,10 @@ use rune::text::TextSystem;
 use rune::{Cx, El, Env, Key, KeyEvent, Mods, Runtime, clipboard};
 use strata_kit::fonts;
 use strata_kit::look::Look;
+use strata_kit::theme::syntax::syntect_theme;
 
 use super::super::*;
-use crate::code_view::highlight::{Highlighter, theme_from_look};
+use crate::code_view::highlight::Highlighter;
 use crate::preview_drawer::HostedPreview;
 
 thread_local! {
@@ -93,7 +94,7 @@ fn ctrl() -> Mods {
 fn preview(wrap: bool) {
     let text: Arc<str> = fixture("rust-50k.rs").into();
     let look = Look::fallback(false);
-    let hl = Highlighter::new(Arc::new(theme_from_look(&look)));
+    let hl = Highlighter::new(Arc::new(syntect_theme(&look)));
     let mut first = f64::INFINITY;
     let mut rt = None;
     for _ in 0..3 {
@@ -247,7 +248,7 @@ fn a_5000_line_script_edit() {
     release_only();
     let text = fixture("shell-5k.sh");
     let look = Look::fallback(false);
-    let hl = Highlighter::new(Arc::new(theme_from_look(&look)));
+    let hl = Highlighter::new(Arc::new(syntect_theme(&look)));
     let mut editor = EditorState::new(text.as_str(), &hl, Some("s.sh"), None);
     editor.settle(Duration::from_secs(60));
     let mid = text.match_indices('\n').nth(2500).map_or(0, |(i, _)| i);

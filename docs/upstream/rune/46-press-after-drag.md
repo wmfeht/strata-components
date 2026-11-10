@@ -6,7 +6,8 @@
 | Drafts | R-C4-1 |
 | Affects | C4 (header sort click after a resize or reorder drag), C2 |
 | Retires | C4's held-back sort click cleared in `ListTable::build` |
-| Checked | Repro run at `5d421fd` and `04b38ae`: same output (`e96c55ee`'s press-run rule past the pin doesn't change it). |
+| Checked | Re-checked at `2a44156`: the repro's output in `run-2a44156.txt` matches the Output block. By source, `pointer_up` still queues `Press` whenever the release is inside the captured element, moved or not (`runtime/input/pointer.rs:347–348`; `moved` only clears the click run, `:336`, and gates the double press, `:350`). In the gallery, `mise run test list_table::tests::runtime` passed (15 tests, among them the held-back sort click's cases, such as `an_assistive_press_after_a_sortable_heading_released_on_itself_sorts`), and C4's held-back click is still there (`list_table/header.rs:239`, `list_table/state.rs:53`). Earlier: the repro ran at `5d421fd` and `04b38ae` with the same output (`e96c55ee`'s press-run rule, past the pin, doesn't change it). |
+| Status | Ready to file (re-verified at 2a44156, 2026-11-10; no duplicate as of 2026-11-10) |
 
 Paste from here.
 
@@ -14,11 +15,13 @@ Paste from here.
 
 **Title:** An element with `on_drag` and `on_press` hears a press after its own drag past the threshold
 
+Context: Strata (lgse/strata), a file manager on Rune.
+
 `pointer_up` queues `Press` whenever the release is inside the captured element
-(`runtime/input/pointer.rs:324` at `5d421fd`), so a header that both sorts on a click and
+(`runtime/input/pointer.rs:348` at `2a44156`, `:324` at `5d421fd`), so a header that both sorts on a click and
 resizes or reorders on a drag also sorts at the end of every drag.
 
-**Repro** (headless; ran at `5d421fd` and `04b38ae`):
+**Repro** (headless; ran at `5d421fd` and `2a44156`):
 
 ```rust
 use rune::{Cx, Drag, El, Env, Runtime, col, el};

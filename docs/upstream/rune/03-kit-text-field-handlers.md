@@ -6,7 +6,8 @@
 | Drafts | U-C21-2, U-C5-1, R-C14b-3 |
 | Affects | C5, C6, C14b, C17, C18, C19, C20a, C20b, C21, C26 |
 | Retires | Each component's own frame around core `text_input`, in place of rune-kit `TextInput` |
-| Checked | Repro run at `5d421fd` and `04b38ae`: same output. |
+| Checked | Re-checked at `2a44156`: the repro's output in `run-2a44156.txt` matches the Output block. By source, `TextInput::build` (`rune-kit/src/text_input.rs:300`) still passes `None` for `name_field`'s description (`:117`), and nothing in rune-kit's text fields forwards `on_secondary_press`. `TextField` has `error` (`:607`) but still no `on_submit`. `secondary_target` is at `runtime/input/secondary.rs:9`. In the gallery, `mise run test c5s_field_menu_holds_the_edit_open` passed (1 test: C21's menu on a core `text_input`), and C21's docs still list rune-kit fields as having no menu (`context_menu/mod.rs:56`, `:195`). Earlier: the repro ran at `5d421fd` and `04b38ae` with the same output. |
+| Status | Ready to file (re-verified at 2a44156, 2026-11-10; no duplicate as of 2026-11-10) |
 
 Paste from here.
 
@@ -17,7 +18,7 @@ Paste from here.
 Context: Strata (lgse/strata), a file manager on Rune draws its own text-field context menu (Cut, Copy, Paste, Undo)
 on Linux, and shows validation errors as a field's description.
 
-**What's missing** (`5d421fd`, unchanged at `04b38ae`). `TextInput::build`
+**What's missing** (`5d421fd`, unchanged at `2a44156`). `TextInput::build`
 (`rune-kit/src/text_input.rs:300`) returns the box around the field. Its builder forwards
 `on_edit`, `on_submit`, `on_key` and `on_change` to the inner `text_input`, but not
 `on_secondary_press` or a description (`name_field`, `text_input.rs:117`, takes one but the
@@ -25,7 +26,7 @@ builder passes none). A field's own menu wins over every ancestor's `on_secondar
 (`secondary_target`, `runtime/input/secondary.rs:9`), so a handler on the returned box never
 runs, and a description lands on the box, not the field.
 
-**Repro** (headless; ran at `5d421fd` and `04b38ae`):
+**Repro** (headless; ran at `5d421fd` and `2a44156`):
 
 ```rust
 use rune::{Cx, El, Env, PointerPress, Runtime, TextEdit, Tx, col, text_input};

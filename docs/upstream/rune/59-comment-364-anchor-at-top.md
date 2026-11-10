@@ -6,18 +6,19 @@
 | Drafts | U-C17-3 |
 | Affects | C17 (search palette streaming better results first) |
 | Retires | C17's rows keyed by place so the anchored key keeps its place |
-| Checked | Repro run at `5d421fd` and `04b38ae`: same output. `El::scroll_anchor`'s docs at `el/scroll.rs:126–134` (pin). |
+| Checked | At `2a44156`, repro re-run (`doc_59`): same output. #364 open, no comments (live, 2026-11-10). `El::scroll_anchor`'s docs say the same (`el/scroll.rs:134`–`141`). Gallery: C17's rows keyed by place are still there (`search_palette/mod.rs:68`); the `search_palette` tests pass. Earlier: repro run at `5d421fd` and `04b38ae`, same output (docs at `el/scroll.rs:126`–`134` at the pin). |
+| Status | Ready to file (re-verified at 2a44156, 2026-11-10; no duplicate as of 2026-11-10) |
 
 Paste from here.
 
 ---
 
-A related case from a search list that streams better results in at the top. At offset 0,
-`virtual_rows` still holds the first visible row in place when rows are inserted above it, so
-the new rows scroll out above the viewport though the user never scrolled. `El::scroll_anchor`'s
-docs (`el/scroll.rs:126–134` at `5d421fd`) say anchoring holds "only while the viewport is …
-scrolled off its top … at the very top new content above shows", and that `virtual_rows` lists
-anchor "this way".
+A related case from Strata (lgse/strata), a file manager on Rune: a search list that streams better
+results in at the top. At offset 0, `virtual_rows` still holds the first visible row in place when
+rows are inserted above it, so the new rows scroll out above the viewport though the user never
+scrolled. `El::scroll_anchor`'s docs (`el/scroll.rs:134–141` at `2a44156`) say anchoring holds "only
+while the viewport is … scrolled off its top … at the very top new content above shows", and that
+`virtual_rows` lists anchor "this way".
 
 ```rust
 use rune::{Cx, El, Env, GrowthSpec, Runtime, ScrollSpec, col, el};
@@ -40,5 +41,5 @@ fn main() {
 ```
 
 prints `two rows inserted above at offset 0: a0 at Some(-40.0), b00 at Some(0.0)` at `5d421fd`
-and `04b38ae`. Either skipping the anchor at offset 0, as the docs say, or the opt-out this issue
+and `2a44156`. Either skipping the anchor at offset 0, as the docs say, or the opt-out this issue
 asks for (anchor on a row the app marks, or none) would cover it.

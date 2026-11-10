@@ -6,7 +6,8 @@
 | Drafts | U-C13-2 |
 | Affects | C13 (media timeline: 5 s steps, 30 s pages), C20a (slider: Strata pages 4 steps) |
 | Retires | C13's and C20a's Page keys taken in `on_key` before `on_step` |
-| Checked | Repro run at `5d421fd` and `04b38ae`: same output (`runtime/input/focus.rs:376` at the pin: `PageDown => -10, PageUp => 10`). |
+| Checked | At `2a44156`, repro re-run (`doc_53`): same output. Source: `PageDown => Some(-10), PageUp => Some(10)` (`runtime/input/focus.rs:449`); no `range_page` or other page count. Gallery: C20a's and C13's Page keys still go through `on_key` (`controls/slider/mod.rs:13`, `media_player/keys.rs:173`); `a_page_is_whole_steps` and the `page` tests pass. Earlier: repro run at `5d421fd` (`focus.rs:376`) and `04b38ae`, same output. |
+| Status | Ready to file (re-verified at 2a44156, 2026-11-10; no duplicate as of 2026-11-10) |
 
 Paste from here.
 
@@ -14,7 +15,9 @@ Paste from here.
 
 **Title:** `on_step` pages are always 10 steps; add `El::range_page`
 
-**Repro** (headless; ran at `5d421fd` and `04b38ae`):
+Context: Strata (lgse/strata), a file manager on Rune.
+
+**Repro** (headless; ran at `5d421fd` and `2a44156`):
 
 ```rust
 use rune::{Cx, El, Env, Key, KeyEvent, Mods, Runtime, col, el};

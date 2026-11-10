@@ -6,7 +6,8 @@
 | Drafts | R-K6-1 |
 | Affects | K6 (font tests), strata-kit and gallery test layout |
 | Retires | The rule that a test needing the measure path's fonts lives alone in its own test binary |
-| Checked | By source: the generation is read again after the build (`text/measure.rs:227` at `5d421fd`, `:238` at `04b38ae`). Flaky by nature (about one run in six); not run here. |
+| Checked | Re-checked at `2a44156` by source: `with_text` still builds the measurer, then reads `fonts_generation` again with no lock held across the build (`text/measure.rs:233–239`), and the families-only branch keeps the loaded fonts on a generation match (`:228–231`). Gallery: K6's weight test still lives alone in `crates/strata-kit/tests/fonts_weight.rs` and passes (`mise run test the_wght_axis_follows_the_weight`, 1 test). Not run as a race (flaky by nature, about one run in six). Earlier: by source at `5d421fd` (`:227`) and `04b38ae` (`:238`). |
+| Status | Ready to file (re-verified at 2a44156, 2026-11-10; no duplicate as of 2026-11-10) |
 
 Paste from here.
 
@@ -14,10 +15,12 @@ Paste from here.
 
 **Title:** `with_text`'s measurer can be tagged with a newer fonts generation than the fonts it loaded
 
-`with_text` (`text/measure.rs` at `5d421fd`) builds a thread's measurer from the fonts it read,
-then reads the state's `fonts_generation` again (line 227) to tag it, with no lock held across
+Context: Strata (lgse/strata), a file manager on Rune.
+
+`with_text` (`text/measure.rs` at `2a44156`) builds a thread's measurer from the fonts it read,
+then reads the state's `fonts_generation` again (line 238) to tag it, with no lock held across
 the build. A `TextSystem::new` with other fonts on another thread in between leaves the measurer
-holding the old fonts under the new generation. Later, the families-only branch (line 217) sees
+holding the old fonts under the new generation. Later, the families-only branch (line 228) sees
 the generation match and keeps the loaded fonts, changing only the families: text measures in
 the old fonts under the new names (in our tests, about one run in six measured 258 pt where 600
 was due).

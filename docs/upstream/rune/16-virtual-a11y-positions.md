@@ -6,7 +6,8 @@
 | Drafts | U-C1f-2, U-C1f-3, U-C3-4, R-C4-3, U-C11b-1 |
 | Affects | C1e/C1f (grouped lists), C3 (icon grid), C4 (list table), C11b (sheet grid), C20d (icon picker) |
 | Retires | Group headers that read as items; grids whose rows read "row 2 of 40" |
-| Checked | Repro run at `5d421fd` and `04b38ae`: same output. No `column_index`, `row_index` or count builder at either rev. |
+| Checked | Re-checked at `2a44156`: `doc_16`'s output in `run-2a44156.txt` matches the Output block. By source, a virtual row takes its list index as its position (`a11y/tree.rs:397`), an item's `position_in_set` size goes to its container (`:340`, applied at `:398`), and no `El` builder sets `column_index`, `row_index`, counts or `member_of` (`el/a11y.rs`; its only change past `04b38ae` is `El::unselectable`). Through the gallery, the accessibility goldens (their tests pass in `c1::` and `c3::`) show it: `c1-groups` reads the headings "Folders" and "Images" at positions 1 and 10, and `c3-default`'s rows of tiles read positions 1, 2, 3, … with set size 40 (the tile count). Earlier: the repro ran at `5d421fd` and `04b38ae` with the same output. |
+| Status | Ready to file (re-verified at 2a44156, 2026-11-10; no duplicate as of 2026-11-10) |
 
 Paste from here.
 
@@ -14,20 +15,20 @@ Paste from here.
 
 **Title:** Virtual lists and grids: a heading row counts as an item, an item's set size replaces its row's, and no row or column index
 
-Context: a file manager's list, icon and table views are virtual rows (`virtual_rows`) with
-section headings, tiles packed several to a row, and table cells.
+Context: Strata (lgse/strata), a file manager on Rune: its list, icon and table views are virtual
+rows (`virtual_rows`) with section headings, tiles packed several to a row, and table cells.
 
-**What's missing** (`5d421fd`, unchanged at `04b38ae`):
-1. Every mounted virtual row gets its list index as its position (`a11y/tree.rs:395`), so a
+**What's missing** (`5d421fd`, unchanged at `2a44156`):
+1. Every mounted virtual row gets its list index as its position (`a11y/tree.rs:397`), so a
    heading among options reads as an item ("12 of 20").
 2. Nothing relates items to the heading above them (AccessKit's `member_of`, ARIA
    `aria-owns`), so a screen reader never hears the group it enters.
 3. `El::position_in_set(i, n)` on an item sets `n` as the size of set of the element holding it
-   (`a11y/tree.rs:340`, applied at `:389`), overriding the row's own place among the rows.
+   (`a11y/tree.rs:340`, applied at `:398`), overriding the row's own place among the rows.
 4. AccessKit has `row_count`, `column_count`, `row_index` and `column_index`; no `El` builder
    sets them, so "row 50,000 of 100,000, column C" can't be said.
 
-**Repro** (headless; ran at `5d421fd` and `04b38ae`):
+**Repro** (headless; ran at `5d421fd` and `2a44156`):
 
 ```rust
 use rune::{Cx, El, Env, GrowthSpec, Runtime, ScrollSpec, col, row, text};

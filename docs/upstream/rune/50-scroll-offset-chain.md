@@ -6,7 +6,8 @@
 | Drafts | U-C24b-1 |
 | Affects | C4 (sideways scroll followers), C22 (folder peek), C24b |
 | Retires | C4's single handler that calls the host's followers (`ListTable::follow_sideways`) |
-| Checked | Repro run at `5d421fd` and `04b38ae`: same output. `chain_scroll_offset` is `#[doc(hidden)]` at both (`el/layout_watch.rs:151`, `:154` at head). |
+| Checked | At `2a44156`, repro re-run (`doc_50`): same output. Source: `on_scroll_offset` still sets the one handler (`el/layout_watch.rs:148`) and `chain_scroll_offset` is still `#[doc(hidden)]` (`:153`–`154`). `9edc78a1` only changes how the runtime tells a new handler from the one it last told (a weak reference instead of an address, `runtime/scroll/watch.rs`), not what a second call does. Gallery: C4's single handler is still there (`list_table/mod.rs:598`), and `a_sideways_scroll_reaches_both_bars_and_every_follower_…` and `a_peek_whose_anchor_moved_sideways_closes` pass. Earlier: repro run at `5d421fd` and `04b38ae`, same output. |
+| Status | Ready to file (re-verified at 2a44156, 2026-11-10; no duplicate as of 2026-11-10) |
 
 Paste from here.
 
@@ -14,7 +15,9 @@ Paste from here.
 
 **Title:** `El::on_scroll_offset` replaces an earlier one, and the chaining rune-kit uses is `#[doc(hidden)]`
 
-**Repro** (headless; ran at `5d421fd` and `04b38ae`):
+Context: Strata (lgse/strata), a file manager on Rune.
+
+**Repro** (headless; ran at `5d421fd` and `2a44156`):
 
 ```rust
 use rune::{Cx, El, Env, Runtime, ScrollPos, WheelEvent, col, el};

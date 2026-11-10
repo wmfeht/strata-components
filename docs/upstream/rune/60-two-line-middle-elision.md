@@ -6,7 +6,8 @@
 | Drafts | U-C3-1 |
 | Affects | C3 (icon captions) |
 | Retires | C3's own two-line middle cut on grapheme clusters (and its `unicode-segmentation` dependency) |
-| Checked | Repro run at `5d421fd` and `04b38ae`: same output. |
+| Checked | At `2a44156`, repro re-run (`doc_60`): same output. Gallery: C3's own cut and its `unicode-segmentation` dependency are still there (`icons_grid/caption.rs:6`, `icons_grid/mod.rs:243`, `strata-components/Cargo.toml:23`); the `caption` tests pass. Earlier: repro run at `5d421fd` and `04b38ae`, same output. |
+| Status | Ready to file (re-verified at 2a44156, 2026-11-10; no duplicate as of 2026-11-10) |
 
 Paste from here.
 
@@ -14,11 +15,13 @@ Paste from here.
 
 **Title:** `max_lines(2)` and `truncate_middle()` don't combine: a long file name over two lines can't keep its end
 
+Context: Strata (lgse/strata), a file manager on Rune.
+
 `max_lines(n)` ends its last line with "…"; `truncate_middle` makes the text one line; whichever
 comes last wins. A file name over two lines ("Quarterly report … two of the budget.xlsx")
 can't keep its extension.
 
-**Repro** (headless; ran at `5d421fd` and `04b38ae`):
+**Repro** (headless; ran at `5d421fd` and `2a44156`):
 
 ```rust
 use rune::{Cx, El, Env, Runtime, col, text};

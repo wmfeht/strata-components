@@ -6,7 +6,8 @@
 | Drafts | U-C6-1, U-C20a-1; the rune-kit NumberField proposal (C20a) folded in as a follow-up |
 | Affects | C6 (location bar), C17 (search palette), C18 (filter bar), C20a (number field) |
 | Retires | The `combobox` group wrapped around C6's, C17's and C18's inputs; C20a's spin-button wrapper with `focusable(false)` and its own Page keys |
-| Checked | Repro run at `5d421fd` and `04b38ae`: same output. `if cx.input { … }` returns before the role is read (`a11y/roles.rs:25`, both revs). |
+| Checked | Re-checked at `2a44156`: `doc_21`'s output in `run-2a44156.txt` matches the Output block. By source, `if cx.input { … }` still returns before the role is read (`a11y/roles.rs:24–28`), and a focused element's `focus.step` takes Left, Right, Up, Down, Page Up and Page Down (`runtime/input/focus.rs:446–452`); the body's `focus.rs:25` was `navigates`, corrected. Through the gallery, the accessibility goldens show the wrappers: `c17-idle` reads a `combo-box` holding a `text-input`, and `c20a-controls` a `spin-button` holding a `text-input` (`number_field/view.rs:213`, U-C20a-1; `filter_bar/prompt/view.rs:193`, U-C6-1); `c6::`, `c17::`, `c18::` and `c20a::` passed. Earlier: the repro ran at `5d421fd` and `04b38ae` with the same output. |
+| Status | Ready to file (re-verified at 2a44156, 2026-11-10; no duplicate as of 2026-11-10) |
 
 Paste from here.
 
@@ -14,16 +15,16 @@ Paste from here.
 
 **Title:** A text input ignores `role(..)`: an editable combobox or a spin button can't be expressed, and `on_step` takes Left and Right from the caret
 
-Context: a file manager's path bar is an editable combobox (ARIA 1.2: the input has the role,
-`expanded` and `controls`); its number fields are spin buttons.
+Context: Strata (lgse/strata), a file manager on Rune: its path bar is an editable combobox (ARIA
+1.2: the input has the role, `expanded` and `controls`); its number fields are spin buttons.
 
-**What's missing** (`5d421fd`, unchanged at `04b38ae`):
-- `a11y/roles.rs:25` maps any element with an input to a text input (or search or password
+**What's missing** (`5d421fd`, unchanged at `2a44156`):
+- `a11y/roles.rs:24` maps any element with an input to a text input (or search or password
   input) before it reads the role, so `role("combobox")` and `role("spinbutton")` are dropped.
-- `on_step` on a field runs on Left and Right too (the step keys, `runtime/input/focus.rs:25`,
-  run before the editor), so the caret can't move.
+- `on_step` on a field runs on Left and Right too (the step keys,
+  `runtime/input/focus.rs:446–452`, run before the editor), so the caret can't move.
 
-**Repro** (headless; ran at `5d421fd` and `04b38ae`):
+**Repro** (headless; ran at `5d421fd` and `2a44156`):
 
 ```rust
 use rune::{Cx, El, Env, Key, KeyEvent, Mods, Runtime, TextEdit, col, text_input};

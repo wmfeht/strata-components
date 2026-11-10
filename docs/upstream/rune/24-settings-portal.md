@@ -7,7 +7,8 @@
 | Affects | P5 (desktop settings), K2 (text scale), C1b (double-click time), C23 (animations) |
 | Retires | P5's zbus reader of `org.freedesktop.portal.Settings` |
 | Filing | Attach the fake-portal script as a gist and link it, instead of pasting it inline (owner, 2026-11-10). |
-| Checked | `platform/portal_appearance.rs:15` `KEY = "color-scheme"`, the only key, at `5d421fd` and `04b38ae`. S1 ran the fake-portal measurement; not re-run. The program compiles at `5d421fd` and `04b38ae` (not run here: it needs a compositor). |
+| Checked | Re-checked at `2a44156`, by source: `KEY = "color-scheme"` (`platform/portal_appearance.rs:15`) is still the only key; the worker reads it with `ReadOne`, else `Read` (`:82–84`), and follows `SettingChanged` for it (`:81`). Reduced motion still comes from GSettings or `kdeglobals` (`platform/preferences.rs:26–65`), sampled when a window or overlay is created or focused (`window.rs:520`, `overlay.rs:391`). The program compiles at `2a44156` (`doc_24`); it needs a compositor and was not run. In the gallery, P5's zbus reader is still there (`strata-platform/src/settings/watcher.rs:28`, `settings/mod.rs:8–12`, U12), and `mise run test-platform p5::` passed in a private headless sway (20). The fake-portal script goes in a gist (Filing row); the body below still has it inline until the gist exists. Earlier: the same at `5d421fd` and `04b38ae`; S1's fake-portal run at `78d22ed`. |
+| Status | Ready to file (re-verified at 2a44156, 2026-11-10; no duplicate as of 2026-11-10) |
 
 Paste from here.
 
@@ -15,9 +16,10 @@ Paste from here.
 
 **Title:** Linux: read Settings portal keys beyond `color-scheme`, with change signals
 
-Context: a file manager follows the desktop's text scale, double-click time, cursor blink and
-animations switch. All live in `org.freedesktop.portal.Settings`, which Rune already reads for
-`color-scheme` (`platform/portal_appearance.rs:15` at `5d421fd`, unchanged at `04b38ae`).
+Context: Strata (lgse/strata), a file manager on Rune, follows the desktop's text scale,
+double-click time, cursor blink and animations switch. All live in
+`org.freedesktop.portal.Settings`, which Rune already reads for `color-scheme`
+(`platform/portal_appearance.rs:15` at `5d421fd`, unchanged at `2a44156`).
 
 **Repro.** Any Rune window, on a private session bus with the fake portal below, under a
 Wayland compositor (headless sway is enough):

@@ -6,7 +6,8 @@
 | Drafts | C14a's "Ctrl+wheel turned into a pinch zooms the wrong way" draft |
 | Affects | C14a (image viewport), C12 (PDF zoom) |
 | Retires | C14a's `on_magnify` on macOS only, with Ctrl+wheel handled in `on_wheel` elsewhere |
-| Checked | By source: `MagnifyEvent::new(-dy / PINCH_WHEEL)` (`runtime/input/gesture.rs:106` at `5d421fd`, `:113` at `04b38ae`). Not run here. |
+| Checked | Re-checked at `2a44156` by source: `pinch_wheel` still sends `MagnifyEvent::new(-dy / PINCH_WHEEL)` (`runtime/input/gesture.rs:111–115`, `PINCH_WHEEL` 200 at `:19`) to any `on_magnify` up the chain (`gesture_chain`, `:146`); `MagnifyEvent` has no modifiers (`input/canvas_input.rs:54–62`); the window's wheel takes the pinch whenever a handler is there, declined or not (`window/events.rs:427`; the web's `platform/web/input.rs:228` likewise). No change to it past the pin. Gallery: C14a's Ctrl+wheel in `on_wheel` and its tests pass (`mise run test ctrl_wheel`: 5 tests in strata-components, c12, c14a). Earlier: by source at `5d421fd` (`:106`) and `04b38ae` (`:113`). |
+| Status | Ready to file (re-verified at 2a44156, 2026-11-10; no duplicate as of 2026-11-10) |
 
 Paste from here.
 
@@ -14,7 +15,9 @@ Paste from here.
 
 **Title:** Off macOS, a Ctrl+wheel over any `on_magnify` (ancestors included) becomes a pinch: inverted, without modifiers, and with no fallback
 
-`pinch_wheel` (`runtime/input/gesture.rs:106` at `5d421fd`) turns a Ctrl+wheel over an
+Context: Strata (lgse/strata), a file manager on Rune.
+
+`pinch_wheel` (`runtime/input/gesture.rs:111` at `2a44156`) turns a Ctrl+wheel over an
 `on_magnify` handler into `MagnifyEvent::new(-dy / 200)`:
 - the zoom is inverted against the wheel convention (a wheel turned away zooms out);
 - the event has no modifiers, so Ctrl+Shift+wheel can't be told from a pinch;

@@ -6,13 +6,15 @@
 | Drafts | U6, its resize half (S5, from S1 R1) |
 | Affects | P3, X1 |
 | Retires | P3's "no edge resize on Wayland" known limit (owner's P3 decision), and on X11 the `_NET_WM_MOVERESIZE` sent from a second connection |
-| Checked | No `drag_resize_window` or `window_resize` anywhere in `rune/src` at `5d421fd` or `04b38ae`. S1's sway measurement; not re-run. |
+| Checked | Re-checked at `2a44156` by source. There is still no `drag_resize_window`, `ResizeDirection` or `El::window_resize` anywhere in `crates/`: `.window_drag()` (`el/layout.rs:596`) reaches winit's `drag_window` only (`window/events.rs:494`), and `with_raw_handle` still yields only the window handle (`window/handle.rs:148`). #309 is still open with no comments (checked live 2026-11-10). P3's known limit (`csd/mod.rs:146`, "no edge resize, minimise or window menu" on Wayland) and its X11 `_NET_WM_MOVERESIZE` on its own connection (`csd/x11.rs`) are still there. S1's sway measurement was not re-run. Earlier: the same by source at `5d421fd` and `04b38ae`. |
+| Status | Ready to file (re-verified at 2a44156, 2026-11-10; no duplicate as of 2026-11-10). Post it as a comment on #309, which is still open. |
 
 Paste from here.
 
 ---
 
-Adding Linux evidence from a file manager that draws its own header in a borderless window.
+Adding Linux evidence from Strata (lgse/strata), a file manager on Rune that draws its own header in
+a borderless window.
 
 Under headless sway (Wayland and Xwayland), plain winit 0.30.13's
 `Window::drag_resize_window(ResizeDirection::East)`, called from a press 3 px inside the right

@@ -6,7 +6,8 @@
 | Drafts | U5 (S5, corrected; amended by P2) |
 | Affects | P2, X3 |
 | Retires | P2's data-control and `wl_data_device` clipboard, its X11 selection owner and `SAVE_TARGETS` hand-off |
-| Checked | `clipboard/native.rs:139` `write_one_form` at `5d421fd` and `04b38ae`; no commit touches `crates/rune/src/clipboard*` past the pin. S2/P2 measured under sway; not re-run. The program compiles at `5d421fd` and `04b38ae` (not run here: it needs a compositor). |
+| Checked | Re-checked at `2a44156` by source. `write_one_form` (`clipboard/native.rs:139`) still writes one form: files, else the image, else HTML beside the text, else the text. `ClipboardContent` (`clipboard/content.rs:41–60`) still has only text, HTML, RTF, image and files, with no MIME setter or offered-type list. The README's Linux row and "Copies don't write images yet" (`README.md:1363`, `:1384`) are unchanged, and no commit in `5d421fd..2a44156` touches `crates/rune/src/clipboard*`. The program compiled at `2a44156` and was not run: it needs a compositor. P2's data-control and `wl_data_device` clipboard and its X11 `SAVE_TARGETS` hand-off are still there (`clipboard/`). Earlier: S2/P2 measured under sway at `78d22ed`, and it compiled at `5d421fd` and `04b38ae`. |
+| Status | Ready to file (re-verified at 2a44156, 2026-11-10; no duplicate as of 2026-11-10) |
 
 Paste from here.
 
@@ -14,12 +15,12 @@ Paste from here.
 
 **Title:** Linux clipboard: custom MIME types, several forms in one copy, typed reads, and a notice when another app takes it
 
-Context: a file manager's copy and cut offer `text/uri-list` beside
-`x-special/gnome-copied-files` and `application/x-kde-cutselection` (which carry copy or cut),
-plus text for editors, in one selection. Its paste needs the offered types, and its cut badge
-needs to know when another app takes the clipboard.
+Context: Strata (lgse/strata), a file manager on Rune: its copy and cut offer `text/uri-list` beside
+`x-special/gnome-copied-files` and `application/x-kde-cutselection` (which carry copy or cut), plus
+text for editors, in one selection. Its paste needs the offered types, and its cut badge needs to
+know when another app takes the clipboard.
 
-**What's missing** (`5d421fd`, unchanged at `04b38ae`):
+**What's missing** (`5d421fd`, unchanged at `2a44156`):
 - A copy holds one form on Linux and Windows: the files, else the image, else HTML beside the
   text, else the text (`write_one_form`, `clipboard/native.rs:139`). A file copy offers
   `text/uri-list` alone.

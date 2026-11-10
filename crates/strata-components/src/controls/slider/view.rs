@@ -224,13 +224,19 @@ impl<S: 'static> Slider<S> {
             .a11y_hidden();
         slider = slider.child(k.elevate(knob, &k.elevation.knob));
 
-        let labels = self.labels(st, look, m);
+        let widths = self.label_widths(look);
+        let labels = self.labels(st, look, m, &widths);
+        // As wide as the labels side by side with their gaps, so a menu sized to its content
+        // keeps them from overlapping (Strata's `SnapLabels::measure`).
+        let reserve =
+            widths.iter().sum::<f32>() + m.label_gap * widths.len().saturating_sub(1) as f32;
         // The knob, fill and labels follow the value and the track's width with no motion:
         // the knob stays under the pointer, and the first layout doesn't slide it from where
         // a zero width put it (a tap then would land on the track).
         let parts = |slider: El| {
             col()
                 .w_full()
+                .min_w(reserve.max(m.knob))
                 .instant_changes()
                 .children(std::iter::once(slider).chain(labels))
         };
@@ -307,9 +313,20 @@ impl<S: 'static> Slider<S> {
         slider
     }
 
-    /// The labelled snaps' toggles, each centred under its tick, kept inside the track and
-    /// at least `label_gap` apart (Strata's `SnapLabels::size_allocate`).
-    fn labels(&self, st: &SliderState, look: &Look, m: Metrics) -> Option<El> {
+    /// The labelled snaps' toggles' widths: the label in `kit.ty.small` and `space.xs` each
+    /// side.
+    fn label_widths(&self, look: &Look) -> Vec<f32> {
+        let font = look.kit.ty.small;
+        self.snaps
+            .iter()
+            .filter_map(|s| s.label.as_deref())
+            .map(|l| rune::text::advance(l, font).ceil() + 2.0 * look.space.xs)
+            .collect()
+    }
+
+    /// The labelled snaps' toggles, `widths` wide, each centred under its tick, kept inside
+    /// the track and at least `label_gap` apart (Strata's `SnapLabels::size_allocate`).
+    fn labels(&self, st: &SliderState, look: &Look, m: Metrics, widths: &[f32]) -> Option<El> {
         let labelled: Vec<(usize, &Snap, &str)> = self
             .snaps
             .iter()
@@ -321,15 +338,12 @@ impl<S: 'static> Slider<S> {
         }
         let k = &look.kit;
         let font = k.ty.small;
-        let pad = look.space.xs;
         let line = strata_kit::typography::line_of(font);
         let height = line + 2.0 * look.space.xxs;
         let width = st.width();
         let range = st.range();
-        let widths: Vec<f32> = labelled
-            .iter()
-            .map(|(_, _, l)| (rune::text::advance(l, font).ceil() + 2.0 * pad).min(width.max(0.0)))
-            .collect();
+        // Narrower than the track only before the first layout.
+        let widths: Vec<f32> = widths.iter().map(|w| w.min(width.max(0.0))).collect();
         let gaps = m.label_gap * labelled.len().saturating_sub(1) as f32;
         let mut remaining = widths.iter().sum::<f32>() + gaps;
         let mut left = 0.0f32;

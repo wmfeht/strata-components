@@ -1,5 +1,12 @@
+use rune::text::TextSystem;
+use rune::{Cx, El, Env, Runtime, col, row};
+use strata_kit::fonts;
+use strata_kit::look::Look;
+use strata_kit::shape::LookParams;
+
 use super::range::Range;
 use super::state::{SliderChange, SliderState};
+use super::view::{Slider, Snap};
 
 /// Strata's Frame density: 0–12 px, step 1, page 4, Compact 0 and Airy 4.
 fn frame() -> Range {
@@ -155,4 +162,70 @@ fn home_end_and_set_report_only_a_move() {
     assert_eq!(st.value(), 12.0);
     assert!(st.set(4.0));
     assert!(!st.set(4.0));
+}
+
+struct Host {
+    slider: SliderState,
+    look: Look,
+}
+
+/// Long snap labels, as Russian's are, in a column sized to its content, as Strata's
+/// Appearance menu is.
+fn shrink_wrapped(s: &Host, _: &mut Cx<Host>) -> El {
+    let slider = Slider::new("s", |h: &Host| &h.slider, |h: &mut Host| &mut h.slider)
+        .snaps(vec![
+            Snap::labelled(0.0, "Компактная плотность"),
+            Snap::labelled(4.0, "Просторная плотность"),
+        ])
+        .build(s, &s.look);
+    row().items_start().child(col().child(slider))
+}
+
+#[test]
+fn a_content_sized_menu_reserves_the_snap_labels_width() {
+    let mut look = Look::fallback(false);
+    look.apply_params(&LookParams {
+        text_size: 24,
+        ..LookParams::default()
+    });
+    let gap = look.space.md;
+    let host = Host {
+        slider: SliderState::new(0.0, frame()),
+        look,
+    };
+    let text = TextSystem::new(fonts::FONTS, fonts::FAMILIES);
+    let mut rt = Runtime::with_text(
+        host,
+        shrink_wrapped,
+        (900.0, 400.0),
+        Env::new(false, 1.0),
+        text,
+    );
+    rt.frame(0.0);
+    for _ in 0..5 {
+        rt.frame(1.0 / 60.0);
+    }
+    let rect = |key: &str| {
+        rt.elements()
+            .into_iter()
+            .find(|e| e.key.as_deref() == Some(key))
+            .unwrap_or_else(|| panic!("no {key}"))
+            .rect
+    };
+    let (slider, a, b) = (rect("s"), rect("s-snap-0"), rect("s-snap-1"));
+    let label = rune::text::advance("Просторная плотность", look_small(&rt));
+    assert!(b[2] >= label, "the label keeps its width: {b:?}, {label}");
+    assert!(a[0] >= slider[0], "{a:?} inside {slider:?}");
+    assert!(
+        a[0] + a[2] + gap <= b[0] + 0.5,
+        "{a:?} and {b:?} {gap} apart"
+    );
+    assert!(
+        b[0] + b[2] <= slider[0] + slider[2] + 0.5,
+        "{b:?} inside {slider:?}"
+    );
+}
+
+fn look_small(rt: &Runtime<Host>) -> rune::TextStyle {
+    rt.state.look.kit.ty.small
 }

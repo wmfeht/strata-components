@@ -71,10 +71,15 @@
 //! - Choosing Anonymous disables the fields, the show/hide toggle and Password storage.
 //! - A question or a process list ignores backdrop clicks, has **no default button**
 //!   (`StrataDialog::default_button(false)`), so Return with nothing focused never accepts a
-//!   host key or ends processes, and opens on its first declining choice (the secondary).
-//!   Choices sit as Strata orders them: declining ones first; each answers with its index in
-//!   the request. GIO doesn't say which choice declines, so the host marks it
-//!   ([`Choice::rejects`]; [`looks_like_rejection`] is Strata's English heuristic).
+//!   host key or ends processes, and opens on its first declining choice (the secondary), or
+//!   on the close button, which aborts, when no choice declines (Strata's
+//!   `focus_button(rejection.unwrap_or(&layout.close))`). Each choice answers with its index
+//!   in the request. With two choices they sit as Strata orders them, the declining one
+//!   first. With more, the footer reads: the other choices, declining ones first, then the
+//!   first declining choice, then the first accepting one, last as the primary; Strata put
+//!   every declining choice before every accepting one, which C15's footer (extra actions,
+//!   the secondary, the primary) can't. GIO doesn't say which choice declines, so the host
+//!   marks it ([`Choice::rejects`]; [`looks_like_rejection`] is Strata's English heuristic).
 //! - The show/hide toggle is no Tab stop of its own, as GTK's peek icon isn't.
 //!
 //! # What assistive technology hears

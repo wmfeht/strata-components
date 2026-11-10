@@ -364,3 +364,22 @@ fn each_refusal_is_a_new_node_so_a_second_one_is_heard_too() {
     assert_eq!(second.len(), 1);
     assert_ne!(first, second);
 }
+
+#[test]
+fn with_no_choice_marked_declining_a_question_opens_on_close_and_enter_aborts() {
+    let german = [
+        Choice::new("Trotzdem anmelden"),
+        Choice::new("Anmeldung abbrechen"),
+    ];
+    for choices in [german.to_vec(), german.iter().rev().cloned().collect()] {
+        let question = QuestionRequest {
+            choices,
+            ..host_key()
+        };
+        assert!(question.choices.iter().all(|c| !c.rejects));
+        let mut rt = mount(MountRequest::Question(question));
+        assert_eq!(focused(&rt).as_deref(), Some("m-question-close"));
+        press(&mut rt, Key::Enter);
+        assert_eq!(rt.state.answers, [(7, MountResponse::Abort)]);
+    }
+}

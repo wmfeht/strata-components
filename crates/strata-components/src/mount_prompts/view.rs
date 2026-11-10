@@ -489,10 +489,11 @@ impl<S: 'static, T: 'static> MountPrompts<S, T> {
     }
 
     /// A question's or a process list's footer: the first accepting choice as the primary, the
-    /// first rejecting one as the secondary, the rest before them, rejecting ones first, as
-    /// Strata orders them. Each answers with its index in the request. No choice is the default
+    /// first rejecting one as the secondary, the rest before them, rejecting ones first (see
+    /// the module docs for how that differs from Strata's order with three or more choices).
+    /// Each answers with its index in the request. No choice is the default
     /// button, so Return presses only the focused one; focus starts on the secondary, the
-    /// declining choice, as Strata's host-key dialog does.
+    /// declining choice, as Strata's host-key dialog does, or on close when none declines.
     fn choices(&self, d: StrataDialog<S>, choices: &[Choice]) -> StrataDialog<S> {
         let l = &*self.labels;
         let plan = footer(choices);
@@ -516,10 +517,11 @@ impl<S: 'static, T: 'static> MountPrompts<S, T> {
         if let Some(i) = plan.primary {
             d = d.primary(choices[i].label.clone(), choose(i));
         }
-        d.initial_focus(match (plan.secondary, plan.actions.first(), plan.primary) {
-            (Some(_), _, _) => Focus::Secondary,
-            (None, Some(&i), _) => Focus::Action(format!("choice-{i}")),
-            _ => Focus::Primary,
+        // With no choice marked declining, every one commits: focus starts on close, which
+        // aborts, as Strata's `focus_button(rejection.unwrap_or(&layout.close))`.
+        d.initial_focus(match plan.secondary {
+            Some(_) => Focus::Secondary,
+            None => Focus::Close,
         })
     }
 }

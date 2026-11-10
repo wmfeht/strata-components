@@ -3394,12 +3394,11 @@ fn back_on_the_same_row_after_leaving_the_collection_is_an_arrival() {
     rt.update(|s, _| s.coll.hold_rest());
     wake_until(&mut rt, 1.0, |_| false);
     assert!(!rt.state.rests.iter().any(|r| r.inside), "held");
-    // Out of the collection for longer than the leave delay, then straight back onto row 10
-    // (not to the very point it left from: a move reported there is a re-enter, not a move).
+    // Out of the collection for longer than the leave delay, then straight back onto row 10.
     rt.pointer_move(W - 20.0, y);
     rt.frame(1.0 / 60.0);
     wake_until(&mut rt, 0.3, |_| false);
-    rt.pointer_move(x + 3.0, y);
+    rt.pointer_move(x, y);
     rt.frame(1.0 / 60.0);
     wake_until(&mut rt, 1.0, |s| s.rests.iter().any(|r| r.inside));
     let inside: Vec<_> = rt
@@ -3412,10 +3411,11 @@ fn back_on_the_same_row_after_leaving_the_collection_is_an_arrival() {
     assert_eq!(inside, [id(10)], "an arrival");
 }
 
-/// X11 can send a leave and an enter after a drop with the pointer where it was: the enter's
-/// move, at the point the last move was, is no arrival, so a held row stays held.
+/// X11 can send a leave and an enter back to back after a drop, with the pointer where it
+/// was: a re-enter that soon is no arrival, so a held row stays held. (Out of the window for
+/// longer, the same return is one.)
 #[test]
-fn a_held_row_stays_held_when_the_pointer_leaves_and_reenters_without_moving() {
+fn a_held_row_stays_held_when_the_pointer_leaves_and_reenters_at_once() {
     let mut rt = rest_runtime(30);
     settle(&mut rt);
     let (x, y) = centre_of(&rt, "row-10");
@@ -3424,7 +3424,6 @@ fn a_held_row_stays_held_when_the_pointer_leaves_and_reenters_without_moving() {
     rt.update(|s, _| s.coll.hold_rest());
     rt.pointer_leave();
     rt.frame(1.0 / 60.0);
-    wake_until(&mut rt, 0.3, |_| false);
     rt.pointer_move(x, y);
     rt.frame(1.0 / 60.0);
     wake_until(&mut rt, 1.0, |_| false);
@@ -3442,4 +3441,30 @@ fn a_held_row_stays_held_when_the_pointer_leaves_and_reenters_without_moving() {
         "{:?}",
         rt.state.rests
     );
+}
+
+/// Out of the window for longer than a back-to-back leave and enter, the pointer coming back
+/// to the very point it left is an arrival.
+#[test]
+fn back_at_the_same_point_after_leaving_the_window_is_an_arrival() {
+    let mut rt = rest_runtime(30);
+    settle(&mut rt);
+    let (x, y) = centre_of(&rt, "row-10");
+    rt.pointer_move(x, y);
+    rt.frame(1.0 / 60.0);
+    rt.update(|s, _| s.coll.hold_rest());
+    rt.pointer_leave();
+    rt.frame(1.0 / 60.0);
+    wake_until(&mut rt, 0.3, |_| false);
+    rt.pointer_move(x, y);
+    rt.frame(1.0 / 60.0);
+    wake_until(&mut rt, 1.0, |s| s.rests.iter().any(|r| r.inside));
+    let inside: Vec<_> = rt
+        .state
+        .rests
+        .iter()
+        .filter(|r| r.inside)
+        .map(|r| r.id)
+        .collect();
+    assert_eq!(inside, [id(10)], "an arrival");
 }

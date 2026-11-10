@@ -224,6 +224,12 @@ use crate::contract::{
     EntrySource, Point, Rect,
 };
 
+/// How long the pointer must stay out of a collection with the rest hook before its leave
+/// counts: longer than a leave and an enter X11 sends back to back (one batch of events,
+/// well under a 60 Hz frame even on a loaded machine), shorter than a person leaving and
+/// coming back (the rest delay itself is 500 ms).
+const REENTER: std::time::Duration = std::time::Duration::from_millis(100);
+
 type GetFn<S> = Rc<dyn Fn(&S) -> (&dyn EntrySource, &CollectionState)>;
 type GetMutFn<S> = Rc<dyn Fn(&mut S) -> (&dyn EntrySource, &mut CollectionState)>;
 type LookFn<S> = Rc<dyn Fn(&S) -> &Look>;
@@ -892,11 +898,15 @@ impl<S: 'static> Collection<S> {
             });
         if cfg.rest.is_some() {
             // The pointer leaving the collection forgets the row it was on, so coming back onto
-            // that row is an arrival.
+            // that row is an arrival; but only once it has stayed out for REENTER. X11 sends a
+            // leave and an enter back to back after a drop, with the pointer still: no
+            // arrival, so a held row stays held.
             let leave_cfg = cfg.clone();
-            root = root.on_hover_change(move |s: &mut S, inside, tx| {
-                route::on_hover(&leave_cfg, s, inside, tx)
-            });
+            root = root
+                .hover_delays(std::time::Duration::ZERO, REENTER)
+                .on_hover_change(move |s: &mut S, inside, tx| {
+                    route::on_hover(&leave_cfg, s, inside, tx)
+                });
         }
         if !cfg.keys_by_host {
             root = root

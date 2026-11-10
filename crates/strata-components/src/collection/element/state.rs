@@ -52,9 +52,6 @@ pub struct CollectionState {
     /// The entry the pointer last arrived on by moving, unless a press ended or the host held
     /// rest reports since: the only row whose rest report counts.
     pub(super) rest_entered: Option<EntryId>,
-    /// Where (in window points) the pointer last moved over the collection: a move reported
-    /// there again (X11's enter after a leave, with the pointer still) is no arrival.
-    pub(super) rest_at: Option<Point>,
     pub(super) keyboard: bool,
     pub(super) active: bool,
     pub(super) layout: u64,
@@ -113,7 +110,6 @@ impl Default for CollectionState {
             hover_live: true,
             rest_under: None,
             rest_entered: None,
-            rest_at: None,
             keyboard: false,
             active: true,
             layout: 0,

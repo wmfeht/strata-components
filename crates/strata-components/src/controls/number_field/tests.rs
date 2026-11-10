@@ -35,6 +35,16 @@ fn a_number_reads_with_or_without_its_unit() {
 }
 
 #[test]
+fn a_spaced_unit_reads_typed_with_or_without_its_space() {
+    let mut st = NumberFieldState::new(13.0, Range::new(8.0, 48.0, 1.0)).suffix(" px");
+    for text in ["14px", "14 px", "14"] {
+        typed(&mut st, text);
+        assert_eq!(st.parse(), Some(14.0), "{text:?}");
+    }
+    assert_eq!(st.value_text(), "13 px");
+}
+
+#[test]
 fn text_out_of_range_or_not_a_number_reverts() {
     let mut st = workers(4.0);
     for text in ["40", "0", "-3", "abc", "", "1e1", "4.5", "4.", "inf", "%"] {

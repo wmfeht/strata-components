@@ -51,6 +51,11 @@ impl<S: 'static> NumberField<S> {
         }
     }
 
+    /// The spin button's key.
+    pub fn key(&self) -> &str {
+        &self.key
+    }
+
     /// The accessible name, of the spin button and its text field.
     pub fn label(mut self, label: impl Into<String>) -> Self {
         self.label = Some(label.into());
@@ -207,6 +212,7 @@ impl<S: 'static> NumberField<S> {
             .range_value(st.value(), range.min(), range.max())
             .range_step(range.step())
             .a11y_value(st.value_text())
+            .invalid(invalid)
             .child(frame);
         if let Some(l) = &self.label {
             spin = spin.label(l.clone());

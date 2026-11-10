@@ -190,7 +190,7 @@ impl<S: 'static> Slider<S> {
                     .pin(Some(0.0), Some(track_y), None, None)
                     .size(w, m.track)
                     .radius(m.track / 2.0)
-                    .fill(c.layer_04)
+                    .fill(c.border_base)
                     .a11y_hidden(),
             )
             .child(
@@ -207,7 +207,7 @@ impl<S: 'static> Slider<S> {
                 el().key(format!("{key}-tick-{i}"))
                     .pin(Some(tx - 0.5), Some(m.height - m.tick), None, None)
                     .size(1.0, m.tick)
-                    .fill(c.border_base)
+                    .fill(c.border_strong)
                     .a11y_hidden(),
             );
         }
@@ -224,15 +224,19 @@ impl<S: 'static> Slider<S> {
         slider = slider.child(k.elevate(knob, &k.elevation.knob));
 
         let labels = self.labels(st, look, m);
-        if self.disabled {
-            let slider = slider.disabled(true);
-            return col()
+        // The knob, fill and labels follow the value and the track's width with no motion:
+        // the knob stays under the pointer, and the first layout doesn't slide it from where
+        // a zero width put it (a tap then would land on the track).
+        let parts = |slider: El| {
+            col()
                 .w_full()
+                .instant_changes()
                 .children(std::iter::once(slider).chain(labels))
-                .layer_opacity(0.5);
+        };
+        if self.disabled {
+            return parts(slider.disabled(true)).layer_opacity(0.5);
         }
-        let slider = self.wire(slider.cursor(Cursor::Pointer), m);
-        col().w_full().children(std::iter::once(slider).chain(labels))
+        parts(self.wire(slider.cursor(Cursor::Pointer), m))
     }
 
     /// The pointer, keys, wheel and assistive actions.

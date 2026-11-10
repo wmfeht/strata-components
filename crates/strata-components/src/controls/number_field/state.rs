@@ -107,8 +107,9 @@ impl NumberFieldState {
     /// decimals, inside the range. `None` for anything else.
     pub(super) fn parse(&self) -> Option<f64> {
         let mut t = self.edit.text.trim();
-        if !self.suffix.is_empty()
-            && let Some(rest) = t.strip_suffix(self.suffix.as_str())
+        let unit = self.suffix.trim();
+        if !unit.is_empty()
+            && let Some(rest) = t.strip_suffix(unit)
         {
             t = rest.trim_end();
         }

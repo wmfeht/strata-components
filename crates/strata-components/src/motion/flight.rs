@@ -60,40 +60,72 @@ impl Mode {
     }
 }
 
-// Strata draws each flyer per frame: opacity `1 − p³` into the target and shrinking to 0.42
-// from p = 0.58; out of it fading in (`1 − (1 − p)³`) and growing from 0.42 at p = 0.08; up
-// off rows banked at 1.25, fading from p = 0.65 and spreading to 1.35 from p = 0.82.
+// Strata draws each flyer per frame (`fly_to_trash.rs`, `style.css`):
+// - into the target, opacity `1 − p³`, and from p = 0.58 a 180 ms
+//   `cubic-bezier(0.2, 0.9, 0.3, 1.2)` transition to scale 0.42, cut off at landing;
+// - out of it, opacity `1 − (1 − p)³`, and from p = 0.08 the same transition from 0.42 to 1;
+// - up off rows, scale 0.85, banked to 1.25 from p = 0.12 by a 160 ms
+//   `cubic-bezier(0.18, 0.9, 0.25, 1.35)` transition, retargeted to 1.35 at p = 0.82, and
+//   opacity `1 − ((p − 0.65) / 0.35)²` from p = 0.65.
+// A beat has one easing for both its opacity and its scale, so where the two curves differ the
+// beats sample them every 15–20 ms with straight segments between.
+const EASE_IN_CUBIC: Easing = Easing::cubic(0.32, 0.0, 0.67, 0.0);
 const INBOUND: &[Beat] = &[
     Beat::new(0.0),
-    Beat::new(0.209).opacity(0.8),
-    Beat::new(0.30)
-        .opacity(0.42)
-        .scale(0.42)
-        .easing(Easing::EASE_OUT),
-    Beat::new(TRAVEL)
-        .opacity(0.0)
-        .scale(0.42)
-        .easing(Easing::EASE_IN),
+    Beat::new(TRAVEL * 0.58)
+        .opacity(0.805)
+        .easing(EASE_IN_CUBIC),
+    Beat::new(0.225).opacity(0.756).scale(0.779).easing(LIN),
+    Beat::new(0.240).opacity(0.704).scale(0.620).easing(LIN),
+    Beat::new(0.255).opacity(0.645).scale(0.517).easing(LIN),
+    Beat::new(0.270).opacity(0.578).scale(0.453).easing(LIN),
+    Beat::new(0.285).opacity(0.504).scale(0.417).easing(LIN),
+    Beat::new(0.300).opacity(0.421).scale(0.397).easing(LIN),
+    Beat::new(0.320).opacity(0.298).scale(0.386).easing(LIN),
+    Beat::new(0.340).opacity(0.158).scale(0.388).easing(LIN),
+    Beat::new(TRAVEL).opacity(0.0).scale(0.397).easing(LIN),
 ];
 const OUTBOUND: &[Beat] = &[
     Beat::new(0.0).opacity(0.0).scale(0.42),
-    Beat::new(0.06)
-        .opacity(0.58)
-        .scale(0.8)
-        .easing(Easing::EASE_OUT),
-    Beat::new(0.12).opacity(0.875),
-    Beat::new(RESTORE_TRAVEL),
+    Beat::new(RESTORE_TRAVEL * 0.08)
+        .opacity(0.221)
+        .scale(0.42)
+        .easing(LIN),
+    Beat::new(0.035).opacity(0.377).scale(0.636).easing(LIN),
+    Beat::new(0.050).opacity(0.504).scale(0.796).easing(LIN),
+    Beat::new(0.065).opacity(0.612).scale(0.901).easing(LIN),
+    Beat::new(0.080).opacity(0.704).scale(0.965).easing(LIN),
+    Beat::new(0.100).opacity(0.802).scale(1.011).easing(LIN),
+    Beat::new(0.120).opacity(0.875).scale(1.030).easing(LIN),
+    Beat::new(0.150).opacity(0.947).scale(1.032).easing(LIN),
+    Beat::new(0.180).opacity(0.984).scale(1.016).easing(LIN),
+    Beat::new(0.210).opacity(0.998).easing(LIN),
+    Beat::new(RESTORE_TRAVEL).easing(LIN),
 ];
 const RELEASE: &[Beat] = &[
     Beat::new(0.0).scale(0.85),
-    Beat::new(0.035).scale(1.25).easing(Easing::EASE_OUT),
-    Beat::new(0.143).scale(1.25),
-    Beat::new(0.18).opacity(0.6).scale(1.35),
+    Beat::new(RELEASE_TRAVEL * 0.12).scale(0.85).easing(LIN),
+    Beat::new(0.040).scale(1.015).easing(LIN),
+    Beat::new(0.055).scale(1.152).easing(LIN),
+    Beat::new(0.070).scale(1.230).easing(LIN),
+    Beat::new(0.090).scale(1.279).easing(LIN),
+    Beat::new(0.110).scale(1.296).easing(LIN),
+    Beat::new(0.130).scale(1.296).easing(LIN),
+    Beat::new(RELEASE_TRAVEL * 0.65).scale(1.290).easing(LIN),
+    Beat::new(0.160).opacity(0.951).scale(1.277).easing(LIN),
+    Beat::new(RELEASE_TRAVEL * 0.82)
+        .opacity(0.764)
+        .scale(1.257)
+        .easing(LIN),
+    Beat::new(0.190).opacity(0.627).scale(1.285).easing(LIN),
+    Beat::new(0.200).opacity(0.452).scale(1.310).easing(LIN),
+    Beat::new(0.210).opacity(0.243).scale(1.329).easing(LIN),
     Beat::new(RELEASE_TRAVEL)
         .opacity(0.0)
-        .scale(1.35)
-        .easing(Easing::EASE_IN),
+        .scale(1.341)
+        .easing(LIN),
 ];
+const LIN: Easing = Easing::LINEAR;
 
 /// A flight to start with [`Effects::fly`](super::Effects::fly).
 ///

@@ -72,10 +72,15 @@
 //!   frame; re-check both rules at the next Rune bump. The test
 //!   `an_instant_flip_flies_nothing_at_the_pin` pins today's behaviour.
 //! - **Remove the rows at Launched**, not before: the effect reads their rects first.
-//! - **Start an effect anywhere**: from a handler, or from the poll before or after the
-//!   tick. It waits for the layer to draw it before it moves (3 ticks at most, when no layer
-//!   is mounted, then it ends).
-//! - [`Effects::settle`] ends everything at once (a tab or view-mode switch under it).
+//! - **Start an effect from a handler, or in a poll that commits** (returns true), before or
+//!   after the tick: the layer must draw it before it moves, and a poll that doesn't commit
+//!   runs no view. It waits for that draw for 3 ticks at most (no layer mounted), then ends.
+//! - [`Effects::settle`] ends everything at once (a tab or view-mode switch under it), with
+//!   each effect's owed events. It leaves the targets' pulses as they are: a pulse playing
+//!   plays out, and [`dress_target`] keeps the target in its wrapper.
+//! - [`dress_target`] wraps the target from its first pulse on, for good: the target's
+//!   element path gains a `c23-pulse-<n>` step then, and the wrapper's key changes with each
+//!   pulse, which mounts the target afresh.
 //!
 //! # Deliberate changes (owner rulings)
 //!
@@ -84,7 +89,13 @@
 //! 2. **Staggered by arrival.** Strata starts each icon 12 ms after the one before (up to
 //!    36 ms); here they leave together on springs 12 ms longer each, so they land in turn
 //!    (U-C23-1).
-//! 3. **Fades and shrinks as sequence beats** that follow Strata's per-frame curves.
+//! 3. **Fades and shrinks as sequence beats** that follow Strata's per-frame curves and CSS
+//!    keyframes. A beat has one easing for its opacity and its scale, so where Strata's two
+//!    curves differ (a flyer's fade and its shrink) the beats sample them every 15–20 ms with
+//!    straight segments between. The rings take the accent alphas (0.16–0.34) of Strata's
+//!    box shadows and their keyframe easings, but a ring is a 1.5 pt border that scales, not a
+//!    spread shadow, and one opacity drives its border and its glow: the release's glow-only
+//!    middle shows a faint border, and the impact's start a faint glow.
 //! 4. **The release has no burst**, and its shake is scale only (U-C23-2).
 //! 5. **Fragments are pieces of a ghost** of the row, the host's look for its entry, not of its
 //!    rendered pixels (U-C23-3). With no ghost they are flat shards drawn with `canvas`.
@@ -104,9 +115,9 @@
 //!
 //! | Bullet | Where |
 //! | --- | --- |
-//! | **trash/animation** A Move to Trash that succeeds before its card flies its icons from their rows into the sidebar Trash button | tests `a_flight_launches_flies_lands_and_cleans_up`, `flyers_close_on_the_target_and_land_in_turn`; script `trash-flight`; goldens `c23-flight`; when is **Strata policy** (C16) |
+//! | **trash/animation** A Move to Trash that succeeds before its card flies its icons from their rows into the sidebar Trash button | tests `a_flight_launches_flies_lands_and_cleans_up`, `flyers_close_on_the_target_and_land_in_turn` (the flight); script `trash-flight` (end state only); goldens `c23-flight`; when is **Strata policy** (C16) |
 //! | … still running when its card appears never flies; fails, partly fails or is cancelled: no flight; a failing foreground operation leaves it to play; a failed restore: no flight; restore only after the confirmation | **Strata policy** |
-//! | Restoring while viewing Trash lifts the icons off their rows and launches them upward with a burst | **partial**: lift and fade, no burst; test `a_release_lifts_off_the_rows_and_shakes_the_target`; script `release` |
+//! | Restoring while viewing Trash lifts the icons off their rows and launches them upward with a burst | **partial**: lift and fade, no burst; test `a_release_lifts_off_the_rows_and_shakes_the_target` (the lift); script `release` (end state only) |
 //! | Restoring into a normal folder flies icons from the Trash button onto the restored rows | test `a_restore_flies_out_onto_the_rows_and_lands_before_they_show`; script `restore-flight` |
 //! | During that flight the pre-restore listing stays frozen, and the restored rows appear when the icons land | **partial**: restored rows hidden until Landed, survivors not frozen (deviation 8) |
 //! | When restore icons leave the Trash button it plays a release pulse; restores in Trash shake it | tests (release, restore); review scene `c23-pulse` |

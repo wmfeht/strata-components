@@ -50,44 +50,59 @@ impl PulseKind {
     }
 }
 
+// Strata's keyframes (`style.css`), each interval eased as its animation is.
+const SPRINGY: Easing = Easing::cubic(0.2, 0.9, 0.3, 1.2);
+const SETTLE: Easing = Easing::cubic(0.23, 1.0, 0.32, 1.0);
 const IMPACT: &[Beat] = &[
     Beat::new(0.0).scale(0.96),
-    Beat::new(0.095).scale(1.14),
-    Beat::new(0.19).scale(0.97),
-    Beat::new(BOUNCE),
+    Beat::new(BOUNCE * 0.34).scale(1.14).easing(SPRINGY),
+    Beat::new(BOUNCE * 0.68).scale(0.97).easing(SPRINGY),
+    Beat::new(BOUNCE).easing(SPRINGY),
 ];
 const RELEASE: &[Beat] = &[
     Beat::new(0.0).scale(0.94),
-    Beat::new(0.126).scale(1.08),
-    Beat::new(BOUNCE),
+    Beat::new(BOUNCE * 0.45).scale(1.08).easing(SETTLE),
+    Beat::new(BOUNCE).easing(SETTLE),
 ];
 // Strata's shudder also turns ±8°; a Beat has no rotation (U-C23-2).
 const SHUDDER: &[Beat] = &[
     Beat::new(0.0),
-    Beat::new(0.043).scale(0.92),
-    Beat::new(0.091).scale(1.14),
-    Beat::new(0.139).scale(0.95),
-    Beat::new(0.187).scale(1.05),
-    Beat::new(SHAKE),
+    Beat::new(SHAKE * 0.18).scale(0.92).easing(SPRINGY),
+    Beat::new(SHAKE * 0.38).scale(1.14).easing(SPRINGY),
+    Beat::new(SHAKE * 0.58).scale(0.95).easing(SPRINGY),
+    Beat::new(SHAKE * 0.78).scale(1.05).easing(SPRINGY),
+    Beat::new(SHAKE).easing(SPRINGY),
 ];
+// The rings' opacities are the accent alphas of Strata's box shadows, and their scales its
+// spreads: impact 0.34 at 1 px, 0.18 at 5 px, gone by 8 px; release 0.16 at 4 px, then only a
+// glow; receiving 0.16 at 3 px at 55 %, then 0.28 at 1 px.
 const IMPACT_RING: &[Beat] = &[
-    Beat::new(0.0),
-    Beat::new(BOUNCE)
+    Beat::new(0.0).opacity(0.34),
+    Beat::new(BOUNCE * 0.34)
+        .opacity(0.18)
+        .scale(1.25)
+        .easing(SPRINGY),
+    Beat::new(BOUNCE * 0.68)
         .opacity(0.0)
-        .scale(1.45)
-        .easing(Easing::EASE_OUT),
+        .scale(1.4)
+        .easing(SPRINGY),
+    Beat::new(BOUNCE).opacity(0.0).scale(1.45).easing(SPRINGY),
 ];
 const RELEASE_RING: &[Beat] = &[
-    Beat::new(0.0).opacity(0.8),
-    Beat::new(BOUNCE)
-        .opacity(0.0)
+    Beat::new(0.0).opacity(0.16).scale(1.15),
+    Beat::new(BOUNCE * 0.45)
+        .opacity(0.2)
         .scale(1.3)
-        .easing(Easing::EASE_OUT),
+        .easing(SETTLE),
+    Beat::new(BOUNCE).opacity(0.0).scale(1.3).easing(SETTLE),
 ];
 const RECEIVING_RING: &[Beat] = &[
     Beat::new(0.0).opacity(0.0),
-    Beat::new(0.23),
-    Beat::new(RECEIVING).opacity(0.7),
+    Beat::new(RECEIVING * 0.55)
+        .opacity(0.16)
+        .scale(1.1)
+        .easing(SETTLE),
+    Beat::new(RECEIVING).opacity(0.28).easing(SETTLE),
 ];
 
 /// How many pulses each target has started, and the last one's kind: a new count is a new
@@ -117,9 +132,10 @@ impl Pulses {
 /// The target element `el`, keyed `key`, dressed for its pulses: pass C8's Trash icon box
 /// through it (`PlacesSidebar::trash_icon(|el| dress_target(&fx, &key, el))`).
 ///
-/// Until its first pulse it is `el` itself. From then on it sits in a wrapper keyed by its
-/// pulse count, so each pulse mounts it afresh and replays the scale (the wrapper's sequence
-/// holds its last pose, its rest, between pulses).
+/// Until its first pulse it is `el` itself. From then on, for good (even through
+/// [`Effects::settle`]), it sits in a wrapper keyed by its pulse count, so each pulse mounts it
+/// afresh and replays the scale (the wrapper's sequence holds its last pose, its rest, between
+/// pulses). Its element path gains the wrapper's `c23-pulse-<n>` step.
 pub fn dress_target(fx: &Effects, key: &str, el: El) -> El {
     match fx.pulses.last(key) {
         None => el,
@@ -146,7 +162,8 @@ fn ring(look: &Look, key: String, rect: [f32; 4], beats: &'static [Beat]) -> El 
         .border(1.5, k.c.icon_accent)
         .sequence(Sequence::new(beats));
     if look.glow.on {
-        e = e.shadow(0.0, 12.0, look.glow.color.alpha(0.22));
+        // The ring's opacity scales its glow too, to about Strata's glow alphas (0.12–0.22).
+        e = e.shadow(0.0, 12.0, look.glow.color.alpha(1.0));
     }
     e
 }

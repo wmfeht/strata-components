@@ -609,6 +609,11 @@ Recommended changes. None of these files was edited here.
    Xwayland, and loses only drag and drop there, for one LTS that 26.04 replaces. c is a private
    ABI and should not ship. Whether mutter's Xwayland bridge carries `x-special/gnome-copied-files`
    and `text/uri-list` faithfully is a hand test.
+
+   The owner chose a, and P0 and P2 built it. **Superseded on 2026-11-10** by the owner's ruling
+   on S3's decision 1: Ubuntu 24.04 is dropped and libwayland 1.23 is the minimum supported
+   version. The fallbacks above stay in the code, but libwayland < 1.23 is an unsupported
+   environment, and the 24.04 hand test is dropped.
 2. **Copy or move by modifier** can't follow Ctrl and Shift on sway as a drop target, and
    probably not on Hyprland. Accept the compositor's action there, or ask Hyprland? Hand tests
    on GNOME and KDE decide the rest.

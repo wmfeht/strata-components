@@ -482,8 +482,9 @@ window per `open` command hidden, parents it from `App::on_window` and shows it,
 backend opens its dialog; `tests/session/p4.rs` parents it to the peer's exported window.
 
 P0's tests that need winit's own Wayland display ("shared" in `p0.rs`) need libwayland 1.23 or
-later (`wl_proxy_get_display`). On an older host, Ubuntu 24.04 among them, they check only that
-the probe reports that route Unsupported, and say so on stderr.
+later (`wl_proxy_get_display`), the minimum supported version. On an older, unsupported host,
+Ubuntu 24.04 among them, they check only that the probe reports that route Unsupported, and say
+so on stderr.
 
 ### X2's session tests (the gallery's `tests/x2.rs`)
 

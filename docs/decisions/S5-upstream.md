@@ -18,7 +18,7 @@
   | P1 `dnd` | Shim here, on P0 | [U1](#u1), [U2](#u2), [U9](#u9), [U10](#u10); upstream [#171](https://github.com/anomalyco/rune/issues/171) | libwayland ≥ 1.23. Wayland drag and drop is unsupported on Ubuntu 24.04 (S2 owner question 1). The capture workaround stays until U10. |
   | P2 `clipboard` | Shim here | [U5](#u5), [U9](#u9) | data-control on its own connection; `wl_data_device` fallback on mutter |
   | P3 `csd` | Shim here, in part | [U6](#u6), [U7](#u7), [U8](#u8), [U9](#u9); upstream [#145](https://github.com/anomalyco/rune/issues/145) | The platform-neutral part now. The native frame stays on Wayland until U6–U8. X11 borderless only if the mutter/KWin hand test passes. Rests on S1 owner question 1. **Superseded by the owner's P3 decision:** `Policy::Auto` is borderless on Wayland and X11, with no Wayland resize, minimise or window menu until U6–U8; the mutter/KWin hand test no longer gates X11. |
-  | P4 `foreign-parent` | Shim here | [U11](#u11), [U9](#u9) | Parentless on libwayland 1.22 (S3 decision 1) |
+  | P4 `foreign-parent` | Shim here | [U11](#u11), [U9](#u9) | libwayland ≥ 1.23: the owner dropped Ubuntu 24.04 (S3 decision 1, ruled 2026-11-10). Below 1.23 it opens parentless, unsupported |
   | P5 `settings` | Shim here, over the Settings portal with zbus | [U12](#u12), [U13](#u13) | — |
 
   M0's "with an issue link" is **pending**: the links exist once the owner files the drafts.

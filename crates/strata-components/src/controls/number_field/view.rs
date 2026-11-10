@@ -16,6 +16,8 @@ type Get<S> = fn(&S) -> &NumberFieldState;
 type GetMut<S> = fn(&mut S) -> &mut NumberFieldState;
 type Report<S> = Rc<dyn Fn(&mut S, f64, &mut Tx)>;
 type Menu<S> = Rc<dyn Fn(&mut S, Point, &mut Tx)>;
+/// Reports a step's or commit's new value, when it moved.
+type Tell<S> = Rc<dyn Fn(&mut S, Option<f64>, &mut Tx)>;
 
 /// A number field over a [`NumberFieldState`] the host holds: − before the number and +
 /// after it, as Strata's spin buttons, with the unit between the number and +.
@@ -116,12 +118,11 @@ impl<S: 'static> NumberField<S> {
             .fold(0.0f32, f32::max);
         let get_mut = self.get_mut;
         let report = self.report.clone();
-        let tell: Rc<dyn Fn(&mut S, Option<f64>, &mut Tx)> =
-            Rc::new(move |s: &mut S, moved: Option<f64>, tx: &mut Tx| {
-                if let (Some(v), Some(f)) = (moved, &report) {
-                    f(s, v, tx);
-                }
-            });
+        let tell: Tell<S> = Rc::new(move |s: &mut S, moved: Option<f64>, tx: &mut Tx| {
+            if let (Some(v), Some(f)) = (moved, &report) {
+                f(s, v, tx);
+            }
+        });
 
         let mut field = text_input(&st.edit, font)
             .single_line()
@@ -235,13 +236,7 @@ impl<S: 'static> NumberField<S> {
 
     /// − or +: hidden from assistive technology, which steps the spin button itself, and
     /// never focused, as GTK's are. Insensitive at its end.
-    fn stepper(
-        &self,
-        look: &Look,
-        up: bool,
-        at_end: bool,
-        tell: Rc<dyn Fn(&mut S, Option<f64>, &mut Tx)>,
-    ) -> El {
+    fn stepper(&self, look: &Look, up: bool, at_end: bool, tell: Tell<S>) -> El {
         let k = &look.kit;
         let side = look.frame.control;
         let glyph = look.icon(if up {
@@ -296,8 +291,8 @@ pub(super) fn key_step(st: &mut NumberFieldState, e: &KeyEvent) -> Option<Option
     let page = st.range().page_steps();
     if m.ctrl {
         return match e.key {
-            Key::Home | Key::PageDown => Some(st.to_limit(false)),
-            Key::End | Key::PageUp => Some(st.to_limit(true)),
+            Key::Home | Key::PageDown => Some(st.jump_to_end(false)),
+            Key::End | Key::PageUp => Some(st.jump_to_end(true)),
             _ => None,
         };
     }

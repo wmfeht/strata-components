@@ -142,8 +142,8 @@ fn precise_wheel_travel_adds_up_to_whole_notches() {
 #[test]
 fn home_end_and_set_report_only_a_move() {
     let mut st = SliderState::new(0.0, frame());
-    assert!(!st.to_limit(false));
-    assert!(st.to_limit(true));
+    assert!(!st.jump_to_end(false));
+    assert!(st.jump_to_end(true));
     assert_eq!(st.value(), 12.0);
     assert!(st.set(4.0));
     assert!(!st.set(4.0));

@@ -152,7 +152,7 @@ impl NumberFieldState {
     }
 
     /// The typed text committed, then the minimum (`false`) or the maximum.
-    pub(super) fn to_limit(&mut self, max: bool) -> Option<f64> {
+    pub(super) fn jump_to_end(&mut self, max: bool) -> Option<f64> {
         let before = self.value;
         self.commit_text();
         self.value = if max {

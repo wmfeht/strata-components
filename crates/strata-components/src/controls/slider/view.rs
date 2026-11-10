@@ -289,7 +289,7 @@ impl<S: 'static> Slider<S> {
         });
         let t = tell.clone();
         slider = slider.on_step_limit(move |s: &mut S, max: bool, tx: &mut Tx| {
-            let moved = get_mut(s).to_limit(max);
+            let moved = get_mut(s).jump_to_end(max);
             t(s, moved.then_some(SliderChange::Commit), tx);
         });
         if let Some(amount) = self.wheel {

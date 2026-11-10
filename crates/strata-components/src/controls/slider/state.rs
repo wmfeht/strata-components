@@ -167,7 +167,7 @@ impl SliderState {
     }
 
     /// To the minimum (`false`) or the maximum. True when the value moved.
-    pub(super) fn to_limit(&mut self, max: bool) -> bool {
+    pub(super) fn jump_to_end(&mut self, max: bool) -> bool {
         let r = self.range;
         self.move_to(if max { r.max() } else { r.min() })
     }

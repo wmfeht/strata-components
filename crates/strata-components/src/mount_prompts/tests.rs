@@ -383,3 +383,21 @@ fn with_no_choice_marked_declining_a_question_opens_on_close_and_enter_aborts() 
         assert_eq!(rt.state.answers, [(7, MountResponse::Abort)]);
     }
 }
+
+#[test]
+fn an_edit_that_reaches_the_spare_is_wiped_once_it_lands() {
+    let mut state = MountPromptState::<u32>::default();
+    // A field's edit handler, run after its prompt has gone, then its change handler.
+    state.edit_mut(PromptField::Secret).replace_text("hunter2");
+    state.edited();
+    assert_eq!(state.spare().text, "");
+
+    let _ = state.open(MountRequest::Password(smb()), 1);
+    state.edit_mut(PromptField::Secret).replace_text("hunter2");
+    state.edited();
+    let form = state.password_form().expect("a password prompt");
+    assert_eq!(
+        form.secret.text, "hunter2",
+        "the form's own field keeps its text"
+    );
+}

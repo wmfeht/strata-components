@@ -318,7 +318,7 @@ impl<S: 'static, T: 'static> MountPrompts<S, T> {
             PromptField::Secret => "secret",
         };
         let key = format!("{dk}-{part}");
-        let get_mut = self.get_mut.clone();
+        let (get_mut, after) = (self.get_mut.clone(), self.get_mut.clone());
         let menu: field::MenuFn<S> = match &self.on_field_menu {
             Some(f) => {
                 let f = f.clone();
@@ -329,7 +329,7 @@ impl<S: 'static, T: 'static> MountPrompts<S, T> {
         let handlers = Handlers {
             edit: Rc::new(move |s: &mut S| get_mut(s).edit_mut(which)),
             key: Rc::new(|_: &mut S, _: &KeyEvent, _: &mut Tx| false),
-            change: Rc::new(|_: &mut S, _: &mut Tx| {}),
+            change: Rc::new(move |s: &mut S, _: &mut Tx| after(s).edited()),
             menu: menu.clone(),
         };
         let spec = Spec {

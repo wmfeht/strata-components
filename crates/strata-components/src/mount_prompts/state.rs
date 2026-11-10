@@ -16,7 +16,8 @@ pub struct MountPromptState<T> {
     /// Errors shown so far: each one is a new live node, so a second refusal is heard too.
     attempt: u64,
     /// What a field's edit handler reaches once its prompt has gone (an edit landing in the
-    /// frame the prompt closed): secure, so nothing typed into it is kept readable.
+    /// frame the prompt closed): secure, and wiped after each edit ([`Self::edited`]), so
+    /// nothing typed into it is kept readable.
     spare: TextEdit,
 }
 
@@ -143,13 +144,15 @@ impl<T> MountPromptState<T> {
         }
     }
 
-    /// The password form's edit for `field`, or the spare once the prompt has gone.
+    /// The password form's edit for `field`, or the spare once the prompt has gone. The field's
+    /// change handler then calls [`edited`](Self::edited), which wipes what the edit put there.
     pub(crate) fn edit_mut(&mut self, field: PromptField) -> &mut TextEdit {
         let Some(Active {
             prompt: Prompt::Password(p),
             ..
         }) = &mut self.active
         else {
+            // Wiped before as well, for an edit path that runs no change handler.
             self.spare.clear();
             return &mut self.spare;
         };
@@ -158,6 +161,19 @@ impl<T> MountPromptState<T> {
             PromptField::Domain => &mut p.form.domain,
             PromptField::Secret => &mut p.form.secret,
         }
+    }
+
+    /// After a field's edit (Rune's `on_input_change`): wipes the spare, so an edit that
+    /// reached it once its prompt had gone isn't kept.
+    pub(crate) fn edited(&mut self) {
+        if !self.spare.text.is_empty() {
+            self.spare.clear();
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn spare(&self) -> &TextEdit {
+        &self.spare
     }
 
     pub(crate) fn prompt(&self) -> Option<&Prompt> {

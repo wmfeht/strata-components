@@ -310,9 +310,16 @@ impl Theme {
     fn load(name: &str, roots: &[PathBuf]) -> Theme {
         let mut watched = Watched::default();
         let mut index: Option<ThemeIndex> = None;
+        // Only roots that have the theme are listed: most have none of a given theme, and
+        // hicolor alone names hundreds of directories. A root that gains the theme later
+        // changes its watched `<root>/<theme>`, and the theme is read again.
+        let mut present: Vec<&PathBuf> = Vec::new();
         for root in roots {
             let dir = root.join(name);
             let file = dir.join("index.theme");
+            if dir.is_dir() {
+                present.push(root);
+            }
             watched.add(dir);
             watched.add(file.clone());
             if index.is_none() {
@@ -345,7 +352,7 @@ impl Theme {
                     theme.classes.len() - 1
                 }
             };
-            for root in roots {
+            for root in &present {
                 let dir = root.join(name).join(&spec.path);
                 theme.watched.add(dir.clone());
                 let mut here: HashMap<Box<str>, Suffix> = HashMap::new();

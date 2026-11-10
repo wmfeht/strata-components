@@ -1,5 +1,7 @@
 //! `index.theme`: the theme's inherited themes and its directories' size parameters.
 
+use std::collections::HashMap;
+
 #[cfg(test)]
 mod tests;
 
@@ -41,8 +43,14 @@ pub(super) struct ThemeIndex {
 /// a whole `Size` is left out; the other keys take the spec's defaults when absent or not whole
 /// numbers.
 pub(super) fn parse(text: &str) -> Option<ThemeIndex> {
-    let groups = key_file(text);
-    let head = group(&groups, "Icon Theme")?;
+    let parsed = key_file(text);
+    // The first appearance of each group; hicolor alone has hundreds.
+    let mut groups: HashMap<&str, &[(String, String)]> = HashMap::new();
+    for (name, keys) in &parsed {
+        groups.entry(name.as_str()).or_insert(keys.as_slice());
+    }
+    let group = |name: &str| groups.get(name).copied();
+    let head = group("Icon Theme")?;
     let listed = list(value(head, "Directories")?);
     let scaled = value(head, "ScaledDirectories")
         .map(list)
@@ -52,7 +60,7 @@ pub(super) fn parse(text: &str) -> Option<ThemeIndex> {
         if dirs.iter().any(|d| d.path == path) {
             continue;
         }
-        let Some(params) = group(&groups, &path).and_then(dir_params) else {
+        let Some(params) = group(&path).and_then(dir_params) else {
             continue;
         };
         dirs.push(DirSpec { path, params });
@@ -103,14 +111,6 @@ fn key_file(text: &str) -> Vec<Group> {
         }
     }
     groups
-}
-
-/// A group's keys; a group that appears twice is read from its first appearance.
-fn group<'a>(groups: &'a [Group], name: &str) -> Option<&'a [(String, String)]> {
-    groups
-        .iter()
-        .find(|(n, _)| n == name)
-        .map(|(_, keys)| keys.as_slice())
 }
 
 /// The last value of `key`, as `GKeyFile` keeps the last of a repeated key.

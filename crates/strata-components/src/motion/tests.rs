@@ -398,6 +398,29 @@ fn the_target_rings_while_icons_fly_in_and_pulses_when_they_land() {
 }
 
 #[test]
+fn two_flights_into_one_target_draw_one_ring() {
+    let mut rt = runtime(Host::new(6));
+    rt.update(|s, tx| {
+        for row in [1, 3] {
+            let f = Flight::into_target("trash", icons(s, &[row], "/icon")).target_in("side");
+            let Host { fx, look, .. } = s;
+            let id = fx.fly(f, look, tx).unwrap();
+            s.owed.push((id, Owe::RemoveAtLaunch, vec![row]));
+        }
+    });
+    rt.frame(DT);
+    wake_to_wake(&mut rt, 1.0, |s| {
+        s.kinds().iter().filter(|k| **k == "landed").count() == 2
+    });
+    rt.frame(DT);
+    assert_eq!(
+        keys_with(&rt, "c23-ring"),
+        [ring_key("trash", 2)],
+        "one ring, for the target's latest pulse (Rune renames a duplicate `#dup1`)"
+    );
+}
+
+#[test]
 fn flyers_close_on_the_target_and_land_in_turn() {
     let mut rt = runtime(Host::new(8));
     let id = trash(&mut rt, &[0, 3, 6]).unwrap();

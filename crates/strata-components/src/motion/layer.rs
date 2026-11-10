@@ -57,10 +57,11 @@ impl<S: 'static> MotionLayer<S> {
         // Rune's own motion is off: a matched pair would cross-fade in place, and live values
         // ignore it, so nothing draws and every effect ends at its next ticks.
         let reduced = cx.is_reduced_motion();
-        let mut out = Vec::new();
+        let mut out = Drawn::default();
         for f in &fx.flights {
             flight_view(f, fx, look, cx, window, reduced, &mut out);
         }
+        let mut out = out.els;
         if let Some(d) = &fx.dissolve {
             let ghost = self.ghost.as_ref().map(|g| (g.clone(), s));
             out.extend(dissolve_view(d, ghost, look, cx, window, reduced));
@@ -103,6 +104,15 @@ fn intersect(a: [f32; 4], b: [f32; 4]) -> Option<[f32; 4]> {
     (r > x && btm > y).then_some([x, y, r - x, btm - y])
 }
 
+/// What the flights draw.
+#[derive(Default)]
+struct Drawn {
+    els: Vec<El>,
+    /// The targets whose ring is drawn: flights into one target share its latest pulse, and
+    /// so its ring's key.
+    rung: Vec<String>,
+}
+
 fn flight_view<S>(
     f: &FlightRun,
     fx: &Effects,
@@ -110,7 +120,7 @@ fn flight_view<S>(
     cx: &mut Cx<S>,
     window: [f32; 4],
     reduced: bool,
-    out: &mut Vec<El>,
+    out: &mut Drawn,
 ) {
     let target = cx
         .window_layout(&f.target)
@@ -142,7 +152,7 @@ fn flight_view<S>(
                 };
                 leg.seen.set(rect);
                 if let Some(rect) = rect {
-                    out.push(
+                    out.els.push(
                         flight::launch(f.id, i, look, leg.icon, rect)
                             .transition(Transition::none()),
                     );
@@ -164,7 +174,7 @@ fn flight_view<S>(
                         Mode::Release => Some(flight::release_end(seen, k, n)),
                     };
                     if let Some(rect) = rect {
-                        out.push(
+                        out.els.push(
                             flight::flyer(f.id, i, k, f.mode, look, leg.icon, rect)
                                 .transition(quick_fade()),
                         );
@@ -173,15 +183,17 @@ fn flight_view<S>(
                 if f.mode == Mode::Inbound
                     && let Some(t) = target
                 {
-                    out.push(pulse::receiving(look, f.id.0, t));
+                    out.els.push(pulse::receiving(look, f.id.0, t));
                 }
             }
             let pulsing = landed.is_some() || !f.mode.pulse().1;
             if pulsing
+                && !out.rung.contains(&f.target)
                 && let Some(t) = target
                 && let Some(ring) = pulse::pulse_ring(look, fx, &f.target, t)
             {
-                out.push(ring);
+                out.rung.push(f.target.clone());
+                out.els.push(ring);
             }
         }
     }

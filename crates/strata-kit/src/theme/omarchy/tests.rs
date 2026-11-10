@@ -280,7 +280,8 @@ fn without_mode_the_background_decides() {
 /// monochrome, all-black and all-white palettes. settings/themes/omarchy: "Contrast raises
 /// text to 7:1", "dim text, accent, and danger to 4.5:1, and borders to 3:1, against those four
 /// surfaces", "code-preview syntax colors to 4.5:1 against the window and pane surfaces", and a
-/// palette keeps its appearance.
+/// palette keeps its appearance. Strata's `validate_tokens` check becomes a check that every
+/// colour token in the finished look is finite.
 #[test]
 fn contrast_keeps_every_pair_readable_on_dark_light_and_extreme_palettes() {
     let mut palettes: Vec<(String, [Rgba8; 5])> = crate::theme::bundled()

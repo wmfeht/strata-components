@@ -42,8 +42,13 @@
 //!
 //! - Rust's `let`, `const` and `Self` draw as types: the grammar scopes them
 //!   `storage.type.rust`, as it does the primitive types, so no selector tells them apart.
+//! - C's `struct`, `enum`, `union` and `typedef` draw as types: the grammar scopes them
+//!   `storage.type.c`, as it does `int`, though c.lang lists them as keywords.
+//! - C++'s `class`, `struct` and `typename` (`storage.type.c++`) and `template`
+//!   (`storage.type.template.c++`) draw as types; cpp.lang lists them as keywords.
 //! - C's number suffixes (`storage.type.numeric` inside a number) draw as types.
-//! - TypeScript's declaration keywords aren't mapped as JavaScript's are.
+//! - TypeScript's `const`, `let` and `var` (`storage.type.ts`), `interface` and `namespace`
+//!   draw as types; Strata's TypeScript files draw them as keywords.
 //! - A variable or command substitution inside a shell string (`"$dir"`) draws as the
 //!   string; sh.lang draws it as an identifier, in the text colour. Following it would need
 //!   text-role rows that override an enclosing string.

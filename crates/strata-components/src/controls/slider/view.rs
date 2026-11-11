@@ -51,6 +51,12 @@ struct Metrics {
     snap_within: f32,
     /// The least room between two snap labels: `space.md` (8), Strata's `GAP`.
     label_gap: f32,
+    /// The knob's scale while a drag holds it: as tall as the hit area allows, at most a
+    /// quarter larger (16 to 20).
+    engaged_scale: f32,
+    /// The accent ring's width while a drag holds the knob, before the scale: an eighth of
+    /// the knob (2), Strata's 2 px accent border.
+    engaged_ring: f32,
 }
 
 impl Metrics {
@@ -64,6 +70,8 @@ impl Metrics {
             tick: ((height - knob) / 2.0).max(1.0),
             snap_within: look.space.lg,
             label_gap: look.space.md,
+            engaged_scale: (height / knob).clamp(1.0, 1.25),
+            engaged_ring: (knob / 8.0).max(1.0),
         }
     }
 }
@@ -219,9 +227,17 @@ impl<S: 'static> Slider<S> {
             .radius(m.knob / 2.0)
             .fill(c.knob)
             .gradient(k.on(c.depth_top, c.knob), k.on(c.depth_bottom, c.knob))
-            .border(0.5, k.on(c.depth_top, c.knob))
             .focus_ring(2.0, 1.0, c.border_focus)
             .a11y_hidden();
+        // While a drag holds it the knob grows and takes an accent ring, so the press reads
+        // as engaged (Strata's `:active` slider); the scale draws over the room around the
+        // knob and leaves the layout alone.
+        let knob = if st.dragging() && !self.disabled {
+            knob.scale(m.engaged_scale)
+                .border(m.engaged_ring, c.bg_accent)
+        } else {
+            knob.border(0.5, k.on(c.depth_top, c.knob))
+        };
         slider = slider.child(k.elevate(knob, &k.elevation.knob));
 
         let widths = self.label_widths(look);

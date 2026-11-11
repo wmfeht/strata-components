@@ -111,6 +111,8 @@ pub const SCENES: &[Scene] = &[
     ("c20a-disabled-dark", |g| disabled(g, true)),
     ("c20a-invalid-light", |g| invalid(g, false)),
     ("c20a-invalid-dark", |g| invalid(g, true)),
+    ("c20a-engaged-light", |g| engaged(g, false)),
+    ("c20a-engaged-dark", |g| engaged(g, true)),
 ];
 
 /// Scenes for review with `--scene` only, kept out of the goldens.
@@ -124,6 +126,12 @@ fn limits(g: &mut Gallery, dark: bool, max: bool) {
 fn disabled(g: &mut Gallery, dark: bool) {
     g.open("c20a", dark);
     g.c20a.disabled = true;
+}
+
+/// The Content slider held mid-drag, the others at rest beside it.
+fn engaged(g: &mut Gallery, dark: bool) {
+    g.open("c20a", dark);
+    g.c20a.content.hold();
 }
 
 /// Corner roundness holding typed text it won't take: 250 is past 200.

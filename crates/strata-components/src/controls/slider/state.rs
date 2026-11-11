@@ -99,6 +99,16 @@ impl SliderState {
         self.grab.is_some()
     }
 
+    /// Holds the knob where it is, as a press on it does: a drag in progress with no move yet,
+    /// for a gallery scene of the engaged look. Nothing ends it but a release.
+    #[doc(hidden)]
+    pub fn hold(&mut self) {
+        self.grab = Some(Grab {
+            start: self.value,
+            offset: 0.0,
+        });
+    }
+
     pub(super) fn width(&self) -> f32 {
         self.width
     }

@@ -21,7 +21,9 @@
 //!   knob there (GTK's warp). A drag follows the pointer, landing on the step grid (or any
 //!   value, [`Slider::free_drag`]), and on a snap point when it comes within `space.lg`
 //!   (12 pt) of one, GTK's `MARK_SNAP_LENGTH`. Escape or a lost pointer cancels it back to
-//!   where it started.
+//!   where it started. While a press or drag holds it, the knob is engaged: it grows to the
+//!   hit height (at most a quarter larger) and takes a `bg_accent` ring, as Strata's
+//!   `:active` slider did, until the release or the cancel.
 //! - **Keys** (focused): Left and Down a step down, Right and Up a step up (Rune's slider
 //!   keys), Page Up and Page Down a page ([`Range::page`]), Home and End the ends. From a
 //!   value between grid points a step lands on the next one that way. Shift and the other
@@ -75,7 +77,8 @@
 //! part: [`Slider::wheel`]): script `slider-wheel-steps`. The popover and its other wheel
 //! rules are C3's and Strata's.
 //!
-//! Not from a bullet: live, commit and cancel reports, a press on the track, Home and End,
+//! Not from a bullet: the engaged knob while a press holds it (`c20a::a_held_press_engages_the_knob_until_release_or_cancel`;
+//! PNG goldens `c20a-engaged-*`), live, commit and cancel reports, a press on the track, Home and End,
 //! assistive set-value, and a sideways or modified wheel passing a wheel-taking slider by
 //! (`c20a::` tests; unit `a_sideways_wheel_moves_nothing`).
 //!

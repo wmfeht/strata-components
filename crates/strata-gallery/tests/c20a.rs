@@ -113,6 +113,37 @@ mod c20a {
         );
     }
 
+    /// Whether Frame's knob shows the engaged look (it grows while held).
+    fn frame_engaged(rt: &Runtime<Gallery>) -> bool {
+        element(rt, "c20a-frame-knob").scale > 1.0
+    }
+
+    #[test]
+    fn a_held_press_engages_the_knob_until_release_or_cancel() {
+        let mut rt = mount("c20a-controls-light");
+        assert!(!frame_engaged(&rt));
+        let (x, y) = centre(&rt, "c20a-frame-knob");
+        rt.pointer_move(x, y);
+        rt.pointer_down(x, y);
+        rt.frame(FRAME);
+        assert!(frame_engaged(&rt), "a press on the knob engages it");
+        assert!(heard(&rt).is_empty(), "before it moves");
+        rt.pointer_up(x, y);
+        rt.frame(FRAME);
+        assert!(!frame_engaged(&rt), "a release lets it go");
+
+        let at = frame_x(&rt, 9.0);
+        rt.pointer_move(at.0, at.1);
+        rt.pointer_down(at.0, at.1);
+        rt.frame(FRAME);
+        assert!(frame_engaged(&rt), "a press on the track engages it");
+        press(&mut rt, Key::Escape, Mods::default());
+        assert!(!frame_engaged(&rt), "Escape lets it go");
+        rt.pointer_up(at.0, at.1);
+        rt.frame(FRAME);
+        assert!(!frame_engaged(&rt));
+    }
+
     #[test]
     fn a_press_on_the_track_jumps_there_and_commits_on_release() {
         let mut rt = mount("c20a-controls-light");

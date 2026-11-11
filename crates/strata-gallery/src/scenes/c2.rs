@@ -572,15 +572,20 @@ pub fn columns_view() -> ColumnsView<Gallery> {
 fn start(g: &mut Gallery, dark: bool) {
     g.open("c2", dark);
     g.c2 = Demo::default();
+    open_home(g, &mut Tx::default());
+}
+
+/// Opens Home as the only column, focused: what every scene starts from, and what the page
+/// shows when the index opens it.
+fn open_home(g: &mut Gallery, tx: &mut Tx) {
     let look = g.look.clone();
     let d = &mut g.c2;
     d.listings.0.push(d.listed("Home", None));
-    let mut tx = Tx::default();
     d.columns.push(
         Opening::new(&d.listings.0[0].source, Listing::Complete),
         Focus::Column,
         &look,
-        &mut tx,
+        tx,
     );
 }
 
@@ -824,7 +829,8 @@ pub fn view(g: &Gallery, cx: &mut Cx<Gallery>) -> El {
 }
 
 /// Keys no focused element took while this page is open: shortcuts, and keys with nothing
-/// focused. True consumes the key; false lets the gallery's Escape go back to the index.
+/// focused. True consumes the key; false lets the gallery's Escape go back to the index, as
+/// it does once the strip has nothing left to clear or close.
 pub fn on_key(g: &mut Gallery, key: &KeyEvent, tx: &mut Tx) -> bool {
     let look = g.look.clone();
     let d = &mut g.c2;
@@ -842,16 +848,20 @@ pub fn on_key(g: &mut Gallery, key: &KeyEvent, tx: &mut Tx) -> bool {
         d.intent = format!("Back to {}", d.listings.0[parent].name);
         return true;
     }
-    // Escape that the strip didn't take (nothing to close) stays on the page.
-    key.key == Key::Escape
+    false
 }
 
 /// Runs at the start of every frame while this page is open, with the clock in seconds.
 /// Deliver fake async results here; a worker wakes the loop with `Gallery::waker`. True when
 /// state changed.
 pub fn poll(g: &mut Gallery, t: f64, tx: &mut Tx) -> bool {
-    let look = g.look.clone();
     let mut changed = false;
+    // Opened from the index, the page has no scene to set it up.
+    if g.c2.listings.0.is_empty() {
+        open_home(g, tx);
+        changed = true;
+    }
+    let look = g.look.clone();
     {
         let d = &mut g.c2;
         d.clock = t;

@@ -269,8 +269,16 @@ pub struct Demo {
     pub auto: Autoscroll,
 }
 
+/// The page as the index opens it: Pictures, as the default scene shows.
 impl Default for Demo {
     fn default() -> Self {
+        Demo::at(Folder::Pictures)
+    }
+}
+
+impl Demo {
+    /// Nothing listed yet: what [`Demo::at`] fills in.
+    fn blank() -> Self {
         let mut coll = CollectionState::new();
         let grid = IconsGridState::new();
         let auto = Autoscroll::new();
@@ -331,7 +339,7 @@ impl Demo {
     fn at(folder: Folder) -> Self {
         let mut d = Demo {
             folder,
-            ..Demo::default()
+            ..Demo::blank()
         };
         d.listing = ListSource::new(folder.listing());
         d

@@ -4,6 +4,7 @@
 mod gallery {
     use rune::{Env, Key, KeyEvent, Mods, Runtime};
     use serde_json::Value;
+    use strata_components::contract::EntrySource;
     use strata_gallery::{Gallery, scenes};
 
     /// The index as the app opens it, or with `markers` off as its golden scenes are.
@@ -41,6 +42,41 @@ mod gallery {
         press(&mut rt, Key::Tab);
         press(&mut rt, Key::Enter);
         assert_eq!(rt.state.page, Some(scenes::PAGES[0].id));
+    }
+
+    /// `id` opened as the index's button opens it, with no scene to set it up.
+    fn from_index(id: &'static str) -> Runtime<Gallery> {
+        let mut rt = index(true);
+        rt.update(|g, _| g.page = Some(id));
+        for _ in 0..30 {
+            rt.frame(1.0 / 60.0);
+        }
+        rt
+    }
+
+    /// Escape goes back from every page opened from the index: at most two presses, for a
+    /// page whose first Escape dismisses something of its own.
+    #[test]
+    fn escape_leaves_every_page_opened_from_the_index() {
+        for p in scenes::PAGES {
+            let mut rt = from_index(p.id);
+            for _ in 0..2 {
+                if rt.state.page.is_some() {
+                    press(&mut rt, Key::Escape);
+                    rt.frame(1.0 / 60.0);
+                }
+            }
+            assert_eq!(rt.state.page, None, "{} kept Escape", p.id);
+        }
+    }
+
+    /// The listing pages open on a folder with entries, not an empty one.
+    #[test]
+    fn listing_pages_opened_from_the_index_show_their_folder() {
+        let tree = from_index("c2").accessibility_json();
+        assert!(node(&tree, "row-1000001").is_some(), "Home's first entry");
+        assert_eq!(from_index("c3").state.c3.listing.len(), 40, "Pictures");
+        assert_eq!(from_index("c4").state.c4.listing.len(), 12, "Documents");
     }
 
     #[test]

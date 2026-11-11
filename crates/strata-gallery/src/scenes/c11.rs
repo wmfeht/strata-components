@@ -26,7 +26,7 @@ use strata_kit::icons::IconName;
 use strata_kit::look::Look;
 use strata_kit::theme::syntax::syntect_theme;
 
-use crate::{Gallery, Scene};
+use crate::{Gallery, Scene, SyntaxKey};
 
 /// How long a golden scene's first build waits for a code block's colours.
 const GOLDEN_WAIT: Duration = Duration::from_secs(30);
@@ -52,12 +52,12 @@ pub enum Fixture {
 pub struct Live {
     pub highlighter: Highlighter,
     pub blocks: CodeBlocks,
-    dark: bool,
+    syntax: SyntaxKey,
     waker: bool,
 }
 
 impl Live {
-    fn new(look: &Look, dark: bool, wait: bool) -> Live {
+    fn new(look: &Look, wait: bool) -> Live {
         let highlighter = Highlighter::new(Arc::new(syntect_theme(look)));
         let mut blocks = highlighter.blocks();
         if wait {
@@ -66,7 +66,7 @@ impl Live {
         Live {
             highlighter,
             blocks,
-            dark,
+            syntax: SyntaxKey::of(look),
             waker: false,
         }
     }
@@ -461,7 +461,7 @@ pub fn setup(g: &mut Gallery, dark: bool, fixture: Fixture) {
         fixture,
         drawer,
         doc: state,
-        live: Some(Live::new(&g.look, dark, true)),
+        live: Some(Live::new(&g.look, true)),
         last: String::new(),
         selection: String::new(),
     };
@@ -630,7 +630,7 @@ pub fn poll(g: &mut Gallery, t: f64, tx: &mut Tx) -> bool {
         Some(live) => live,
         None => {
             changed = true;
-            d.live.insert(Live::new(&g.look, g.dark, false))
+            d.live.insert(Live::new(&g.look, false))
         }
     };
     if !live.waker
@@ -639,9 +639,9 @@ pub fn poll(g: &mut Gallery, t: f64, tx: &mut Tx) -> bool {
         live.highlighter.set_waker(waker.clone());
         live.waker = true;
     }
-    if live.dark != g.dark {
+    if live.syntax != SyntaxKey::of(&g.look) {
         live.highlighter.set_theme(Arc::new(syntect_theme(&g.look)));
-        live.dark = g.dark;
+        live.syntax = SyntaxKey::of(&g.look);
     }
     changed |= live.blocks.poll();
     changed |= d.doc.tick(t);

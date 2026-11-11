@@ -62,7 +62,7 @@ mod k1 {
             let dark = name.ends_with("-dark");
             assert_eq!(g.look.kit.dark, dark, "{name}");
             assert_eq!(g.dark, dark, "{name}");
-            let theme = theme_of(g.k1.shown);
+            let theme = theme_of(g.theme.expect("a theme"));
             assert_eq!(theme.dark_background(), dark, "{name}");
         }
     }
@@ -71,7 +71,7 @@ mod k1 {
     fn the_arrow_keys_step_through_the_bundled_themes_and_wrap() {
         let mut rt = mount("k1-curated-dark");
         let themes = bundled();
-        let at = |rt: &Runtime<Gallery>| match rt.state.k1.shown {
+        let at = |rt: &Runtime<Gallery>| match rt.state.theme.expect("a theme") {
             Shown::Bundled(id) => themes.iter().position(|t| t.id == id).expect("bundled"),
             Shown::Omarchy { .. } => panic!("a bundled theme"),
         };
@@ -94,7 +94,7 @@ mod k1 {
     #[test]
     fn on_an_omarchy_scene_the_arrow_keys_step_through_the_variants() {
         let mut rt = mount("k1-omarchy-lighter-dark");
-        let variant = |rt: &Runtime<Gallery>| match rt.state.k1.shown {
+        let variant = |rt: &Runtime<Gallery>| match rt.state.theme.expect("a theme") {
             Shown::Omarchy { variant, .. } => variant,
             Shown::Bundled(_) => panic!("an Omarchy theme"),
         };
@@ -106,17 +106,90 @@ mod k1 {
         assert_eq!(variant(&rt), Variant::Lighter);
     }
 
+    fn click(rt: &mut Runtime<Gallery>, key: &str) {
+        let r = rt
+            .elements()
+            .into_iter()
+            .find(|e| e.key.as_deref() == Some(key))
+            .unwrap_or_else(|| panic!("no {key}"))
+            .rect;
+        let (x, y) = (r[0] + r[2] / 2.0, r[1] + r[3] / 2.0);
+        rt.pointer_move(x, y);
+        rt.pointer_down(x, y);
+        rt.frame(FRAME);
+        rt.pointer_up(x, y);
+        rt.frame(FRAME);
+    }
+
+    fn bg(look: &strata_kit::look::Look) -> String {
+        look.kit.c.bg_base.hex()
+    }
+
+    /// A theme picked from the list is the gallery's: the index and other pages wear it, K2
+    /// builds on it, and Neutral puts the fallback back.
+    #[test]
+    fn a_theme_picked_from_the_list_applies_to_the_whole_gallery() {
+        // Opened from the index, as the app starts.
+        let mut rt = strata_gallery::runtime(Gallery::default(), Env::new(false, 1.0));
+        rt.frame(0.0);
+        rt.update(|g, _| {
+            g.page = Some("k1");
+            g.k1.query = rune::TextEdit::new("dracula");
+        });
+        run(&mut rt, 0.2);
+        click(&mut rt, "k1-pick-dracula");
+        let dracula = Shown::Bundled("dracula");
+        assert_eq!(rt.state.theme, Some(dracula));
+        let want = theme_of(dracula).look().with_params(&LookParams::default());
+        assert_eq!(bg(&rt.state.look), bg(&want));
+        assert!(rt.state.dark, "Dracula is dark");
+
+        press(&mut rt, Key::Escape);
+        assert_eq!(rt.state.page, None);
+        assert_eq!(bg(&rt.state.look), bg(&want), "the index wears it");
+
+        // K2 rebuilds the look from the theme, and leaving it puts the theme's look back.
+        rt.update(|g, _| g.page = Some("k2"));
+        rt.frame(FRAME);
+        rt.key(KeyEvent {
+            key: Key::Command('='),
+            mods: Mods {
+                ctrl: true,
+                ..Mods::default()
+            },
+        });
+        rt.frame(FRAME);
+        assert_ne!(
+            rt.state.look.kit.ty.ui, want.kit.ty.ui,
+            "K2 stepped the text size"
+        );
+        assert_eq!(bg(&rt.state.look), bg(&want), "on Dracula's colours");
+        press(&mut rt, Key::Escape);
+        assert_eq!(rt.state.look.kit.ty.ui, want.kit.ty.ui);
+        assert_eq!(bg(&rt.state.look), bg(&want));
+
+        rt.update(|g, _| {
+            g.page = Some("k1");
+            g.k1.query = rune::TextEdit::new("neutral");
+        });
+        run(&mut rt, 0.2);
+        click(&mut rt, "k1-pick-neutral");
+        assert_eq!(rt.state.theme, None);
+        let fallback = strata_kit::look::Look::fallback(true);
+        assert_eq!(bg(&rt.state.look), bg(&fallback), "Neutral keeps dark");
+    }
+
     /// The WP's done-when: "A theme switch in the gallery animates." Mid-switch the glow is
     /// neither theme's; once the motion settles it is the new theme's.
     #[test]
     fn a_theme_switch_animates_its_colours() {
         let mut rt = mount("k1-curated-dark");
         run(&mut rt, 1.0);
-        let before = rt.state.k1.shown;
+        let before = rt.state.theme.expect("a theme");
         assert_eq!(glow(&rt), glow_of(before));
 
         press(&mut rt, Key::Down);
-        let after = rt.state.k1.shown;
+        let after = rt.state.theme.expect("a theme");
         assert_ne!(
             glow_of(before),
             glow_of(after),

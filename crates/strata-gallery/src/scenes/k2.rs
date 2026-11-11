@@ -6,8 +6,8 @@
 //! The page is the "look" scene: a stepper for every [`LookParams`] field down the left, and
 //! a specimen drawn from the resulting look on the right (a header and tab strip, sidebar and
 //! list rows, a search result, rune-kit controls, the radii, the type ramp, and a readout of
-//! the tokens). Every control rebuilds the look from the fallback, standing in for the theme,
-//! with [`Look::with_params`]. The golden scenes are Strata's defaults and the extremes.
+//! the tokens). Every control rebuilds the look from the gallery's theme (K1's pick, the
+//! fallback until one is picked) with [`Look::with_params`]. The golden scenes are Strata's defaults and the extremes.
 //!
 //! The page also plays the host for the interface font: its `poll` hands `look.font` to
 //! `Tx::set_font_families` when it changes, and Escape puts the app's families back before
@@ -148,9 +148,9 @@ fn density_label(scale: Scale, px: u8) -> String {
     format!("{name} · {px} px")
 }
 
-/// Rebuilds the look from the fallback (the theme's stand-in) and the page's parameters.
+/// Rebuilds the look from the gallery's theme and the page's parameters.
 fn rebuild(g: &mut Gallery) {
-    g.look = Look::fallback(g.dark).with_params(&g.k2.params);
+    g.look = g.theme_look(&g.k2.params);
 }
 
 fn change(g: &mut Gallery, f: impl FnOnce(&mut LookParams)) {
@@ -287,7 +287,7 @@ pub const REVIEW: &[Scene] = &[
 pub fn view(g: &Gallery, _cx: &mut Cx<Gallery>) -> El {
     let look = g.look();
     // The controls keep the gallery's own size, so they stay usable at every text size.
-    let ui = Look::fallback(g.dark);
+    let ui = g.theme_look(&LookParams::default());
     row()
         .key("k2")
         .w_full()
@@ -893,8 +893,7 @@ pub fn on_key(g: &mut Gallery, key: &KeyEvent, tx: &mut Tx) -> bool {
         }
         tx.set_font_families(APP_FAMILIES.0, APP_FAMILIES.1);
         g.k2.sent = None;
-        // Leave the page on the plain fallback, so the index doesn't draw in K2's look.
-        g.look = Look::fallback(g.dark);
+        // The gallery's Escape then puts the theme's look back for the index.
         return false;
     }
     if key.mods.alt || key.mods.logo {

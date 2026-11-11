@@ -7,8 +7,10 @@
 use rune::text::TextSystem;
 use rune::{AppSpec, Cx, El, Env, Key, KeyEvent, Runtime, Tx, Waker, col};
 use rune_kit::Kit;
+use rune_kit::syntax::SyntaxTheme;
 use strata_kit::fonts;
-use strata_kit::look::Look;
+use strata_kit::look::{Look, SyntaxExtra};
+use strata_kit::shape::LookParams;
 
 pub mod scenes;
 
@@ -38,6 +40,10 @@ pub struct Gallery {
     /// The look every page draws with. [`Gallery::open`] rebuilds it as the fallback for
     /// `dark`; a look page (K1, K2, K4) then changes it from its own `scenes/<id>.rs`.
     pub look: Look,
+    /// The theme picked on K1's list, which every page wears until another is picked; `None`
+    /// is rune-kit's neutral kit, the fallback. [`Gallery::open`] clears it, so a scene
+    /// starts on the fallback.
+    pub theme: Option<scenes::k1::Shown>,
     /// The open page's id, or `None` for the index.
     pub page: Option<&'static str>,
     /// Wakes the app loop from another thread, so the open page's `poll` runs: a fake worker
@@ -94,6 +100,17 @@ impl Gallery {
         self.page = Some(page);
         self.dark = dark;
         self.look = Look::fallback(dark);
+        self.theme = None;
+    }
+
+    /// The picked theme's look at `params`, or the fallback's for `dark` when none is
+    /// picked: what a page that rebuilds the look (K2) starts from, and what the index goes
+    /// back to.
+    pub fn theme_look(&self, params: &LookParams) -> Look {
+        match self.theme {
+            Some(shown) => scenes::k1::theme_of(shown).look().with_params(params),
+            None => Look::fallback(self.dark).with_params(params),
+        }
     }
 
     /// The look pages draw with: the accessor components take, `fn(&Gallery) -> &Look`.
@@ -169,7 +186,21 @@ pub fn route_key(page_key: KeyHook, g: &mut Gallery, key: &KeyEvent, tx: &mut Tx
     }
     if key.key == Key::Escape && g.page.is_some() {
         g.page = None;
+        // A look page (K2, K4, X1) may leave its own look behind; the index wears the theme.
+        g.look = g.theme_look(&LookParams::default());
+        g.dark = g.look.kit.dark;
         return true;
     }
     false
+}
+
+/// What a page's cached syntect theme was built from. A page that keeps a highlighter
+/// rebuilds its theme when this changes: a theme picked on K1, or light to dark.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SyntaxKey(SyntaxTheme, SyntaxExtra);
+
+impl SyntaxKey {
+    pub fn of(look: &Look) -> SyntaxKey {
+        SyntaxKey(look.syntax, look.syntax_extra)
+    }
 }

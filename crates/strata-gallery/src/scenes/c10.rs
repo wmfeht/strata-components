@@ -24,7 +24,7 @@ use strata_kit::icons::IconName;
 use strata_kit::look::Look;
 use strata_kit::theme::syntax::syntect_theme;
 
-use crate::{Gallery, Scene};
+use crate::{Gallery, Scene, SyntaxKey};
 
 /// How long a golden scene waits for the highlighter (debug builds parse slowly).
 const GOLDEN_WAIT: Duration = Duration::from_secs(60);
@@ -64,15 +64,15 @@ pub enum Field {
 /// The highlighter, started by the scene (or on the page's first poll).
 pub struct Live {
     pub highlighter: Highlighter,
-    dark: bool,
+    syntax: SyntaxKey,
     waker: bool,
 }
 
 impl Live {
-    fn new(look: &Look, dark: bool) -> Live {
+    fn new(look: &Look) -> Live {
         Live {
             highlighter: Highlighter::new(Arc::new(syntect_theme(look))),
-            dark,
+            syntax: SyntaxKey::of(look),
             waker: false,
         }
     }
@@ -221,7 +221,7 @@ fn header(fixture: Fixture) -> (&'static str, &'static str, &'static str) {
 /// The page's state for `fixture`, its colours landed for the lines on screen when `wait`.
 pub fn setup(g: &mut Gallery, dark: bool, fixture: Fixture, wait: bool) {
     g.open("c10", dark);
-    let live = Live::new(&g.look, dark);
+    let live = Live::new(&g.look);
     let (text, file, syntax): (String, Option<&str>, Option<&str>) = match fixture {
         Fixture::Rust | Fixture::Editor => (RUST.into(), Some("sizes.rs"), None),
         Fixture::WrapOff => (wrap_off(), Some("table.rs"), None),
@@ -506,7 +506,7 @@ pub fn on_key(_g: &mut Gallery, _key: &KeyEvent, _tx: &mut Tx) -> bool {
 pub fn poll(g: &mut Gallery, _t: f64, tx: &mut Tx) -> bool {
     let mut changed = false;
     if g.c10.live.is_none() {
-        let live = Live::new(&g.look, g.dark);
+        let live = Live::new(&g.look);
         g.c10.code = CodeState::new(RUST).highlighter(&live.highlighter, Some("sizes.rs"), None);
         g.c10.drawer.open_at_once();
         g.c10.live = Some(live);
@@ -520,9 +520,9 @@ pub fn poll(g: &mut Gallery, _t: f64, tx: &mut Tx) -> bool {
             live.highlighter.set_waker(waker.clone());
             live.waker = true;
         }
-        if live.dark != g.dark {
+        if live.syntax != SyntaxKey::of(&g.look) {
             live.highlighter.set_theme(Arc::new(syntect_theme(&g.look)));
-            live.dark = g.dark;
+            live.syntax = SyntaxKey::of(&g.look);
         }
     }
     changed |= d.code.poll(tx);

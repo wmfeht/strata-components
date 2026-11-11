@@ -9,17 +9,19 @@
 //! rune-kit controls, the danger and info roles, and highlighted code. Every look is the
 //! theme's at Strata's default shape, density and type.
 //!
-//! Up and Down step to the previous or next bundled theme (or, on an Omarchy scene, the
-//! previous or next variant), animating the switch. The `k1-theme-*` review scenes add a
-//! searchable list of every bundled theme; `STRATA_K1_THEME=<id>` opens them on that theme,
-//! for a `--snap` of any theme by name:
+//! Under the colours, a searchable list of every bundled theme, with Neutral (rune-kit's
+//! fallback kit) first, picks the theme the whole gallery wears ([`Gallery::theme`]): the
+//! index and every page draw in it until another is picked. Up and Down step to the previous
+//! or next bundled theme (or, on an Omarchy scene, the previous or next variant), animating
+//! the switch. The `k1-theme-*` review scenes open on `STRATA_K1_THEME=<id>`, for a `--snap`
+//! of any theme by name:
 //!
 //! ```text
 //! STRATA_K1_THEME=dracula mise run gallery -- --snap out.png --scene k1-theme-dark
 //! ```
 
 use rune::{
-    Color, Cx, El, Key, KeyEvent, ScrollSpec, TextEdit, Tx, col, el, icon, rich, row, text,
+    Color, Cursor, Cx, El, Key, KeyEvent, ScrollSpec, TextEdit, Tx, col, el, icon, rich, row, text,
 };
 use rune_kit::{Button, ButtonVariant, Checkbox, State, StateColors, Switch, TextInput};
 use strata_kit::icons::IconName;
@@ -40,22 +42,14 @@ pub enum Shown {
     Omarchy { light: bool, variant: Variant },
 }
 
-/// K1's demo state, held in `Gallery::k1`.
+/// K1's demo state, held in `Gallery::k1`. The theme it shows is the gallery's,
+/// [`Gallery::theme`].
+#[derive(Default)]
 pub struct Demo {
-    pub shown: Shown,
-    /// The `k1-theme-*` scenes' theme list is open.
-    pub browse: bool,
+    /// The theme list's search.
     pub query: TextEdit,
-}
-
-impl Default for Demo {
-    fn default() -> Demo {
-        Demo {
-            shown: Shown::Bundled(theme::DEFAULT_ID),
-            browse: false,
-            query: TextEdit::default(),
-        }
-    }
+    /// The theme the list last scrolled to, so it scrolls once per change.
+    pub revealed: Option<Option<Shown>>,
 }
 
 /// A dark Quattro `colors.toml`, invented for the page.
@@ -111,26 +105,20 @@ pub fn theme_of(shown: Shown) -> Theme {
     }
 }
 
-/// `shown`'s look, at Strata's default shape, density and type.
-fn look_of(shown: Shown) -> Look {
-    theme_of(shown).look().with_params(&LookParams::default())
-}
-
-fn open(g: &mut Gallery, dark: bool, shown: Shown, browse: bool) {
+fn open(g: &mut Gallery, dark: bool, shown: Shown) {
     g.open("k1", dark);
-    g.k1 = Demo {
-        shown,
-        browse,
-        ..Demo::default()
-    };
-    g.look = look_of(shown);
+    g.k1 = Demo::default();
+    g.theme = Some(shown);
+    g.look = g.theme_look(&LookParams::default());
     g.dark = g.look.kit.dark;
 }
 
-/// Moves to `shown`, animating the colours.
-fn show(g: &mut Gallery, shown: Shown, tx: &mut Tx) {
-    g.k1.shown = shown;
-    theme::switch(&mut g.look, look_of(shown), tx);
+/// Makes `shown` the gallery's theme (`None`: Neutral), animating the colours. Neutral keeps
+/// the current appearance, light or dark.
+fn show(g: &mut Gallery, shown: Option<Shown>, tx: &mut Tx) {
+    g.theme = shown;
+    let next = g.theme_look(&LookParams::default());
+    theme::switch(&mut g.look, next, tx);
     g.dark = g.look.kit.dark;
 }
 
@@ -144,7 +132,7 @@ fn named(fallback: &'static str) -> Shown {
 }
 
 fn bundled_scene(g: &mut Gallery, dark: bool, id: &'static str) {
-    open(g, dark, Shown::Bundled(id), false);
+    open(g, dark, Shown::Bundled(id));
 }
 
 fn omarchy_scene(g: &mut Gallery, dark: bool, variant: Variant) {
@@ -152,7 +140,7 @@ fn omarchy_scene(g: &mut Gallery, dark: bool, variant: Variant) {
         light: !dark,
         variant,
     };
-    open(g, dark, shown, false);
+    open(g, dark, shown);
 }
 
 /// Golden scenes: each gets an accessibility and a PNG golden. Each calls
@@ -183,11 +171,11 @@ pub const SCENES: &[Scene] = &[
 pub const REVIEW: &[Scene] = &[
     ("k1-theme-light", |g| {
         let shown = named("omarchy-light");
-        open(g, false, shown, true)
+        open(g, false, shown)
     }),
     ("k1-theme-dark", |g| {
         let shown = named(theme::DEFAULT_ID);
-        open(g, true, shown, true)
+        open(g, true, shown)
     }),
     ("k1-omarchy-lighter-light", |g| {
         omarchy_scene(g, false, Variant::Lighter)
@@ -211,12 +199,12 @@ pub const REVIEW: &[Scene] = &[
 
 pub fn view(g: &Gallery, _cx: &mut Cx<Gallery>) -> El {
     let look = g.look();
-    let theme = theme_of(g.k1.shown);
+    let theme = g.theme.map(theme_of);
     row()
         .key("k1")
         .w_full()
         .h_full()
-        .child(roles(g, look, &theme))
+        .child(roles(g, look, theme.as_ref()))
         .child(
             col()
                 .key("k1-specimen")
@@ -231,28 +219,22 @@ pub fn view(g: &Gallery, _cx: &mut Cx<Gallery>) -> El {
         )
 }
 
-/// The theme's name and colours, and in browse mode the theme list.
-fn roles(g: &Gallery, look: &Look, theme: &Theme) -> El {
+/// The theme's name and colours, then the theme list under them.
+fn roles(g: &Gallery, look: &Look, theme: Option<&Theme>) -> El {
     let kit = &look.kit;
-    let source = match g.k1.shown {
-        Shown::Bundled(_) => "Bundled".to_owned(),
-        Shown::Omarchy { variant, .. } => format!("Omarchy, {variant:?}"),
+    let source = match g.theme {
+        Some(Shown::Bundled(_)) => "Bundled".to_owned(),
+        Some(Shown::Omarchy { variant, .. }) => format!("Omarchy, {variant:?}"),
+        None => "rune-kit's fallback kit".to_owned(),
     };
     let appearance = if kit.dark { "dark" } else { "light" };
-    let mut panel = col()
-        .key("k1-roles")
-        .w(270.0)
-        .h_full()
-        .min_h(0.0)
-        .padding(look.space.lg)
+    let name = theme.map_or_else(|| NEUTRAL.to_owned(), |t| t.name.clone());
+    let mut colours = col()
+        .key("k1-colours")
+        .w_full()
         .gap(look.space.xxs)
-        .fill(kit.c.bg_deep)
-        .border_sides([0.0, 1.0, 0.0, 0.0], kit.c.border_base)
-        .scroll(ScrollSpec {
-            stick_bottom: false,
-        })
         .child(
-            text(theme.name.clone())
+            text(name)
                 .key("k1-theme-name")
                 .font(look.ty.title)
                 .color(kit.c.text_base),
@@ -264,9 +246,9 @@ fn roles(g: &Gallery, look: &Look, theme: &Theme) -> El {
         )
         .child(el().h(look.space.sm));
     for key in Role::ALL {
-        let value = theme.colors.get(key);
+        let value = theme.and_then(|t| t.colors.get(key));
         let label = value.map_or_else(|| "derived".to_owned(), |c| c.hex());
-        panel = panel.child(
+        colours = colours.child(
             row()
                 .gap(look.space.sm)
                 .center_y()
@@ -283,62 +265,135 @@ fn roles(g: &Gallery, look: &Look, theme: &Theme) -> El {
                 ),
         );
     }
-    if g.k1.browse {
-        panel = panel.child(el().h(look.space.md)).child(picker(g, look));
-    }
-    panel
+    col()
+        .key("k1-roles")
+        .w(270.0)
+        .h_full()
+        .min_h(0.0)
+        .padding(look.space.lg)
+        .gap(look.space.md)
+        .fill(kit.c.bg_deep)
+        .border_sides([0.0, 1.0, 0.0, 0.0], kit.c.border_base)
+        .child(colours)
+        .child(picker(g, look))
 }
 
-/// The searchable list of bundled themes.
+/// The theme list's first entry: no theme, rune-kit's fallback kit.
+const NEUTRAL: &str = "Neutral";
+
+/// The theme list's row for `shown`; an Omarchy theme has none.
+fn pick_key(shown: Option<Shown>) -> Option<String> {
+    match shown {
+        None => Some("k1-pick-neutral".to_owned()),
+        Some(Shown::Bundled(id)) => Some(format!("k1-pick-{id}")),
+        Some(Shown::Omarchy { .. }) => None,
+    }
+}
+
+/// The searchable list of bundled themes, Neutral first, filling the panel's height and
+/// scrolling on its own. A press makes that theme the gallery's.
 fn picker(g: &Gallery, look: &Look) -> El {
     let kit = &look.kit;
     let query = g.k1.query.text.to_lowercase();
-    let mut list = col().key("k1-theme-list").gap(look.space.xxs).child(
-        TextInput::new(&g.k1.query)
-            .label("Search themes")
-            .placeholder("Search themes")
-            .on_edit(|g: &mut Gallery| &mut g.k1.query)
-            .build(kit)
-            .key("k1-search")
-            .w_full(),
-    );
-    for t in bundled()
+    let entry = |key: String, name: &str, shown: Option<Shown>| {
+        let current = g.theme == shown;
+        let mut r = row()
+            .key(key)
+            .role("button")
+            .label(name.to_owned())
+            .checked(current)
+            .focusable(true)
+            .cursor(Cursor::Pointer)
+            .w_full()
+            .h(slots::list::row_height(look))
+            .px(look.space.md)
+            .gap(look.space.sm)
+            .center_y()
+            .radius(kit.radius.md)
+            .hover(kit.c.hover)
+            .press(kit.c.pressed)
+            .on_press_tx(move |g: &mut Gallery, tx: &mut Tx| show(g, shown, tx))
+            .child(
+                text(name.to_owned())
+                    .font(kit.ty.ui_compact)
+                    .color(kit.c.text_base)
+                    .truncate()
+                    .shrink()
+                    .a11y_hidden(),
+            )
+            .child(el().grow(1.0));
+        if current {
+            r = r.fill(kit.alpha(kit.c.bg_accent, 0.22)).child(
+                icon(look.icon(IconName::Check), look.icon_size.md)
+                    .color(kit.c.icon_accent)
+                    .a11y_hidden(),
+            );
+        }
+        r
+    };
+    let neutral = NEUTRAL
+        .to_lowercase()
+        .contains(&query)
+        .then(|| entry(pick_key(None).expect("Neutral has a row"), NEUTRAL, None));
+    let themes = bundled()
         .iter()
         .filter(|t| t.name.to_lowercase().contains(&query))
-    {
-        let id = t.id.as_str();
-        let current = g.k1.shown == Shown::Bundled(id);
-        list = list.child(
-            Button::new(t.name.clone())
-                .variant(if current {
-                    ButtonVariant::Submit
-                } else {
-                    ButtonVariant::Ghost
-                })
-                .on_press_tx(move |g: &mut Gallery, tx: &mut Tx| show(g, Shown::Bundled(id), tx))
+        .map(|t| {
+            let id = t.id.as_str();
+            let shown = Some(Shown::Bundled(id));
+            entry(pick_key(shown).expect("a bundled row"), &t.name, shown)
+        });
+    col()
+        .w_full()
+        .grow(1.0)
+        .min_h(0.0)
+        .gap(look.space.xs)
+        .child(
+            TextInput::new(&g.k1.query)
+                .label("Search themes")
+                .placeholder("Search themes")
+                .on_edit(|g: &mut Gallery| &mut g.k1.query)
                 .build(kit)
-                .key(format!("k1-pick-{id}")),
-        );
-    }
-    list
+                .key("k1-search")
+                .w_full(),
+        )
+        .child(
+            col()
+                .key("k1-theme-list")
+                .role("list")
+                .label("Themes")
+                .w_full()
+                .grow(1.0)
+                .min_h(0.0)
+                .gap(look.space.xxs)
+                .scroll(ScrollSpec {
+                    stick_bottom: false,
+                })
+                .children(neutral)
+                .children(themes),
+        )
 }
 
 /// Up and Down step through the bundled themes, or an Omarchy scene's variants, animating
-/// the switch.
+/// the switch. From Neutral, Down goes to the first theme and Up to the last.
 pub fn on_key(g: &mut Gallery, key: &KeyEvent, tx: &mut Tx) -> bool {
     let delta: i64 = match key.key {
         Key::Down => 1,
         Key::Up => -1,
         _ => return false,
     };
-    let next = match g.k1.shown {
-        Shown::Bundled(id) => {
-            let themes = bundled();
+    let themes = bundled();
+    let n = themes.len() as i64;
+    let next = match g.theme {
+        Some(Shown::Bundled(id)) => {
             let at = themes.iter().position(|t| t.id == id).unwrap_or(0) as i64;
-            let n = themes.len() as i64;
             Shown::Bundled(themes[(at + delta).rem_euclid(n) as usize].id.as_str())
         }
-        Shown::Omarchy { light, variant } => {
+        None => {
+            let at = if delta > 0 { 0 } else { n - 1 };
+            Shown::Bundled(themes[at as usize].id.as_str())
+        }
+        Some(Shown::Omarchy { light, variant }) => {
             let all = [Variant::Lighter, Variant::Darker, Variant::Contrast];
             let at = all.iter().position(|&v| v == variant).unwrap_or(0) as i64;
             Shown::Omarchy {
@@ -347,12 +402,20 @@ pub fn on_key(g: &mut Gallery, key: &KeyEvent, tx: &mut Tx) -> bool {
             }
         }
     };
-    show(g, next, tx);
+    show(g, Some(next), tx);
     true
 }
 
-/// Nothing arrives asynchronously on this page.
-pub fn poll(_g: &mut Gallery, _t: f64, _tx: &mut Tx) -> bool {
+/// Scrolls the theme list to the gallery's theme whenever it changes: a pick, a key, or the
+/// page opening on a theme picked before.
+pub fn poll(g: &mut Gallery, _t: f64, tx: &mut Tx) -> bool {
+    if g.k1.revealed == Some(g.theme) {
+        return false;
+    }
+    g.k1.revealed = Some(g.theme);
+    if let Some(key) = pick_key(g.theme) {
+        tx.scroll_into_view(key);
+    }
     false
 }
 

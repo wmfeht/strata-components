@@ -24,7 +24,7 @@ use strata_components::code_view::highlight::{
 use strata_kit::look::Look;
 use strata_kit::theme::syntax::syntect_theme;
 
-use crate::{Gallery, Scene};
+use crate::{Gallery, Scene, SyntaxKey};
 
 /// How long a golden scene waits for the highlighter (debug builds parse slowly).
 const GOLDEN_WAIT: Duration = Duration::from_secs(30);
@@ -88,12 +88,12 @@ pub struct Live {
     pub highlighter: Highlighter,
     pub blocks: CodeBlocks,
     pub script: CodeDoc,
-    dark: bool,
+    syntax: SyntaxKey,
     waker: bool,
 }
 
 impl Live {
-    fn new(look: &Look, dark: bool, script: &str, wait: bool) -> Live {
+    fn new(look: &Look, script: &str, wait: bool) -> Live {
         let highlighter = Highlighter::new(Arc::new(syntect_theme(look)));
         let mut blocks = highlighter.blocks();
         let mut doc = highlighter.open(
@@ -110,7 +110,7 @@ impl Live {
             highlighter,
             blocks,
             script: doc,
-            dark,
+            syntax: SyntaxKey::of(look),
             waker: false,
         }
     }
@@ -153,7 +153,7 @@ fn scene(g: &mut Gallery, dark: bool, mode: Mode, wait: bool) {
         mode,
         ..Demo::default()
     };
-    demo.live = Some(Live::new(&g.look, dark, SCRIPT, wait));
+    demo.live = Some(Live::new(&g.look, SCRIPT, wait));
     g.c10a = demo;
 }
 
@@ -277,8 +277,7 @@ pub fn poll(g: &mut Gallery, _t: f64, _tx: &mut Tx) -> bool {
         Some(live) => live,
         None => {
             changed = true;
-            d.live
-                .insert(Live::new(&g.look, g.dark, &d.script.text, false))
+            d.live.insert(Live::new(&g.look, &d.script.text, false))
         }
     };
     if !live.waker
@@ -287,9 +286,9 @@ pub fn poll(g: &mut Gallery, _t: f64, _tx: &mut Tx) -> bool {
         live.highlighter.set_waker(waker.clone());
         live.waker = true;
     }
-    if live.dark != g.dark {
+    if live.syntax != SyntaxKey::of(&g.look) {
         live.highlighter.set_theme(Arc::new(syntect_theme(&g.look)));
-        live.dark = g.dark;
+        live.syntax = SyntaxKey::of(&g.look);
     }
     changed |= live.blocks.poll();
     changed |= live.script.poll();

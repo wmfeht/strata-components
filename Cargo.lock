@@ -3300,6 +3300,7 @@ dependencies = [
  "strata-kit",
  "strata-platform",
  "strata-test-peer",
+ "swash",
 ]
 
 [[package]]

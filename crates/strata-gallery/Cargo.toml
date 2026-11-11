@@ -12,6 +12,7 @@ rune.workspace = true
 rune-kit = { workspace = true, features = ["markdown"] }
 strata-kit.workspace = true
 strata-components.workspace = true
+swash.workspace = true
 
 [dev-dependencies]
 png.workspace = true

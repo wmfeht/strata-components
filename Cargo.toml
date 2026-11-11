@@ -55,6 +55,9 @@ wayland-backend = "0.3"
 png = "0.18"
 serde_json = "1"
 
+# The gallery's fake PDF renderer (C12) draws its page text with it; Rune already links it.
+swash = "0.2.10"
+
 # strata-platform test harness (W3): the session tests' peer and its client. strata-test-peer is
 # test-only and never published; cargo-deny's `wildcards` ban needs its version, so publishing
 # strata-platform needs this dev-dependency dropped or deny.toml's `allow-wildcard-paths` (owner

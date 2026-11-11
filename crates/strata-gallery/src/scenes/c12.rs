@@ -6,8 +6,8 @@
 //! A PDF in C9's drawer beside a fake listing. A fake document stands in for the file: pages of
 //! generated prose, a landscape page, a scan with no text layer and a page that fails. A fake
 //! renderer stands in for Strata's sandbox: it renders one page at a time, 60 ms each on the
-//! page's clock, drawing each glyph's box as a block of ink with the text layer to match, at
-//! the width the view asks. Under the listing, lines scripts read: what the renderer did
+//! page's clock, setting each line in the bundled JetBrains Mono (through swash, as a PDF
+//! rasterizer would) with the text layer to match, at the width the view asks. Under the listing, lines scripts read: what the renderer did
 //! (`c12-log`), what copying would take (`c12-selection`), the last copy (`c12-copied`), the
 //! last intent or key the view passed on (`c12-last`), and the interface text size the
 //! Ctrl+wheel and Ctrl+0 the view didn't take would change (`c12-text-size`).
@@ -22,6 +22,9 @@ use strata_components::preview_drawer::{
 use strata_components::viewers::viewport::ctrl_zero_key;
 use strata_kit::icons::IconName;
 use strata_kit::look::Look;
+use swash::FontRef;
+use swash::scale::{Render, ScaleContext, Source};
+use swash::zeno::{Format, Vector};
 
 use crate::{Gallery, Scene};
 
@@ -33,6 +36,10 @@ const MARGIN: f32 = 54.0;
 const TOP: f32 = 72.0;
 const LINE: f32 = 16.0;
 const ADVANCE: f32 = 6.6;
+/// The page's type size: JetBrains Mono advances 0.6 em, so 11 pt sets [`ADVANCE`].
+const TYPE_SIZE: f32 = 11.0;
+/// The baseline, below a line's top.
+const BASELINE: f32 = 10.0;
 const COLUMNS: usize = 72;
 
 /// What a fake page holds.
@@ -155,22 +162,16 @@ pub fn render(page: &FakePage, box_px: [u32; 2], dark_ink: bool) -> PageReply {
         FakeKind::Text(lines) => {
             let mut text = String::new();
             let mut glyphs = Vec::new();
+            let mut pen = Pen::new(s);
             for (n, line) in lines.iter().enumerate() {
                 let top = TOP + n as f32 * LINE;
-                let base = top + 10.0;
                 for (c, ch) in line.chars().enumerate() {
                     let x = MARGIN + c as f32 * ADVANCE;
                     text.push(ch);
                     glyphs.push([x * s, top * s, (x + ADVANCE) * s, (top + 13.0) * s]);
-                    if ch.is_whitespace() {
-                        continue;
+                    if !ch.is_whitespace() {
+                        pen.ink(&mut rgba, [w, h], ch, [x * s, (top + BASELINE) * s], ink);
                     }
-                    let tall =
-                        ch.is_ascii_uppercase() || ch.is_ascii_digit() || "bdfhklt".contains(ch);
-                    let low = "gjpqy".contains(ch);
-                    let y0 = if tall { base - 9.0 } else { base - 6.0 };
-                    let y1 = if low { base + 3.0 } else { base };
-                    fill([x + 0.8, y0, x + ADVANCE - 0.8, y1], ink);
                 }
                 text.push('\n');
                 let end = MARGIN + line.chars().count() as f32 * ADVANCE;
@@ -181,6 +182,56 @@ pub fn render(page: &FakePage, box_px: [u32; 2], dark_ink: bool) -> PageReply {
                 height: h,
                 rgba,
                 text: Some(TextLayer::new(w as f32, h as f32, text, glyphs)),
+            }
+        }
+    }
+}
+
+/// Sets glyphs in the bundled JetBrains Mono at [`TYPE_SIZE`] on a page `s` pixels a point.
+struct Pen {
+    font: FontRef<'static>,
+    context: ScaleContext,
+    ppem: f32,
+}
+
+impl Pen {
+    fn new(s: f32) -> Pen {
+        let font = FontRef::from_index(strata_kit::fonts::JETBRAINS_MONO, 0)
+            .expect("the bundled JetBrains Mono parses");
+        Pen {
+            font,
+            context: ScaleContext::new(),
+            ppem: TYPE_SIZE * s,
+        }
+    }
+
+    /// Inks `ch` with its baseline origin at `at` (pixels), darkening toward `ink` by the
+    /// glyph's coverage.
+    fn ink(&mut self, rgba: &mut [u8], [w, h]: [u32; 2], ch: char, at: [f32; 2], ink: u8) {
+        let id = self.font.charmap().map(ch);
+        let mut scaler = self.context.builder(self.font).size(self.ppem).build();
+        let Some(image) = Render::new(&[Source::Outline])
+            .format(Format::Alpha)
+            .offset(Vector::new(at[0].fract(), at[1].fract()))
+            .render(&mut scaler, id)
+        else {
+            return;
+        };
+        let p = image.placement;
+        let x0 = at[0].floor() as i32 + p.left;
+        let y0 = at[1].floor() as i32 - p.top;
+        for gy in 0..p.height as i32 {
+            for gx in 0..p.width as i32 {
+                let (x, y) = (x0 + gx, y0 + gy);
+                if x < 0 || y < 0 || x >= w as i32 || y >= h as i32 {
+                    continue;
+                }
+                let a = u32::from(image.data[(gy * p.width as i32 + gx) as usize]);
+                let v = (255 - a * (255 - u32::from(ink)) / 255) as u8;
+                let i = ((y as u32 * w + x as u32) * 4) as usize;
+                for c in &mut rgba[i..i + 3] {
+                    *c = (*c).min(v);
+                }
             }
         }
     }
